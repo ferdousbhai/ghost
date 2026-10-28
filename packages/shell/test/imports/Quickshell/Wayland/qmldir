@@ -1,0 +1,6 @@
+module Quickshell.Wayland
+WlrLayershell 1.0 WlrLayershell.qml
+WlrLayer 1.0 WlrLayer.qml
+WlrKeyboardFocus 1.0 WlrKeyboardFocus.qml
+EdgeAnchors 1.0 EdgeAnchors.qml
+EdgeMargins 1.0 EdgeMargins.qml

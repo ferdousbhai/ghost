@@ -1,17 +1,27 @@
 # `@ghost/omarchy`
 
 Ghost's Omarchy desktop surfaces, as an omarchy-shell plugin
-(`ferdousbhai.ghost`): chat HUD, bar dot, settings and context panes, and
-notifications. It runs inside the shell Omarchy already starts, so there is no
+(`ferdousbhai.ghost`): the desktop presence, chat HUD, bar dot, settings and
+context panes, and notifications. It runs inside the shell Omarchy already starts, so there is no
 second Quickshell process, no unit, and no tray helper.
 
-The manifest declares three kinds: `service` (the daemon connection and the
-notifications a shut window would swallow), `panel` (the chat window), and
-`bar-widget` (the state dot). The HUD is a normal `FloatingWindow`
-(`xdg-toplevel`), so Hyprland owns tiling, focus, resizing, and workspace
-movement; window rules use its title because a plugin window carries the host shell's
-app-id. Focus comes from Qt's own window state. `SUPER+CTRL+G` is launch-or-focus, hiding only when
-the focused HUD receives it again.
+The manifest declares three kinds: `service` (the daemon connection, the
+presence, and the notifications a shut window would swallow), `panel` (the
+summon), and `bar-widget` (the state dot).
+
+`SUPER+CTRL+G` summons the presence: layer-shell surfaces glow along every
+screen edge and a prompt on the focused monitor takes the keyboard while
+Voxtype listens. After a send, the glow thins and a ticker, then the reply
+card, stays up without taking the keyboard until clicked; summoning again
+over it follows up in the same conversation. The `Presence` singleton holds
+that state and `PresenceOverlay` (mounted by the always-loaded service, since
+the host unloads the panel whenever it hides) draws it.
+
+The chat HUD opens from the bar dot, a notification, the card's `open`, or any
+summon naming a section. It is a normal `FloatingWindow` (`xdg-toplevel`), so
+Hyprland owns tiling, focus, resizing, and workspace movement; window rules
+use its title because a plugin window carries the host shell's app-id. Focus
+comes from Qt's own window state. A toggle hides it only when it is focused.
 
 Every QML import here is a relative path. Inside the host, `qs.` resolves to
 Omarchy's shell root, so `import qs.services` would bind these files to

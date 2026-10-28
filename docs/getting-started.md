@@ -99,7 +99,8 @@ line.
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
 — it is a plugin inside your own `omarchy-shell`, summoned with
-`omarchy-shell shell toggle ferdousbhai.ghost`.
+`omarchy-shell shell toggle ferdousbhai.ghost`; its chat window opens with
+`omarchy-shell ghost section chat`.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -117,7 +118,7 @@ To replace it, delete the file and `systemctl --user restart ghostd`.
 `~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
 `/usr/share/doc/ghost/shell-contrib/` — `hyprland/ghost.lua` for Omarchy 4's
 Lua config, `hyprland/ghost.conf` for plain Hyprland. Until you do, open the
-HUD from your app launcher, or with
+chat window from your app launcher, or summon with
 `omarchy-shell shell toggle ferdousbhai.ghost`.
 
 ## 4. Create a ghost
@@ -184,10 +185,23 @@ and permissions are that agent's own, configured as you would for yourself;
 Ghost has no model picker or provider login. For the hard questions, a ghost
 also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
 
-## 6. First conversation in the HUD
+## 6. First conversation
 
-Summon the HUD (`SUPER+CTRL+G`, your app launcher, or
-`omarchy-shell shell toggle ferdousbhai.ghost`). An
+Press `SUPER+CTRL+G` (or run `omarchy-shell shell toggle ferdousbhai.ghost`).
+The screen edges glow and a prompt opens near the bottom of the focused
+monitor, already listening if Voxtype is installed. Speak or type, then press
+`Enter`; with nothing typed, `Enter` stops the recording and sends what was
+heard. `Tab` picks another ghost, and `Esc` or a click outside closes the
+prompt.
+
+The prompt closes and the ghost works in the background: a thin shimmer stays
+on the edges and a ticker says what it is doing. Its reply replaces the
+ticker as a card. Summon again while the card is up to follow up in the same
+conversation (`new ×` starts a fresh one instead); `×` or `Esc` on the card
+dismisses it, and `open` shows the conversation in the chat window.
+
+The chat window (the ghost mark in the Omarchy bar, your app launcher, or
+`omarchy-shell ghost section chat`) keeps the history and settings. An
 empty conversation shows the ghost's glyph, its name, and the static line
 `What's on your mind?`.
 
@@ -211,7 +225,7 @@ appears only while it moves or under the pointer.
 
 The rail on the right switches sections: **Chat**, **Board**, **Routines**,
 **Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
-mark in the Omarchy bar toggles the HUD.
+mark in the Omarchy bar toggles the window.
 
 ## 7. The same ghost from the terminal
 

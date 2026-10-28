@@ -102,9 +102,11 @@ that has already exited and the preview keeps running.
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`; `+` in its Ghosts header), transcript in the middle, composer at the
   bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
-  rail floating at the right edge. The nested session binds no keys (the
-  summon key would reach the owner's own HUD); toggle the preview with
-  `omarchy-shell shell toggle ferdousbhai.ghost` under the exported variables.
+  rail floating at the right edge. `preview.sh` summons it with
+  `{"section":"chat"}`; a plain summon opens the presence instead (below).
+  The nested session binds no keys (the summon key would reach the owner's
+  own HUD); drive the preview with `omarchy-shell shell toggle ferdousbhai.ghost`
+  under the exported variables.
   Character edits `character.md`. Hooks shows the
   owner's `hooks.json` handlers with their lifecycle triggers and the loaded
   count, and opening it does not create a conversation. MCP lists stdio, HTTP,
@@ -118,8 +120,16 @@ that has already exited and the preview keeps running.
   narration stays as its own message, its tool call settled behind that
   message's quiet "1 step" toggle rather than in a card of its own, and the
   reply arrives as the next message.
+- On a plain toggle with the window hidden: four `ghost-presence` edge layers
+  and a full-screen `ghost-presence-prompt` layer in `hyprctl layers`, the
+  prompt focused (`wtype` types into it under the exported variables). `Enter`
+  replaces the prompt with a `ghost-presence-card` ticker over 10px edges; the
+  reply then fills the card with no toast. A second toggle shows
+  `continuing`; `Esc` or a second toggle closes the prompt and removes its
+  layer. The nested session has no Voxtype, so the mic stays hidden.
 - A finished turn or failure raises a desktop toast unless
-  its conversation is being viewed in the focused chat panel. Clicking the toast
+  its conversation is being viewed in the focused chat panel or followed by
+  the presence. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
 - `Esc` behaves as getting-started's key table says; it never closes the
   window.

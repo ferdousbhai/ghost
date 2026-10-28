@@ -668,9 +668,18 @@ runtime preserves owner data.
   HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring `service`
-  (the daemon connection and
-  the notifications a shut window would swallow), `panel` (the chat window), and
-  `bar-widget` (the state dot) kinds. It runs inside Omarchy's own shell
+  (the daemon connection, the desktop presence, and
+  the notifications a shut window would swallow), `panel` (the summon), and
+  `bar-widget` (the state dot) kinds. A summon payload with neither `section`
+  nor `sessionId` opens the presence: every screen's edges glow and a prompt
+  on the focused monitor takes the keyboard (the window instead while no ghost
+  is listed). Sending starts a new conversation, or continues the presence's
+  while its ticker or reply card is up, unless the owner chose new. The prompt then
+  closes, the glow thins, and a ticker that takes no keyboard focus
+  unclicked shows the turn's activity, then its reply or error, until
+  dismissed or opened in the window. Edge surfaces take no input and reserve
+  no space. A payload naming a `section` or `sessionId` opens the chat window;
+  the bar dot and desktop entry open it on `chat`. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and
@@ -678,7 +687,7 @@ runtime preserves owner data.
   host's `bar.showTooltip`/`hideTooltip` API and `tooltipHovered` lifecycle;
   Omarchy owns its theme, sizing, and placement. The widget exposes
   `triggerPress(button)` so the host's drag-aware click forwarding toggles the
-  panel on left click through the injected `bar.shell` facade. The package installs it
+  window on left click through the injected `bar.shell` facade. The package installs it
   to `/usr/share/ghost/plugin`; the per-user symlink into
   `~/.config/omarchy/plugins/` belongs to the install script, which waits for
   shell discovery before enabling the plugin. Setup ends with `ghost new <name>`; harness sign-in is external.
@@ -688,8 +697,8 @@ runtime preserves owner data.
   Desktop toasts belong to the shell service. Optional mobile delivery uses the
 owner's `turn_end` command hook. Completed turns,
   and terminal failures notify unless their conversation is
-  being viewed in the focused, visible chat panel. Only that chat marks replies
-  read. Focus is the HUD's own Qt window state, not a compositor title cache.
+  being viewed in the focused, visible chat panel or followed by the presence.
+  Only that chat and the presence's reply card mark replies read. Focus is the HUD's own Qt window state, not a compositor title cache.
   Cancellation is quiet. Toasts use
   the conversation title and a reply/error excerpt, replace live toasts
   per ghost and conversation using the notification server’s IDs, and open that
@@ -705,7 +714,10 @@ owner's `turn_end` command hook. Completed turns,
   `$XDG_RUNTIME_DIR/voxtype/state`, focuses the composer, then runs
   `voxtype record start` when idle or `stop` when recording; the mic is
   disabled while transcribing. Esc in the composer or its cancel control runs
-  `voxtype record cancel` while recording or transcribing. A command that
+  `voxtype record cancel` while recording or transcribing. The presence prompt
+  starts recording when it opens and Voxtype is idle; a send or dismissal
+  cancels it, and Enter on an empty prompt while recording stops it and sends
+  the transcript once Voxtype has typed it. A command that
   exits nonzero, crashes, or never starts shows as status text above the
   field, whatever the draft or state, until the next command; Voxtype reports
   no failed transcription, so the HUD shows none. Ghost ships no speech stack

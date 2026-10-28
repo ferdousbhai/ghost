@@ -1,3 +1,8 @@
 module Quickshell
 singleton Quickshell 1.0 Quickshell.qml
 Singleton 1.0 Singleton.qml
+Variants 1.0 Variants.qml
+Scope 1.0 Scope.qml
+ShellScreen 1.0 ShellScreen.qml
+Region 1.0 Region.qml
+ExclusionMode 1.0 ExclusionMode.qml

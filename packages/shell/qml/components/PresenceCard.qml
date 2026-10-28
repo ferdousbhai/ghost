@@ -1,0 +1,128 @@
+// PresenceCard — the work in progress, then the reply, where the prompt was.
+//
+// While the turn runs it is one line: the HUD's own ActivityLine when Ghostd's
+// live projection is this conversation, plain "Working" when the window has
+// moved the projection elsewhere. The reply replaces it, scrolled past half
+// the screen. Esc or × forgets it; Open shows the conversation in the window;
+// summoning again follows up.
+import QtQuick
+import "../services"
+import "MarkdownCompat.js" as MarkdownCompat
+
+Rectangle {
+    id: root
+
+    property real maxHeight: 600
+    readonly property int inner: Theme.ch(72)
+
+    width: root.inner + Theme.pad * 2
+    height: Math.min(root.maxHeight, column.implicitHeight + Theme.pad * 2)
+    color: Theme.background
+    border.width: 1
+    border.color: Presence.phase === "failed" ? Theme.rose(0.6) : Theme.film(0.22)
+    radius: Theme.radius * 2
+    focus: true
+
+    Keys.onEscapePressed: Presence.clear()
+
+    Column {
+        id: column
+        anchors.fill: parent
+        anchors.margins: Theme.pad
+        spacing: Theme.gap
+
+        Item {
+            width: parent.width
+            height: Theme.controlHeight
+
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: Presence.ghost
+                color: Theme.foregroundDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeCaption
+            }
+
+            Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Theme.gap * 2
+
+                Repeater {
+                    model: [
+                        { label: "open", act: () => Presence.openInWindow() },
+                        { label: "×", act: () => Presence.clear() }
+                    ]
+
+                    Text {
+                        required property var modelData
+                        text: modelData.label
+                        color: linkArea.containsMouse ? Theme.foregroundBright : Theme.foregroundFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeCaption
+
+                        MouseArea {
+                            id: linkArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: parent.modelData.act()
+                        }
+                    }
+                }
+            }
+        }
+
+        ActivityLine {
+            width: parent.width
+            maxHeight: Theme.controlHeight * 3
+            visible: Presence.working && Presence.projected
+        }
+
+        Text {
+            width: parent.width
+            visible: Presence.working && !Presence.projected
+            text: "Working…"
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+        }
+
+        Text {
+            width: parent.width
+            visible: Presence.phase === "failed"
+            text: Presence.failure
+            color: Theme.ghostRose
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: Text.Wrap
+        }
+
+        Flickable {
+            id: answerScroll
+            width: parent.width
+            visible: Presence.phase === "answered"
+            height: Math.min(answer.implicitHeight,
+                root.maxHeight - Theme.pad * 2 - Theme.controlHeight - Theme.gap)
+            contentWidth: width
+            contentHeight: answer.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            Text {
+                id: answer
+                width: answerScroll.width
+                text: MarkdownCompat.normalize(Presence.answer, Theme.ghostAmber)
+                textFormat: Text.MarkdownText
+                color: Theme.foregroundBright
+                linkColor: Theme.ghostAmber
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+                lineHeight: Theme.lineHeight
+                wrapMode: Text.Wrap
+                onLinkActivated: link => ExternalLinks.openModelUrl(link)
+            }
+        }
+    }
+}

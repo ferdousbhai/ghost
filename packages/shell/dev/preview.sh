@@ -310,7 +310,7 @@ if (( plugin_ready == 0 )); then
   sed -n '1,200p' "$preview_root/quickshell.log" >&2
   exit 1
 fi
-qs -p "$config_path" ipc call shell summon "$plugin_id" '{}' >/dev/null
+qs -p "$config_path" ipc call shell summon "$plugin_id" '{"section":"chat"}' >/dev/null
 sleep 1
 
 # Everything that makes this session private, for a second terminal to source;

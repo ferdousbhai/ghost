@@ -4,6 +4,8 @@ import QtQml
 
 QtObject {
     property string clipboardText: ""
+    /** No outputs: Variants over these instantiates nothing. */
+    property var screens: []
 
     function env(name: string): string {
         // Destination port 0 cannot have a listener. Keep singleton startup

@@ -173,7 +173,7 @@ function dictation(): string[] {
     "voxtype -q transcribe /tmp/<name>.wav",
     "```",
     "Read the output before using it: not every line is transcript.",
-    "The HUD composer starts, stops, and cancels the owner's dictation (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
+    "The summon prompt starts the owner's dictation when it opens; it and the HUD composer start, stop, and cancel it (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
   ];
 }
 

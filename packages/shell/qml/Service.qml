@@ -1,9 +1,11 @@
-// Ghost's headless half: the daemon connection, the notifications a shut
-// window would otherwise swallow, and the `ghost` IPC target.
+// Ghost's always-mounted half: the daemon connection, the desktop presence,
+// the notifications a shut window would otherwise swallow, and the `ghost`
+// IPC target.
 //
 // It is a `service` kind so the host mounts it at startup and keeps it
 // mounted. The panel is loaded only when summoned, so this is what makes the
-// bar dot live and a finished turn reach the owner while the window is shut.
+// bar dot live, keeps the presence's ticker and card up after its prompt
+// closes, and lets a finished turn reach the owner while the window is shut.
 import QtQuick
 import Quickshell.Io
 import "services"
@@ -23,7 +25,7 @@ Item {
 
     onShellChanged: if (root.shell && Ghostd.reopenAfterReload) {
         Ghostd.reopenAfterReload = false;
-        root.summon(({}));
+        root.summon(({ section: "chat" }));
     }
 
     // `omarchy-shell ghost <verb>`; the plain toggle is the shell's own
@@ -68,9 +70,20 @@ Item {
         }
     }
 
+    /** The reply is on screen already: in the focused chat, or as the presence card. */
     function viewing(ghost: string, sessionId: string): bool {
-        return Ghostd.hudChatFocused && Ghostd.activeGhost === ghost
+        return Presence.mine(ghost, sessionId) || Ghostd.hudChatFocused && Ghostd.activeGhost === ghost
             && Ghostd.currentSessionId === sessionId;
+    }
+
+    PresenceOverlay {}
+
+    Connections {
+        target: Presence
+
+        function onWindowRequested(ghost: string, sessionId: string): void {
+            root.summon(({ ghost: ghost, sessionId: sessionId, section: "chat" }));
+        }
     }
 
     Connections {

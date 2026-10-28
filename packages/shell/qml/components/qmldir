@@ -29,3 +29,6 @@ Sidebar 1.0 Sidebar.qml
 Welcome 1.0 Welcome.qml
 Routines 1.0 Routines.qml
 RowDeleteButton 1.0 RowDeleteButton.qml
+PresenceCard 1.0 PresenceCard.qml
+PresenceEdge 1.0 PresenceEdge.qml
+PresencePrompt 1.0 PresencePrompt.qml
