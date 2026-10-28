@@ -80,13 +80,19 @@ export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   return 0;
 }
 
-type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault" | "omarchyDefault">;
+type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault" | "omarchyDefault"> & Partial<Pick<HarnessChoices, "harnesses">>;
 
-/** The preference only; `ghost harnesses` lists installed agents and usage. */
+/**
+ * The preference, and any agent a recent failure keeps at the back;
+ * `ghost harnesses` lists installed agents and usage.
+ */
 function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
   const preferred = body.ghostDefault
     ?? (body.omarchyDefault ? `automatic (Omarchy default: ${body.omarchyDefault})` : "automatic");
-  return `${name} runs on ${preferred}\n`;
+  const resting = (body.harnesses ?? []).flatMap((harness) => harness.resting
+    ? [`${harness.id} is tried last until ${new Date(harness.resting.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${harness.resting.reason}\n`]
+    : []);
+  return `${name} runs on ${preferred}\n${resting.join("")}`;
 }
 
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */

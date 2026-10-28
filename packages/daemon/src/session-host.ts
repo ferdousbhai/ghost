@@ -89,6 +89,14 @@ const TOOL_SUMMARY_MAX = 800;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
+/**
+ * How long a harness that failed before answering is tried last: a limit
+ * (quota, rate, credit) for an hour, anything else for a quarter. A retry an
+ * hour later costs one failed start; trying it first every turn costs one
+ * per turn.
+ */
+const REST_AFTER_LIMIT_MS = 60 * 60_000;
+const REST_AFTER_FAILURE_MS = 15 * 60_000;
 const MAX_QUESTION_LENGTH = 2_000;
 const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
@@ -183,10 +191,20 @@ export interface ConversationUpdatedEvent {
 
 export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
+/** A harness that failed before answering, tried last until `until`. */
+export interface HarnessRest {
+  until: string;
+  /** The failure that sent it to the back, as the harness reported it. */
+  reason: string;
+}
+
 /** The agents a ghost can run on, as the picker shows them. */
 export interface HarnessChoices {
-  /** `effort` is the one its launch asks for, null where the owner's setting stands. */
-  harnesses: (Harness & { effort: string | null })[];
+  /**
+   * `effort` is the one its launch asks for, null where the owner's setting
+   * stands; `resting` is set while a recent failure keeps it at the back.
+   */
+  harnesses: (Harness & { effort: string | null; resting: HarnessRest | null })[];
   /** The ghost's `settings.yml` `harness`, or null for automatic. */
   ghostDefault: string | null;
   /** Omarchy's default agent, the next preference after the ghost's own. */
@@ -488,7 +506,28 @@ export class SessionHost {
    */
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
-    return orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, readHarnessSetting(ghost.dir), omarchyDefault]);
+    const ordered = orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, readHarnessSetting(ghost.dir), omarchyDefault]);
+    // A harness that just failed before answering goes to the back, not out:
+    // if everything ahead of it fails too, it is still tried.
+    return [...ordered.filter((id) => !this.restingFor(id)), ...ordered.filter((id) => this.restingFor(id))];
+  }
+
+  /** Machine-wide, since a harness's sign-in and credit are the owner's, not one ghost's. */
+  private readonly resting = new Map<string, { until: number; reason: string }>();
+
+  private restingFor(id: string): HarnessRest | null {
+    const rest = this.resting.get(id);
+    if (!rest) return null;
+    if (rest.until <= Date.now()) {
+      this.resting.delete(id);
+      return null;
+    }
+    return { until: new Date(rest.until).toISOString(), reason: rest.reason };
+  }
+
+  private rest(id: string, reason: string): void {
+    const span = classifyLimitMessage(reason) ? REST_AFTER_LIMIT_MS : REST_AFTER_FAILURE_MS;
+    this.resting.set(id, { until: Date.now() + span, reason: reason.slice(0, 300) });
   }
 
   // ── Agent choice ──────────────────────────────────────────────────────
@@ -506,7 +545,7 @@ export class SessionHost {
     return {
       harnesses: report.harnesses.flatMap((harness) => {
         const row = this.rowOf(harness.id);
-        return row ? [{ ...harness, effort: row.effort ?? null }] : [];
+        return row ? [{ ...harness, effort: row.effort ?? null, resting: this.restingFor(harness.id) }] : [];
       }),
       ghostDefault: readHarnessSetting(ghost.dir),
       omarchyDefault,
@@ -516,6 +555,8 @@ export class SessionHost {
   /** The ghost's preferred agent, ahead of Omarchy's default; null is automatic. */
   async setGhostHarness(ghostName: string, id: string | null): Promise<HarnessChoices> {
     if (id !== null) this.requireRow(id);
+    // The owner naming it is the retry.
+    if (id !== null) this.resting.delete(id);
     await this.withGhost(ghostName, async () => {
       await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
     });
@@ -528,6 +569,7 @@ export class SessionHost {
    */
   async chooseHarness(ghostName: string, sessionId: string, id: string): Promise<{ id: string; harness: string }> {
     this.requireRow(id);
+    this.resting.delete(id);
     const listed = (await this.cachedReport()).harnesses.find((harness) => harness.id === id);
     if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
     const ghost = this.registry.get(ghostName);
@@ -764,6 +806,7 @@ export class SessionHost {
         resume: !fresh,
         sessionId: fresh ? null : bound.harnessSession,
       }, stream, blocks, signal);
+      if (result.error === null) this.resting.delete(harness);
       if (result.error === null || result.aborted || result.produced) {
         await appendLog(sessionDir, id, [{
           type: "assistant",
@@ -779,6 +822,7 @@ export class SessionHost {
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
       lastError = result.error;
+      this.rest(harness, result.error);
       this.logger.warn("harness failed before answering; trying the next", { ghost: ghost.name, conversation: id, harness, error: result.error });
       entries = (await readLog(sessionDir, id)) ?? [];
     }

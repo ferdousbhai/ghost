@@ -412,7 +412,13 @@ Omarchy's default agent, then every other harness Omarchy reports installed
 (`ghost harnesses`). A harness that fails
 before producing anything (not signed in, out of quota, not installed) hands
 the prompt to the next; one that fails after answering ends the turn in an
-error. A harness new to a conversation receives the newest
+error. A harness that failed before producing anything is then tried last,
+machine-wide, for an hour after a limit (`classifyLimitMessage`) and fifteen
+minutes after anything else, so new conversations start on one that answers;
+it still runs when everything ahead of it fails. Answering, the owner naming
+it (`ghost harness <id>`, `ghost switch <id>`), or a daemon restart ends that.
+`GET /api/ghosts/:ghost/harness` rows carry `resting: { until, reason }` or
+null, and `ghost harness` prints it. A harness new to a conversation receives the newest
 `HANDOFF_CONTEXT_CHARS` of the log as `<conversation-so-far>`; a continuing one
 receives the owner's `!` commands it has not seen as `<owner-commands>`. The
 owner's `!command` runs in the owner home with the conversation's identity

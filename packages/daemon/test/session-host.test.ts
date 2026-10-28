@@ -240,6 +240,39 @@ describe("harness choice", () => {
     ]);
   });
 
+  // A spent or misconfigured harness is not tried first again turn after turn:
+  // a new conversation starts on the one that answered.
+  it("tries a harness that just failed before answering last, until it answers again", async () => {
+    const spent = harness([{ exit: 1, stderr: "429 You have reached your API usage limits." }], "first");
+    const willing = harness(replies("one", "two", "three"), "second");
+    const sessions = host({ harnesses: [spent, willing] });
+    await turn(sessions, "hello", "c1");
+    expect(spent.calls()).toHaveLength(1);
+
+    const fresh = await turn(sessions, "again", "c2");
+    expect(text(fresh)).toBe("two");
+    expect(spent.calls()).toHaveLength(1);
+    const resting = (await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting;
+    expect(resting?.reason).toContain("usage limits");
+    // A limit rests it for about an hour.
+    expect(Date.parse(resting?.until ?? "") - Date.now()).toBeGreaterThan(50 * 60_000);
+
+    // Naming it is the owner's retry.
+    await sessions.chooseHarness("casper", "c2", "first");
+    expect((await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting).toBeNull();
+  });
+
+  it("still tries a resting harness when everything ahead of it fails", async () => {
+    const flaky = harness([{ exit: 1, stderr: "Connection error." }, ...replies("back")], "first");
+    const broken = harness([{ exit: 1, stderr: "model_not_found" }], "second");
+    const sessions = host({ harnesses: [flaky, broken] });
+    await turn(sessions, "hello", "c1");
+    // Both rest now; the next turn still reaches the one that recovered.
+    const events = await turn(sessions, "again", "c2");
+    expect(text(events)).toBe("back");
+    expect((await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting).toBeNull();
+  });
+
   it("lists the model and effort the carrying harness last reported, and forgets them on a switch", async () => {
     const first = harness([{ events: [{ type: "model", model: "gpt-6-astra", provider: "openai-codex" }, { type: "text", block: "r", delta: "hi" }] }], "first");
     const sessions = host({ harnesses: [first, harness(replies("hey"), "second")] });
