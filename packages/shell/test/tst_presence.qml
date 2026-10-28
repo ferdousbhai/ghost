@@ -129,6 +129,27 @@ TestCase {
         compare(recorder.command, ["voxtype", "record", "cancel"]);
     }
 
+    function test_enterSendsWhatVoxtypeTypedOrWaitsAgain(): void {
+        Dictation.state = "idle";
+        Presence.summon();
+        Presence.sendAfterDictation = true;
+        Dictation.state = "transcribing";
+        Presence.dictationSettled("half");
+        compare(posts().length, 0);
+
+        // It heard nothing: the prompt stays, waiting for words again.
+        Dictation.state = "idle";
+        Presence.dictationSettled("  ");
+        verify(Presence.composing);
+        verify(!Presence.sendAfterDictation);
+        compare(posts().length, 0);
+
+        Presence.sendAfterDictation = true;
+        Presence.dictationSettled("what's next");
+        compare(posts().length, 1);
+        compare(JSON.parse(posts()[0].body).prompt, "what's next");
+    }
+
     function test_withoutVoxtypeASummonOnlyComposes(): void {
         Presence.summon();
         verify(Presence.composing);

@@ -103,6 +103,16 @@ Singleton {
         root.sendAfterDictation = false;
     }
 
+    /**
+     * Voxtype has gone quiet after Enter stopped it: send what it typed, or,
+     * when it heard nothing, go back to waiting for words.
+     */
+    function dictationSettled(text: string): void {
+        if (!root.sendAfterDictation || Dictation.state !== "idle") return;
+        if (text.trim() !== "") root.send(text);
+        else root.sendAfterDictation = false;
+    }
+
     function mine(ghost: string, sessionId: string): bool {
         return root.phase !== "" && ghost === root.ghost && sessionId === root.sessionId;
     }

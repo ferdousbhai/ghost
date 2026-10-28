@@ -43,6 +43,7 @@ for command_name in Hyprland hyprctl quickshell qs grim curl node dbus-daemon se
 done
 
 owner_home=${HOME:?preview: HOME is required}
+owner_data=${XDG_DATA_HOME:-$owner_home/.local/share}
 owner_ghosts_root=${GHOSTS_ROOT:-$owner_home/ghosts}
 parent_runtime=${XDG_RUNTIME_DIR:?preview: XDG_RUNTIME_DIR is required}
 parent_display=${WAYLAND_DISPLAY:?preview: run this from the owner Wayland desktop}
@@ -91,6 +92,7 @@ preview_root=""
 runtime_root=""
 hypr_pid=""
 quickshell_pid=""
+voxtype_pid=""
 dbus_pid=""
 cleanup_started=0
 
@@ -114,12 +116,14 @@ cleanup() {
   cleanup_started=1
   trap - EXIT INT TERM
 
+  stop_process_group "$voxtype_pid" TERM
   stop_process_group "$quickshell_pid" TERM
   stop_process_group "$hypr_pid" TERM
   [[ -z $dbus_pid ]] || kill -TERM "$dbus_pid" 2>/dev/null || true
 
   for _ in {1..30}; do
     local alive=0
+    [[ -z $voxtype_pid ]] || ! kill -0 "$voxtype_pid" 2>/dev/null || alive=1
     [[ -z $quickshell_pid ]] || ! kill -0 "$quickshell_pid" 2>/dev/null || alive=1
     [[ -z $hypr_pid ]] || ! kill -0 "$hypr_pid" 2>/dev/null || alive=1
     [[ -z $dbus_pid ]] || ! kill -0 "$dbus_pid" 2>/dev/null || alive=1
@@ -127,9 +131,11 @@ cleanup() {
     sleep 0.1
   done
 
+  stop_process_group "$voxtype_pid" KILL
   stop_process_group "$quickshell_pid" KILL
   stop_process_group "$hypr_pid" KILL
   [[ -z $dbus_pid ]] || kill -KILL "$dbus_pid" 2>/dev/null || true
+  [[ -z $voxtype_pid ]] || wait "$voxtype_pid" 2>/dev/null || true
   [[ -z $quickshell_pid ]] || wait "$quickshell_pid" 2>/dev/null || true
   [[ -z $hypr_pid ]] || wait "$hypr_pid" 2>/dev/null || true
   [[ -z $dbus_pid ]] || wait "$dbus_pid" 2>/dev/null || true
@@ -274,6 +280,77 @@ if [[ -n $config_errors ]]; then
   exit 1
 fi
 
+# GHOST_PREVIEW_VOXTYPE=1: a private Voxtype daemon for the presence's voice
+# path. Its state, lock and socket live in this runtime dir, so the owner's
+# own Voxtype neither sees nor collides with it; it types only through wtype
+# into the nested compositor, never with uinput tools that would reach the
+# owner's desktop, and pauses no media. Only the microphone is shared: it
+# records from the owner's PipeWire, so it hears the room while recording.
+# The owner's installed model is linked in, not downloaded.
+if [[ ${GHOST_PREVIEW_VOXTYPE:-} == 1 ]]; then
+  for command_name in voxtype wtype; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+      echo "preview: GHOST_PREVIEW_VOXTYPE=1 needs $command_name" >&2
+      exit 1
+    fi
+  done
+  owner_models=$owner_data/voxtype/models
+  voxtype_model=""
+  mkdir -p "$XDG_DATA_HOME/voxtype/models"
+  for model_file in "$owner_models"/ggml-*.bin; do
+    [[ -f $model_file ]] || continue
+    ln -s "$model_file" "$XDG_DATA_HOME/voxtype/models/"
+    [[ -n $voxtype_model ]] || voxtype_model=$(basename "$model_file" .bin)
+  done
+  if [[ -z $voxtype_model ]]; then
+    echo "preview: no Voxtype model in $owner_models; run omarchy-voxtype-model" >&2
+    exit 1
+  fi
+  voxtype_config=$preview_root/voxtype.toml
+  cat >"$voxtype_config" <<EOF_VOXTYPE
+state_file = "auto"
+
+[hotkey]
+enabled = false
+
+[audio]
+device = "default"
+sample_rate = 16000
+max_duration_secs = 60
+pause_media = false
+
+[whisper]
+model = "${voxtype_model#ggml-}"
+
+[output]
+mode = "type"
+driver_order = ["wtype"]
+fallback_to_clipboard = false
+
+[output.notification]
+on_recording_start = false
+on_recording_stop = false
+on_transcription = false
+EOF_VOXTYPE
+  setsid env PIPEWIRE_RUNTIME_DIR="$parent_runtime" PULSE_SERVER="unix:$parent_runtime/pulse/native" \
+    voxtype -c "$voxtype_config" daemon >"$preview_root/voxtype.log" 2>&1 &
+  voxtype_pid=$!
+  for _ in {1..300}; do
+    [[ -f $XDG_RUNTIME_DIR/voxtype/state ]] && break
+    if ! kill -0 "$voxtype_pid" 2>/dev/null; then
+      echo "preview: Voxtype exited during startup" >&2
+      sed -n '1,80p' "$preview_root/voxtype.log" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  if [[ ! -f $XDG_RUNTIME_DIR/voxtype/state ]]; then
+    echo "preview: Voxtype did not publish its state file" >&2
+    sed -n '1,80p' "$preview_root/voxtype.log" >&2
+    exit 1
+  fi
+fi
+
 setsid quickshell -p "$config_path" >"$preview_root/quickshell.log" 2>&1 &
 quickshell_pid=$!
 
@@ -328,6 +405,7 @@ echo "  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 echo "  WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 echo "  HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE"
 echo "  Hyprland pid=$hypr_pid; Quickshell pid=$quickshell_pid; mock port=$mock_port"
+[[ -z $voxtype_pid ]] || echo "  Voxtype pid=$voxtype_pid (private; records the owner's microphone)"
 echo "  stop with: kill -TERM $$"
 
 if [[ -n ${GHOST_PREVIEW_SCREENSHOT:-} ]]; then

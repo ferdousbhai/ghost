@@ -186,10 +186,7 @@ Rectangle {
     Timer {
         id: sendTimer
         interval: 700
-        onTriggered: {
-            if (!Presence.sendAfterDictation || Dictation.state !== "idle") return;
-            if (field.text.trim() !== "") Presence.send(field.text);
-        }
+        onTriggered: Presence.dictationSettled(field.text)
     }
 
     Connections {

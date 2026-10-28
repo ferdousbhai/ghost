@@ -72,6 +72,13 @@ The expensive trap: on Hyprland 0.56, legacy plain-syntax calls such as
 expression form above (and the printed instance signature), which does execute
 inside the nested compositor.
 
+`GHOST_PREVIEW_VOXTYPE=1 bash dev/preview.sh qml 17717` adds a private
+Voxtype daemon for the presence's voice path. Its state, lock and socket stay
+in the preview's runtime dir; it types only with `wtype` into the nested
+compositor, pauses no media, and links the owner's installed model rather than
+downloading one. It does record the owner's real microphone while the prompt
+listens, which is the point: speak to check a transcript reaches the prompt.
+
 Capture screenshots with `grim` under those same exported nested variables:
 
 ```sh
@@ -126,7 +133,11 @@ that has already exited and the preview keeps running.
   replaces the prompt with a `ghost-presence-card` ticker over 10px edges; the
   reply then fills the card with no toast. A second toggle shows
   `continuing`; `Esc` or a second toggle closes the prompt and removes its
-  layer. The nested session has no Voxtype, so the mic stays hidden.
+  layer. Without Voxtype the mic stays hidden; with `GHOST_PREVIEW_VOXTYPE=1`
+  (below) the summon sets the private `$XDG_RUNTIME_DIR/voxtype/state` to
+  `recording` while the owner's stays `idle`, Esc returns it to `idle`, and
+  Enter on an empty prompt goes `transcribing`, then sends what was heard or,
+  hearing nothing, leaves the prompt waiting.
 - A finished turn or failure raises a desktop toast unless
   its conversation is being viewed in the focused chat panel or followed by
   the presence. Clicking the toast
