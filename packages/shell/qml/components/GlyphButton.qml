@@ -11,7 +11,6 @@ Text {
     property string name
     property color restColor: Theme.foregroundFaint
     property color hoverColor: Theme.menuSelectedText
-    readonly property alias hovered: area.containsMouse
 
     signal clicked()
 

@@ -3,6 +3,7 @@
 // The host owns this plugin's lifecycle: it instantiates this Item when the
 // panel is summoned, injects `shell`, and reads `opened` to know what it is
 // showing. A plain summon opens the desktop presence's prompt (Presence,
+// or refocuses the window when it was left open behind another app;
 // drawn by Service.qml); a payload naming a section or a conversation opens
 // GhostHud, the full-screen takeover. This file is only the seam between the
 // host's contract and those two.
@@ -43,7 +44,8 @@ Item {
      * Summon. The payload is the shell's summon payload, as Service.qml's IPC
      * verbs and notification actions send it. `{"ghost":"casper"}` selects one
      * first. Without a section or conversation it opens the presence prompt
-     * (the window, while there is no ghost to ask);
+     * (the window, while there is no ghost to ask), or, with no ghost named,
+     * brings back a window left open behind another app;
      * `{"section":"board"}` opens the window on a section, and `sessionId`
      * with `ghost` opens that conversation there.
      */
@@ -58,8 +60,9 @@ Item {
         if (payload.ghost && payload.sessionId)
             Ghostd.openConversationForGhost(String(payload.ghost), String(payload.sessionId));
         else if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
-        // The window left open behind another app comes back as it was.
-        if (!payload.section && !payload.sessionId && hud.shown) {
+        // The toggle with the window left open behind another app brings it
+        // back as it was; naming a ghost still asks that ghost.
+        if (!payload.section && !payload.sessionId && !payload.ghost && hud.shown) {
             hud.raise();
             return;
         }

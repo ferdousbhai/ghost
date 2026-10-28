@@ -20,7 +20,7 @@ Item {
 
     readonly property bool failing: !Ghostd.streaming && Ghostd.lastError !== ""
     property int ellipsisStep: 0
-    /** Wall time, ticking with the ellipsis, for a running call's elapsed time. */
+    /** Wall time, ticking each second while a call runs, for its elapsed time. */
     property real now: Date.now()
 
     /**
@@ -99,7 +99,7 @@ Item {
     Timer {
         interval: 430
         repeat: true
-        running: Ghostd.working && !Theme.reducedMotion
+        running: Ghostd.working && !Theme.reducedMotion && root.toolLine === ""
         onTriggered: root.ellipsisStep = (root.ellipsisStep + 1) % 4
     }
 

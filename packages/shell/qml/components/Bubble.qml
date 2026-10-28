@@ -140,8 +140,8 @@ Item {
             active: replyBlock.code !== null
             width: replyBlock.width
             sourceComponent: CodeBlock {
-                language: replyBlock.code.language
-                code: replyBlock.code.code
+                language: replyBlock.code ? replyBlock.code.language : ""
+                code: replyBlock.code ? replyBlock.code.code : ""
             }
         }
     }

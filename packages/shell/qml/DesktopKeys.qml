@@ -24,7 +24,7 @@ import "services/DesktopKeys.js" as Desk
 Item {
     id: root
 
-    /** Who holds the summon key: "", "free" (just claimed), "shell", "owner", or "taken". */
+    /** Who holds the summon key: "" until read, then "shell" (this shell bound it), "owner", or "taken". */
     property string summonKey: ""
     /** This shell bound the summon key, so it unbinds it on the way out. */
     property bool boundSummon: false
@@ -35,8 +35,10 @@ Item {
     property var pending: []
 
     Component.onCompleted: root.setUp()
-    // Detached: this item, and any Process it owns, is going away.
-    Component.onDestruction: Quickshell.execDetached(["hyprctl", "eval", Desk.withdrawLua(root.token, root.boundSummon)])
+    // Detached: this item, and any Process it owns, is going away. Whatever is
+    // still queued goes first, in the same chunk, so the withdrawal lands last.
+    Component.onDestruction: Quickshell.execDetached(["hyprctl", "eval",
+        root.pending.concat([Desk.withdrawLua(root.token, root.boundSummon)]).join("; ")])
 
     function setUp(): void {
         root.evaluate(Desk.setUpLua(root.token));
@@ -51,15 +53,15 @@ Item {
     }
 
     function next(): void {
-        if (root.pending.length === 0) return;
+        if (evaluator.running || root.pending.length === 0) return;
         evaluator.command = ["hyprctl", "eval", root.pending[0]];
         root.pending = root.pending.slice(1);
         evaluator.running = true;
     }
 
     function claim(state: string): void {
-        root.summonKey = state;
         root.boundSummon = state === "free" || state === "shell";
+        root.summonKey = root.boundSummon ? "shell" : state;
         if (root.boundSummon) root.evaluate(Desk.summonBindLua(Plugin.ID));
         else if (state === "taken")
             console.info("ghost: SUPER+CTRL+G is bound to something else; summon with `omarchy-shell shell toggle "
@@ -73,7 +75,8 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: if (text.trim() !== "ok") console.warn("ghost: hyprctl eval refused Ghost's setup: " + text.trim())
         }
-        onExited: root.next()
+        // Once this exit has settled, as the probe's restart below.
+        onExited: Qt.callLater(root.next)
     }
 
     Process {
@@ -102,6 +105,9 @@ Item {
         target: Hyprland
         function onRawEvent(event: var): void {
             if (event.name !== "configreloaded") return;
+            // The reload dropped everything; what was queued for before it is
+            // stale (a bind could replace one the owner just added).
+            root.pending = [];
             root.boundSummon = false;
             root.setUp();
         }

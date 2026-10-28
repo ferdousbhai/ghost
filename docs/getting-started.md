@@ -117,8 +117,9 @@ To replace it, delete the file and `systemctl --user restart ghostd`.
 **Summon key.** `SUPER+CTRL+G` summons the ghost as soon as the shell loads
 the plugin: Ghost asks Hyprland for the binding at runtime, so nothing in
 `~/.config/hypr` or `~/.config/omarchy` is edited. If one of your own bindings
-already holds that key, Ghost leaves it alone and says so in the shell's log;
-bind another key with a snippet from `/usr/share/doc/ghost/shell-contrib/`
+already holds that key for something else, Ghost leaves it alone and says so in
+the shell's log; bind another key with a snippet from
+`/usr/share/doc/ghost/shell-contrib/`
 (`hyprland/ghost.lua` for Omarchy 4's Lua config, `hyprland/ghost.conf` for
 plain Hyprland), or summon with `omarchy-shell shell toggle ferdousbhai.ghost`.
 

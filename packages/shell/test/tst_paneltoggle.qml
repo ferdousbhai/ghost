@@ -34,6 +34,15 @@ TestCase {
         compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost$" })']);
     }
 
+    // Naming a ghost still asks that ghost, window open or not.
+    function test_summoningANamedGhostOpensItsPrompt(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = createTemporaryObject(panelComponent, this);
+        panel.open('{"section":"routines"}');
+        panel.open('{"ghost":"dous"}');
+        verify(Presence.composing);
+    }
+
     function test_aPlainSummonWithTheWindowClosedOpensThePrompt(): void {
         Ghostd.activeGhost = "dous";
         const panel = createTemporaryObject(panelComponent, this);

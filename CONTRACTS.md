@@ -547,7 +547,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the name `ghost` is reserved for `ghost-desktop` and refused. The next turn hands enabled rows to the harness, which connects them. |
-| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
+| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
@@ -691,7 +691,8 @@ runtime preserves owner data.
   `bar-widget` (the state dot) kinds. A summon payload with neither `section`
   nor `sessionId` opens the presence: every screen's edges glow and a prompt
   on the focused monitor takes the keyboard (the window instead while no ghost
-  is listed). Sending starts a new conversation, or continues the presence's
+  is listed); with the window left open behind another app and no `ghost`
+  named, it refocuses the window as it was. Sending starts a new conversation, or continues the presence's
   while its ticker or reply card is up, unless the owner chose new. The prompt then
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
@@ -731,7 +732,7 @@ runtime preserves owner data.
   animation, out of Omarchy's default inactive opacity). Both are withdrawn
   when the plugin unloads, only by the shell that last made them, and re-made
   after each Hyprland config reload; the `ghost` IPC's `status` reports
-  `summonKey` (`free`, `shell`, `owner`, or `taken`). It runs inside Omarchy's own shell
+  `summonKey` (`shell`, `owner`, or `taken`; empty until read). It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

@@ -81,9 +81,11 @@ TestCase {
         const evaluator = findChild(keys, "evaluator");
         compare(evaluator.command[2], Desk.setUpLua(keys.token));
         answerProbe(keys, []);
-        compare(keys.summonKey, "free");
+        compare(keys.summonKey, "shell");
         verify(keys.boundSummon);
         evaluator.simulateExited(0, 0);
+        wait(0);
+        verify(evaluator.running);
         compare(evaluator.command[2], Desk.summonBindLua(id));
 
         const token = keys.token;
@@ -110,6 +112,27 @@ TestCase {
         compare(keys.summonKey, "");
         wait(0);
         answerProbe(keys, []);
-        compare(keys.summonKey, "free");
+        compare(keys.summonKey, "shell");
+    }
+
+    // Unloading with a chunk still queued sends it ahead of the withdrawal.
+    function test_aQueuedChunkLandsBeforeTheWithdrawal(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        answerProbe(keys, []);
+        compare(keys.pending, [Desk.summonBindLua(id)]);
+        const token = keys.token;
+        Quickshell.detached = [];
+        keys.destroy();
+        wait(0);
+        compare(Quickshell.detached[0][2], Desk.summonBindLua(id) + "; " + Desk.withdrawLua(token, true));
+    }
+
+    // A reload drops what was queued for the configuration before it.
+    function test_aReloadDropsStaleChunks(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        answerProbe(keys, []);
+        compare(keys.pending, [Desk.summonBindLua(id)]);
+        Hyprland.rawEvent({ name: "configreloaded", data: "" });
+        compare(keys.pending, [Desk.setUpLua(keys.token)]);
     }
 }

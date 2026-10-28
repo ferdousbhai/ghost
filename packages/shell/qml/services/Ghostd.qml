@@ -881,11 +881,6 @@ Singleton {
         root.harnessError = "";
     }
 
-    /**
-     * One line of what a harness's state is worth knowing before choosing it:
-     * held back after a failure (until when), else its usage windows as
-     * Omarchy measured them ("Session 9% · Weekly 71%"), else nothing.
-     */
     /** When a resting harness is tried again, or null when it is not resting. */
     function restingUntil(harness: var): var {
         const until = harness.resting && typeof harness.resting.until === "string" ? new Date(harness.resting.until) : null;
@@ -897,6 +892,11 @@ Singleton {
         return Qt.formatDateTime(when, when.toDateString() === new Date().toDateString() ? "HH:mm" : "d MMM HH:mm");
     }
 
+    /**
+     * One line of what a harness's state is worth knowing before choosing it:
+     * held back after a failure (until when), else its usage windows as
+     * Omarchy measured them ("Session 9% · Weekly 71%"), else nothing.
+     */
     function harnessNote(harness: var): string {
         const until = root.restingUntil(harness);
         if (until) return "held back until " + root.noteTime(until);
