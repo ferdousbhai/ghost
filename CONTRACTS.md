@@ -691,10 +691,10 @@ runtime preserves owner data.
   `bar-widget` (the state dot) kinds. A summon payload with neither `section`
   nor `sessionId` opens the presence: every screen's edges glow and a prompt
   on the focused monitor takes the keyboard (the window instead while no ghost
-  is listed); with the prompt or the window left open behind another app and
-  no `ghost` named, it refocuses that one as it was. Sending starts a new
-  conversation, or continues the presence's
-  while its ticker or reply card is up, unless the owner chose new. The prompt then
+  is listed). A prompt left open behind another app is refocused as it was
+  (a named ghost is selected first), and so is the window when no `ghost` is
+  named. Sending starts a new conversation, or continues the presence's while
+  its ticker or reply card is up, unless the owner chose new. The prompt then
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
   dismissed or opened in the window. Edge surfaces take no input and reserve

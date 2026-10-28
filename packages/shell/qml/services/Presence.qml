@@ -55,16 +55,17 @@ Singleton {
 
     function summon(): void {
         if (Ghostd.activeGhost === "") return;
-        // A reply on screen, or a turn still running, is what a summon
-        // follows up on; a fresh summon starts a fresh conversation. A summon
-        // may have switched the ghost, so this is decided again either way.
-        root.continuing = root.phase !== "" && root.ghost === Ghostd.activeGhost;
-        // Already open, behind another app: bring it back where it is.
+        // Already open, behind another app: bring it back as it was, though a
+        // summon that switched the ghost cannot continue the other's turn.
         if (root.composing) {
+            root.continuing = root.continuing && root.ghost === Ghostd.activeGhost;
             root.raise();
             return;
         }
         root.screenName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+        // A reply on screen, or a turn still running, is what a summon
+        // follows up on; a fresh summon starts a fresh conversation.
+        root.continuing = root.phase !== "" && root.ghost === Ghostd.activeGhost;
         root.sendAfterDictation = false;
         root.composing = true;
         Dictation.refresh();

@@ -48,6 +48,20 @@ TestCase {
         compare(Quickshell.detached[1], ["hyprctl", "dispatch", "focuswindow", "title:^Ghost prompt$"]);
     }
 
+    // Bringing the prompt back keeps the owner's choice of a new conversation.
+    function test_refocusKeepsTheChoiceOfANewConversation(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = createTemporaryObject(panelComponent, this);
+        panel.open("");
+        Presence.phase = "answered";
+        Presence.ghost = "dous";
+        Presence.continuing = false;
+        panel.open('{"ghost":"dous"}');
+        verify(!Presence.continuing);
+        Presence.phase = "";
+        Presence.ghost = "";
+    }
+
     // Naming a ghost still asks that ghost, window open or not.
     function test_summoningANamedGhostOpensItsPrompt(): void {
         Ghostd.activeGhost = "dous";

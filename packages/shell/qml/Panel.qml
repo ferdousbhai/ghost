@@ -45,8 +45,8 @@ Item {
      * Summon. The payload is the shell's summon payload, as Service.qml's IPC
      * verbs and notification actions send it. `{"ghost":"casper"}` selects one
      * first. Without a section or conversation it opens the presence prompt
-     * (the window, while there is no ghost to ask), or, with no ghost named,
-     * brings back a window left open behind another app;
+     * (the window, while there is no ghost to ask), or brings back the prompt,
+     * or with no ghost named the window, left open behind another app;
      * `{"section":"board"}` opens the window on a section, and `sessionId`
      * with `ghost` opens that conversation there.
      */
