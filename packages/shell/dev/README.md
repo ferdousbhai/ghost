@@ -105,8 +105,8 @@ that has already exited and the preview keeps running.
   isolated shell is ready.
 - On `open`: a `ghost-hud` layer over the nested monitor, the desktop under
   the theme's menu scrim, and the launcher card a fifth of the way down: a
-  filter (`Search, or ask casper…`), `New conversation`, the mock's
-  conversations with ages and unread dots, then casper's places (Board,
+  filter (`Search, or ask casper…`), the mock's conversations with ages and
+  unread dots, then casper's places (Board,
   Routines, Character, Ghosts, Hooks, MCP servers, Remote access). Typing
   filters; Enter grows the card into the chosen view with a `‹` back to the
   list; Enter on a filter nothing matches asks casper. `preview.sh` summons

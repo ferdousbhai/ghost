@@ -52,7 +52,8 @@ function contains(text, query) {
  * then newest). Headers are rows too, but never selectable. `hookCount`, the
  * owner's loaded hooks, is the Hooks row's detail when there are any.
  *
- * Empty query: a new conversation, the conversations, then the places.
+ * Empty query: the conversations, then the places. The filter is also where
+ * a new conversation starts, so no row repeats it (Ctrl+N opens a blank one).
  * A query: matching conversations and places; asking the ghost is the first
  * row when nothing matches and the last when something does, so Enter opens
  * what was searched for and still asks when there was nothing to find.
@@ -84,8 +85,7 @@ function rows(query, sessions, ghost, now, hookCount) {
     var ask = q === "" || ghost === "" ? null
         : { kind: "ask", id: "ask", label: "Ask " + ghost, detail: String(query).trim() };
 
-    if (q === "") out.push({ kind: "new", id: "new", label: "New conversation", detail: "Ctrl+N" });
-    else if (ask && conversations.length + places.length === 0) out.push(ask);
+    if (ask && conversations.length + places.length === 0) out.push(ask);
     if (conversations.length > 0) {
         out.push({ kind: "header", id: "h-conversations", label: "Conversations" });
         out = out.concat(conversations);

@@ -16,7 +16,7 @@ import "Launcher.js" as Launcher
 FocusScope {
     id: root
 
-    /** A row was chosen: { kind: "new" | "ask" | "session" | "place", id, detail }. */
+    /** A row was chosen, or Ctrl+N: { kind: "new" | "ask" | "session" | "place", id, detail }. */
     signal activated(var row)
     signal deleteRequested(string sessionId, string title)
 
@@ -227,10 +227,8 @@ FocusScope {
                     GhostGlyph {
                         anchors.centerIn: parent
                         visible: row.modelData.kind === "place" || row.modelData.kind === "ask"
-                            || row.modelData.kind === "new"
                         size: Theme.fontSize + 2
                         path: row.modelData.kind === "place" ? row.modelData.icon
-                            : row.modelData.kind === "new" ? "M12 5v14M5 12h14"
                             : "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"
                         tint: row.chosen ? Theme.menuSelectedText : Theme.foregroundDim
                     }
