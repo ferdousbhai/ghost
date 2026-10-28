@@ -22,9 +22,9 @@ The HUD (history, board, routines, character, ghosts, hooks, MCP, remote
 access) opens from the bar dot, a notification, the card's `open`, or any
 summon naming a section. It is drawn the way the desktop draws its own menu,
 with the theme's `[menu]` tokens (`Theme.menu*`): a window titled `Ghost`,
-transparent but for a scrim and the card, which `DesktopKeys` has Hyprland
-float and pin at the focused monitor's size (why it is a window is in
-`CONTRACTS.md`). It opens on the `Launcher`, a filter over conversations and
+transparent but for a scrim and the card, which Hyprland floats and pins at
+the focused monitor's size by `DesktopKeys`' runtime rule (`ghost.conf`'s on a
+`.conf` config; why it is a window is in `CONTRACTS.md`). It opens on the `Launcher`, a filter over conversations and
 places at a fixed height on screen; Enter on a row grows the card into that view,
 and Enter with nothing matching asks the ghost. Esc steps back (a standing
 question, the workbench, the view, then out), as do the toggle and a scrim

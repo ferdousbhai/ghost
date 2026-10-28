@@ -733,9 +733,9 @@ runtime preserves owner data.
   animation, out of Omarchy's default inactive opacity). Both are withdrawn
   when the plugin unloads, only by the shell that last made them, and re-made
   after each Hyprland config reload; the `ghost` IPC's `status` reports
-  `summonKey` (`shell`, `owner`, `taken`, or `none` on a `.conf` config, which
-  runs no Lua, so `contrib/hyprland/ghost.conf` carries the key and the rule;
-  empty until read). It runs inside Omarchy's own shell
+  `summonKey` (`shell`, `owner`, `taken`, or `none`: free on a `.conf` config,
+  which runs no Lua, so `contrib/hyprland/ghost.conf` carries the key and the
+  rule there; empty until read). It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

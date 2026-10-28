@@ -2,9 +2,9 @@
 //
 // The host owns this plugin's lifecycle: it instantiates this Item when the
 // panel is summoned, injects `shell`, and reads `opened` to know what it is
-// showing. A plain summon opens the desktop presence's prompt (Presence,
-// or refocuses the window when it was left open behind another app;
-// drawn by Service.qml); a payload naming a section or a conversation opens
+// showing. A plain summon opens the desktop presence's prompt (Presence, drawn
+// by Service.qml), or refocuses the prompt or window left open behind another
+// app; a payload naming a section or a conversation opens
 // GhostHud, the full-screen takeover. This file is only the seam between the
 // host's contract and those two.
 import QtQuick
