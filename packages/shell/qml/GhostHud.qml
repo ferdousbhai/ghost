@@ -451,6 +451,18 @@ WlrLayershell {
                             maxHeight: Math.max(90, Math.floor(card.height * 0.28))
                         }
 
+                        // What the ghost asked here and waits on; any message
+                        // answers it, a button just saves typing.
+                        QuestionLine {
+                            Layout.fillWidth: true
+                            question: Ghostd.currentSessionRow ? Ghostd.currentSessionRow.question || null : null
+                            onAnswered: text => {
+                                transcriptView.toEnd();
+                                Ghostd.send(text);
+                            }
+                            onDismissed: Ghostd.dismissQuestion(Ghostd.currentSessionId)
+                        }
+
                         QueueLine {
                             Layout.fillWidth: true
                             followUps: Ghostd.followUpQueue

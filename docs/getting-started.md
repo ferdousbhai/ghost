@@ -239,7 +239,14 @@ The transcript follows new output only while you are at its end. Scrolled
 up, it stays put and shows **↓ Jump to latest message**; its scrollbar
 appears only while it moves or under the pointer.
 
-Clicking the ghost mark in the Omarchy bar toggles the card.
+Clicking the ghost mark in the Omarchy bar toggles the card. The mark uses
+herdr's colours: a green outline when everything is read, amber while the ghost
+works, blue when a reply is unread, and red when it is waiting on you.
+
+When the ghost needs a decision it asks with `ghost ask` instead of guessing:
+the question shows on the presence card and above the composer with a few
+suggested answers. Pick one (or press its number on the card), type any other
+answer, or `dismiss` it.
 
 ## 7. The same ghost from the terminal
 

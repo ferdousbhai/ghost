@@ -110,6 +110,38 @@ TestCase {
         verify(!Presence.mine("casper", JSON.parse(posts()[0].body).sessionId));
     }
 
+    // `ghost ask`: the card shows the question from the listing, and a picked
+    // answer is the owner's next message in the same conversation.
+    function test_aQuestionIsAnsweredInItsConversation(): void {
+        Presence.summon();
+        Presence.send("plan the release");
+        const sessionId = Presence.sessionId;
+        finish(posts()[0], "One thing first.");
+        compare(Presence.question, null);
+
+        Ghostd.sessions = Ghostd.sessions.map(session => session.id === sessionId
+            ? Object.assign({}, session, { question: { text: "Tonight?", options: ["yes", "no"] } }) : session);
+        compare(Presence.question.text, "Tonight?");
+
+        Presence.answerQuestion("yes");
+        compare(posts().length, 2);
+        compare(JSON.parse(posts()[1].body), { prompt: "yes", sessionId: sessionId });
+    }
+
+    function test_dismissingAQuestionWithdrawsItUnanswered(): void {
+        Presence.summon();
+        Presence.send("plan");
+        finish(posts()[0], "Hm.");
+        const sessionId = Presence.sessionId;
+        Ghostd.sessions = Ghostd.sessions.map(session => session.id === sessionId
+            ? Object.assign({}, session, { question: { text: "Which?", options: [] } }) : session);
+        Presence.dismissQuestion();
+        compare(Presence.question, null);
+        const deletes = sent.filter(xhr => xhr.method === "DELETE");
+        compare(deletes.length, 1);
+        verify(deletes[0].url.endsWith("/sessions/" + sessionId + "/question"));
+    }
+
     function test_aFailedTurnShowsItsError(): void {
         Presence.summon();
         Presence.send("break");

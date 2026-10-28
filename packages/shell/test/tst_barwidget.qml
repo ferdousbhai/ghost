@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml"
+import "../qml/services"
 
 // The bar arranges its modules with a Row, which sets x and leaves y alone.
 // A widget shorter than its neighbours therefore rides at the top of the bar
@@ -49,6 +50,41 @@ TestCase {
 
     // Style.bar.iconSlot: the length a host icon button reserves along the bar.
     readonly property real iconSlot: 27
+
+    // herdr's agent states, most urgent first, over every conversation.
+    function test_theMarkWearsHerdrsStates(): void {
+        const widget = createTemporaryObject(widgetComponent, tc, { bar: horizontalBar });
+        const mark = findChild(widget, "barMark");
+        const was = { reachable: Ghostd.reachable, sessions: Ghostd.sessions };
+        try {
+            Ghostd.reachable = true;
+            Ghostd.sessions = [{ id: "a" }, { id: "b" }];
+            compare(widget.agentState, "idle");
+            compare(mark.tint, Theme.ok);
+            verify(!mark.filled);
+
+            Ghostd.sessions = [{ id: "a", unread: true }, { id: "b" }];
+            compare(widget.agentState, "done");
+            compare(mark.tint, Theme.info);
+            verify(mark.filled);
+
+            Ghostd.sessions = [{ id: "a", unread: true }, { id: "b", running: true }];
+            compare(widget.agentState, "working");
+            compare(mark.tint, Theme.warn);
+
+            Ghostd.sessions = [{ id: "a", unread: true, question: { text: "Ship it?", options: [] } }, { id: "b", running: true }];
+            compare(widget.agentState, "blocked");
+            compare(mark.tint, Theme.danger);
+            compare(widget.status, "waiting for you");
+
+            Ghostd.reachable = false;
+            compare(widget.agentState, "offline");
+            verify(!mark.filled);
+        } finally {
+            Ghostd.reachable = was.reachable;
+            Ghostd.sessions = was.sessions;
+        }
+    }
 
     function test_hostForwardedPressTogglesPanel(): void {
         const calls = [];

@@ -11,8 +11,12 @@
 //
 // The mark is GhostGlyph, the same lucide ghost the HUD's header and hero draw,
 // so the bar and the window are one piece of artwork at two sizes. State is
-// carried by its tint and by the orb that glows behind it while a turn runs,
-// not by a separate indicator.
+// carried by the ghost itself, in herdr's agent-state language so the desktop
+// reads one way: an outline in green when everything is read (idle), filled
+// amber while a turn runs (working), filled blue when a reply is unread
+// (done), filled red when the ghost is waiting on the owner's answer
+// (blocked), and a dim outline while ghostd is unreachable. The state covers
+// every conversation of the selected ghost, not just the one on screen.
 import QtQuick
 import "services"
 import "services/Plugin.js" as Plugin
@@ -37,9 +41,21 @@ Item {
         if (root.bar.shell) root.bar.shell.toggle(root.selfId, '{"section":"home"}');
     }
 
-    readonly property string status: !Ghostd.reachable
-        ? "offline"
-        : (Ghostd.working ? (Ghostd.activity !== "" ? Ghostd.activity.replace(/^(thinking|starting):[^]*/, "$1") : "thinking") : "idle")
+    /** herdr's states, most urgent first: "offline", "blocked", "working", "done", or "idle". */
+    readonly property string agentState: {
+        if (!Ghostd.reachable) return "offline";
+        const sessions = Ghostd.sessions;
+        if (sessions.some(session => session && session.question)) return "blocked";
+        if (Ghostd.anyStreaming || sessions.some(session => session && session.running)) return "working";
+        if (sessions.some(session => session && session.unread)) return "done";
+        return "idle";
+    }
+
+    readonly property string status: root.agentState === "blocked" ? "waiting for you"
+        : root.agentState === "done" ? "unread reply"
+        : root.agentState === "working"
+            ? (Ghostd.working && Ghostd.activity !== "" ? Ghostd.activity.replace(/^(thinking|starting):[^]*/, "$1") : "working")
+        : root.agentState
 
     readonly property string tooltipText: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
         + " · " + root.status
@@ -55,11 +71,11 @@ Item {
     }
     Component.onDestruction: if (root.bar) root.bar.hideTooltip(root)
 
-    // Unreachable is the one state worth a colour of its own. Otherwise the
-    // ghost wears its own amber, brightened while it is working.
-    readonly property color markTint: !Ghostd.reachable
-        ? Theme.danger
-        : (Ghostd.working ? Theme.ghostAmberBright : Theme.ghostAmber)
+    readonly property color markTint: root.agentState === "blocked" ? Theme.danger
+        : root.agentState === "working" ? Theme.warn
+        : root.agentState === "done" ? Theme.info
+        : root.agentState === "idle" ? Theme.ok
+        : Theme.foregroundDim
 
     Accessible.role: Accessible.Button
     Accessible.name: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
@@ -87,19 +103,12 @@ Item {
         // The orb's bloom reaches past the glyph's box on purpose.
         clip: false
 
-        // Behind the mascot, and only while a turn runs: the same orb the
-        // HUD shows, seeded per ghost and per turn so two ghosts do not
-        // shimmer alike.
-        SpectralOrb {
-            visible: Ghostd.working && Ghostd.reachable
-            anchors.centerIn: parent
-            diameter: 14
-        }
-
         GhostGlyph {
+            objectName: "barMark"
             anchors.centerIn: parent
             size: 14
             tint: root.markTint
+            filled: root.agentState !== "idle" && root.agentState !== "offline"
             // A hairline heavier than the HUD's: at 14px in a bar the
             // stroke has to survive the panel's own contrast.
             strokeWidth: 2.2

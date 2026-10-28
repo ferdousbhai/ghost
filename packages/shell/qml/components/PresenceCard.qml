@@ -19,11 +19,17 @@ Rectangle {
     height: Math.min(root.maxHeight, column.implicitHeight + Theme.pad * 2)
     color: Theme.background
     border.width: 1
-    border.color: Presence.phase === "failed" ? Theme.rose(0.6) : Theme.film(0.22)
+    border.color: Presence.phase === "failed" ? Theme.rose(0.6)
+        : Presence.question ? Theme.danger : Theme.film(0.22)
     radius: Theme.radius * 2
     focus: true
 
     Keys.onEscapePressed: Presence.clear()
+    // 1-6 pick one of the question's suggested answers.
+    Keys.onPressed: event => {
+        if (event.key >= Qt.Key_1 && event.key <= Qt.Key_6 && questionLine.choose(event.key - Qt.Key_1))
+            event.accepted = true;
+    }
 
     Column {
         id: column
@@ -123,6 +129,14 @@ Rectangle {
                 wrapMode: Text.Wrap
                 onLinkActivated: link => ExternalLinks.openModelUrl(link)
             }
+        }
+
+        QuestionLine {
+            id: questionLine
+            width: parent.width
+            question: Presence.question
+            onAnswered: text => Presence.answerQuestion(text)
+            onDismissed: Presence.dismissQuestion()
         }
     }
 }

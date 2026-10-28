@@ -48,13 +48,15 @@ function contains(text, query) {
 }
 
 /**
- * Conversations in the order a messenger keeps them: pinned, then those with
- * an unread reply, then the rest, each newest first. An unread reply stays in
+ * Conversations in the order a messenger keeps them: pinned, then those where
+ * the ghost waits on the owner's answer, then those with an unread reply, then
+ * the rest, each newest first. An unread reply stays in
  * view until it is read, however much talk happens elsewhere meanwhile.
  */
 function ordered(sessions) {
+    // A ghost waiting on the owner's answer outranks an unread reply.
     var rank = function (session) {
-        return session.pinned === true ? 0 : session.unread === true ? 1 : 2;
+        return session.pinned === true ? 0 : session.question ? 1 : session.unread === true ? 2 : 3;
     };
     var time = function (session) {
         return Date.parse(session.updatedAt || "") || 0;
@@ -81,11 +83,15 @@ function rows(query, sessions, ghost, now, hookCount) {
     for (var i = 0; i < listed.length; i++) {
         var session = listed[i];
         var title = titleOf(session);
-        if (q !== "" && !contains(title, q) && !contains(session.preview, q)) continue;
+        if (q !== "" && !contains(title, q) && !contains(session.preview, q)
+            && !(session.question && contains(session.question.text, q))) continue;
         conversations.push({
             kind: "session", id: session.id, label: title,
             title: typeof session.title === "string" ? session.title : "",
-            detail: session.title && session.preview && session.preview !== title ? session.preview : "",
+            // A question is what the owner most needs to read in the row.
+            detail: session.question ? session.question.text
+                : session.title && session.preview && session.preview !== title ? session.preview : "",
+            asking: !!session.question,
             meta: age(session.updatedAt, now), pinned: session.pinned === true,
             unread: session.unread === true, running: session.running === true
         });

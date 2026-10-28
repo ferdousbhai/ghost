@@ -293,20 +293,33 @@ FocusScope {
                         turnKey: row.modelData.id
                     }
 
+                    // Waiting on the owner: herdr's blocked red, above all else but a running turn.
                     Rectangle {
                         anchors.centerIn: parent
                         visible: row.modelData.kind === "session" && row.modelData.running !== true
-                            && row.modelData.unread === true
+                            && row.modelData.asking === true
+                        width: 7
+                        height: 7
+                        radius: 3.5
+                        color: Theme.danger
+                    }
+
+                    Rectangle {
+                        anchors.centerIn: parent
+                        visible: row.modelData.kind === "session" && row.modelData.running !== true
+                            && row.modelData.asking !== true && row.modelData.unread === true
                         width: 6
                         height: 6
                         radius: 3
-                        color: Theme.ghostAmber
+                        // herdr's "done": finished, not yet seen; the bar's blue.
+                        color: Theme.info
                     }
 
                     Text {
                         anchors.centerIn: parent
                         visible: row.modelData.kind === "session" && row.modelData.running !== true
-                            && row.modelData.unread !== true && row.modelData.pinned === true
+                            && row.modelData.asking !== true && row.modelData.unread !== true
+                            && row.modelData.pinned === true
                         text: "★"
                         color: Theme.foregroundFaint
                         font.pixelSize: Theme.fontSizeCaption

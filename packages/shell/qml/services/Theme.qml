@@ -79,6 +79,7 @@ Singleton {
         "bright_foreground": "#c0caf5",
         "accent": "#7aa2f7",
         "red": "#f7768e",
+        "blue": "#7aa2f7",
         "green": "#9ece6a",
         "yellow": "#e0af68"
     })
@@ -259,6 +260,7 @@ Singleton {
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
+    readonly property color info: root.pick("blue")
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral

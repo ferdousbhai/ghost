@@ -7,7 +7,8 @@ second Quickshell process, no unit, and no tray helper.
 
 The manifest declares three kinds: `service` (the daemon connection, the
 presence, and the notifications a shut window would swallow), `panel` (the
-summon), and `bar-widget` (the state dot).
+summon), and `bar-widget` (the ghost mark, in herdr's agent-state colours:
+green outline idle, amber working, blue unread, red waiting on the owner).
 
 `SUPER+CTRL+G` summons the presence: layer-shell surfaces glow along every
 screen edge and a prompt on the focused monitor takes the keyboard while

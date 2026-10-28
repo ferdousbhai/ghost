@@ -40,6 +40,12 @@ Singleton {
     signal windowRequested(string ghost, string sessionId)
 
     readonly property bool working: root.phase === "working"
+    /** What the ghost asked in this conversation (`ghost ask`) and waits on, or null. */
+    readonly property var question: {
+        if (root.phase === "" || root.ghost !== Ghostd.activeGhost) return null;
+        const row = Ghostd.sessions.find(session => session && session.id === root.sessionId);
+        return row && row.question ? row.question : null;
+    }
     /** Ghostd's live projection is this conversation's: its activity is ours. */
     readonly property bool projected: Ghostd.activeGhost === root.ghost
         && Ghostd.currentSessionId === root.sessionId
@@ -78,6 +84,16 @@ Singleton {
         const sessionId = root.sessionId;
         root.clear();
         root.windowRequested(ghost, sessionId);
+    }
+
+    /** Answer the question from the card: the owner's message, in the same conversation. */
+    function answerQuestion(text: string): void {
+        root.continuing = true;
+        root.send(text);
+    }
+
+    function dismissQuestion(): void {
+        Ghostd.dismissQuestion(root.sessionId);
     }
 
     function startFresh(): void {

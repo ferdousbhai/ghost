@@ -17,6 +17,14 @@ Item {
     // Body, scalloped hem, and two near-zero eye segments the round cap
     // renders as dots.
     property string path: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"
+    /**
+     * Solid, the way a status dot fills in: the body takes `tint` and the
+     * eyes are cut back out in `knockout`, so a filled ghost is still a ghost.
+     * Only the mascot path has eyes where `eyesPath` draws them.
+     */
+    property bool filled: false
+    property color knockout: Theme.background
+    property string eyesPath: "M9 10h.01M15 10h.01"
 
     implicitWidth: root.size
     implicitHeight: root.size
@@ -37,12 +45,20 @@ Item {
         }
 
         ShapePath {
-            fillColor: "transparent"
+            fillColor: root.filled ? root.tint : "transparent"
             strokeColor: root.tint
             strokeWidth: root.strokeWidth
             capStyle: ShapePath.RoundCap
             joinStyle: ShapePath.RoundJoin
             PathSvg { path: root.path }
+        }
+
+        ShapePath {
+            fillColor: "transparent"
+            strokeColor: root.filled ? root.knockout : "transparent"
+            strokeWidth: root.strokeWidth * 1.4
+            capStyle: ShapePath.RoundCap
+            PathSvg { path: root.filled ? root.eyesPath : "" }
         }
     }
 }

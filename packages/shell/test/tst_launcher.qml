@@ -55,6 +55,23 @@ TestCase {
             ["pinned-old", "unread-new", "unread-old", "read-newest", "read-old"]);
     }
 
+    function test_aGhostWaitingOnTheOwnerOutranksAnUnreadReply(): void {
+        const rows = Launcher.rows("", [
+            { id: "unread", title: "u", unread: true, updatedAt: "2026-10-28T11:00:00Z" },
+            { id: "asking", title: "a", question: { text: "Ship it tonight?", options: ["yes"] },
+                updatedAt: "2026-10-01T10:00:00Z" },
+            { id: "pinned", title: "p", pinned: true, updatedAt: "2026-09-01T10:00:00Z" }
+        ], "casper", now, 0);
+        const sessionRows = rows.filter(row => row.kind === "session");
+        compare(sessionRows.map(row => row.id), ["pinned", "asking", "unread"]);
+        verify(sessionRows[1].asking);
+        compare(sessionRows[1].detail, "Ship it tonight?");
+        // The question is searchable too.
+        compare(Launcher.rows("tonight", sessionRows.map(row => ({ id: row.id, title: row.label,
+            question: row.asking ? { text: row.detail } : null })), "casper", now, 0)
+            .filter(row => row.kind === "session").map(row => row.id), ["asking"]);
+    }
+
     function test_aConversationRowSaysWhatItIs(): void {
         const rows = Launcher.rows("", sessions, "casper", now, 0);
         const untitled = rows.find(row => row.id === "b");

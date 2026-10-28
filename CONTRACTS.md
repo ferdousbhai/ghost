@@ -697,7 +697,16 @@ runtime preserves owner data.
   standing question, the workbench, the section to `home`, then out), as do
   the toggle and a scrim click; a running turn continues behind it, and
   Shift+Esc stops one. Opening a link, a file, or the external editor closes
-  it. The bar dot and desktop entry open it on `home`. It runs inside Omarchy's own shell
+  it. The bar dot and desktop entry open it on `home`. The bar mark is the
+  ghost glyph in herdr's agent states over every conversation of the selected
+  ghost, most urgent first: filled red while one holds an open `question`
+  (blocked), filled amber while one runs (working), filled blue while one has
+  an unread reply (done), a green outline otherwise (idle), and a dim outline
+  while ghostd is unreachable; the colours are the theme's red, yellow, blue,
+  and green. An open question shows on the presence card and above the chat
+  composer with its suggested answers as buttons (1–6 on the card); a chosen
+  answer is sent as the owner's message, and `dismiss` withdraws it. The
+  launcher lists such conversations after pinned ones, before unread ones. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

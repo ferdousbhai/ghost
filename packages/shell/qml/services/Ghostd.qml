@@ -380,6 +380,7 @@ Singleton {
     readonly property int streamSilenceMs: 45000
     property var deleteSessionRequest: null
     property var pinSessionRequest: null
+    property var questionRequest: null
     /** conversationKey -> its in-flight mark-read request. */
     property var readSessionRequests: ({})
 
@@ -1690,6 +1691,26 @@ Singleton {
                 // The optimistic reorder is now a lie; take the server's truth.
                 root.fetchSessions(ghost);
             });
+    }
+
+    /**
+     * Withdraw the ghost's open question in a conversation without answering
+     * it. Answering is just sending: the daemon drops the question when owner
+     * text reaches the conversation. Optimistic like the pin; a refusal takes
+     * the listing back from the daemon.
+     */
+    function dismissQuestion(id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || id === "") return;
+        root.sessionsError = "";
+        root.sessions = root.sessions.map(function (session) {
+            return session.id === id ? Object.assign({}, session, { question: null }) : session;
+        });
+        root.request(root, "questionRequest", "DELETE", root.sessionPath(ghost, id) + "/question", null, function (xhr) {
+            if (ghost !== root.activeGhost || xhr.status === 200) return;
+            root.sessionsError = root.describeError(xhr, "DELETE question");
+            root.fetchSessions(ghost);
+        });
     }
 
     /**
