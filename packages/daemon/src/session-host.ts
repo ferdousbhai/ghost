@@ -50,6 +50,7 @@ import {
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
+  ASKING_POLICY,
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
@@ -58,7 +59,7 @@ import {
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
-import { pinsPath, readPins, readReads, readsPath, writePins, writeReads } from "./sidecars.js";
+import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
 import {
@@ -88,6 +89,9 @@ const TOOL_SUMMARY_MAX = 800;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
+const MAX_QUESTION_LENGTH = 2_000;
+const MAX_QUESTION_OPTIONS = 6;
+const MAX_QUESTION_OPTION_LENGTH = 120;
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
@@ -156,6 +160,8 @@ export interface SessionSummary {
   unread: boolean;
   /** A turn or owner command is running in it now, whichever client started it. */
   running: boolean;
+  /** What the ghost asked and is waiting on; the owner's next message answers it. */
+  question: OwnerQuestion | null;
 }
 
 export interface Transcript {
@@ -259,11 +265,29 @@ export function stablePolicySections(options: {
     OMARCHY_COMPUTER_USE_POLICY,
     HARNESS_LIMITS_POLICY,
     BACKGROUND_WORK_POLICY,
+    ASKING_POLICY,
     renderOwnerContextPolicy(options.documents, options.recall),
     SCHEDULED_WORK_POLICY,
     renderSelfMaintenancePolicy(options.runningSource),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
   ];
+}
+
+/** A question as asked: trimmed, bounded, options deduplicated in order. */
+function validQuestion(text: string, options: readonly string[]): OwnerQuestion {
+  const trimmed = text.trim();
+  if (trimmed === "") throw new GhostError("invalid_request", "A question needs text.", 400);
+  if (trimmed.length > MAX_QUESTION_LENGTH) {
+    throw new GhostError("invalid_request", `A question must be at most ${MAX_QUESTION_LENGTH} characters.`, 400);
+  }
+  const kept = [...new Set(options.map((option) => option.trim()).filter((option) => option !== ""))];
+  if (kept.length > MAX_QUESTION_OPTIONS) {
+    throw new GhostError("invalid_request", `A question takes at most ${MAX_QUESTION_OPTIONS} options.`, 400);
+  }
+  if (kept.some((option) => option.length > MAX_QUESTION_OPTION_LENGTH)) {
+    throw new GhostError("invalid_request", `Each option must be at most ${MAX_QUESTION_OPTION_LENGTH} characters.`, 400);
+  }
+  return { text: trimmed, options: kept, askedAt: new Date().toISOString() };
 }
 
 export class SessionHost {
@@ -645,6 +669,8 @@ export class SessionHost {
           ownerPrompt = text;
         }
         if (!promptRecorded || origin !== undefined) await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
+        // The owner's message answers what the ghost was waiting on.
+        if (origin !== "hook") await this.dropQuestion(ghost, id);
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
@@ -1055,10 +1081,11 @@ export class SessionHost {
   private async listSessionsLeased(ghostName: string): Promise<SessionSummary[]> {
     const ghost = this.registry.get(ghostName);
     const { sessionDir } = ghostPaths(ghost.dir);
-    const [ids, pins, reads] = await Promise.all([
+    const [ids, pins, reads, questions] = await Promise.all([
       this.conversationIds(sessionDir),
       readPins(sessionDir),
       readReads(sessionDir),
+      readQuestions(sessionDir),
     ]);
     const listed = await Promise.all(ids.map(async (id) => ({ id, log: await listedLog(sessionDir, id) })));
     const rows: SessionSummary[] = [];
@@ -1082,6 +1109,7 @@ export class SessionHost {
         pinned: pins.includes(id),
         unread: readAt === undefined || updatedAt > readAt,
         running,
+        question: questions[id] ?? null,
       });
     }
     return rows.sort((a, b) => (a.pinned === b.pinned ? b.updatedAt.localeCompare(a.updatedAt) : (a.pinned ? -1 : 1)));
@@ -1106,6 +1134,62 @@ export class SessionHost {
         await writePins(sessionDir, pinned ? [...kept, id] : kept);
       });
       this.announce(ghost.name, id);
+    });
+  }
+
+  /**
+   * Record what the ghost asks the owner in a conversation, replacing an
+   * earlier open question there. It stays until the owner's next message to
+   * that conversation (`clearAnsweredQuestion`) or until dismissed.
+   */
+  async setQuestion(ghostName: string, sessionId: string, text: string, options: readonly string[]): Promise<OwnerQuestion> {
+    const question = validQuestion(text, options);
+    await this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      await this.updateQuestions(ghost, (questions) => ({ ...questions, [id]: question }));
+      this.announce(ghost.name, id);
+    });
+    return question;
+  }
+
+  /** Withdraw a conversation's open question without answering it. */
+  async dismissQuestion(ghostName: string, sessionId: string): Promise<void> {
+    await this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      if (await this.dropQuestion(ghost, id)) this.announce(ghost.name, id);
+    });
+  }
+
+  /** Owner text reached the conversation: whatever was asked there is answered. */
+  private async dropQuestion(ghost: Ghost, id: string): Promise<boolean> {
+    let dropped = false;
+    await this.updateQuestions(ghost, (questions) => {
+      if (!(id in questions)) return null;
+      dropped = true;
+      return Object.fromEntries(Object.entries(questions).filter(([asked]) => asked !== id));
+    });
+    return dropped;
+  }
+
+  /**
+   * Apply `change` to the open questions of conversations that still exist.
+   * The file is rewritten only when that changes something (a null `change`
+   * result, with nothing stale to prune), so most turns touch no file.
+   */
+  private async updateQuestions(
+    ghost: Ghost,
+    change: (questions: Record<string, OwnerQuestion>) => Record<string, OwnerQuestion> | null,
+  ): Promise<void> {
+    const { sessionDir } = ghostPaths(ghost.dir);
+    await serializeByKey(this.metadataWrites, questionsPath(sessionDir), async () => {
+      const existing = new Set(await this.conversationIds(sessionDir));
+      const stored = Object.entries(await readQuestions(sessionDir));
+      const kept = Object.fromEntries(stored.filter(([id]) => existing.has(id)));
+      const next = change(kept);
+      if (next !== null) await writeQuestions(sessionDir, next);
+      else if (Object.keys(kept).length < stored.length) await writeQuestions(sessionDir, kept);
     });
   }
 
@@ -1227,6 +1311,7 @@ export class SessionHost {
           const pins = await readPins(sessionDir);
           if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
         });
+        await this.dropQuestion(ghost, id);
         this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
         this.announce(ghost.name, id);
       } finally {

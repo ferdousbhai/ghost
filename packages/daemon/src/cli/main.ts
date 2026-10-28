@@ -31,7 +31,7 @@ import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
-import { sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
+import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
 import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
@@ -132,6 +132,15 @@ export const COMMANDS: readonly Command[] = [
     example: 'ghost title "Release notes" -s cli-abc',
     positionals: [1, 1],
     run: (parsed, ctx) => sessionActionCommand("title", parsed, ctx),
+  },
+  {
+    verb: "ask",
+    flags: { boolean: ["clear"] },
+    usage: "ask <question> [<answer>...] [--clear] [-g <name>] [-s <id>] [--json] [-q]",
+    summary: "Ask the owner; their next message in the conversation answers.",
+    example: 'ghost ask "Ship it tonight?" yes "wait for review"',
+    positionals: [0, 7],
+    run: askCommand,
   },
   {
     verb: "pin",

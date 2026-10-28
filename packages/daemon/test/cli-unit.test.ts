@@ -23,6 +23,7 @@ function session(id: string): SessionSummary {
     pinned: false,
     unread: false,
     running: false,
+    question: null,
   };
 }
 
@@ -58,6 +59,26 @@ describe("a ghost's own shell addresses its conversation", () => {
     const result = await runCli(["show", "--json"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result.code).toBe(0);
     expect(paths).toContain("/api/ghosts/casper/sessions/conv-mine/transcript");
+  });
+
+  it("`ghost ask` asks in its own conversation, and --clear withdraws", async () => {
+    const calls: Array<{ request: string; body: unknown }> = [];
+    const fetch: CliFetch = async (input, init) => {
+      const path = new URL(input).pathname;
+      calls.push({ request: `${init?.method ?? "GET"} ${path}`, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/question")) return jsonResponse({ ok: true });
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const asked = await runCli(["ask", "Ship it tonight?", "yes", "wait for review"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(asked.code).toBe(0);
+    expect(calls).toContainEqual({
+      request: "PUT /api/ghosts/casper/sessions/conv-mine/question",
+      body: { text: "Ship it tonight?", options: ["yes", "wait for review"] },
+    });
+    expect((await runCli(["ask", "--clear"], { env, home: "/tmp/ghost-cli-unit", fetch })).code).toBe(0);
+    expect(calls.map((call) => call.request)).toContain("DELETE /api/ghosts/casper/sessions/conv-mine/question");
+    expect((await runCli(["ask"], { env, home: "/tmp/ghost-cli-unit", fetch })).code).not.toBe(0);
   });
 
   it("`ghost stop` targets the running turn", async () => {

@@ -808,6 +808,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       "pinned",
       "preview",
       "provider",
+      "question",
       "running",
       "title",
       "unread",
@@ -948,6 +949,62 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     });
     expect(JSON.parse(readFileSync(join(temp!.root, "casper", "sessions", "pins.json"), "utf8")))
       .toEqual({ version: 2, pinned: [] });
+  });
+});
+
+describe("PUT|DELETE /api/ghosts/:name/sessions/:id/question", () => {
+  const ask = (base: string, id: string, body: unknown) => fetch(
+    `${base}/api/ghosts/casper/sessions/${id}/question`,
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+  );
+  const questionOf = async (base: string, id: string) => (
+    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+      sessions: Array<{ id: string; question: { text: string; options: string[]; askedAt: string } | null }>;
+    }
+  ).sessions.find((session) => session.id === id)?.question;
+  const questionsFile = () => join(temp!.root, "casper", "sessions", "questions.json");
+
+  it("lists the question until the owner's next message answers it", async () => {
+    const base = await serve(replies("first", "second"));
+    await postTurn(base, TURN_BODY);
+    expect(await questionOf(base, "conv-1")).toBeNull();
+    // Turns that ask nothing write nothing.
+    expect(existsSync(questionsFile())).toBe(false);
+
+    const asked = await ask(base, "conv-1", { text: "  Ship it tonight? ", options: ["yes", " yes", "wait", ""] });
+    expect(asked.status).toBe(200);
+    expect(await asked.json()).toMatchObject({ ok: true, question: { text: "Ship it tonight?", options: ["yes", "wait"] } });
+    expect(await questionOf(base, "conv-1")).toMatchObject({ text: "Ship it tonight?", options: ["yes", "wait"] });
+
+    await postTurn(base, { ...TURN_BODY, prompt: "yes" });
+    expect(await questionOf(base, "conv-1")).toBeNull();
+  });
+
+  it("withdraws a question unanswered, and with its conversation", async () => {
+    const base = await serve(replies("one", "two"));
+    await postTurn(base, TURN_BODY);
+    await ask(base, "conv-1", { text: "Which one?" });
+    const dismissed = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/question`, { method: "DELETE" });
+    expect(dismissed.status).toBe(200);
+    expect(await questionOf(base, "conv-1")).toBeNull();
+
+    await ask(base, "conv-1", { text: "Still there?" });
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, { method: "DELETE" });
+    expect(JSON.parse(readFileSync(questionsFile(), "utf8"))).toEqual({ version: 2, questions: {} });
+  });
+
+  it("refuses an empty, oversized, or malformed question", async () => {
+    const base = await serve();
+    await postTurn(base, TURN_BODY);
+    for (const body of [
+      {}, { text: "   " }, { text: "x".repeat(2_001) }, { text: "ok", options: "yes" },
+      { text: "ok", options: [1] }, { text: "ok", options: ["a", "b", "c", "d", "e", "f", "g"] },
+      { text: "ok", options: ["x".repeat(121)] },
+    ]) {
+      const response = await ask(base, "conv-1", body);
+      expect(response.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+    }
+    expect((await ask(base, "nope", { text: "hi" })).status).toBe(404);
   });
 });
 

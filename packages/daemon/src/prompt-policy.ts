@@ -35,6 +35,18 @@ export const BACKGROUND_WORK_POLICY = [
 ].join("\n");
 
 /**
+ * Questions reach the owner through Ghost, not the harness: a headless run has
+ * no one to answer its own question tool. `ghost ask` marks the conversation
+ * as waiting, and the owner's next message there is the answer.
+ */
+export const ASKING_POLICY = [
+  "## Asking the owner",
+  "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
+    + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
+    + "next message is the answer. One question at a time. Your harness's own question tool cannot reach them.",
+].join("\n");
+
+/**
  * The owner's own directory: deliverables, notes, and the board every ghost on
  * this machine shares; `ghost help memory` has the lookup recipe. With Recall
  * installed, its search is named here too, since a lookup two hops away (help,

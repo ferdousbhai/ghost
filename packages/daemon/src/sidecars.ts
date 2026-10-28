@@ -1,6 +1,7 @@
 /**
  * Per-ghost conversation sidecars in `sessions/`: `pins.json` lists pinned
- * ids in pin order, `reads.json` maps an id to when the owner last read it.
+ * ids in pin order, `reads.json` maps an id to when the owner last read it,
+ * `questions.json` maps an id to the question the ghost is waiting on.
  * Each is replaced whole and privately; a missing, malformed, or hand-edited
  * file reads as empty rather than failing the listing.
  */
@@ -13,6 +14,15 @@ const VERSION = 2;
 
 export const pinsPath = (sessionDir: string): string => join(sessionDir, "pins.json");
 export const readsPath = (sessionDir: string): string => join(sessionDir, "reads.json");
+export const questionsPath = (sessionDir: string): string => join(sessionDir, "questions.json");
+
+/** What a ghost asked the owner in one conversation, waiting for their next message. */
+export interface OwnerQuestion {
+  text: string;
+  /** Suggested answers; the owner may answer anything. */
+  options: string[];
+  askedAt: string;
+}
 
 function readField(path: string, field: string): unknown {
   try {
@@ -52,4 +62,25 @@ export async function readReads(sessionDir: string): Promise<Record<string, stri
 
 export function writeReads(sessionDir: string, reads: Readonly<Record<string, string>>): Promise<void> {
   return write(readsPath(sessionDir), { reads });
+}
+
+/** Open questions by conversation id; an entry without text or a parseable time is dropped. */
+export async function readQuestions(sessionDir: string): Promise<Record<string, OwnerQuestion>> {
+  const questions = readField(questionsPath(sessionDir), "questions");
+  if (!isRecord(questions)) return {};
+  const kept: Record<string, OwnerQuestion> = {};
+  for (const [id, entry] of Object.entries(questions)) {
+    if (id === "" || !isRecord(entry) || typeof entry.text !== "string" || entry.text === "") continue;
+    const askedAt = typeof entry.askedAt === "string" ? Date.parse(entry.askedAt) : Number.NaN;
+    if (!Number.isFinite(askedAt)) continue;
+    const options = Array.isArray(entry.options)
+      ? entry.options.filter((option): option is string => typeof option === "string" && option !== "")
+      : [];
+    kept[id] = { text: entry.text, options, askedAt: new Date(askedAt).toISOString() };
+  }
+  return kept;
+}
+
+export function writeQuestions(sessionDir: string, questions: Readonly<Record<string, OwnerQuestion>>): Promise<void> {
+  return write(questionsPath(sessionDir), { questions });
 }

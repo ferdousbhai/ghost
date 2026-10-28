@@ -1,6 +1,6 @@
 import { rankRecords } from "../recall.js";
 import type { Transcript } from "../session-host.js";
-import { flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
 import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -33,7 +33,7 @@ export async function sessionsCommand(
       truncate(session.title ?? session.preview ?? "—", 42),
       relativeTime(session.updatedAt),
       String(session.messageCount),
-      [session.running ? "running" : "", session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
+      [session.question ? "asking" : "", session.running ? "running" : "", session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
     ]);
     return {
       human: (warning ? `${warning}\n` : "") + (rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : ""),
@@ -85,6 +85,27 @@ export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promi
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
   const body = (await ctx.client.request("POST", `${path}/stop`, {})).body;
   emit(ctx, body, () => `stopped ${session.id}\n`);
+  return 0;
+}
+
+/**
+ * Ask the owner something in a conversation and wait for their next message
+ * there: the question, then up to six suggested answers. `--clear` withdraws
+ * an open question unanswered. In a ghost's own shell `$GHOST_SESSION` names
+ * the conversation.
+ */
+export async function askCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+  if (flagBoolean(parsed, "clear")) {
+    if (parsed.positionals.length > 0) throw new ArgsError("ask --clear takes no question.");
+    const body = (await ctx.client.request("DELETE", `${path}/question`)).body;
+    emit(ctx, body, () => `cleared the question in ${session.id}\n`);
+    return 0;
+  }
+  const [text, ...options] = parsed.positionals;
+  if (text === undefined) throw new ArgsError("ask needs a question.");
+  const body = (await ctx.client.request("PUT", `${path}/question`, { text, options })).body;
+  emit(ctx, body, () => `asked in ${session.id}; the owner's next message there is the answer\n`);
   return 0;
 }
 

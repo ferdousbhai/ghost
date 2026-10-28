@@ -266,8 +266,13 @@ imported as conversation history. The display-only session metadata inspection
 below is the one exception to reading it. A conversation is listed once a message lands or the owner
 names it; each row carries `preview`, the first owner text, and `title`,
 the owner's name for it or else one extracted from that text without a model
-(`derivedTitle`), null when nothing substantive is left. Pins and read
-timestamps are bounded sidecars beside the directories. Deletion moves the
+(`derivedTitle`), null when nothing substantive is left. Pins, read
+timestamps, and open owner questions are bounded sidecars beside the
+directories. A row's `question` is what the ghost asked the owner there
+(`{ text, options, askedAt }`, at most 2000 characters and six suggested
+answers of 120) or null; the owner's next message to the conversation
+answers it, and its deletion drops it. Ghost asks through Ghost because a
+headless harness run has no one to answer its own question tool. Deletion moves the
 directory to recoverable Trash in one rename; there is no fork.
 
 ### Machine-owned artifacts
@@ -541,6 +546,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
+| `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
@@ -588,7 +594,8 @@ state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches, except attaching a photo and reading the follow-up queue, is a
 named verb there (ghost list, rename, character, sessions
-and their title/pin/read/delete/stop, the agent a ghost prefers (`ghost harness`)
+and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
+the owner, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
 status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help

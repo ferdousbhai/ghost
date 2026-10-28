@@ -30,6 +30,9 @@ Your turns run in this conversation's directory, so a project's own instructions
 ## Background work
 Work that must outlive this turn runs detached and wakes you with `ghost say --follow-up` when it ends; your harness's own background jobs end with the turn. `ghost help background` has the recipe.
 
+## Asking the owner
+When a choice is the owner's, or you would otherwise guess what they want, ask before acting: `ghost ask "<question>" [<answer>...]` with a few likely answers, then end your turn; their next message is the answer. One question at a time. Your harness's own question tool cannot reach them.
+
 ## Owner context
 "<owner-home>/Documents" is the owner's documents directory, shared by every ghost on this machine. A file made for the owner goes where they asked, else here; never into your persona or this conversation's directory. Keep notes as Markdown in its existing project or topic folders (owner facts, preferences, decisions, tasks, your reflections), updating one rather than adding a second; never mirror the transcript. Nothing is preloaded: read what a task needs (`ghost help memory`, also tidying).
 `recall search "<meaning>"` (`--code` for code) searches the owner's indexed notes, screenshots, photos and recordings: use it first when a thing's words or place are unknown.
@@ -97,6 +100,9 @@ Your turns run in this conversation's directory, so a project's own instructions
 ## Background work
 Work that must outlive this turn runs detached and wakes you with `ghost say --follow-up` when it ends; your harness's own background jobs end with the turn. `ghost help background` has the recipe.
 
+## Asking the owner
+When a choice is the owner's, or you would otherwise guess what they want, ask before acting: `ghost ask "<question>" [<answer>...]` with a few likely answers, then end your turn; their next message is the answer. One question at a time. Your harness's own question tool cannot reach them.
+
 ## Owner context
 "<owner-home>/Documents" is the owner's documents directory, shared by every ghost on this machine. A file made for the owner goes where they asked, else here; never into your persona or this conversation's directory. Keep notes as Markdown in its existing project or topic folders (owner facts, preferences, decisions, tasks, your reflections), updating one rather than adding a second; never mirror the transcript. Nothing is preloaded: read what a task needs (`ghost help memory`, also tidying).
 `recall search "<meaning>"` (`--code` for code) searches the owner's indexed notes, screenshots, photos and recordings: use it first when a thing's words or place are unknown.
@@ -149,6 +155,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
     "pinned": false,
     "preview": "Remember that I want short answers.",
     "provider": null,
+    "question": null,
     "running": false,
     "title": "Remember that I want short answers",
     "unread": true,

@@ -824,6 +824,20 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       await options.host.setPinned(ghost, id, pinned);
       jsonResponse(response, 200, { ok: true, pinned });
     }),
+    // A ghost asking the owner something (`ghost ask`); the owner's next
+    // message to the conversation answers it, DELETE withdraws it unanswered.
+    route("PUT", "api/ghosts/:ghost/sessions/:id/question", async ({ ghost, id, response, body }) => {
+      const input = await body();
+      const answers = input.options === undefined ? [] : input.options;
+      if (!Array.isArray(answers) || answers.some((answer) => typeof answer !== "string")) {
+        throw new GhostError("invalid_request", '"options" must be an array of strings.', 400);
+      }
+      jsonResponse(response, 200, { ok: true, question: await options.host.setQuestion(ghost, id, stringField(input, "text"), answers) });
+    }),
+    route("DELETE", "api/ghosts/:ghost/sessions/:id/question", async ({ ghost, id, response }) => {
+      await options.host.dismissQuestion(ghost, id);
+      jsonResponse(response, 200, { ok: true });
+    }),
     route("PUT", "api/ghosts/:ghost/sessions/:id/read", async ({ ghost, id, response, body }) => {
       const input = await body();
       const readAt = input.readThrough === undefined ? new Date() : new Date(stringField(input, "readThrough"));
