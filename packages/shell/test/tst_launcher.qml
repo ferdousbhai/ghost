@@ -220,6 +220,23 @@ TestCase {
         compare(asked, [["a", "Fix the README"]]);
     }
 
+    // The header reads left to right: the filter takes the room, then the
+    // ghost's name, then the ×, all inside the card.
+    function test_theHeaderLaysOutInsideTheCard(): void {
+        const launcher = createTemporaryObject(launcherComponent, tc);
+        launcher.reset();
+        wait(50);
+        const filter = findChild(launcher, "launcherFilter");
+        const chip = findChild(launcher, "ghostChip");
+        const close = findChild(launcher, "launcherClose");
+        verify(filter.width > 200, "filter width " + filter.width);
+        const chipX = chip.mapToItem(launcher, 0, 0).x;
+        const closeX = close.mapToItem(launcher, 0, 0).x;
+        verify(chipX > filter.mapToItem(launcher, 0, 0).x + filter.width - 1, "chip at " + chipX);
+        verify(closeX > chipX + chip.width, "close at " + closeX);
+        verify(closeX + close.width <= launcher.width, "close inside the card");
+    }
+
     function test_ctrlRRenamesWhereItIsRead(): void {
         const launcher = createTemporaryObject(launcherComponent, tc);
         launcher.reset();
