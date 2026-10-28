@@ -88,6 +88,14 @@ Rectangle {
                 onClicked: root.refresh()
             }
         }
+        // The rule every pane draws under its header, as far below it.
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.topMargin: Theme.gap
+            Layout.bottomMargin: Theme.gap
+            Layout.preferredHeight: 1
+            color: Theme.border
+        }
         Text {
             font.family: Theme.fontFamily
             textFormat: Text.PlainText

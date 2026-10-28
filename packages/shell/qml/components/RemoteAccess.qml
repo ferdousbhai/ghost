@@ -147,7 +147,7 @@ Rectangle {
 
         Text {
             width: parent.width
-            text: "Reach me from another device"
+            text: "Remote access"
             textFormat: Text.PlainText
             color: Theme.foregroundBright
             font.family: Theme.fontFamily
@@ -157,7 +157,7 @@ Rectangle {
 
         Text {
             width: parent.width
-            text: "Ghost can ask Tailscale to serve this machine privately to your tailnet."
+            text: "Reach Ghost from your phone or another device, served privately to your tailnet by Tailscale."
             textFormat: Text.PlainText
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -220,7 +220,7 @@ Rectangle {
 
                             Text {
                                 width: parent.width
-                                text: "Remote access"
+                                text: "Serve to your tailnet"
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily

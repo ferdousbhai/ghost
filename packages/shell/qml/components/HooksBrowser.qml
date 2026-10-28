@@ -231,6 +231,7 @@ Rectangle {
                 ActionButton {
                     objectName: "hooksNewButton"
                     label: "+ New"
+                    primary: true
                     enabled: root.editable && !root.busy && !root.editing
                     Accessible.description: "Add a command hook to hooks.json"
                     onClicked: root.beginDraft()
