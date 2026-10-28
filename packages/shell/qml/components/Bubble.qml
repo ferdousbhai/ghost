@@ -114,6 +114,38 @@ Item {
         }
     }
 
+    // One block of a message: markdown, or a fenced block shown as code. Only
+    // the one in use is given the text, so a fence is never laid out twice.
+    component ReplyBlock: Item {
+        id: replyBlock
+
+        /** The block's source, as the reply holds it. */
+        property string text
+        readonly property alias textFormat: blockText.textFormat
+        readonly property var code: root.plainBody || replyBlock.text === "" ? null : MarkdownSegments.fencedCode(replyBlock.text)
+        implicitWidth: replyBlock.code ? codeView.implicitWidth : blockText.implicitWidth
+        implicitHeight: replyBlock.code ? codeView.implicitHeight : blockText.implicitHeight
+        height: implicitHeight
+
+        BodyBlock {
+            id: blockText
+            visible: !replyBlock.code
+            width: replyBlock.width
+            text: replyBlock.code ? "" : root.plainBody ? replyBlock.text
+                : MarkdownCompat.normalize(replyBlock.text, Theme.ghostAmber, Theme.info)
+        }
+
+        Loader {
+            id: codeView
+            active: replyBlock.code !== null
+            width: replyBlock.width
+            sourceComponent: CodeBlock {
+                language: replyBlock.code.language
+                code: replyBlock.code.code
+            }
+        }
+    }
+
     // Rows are not selectable, so a message's words copy from here.
     component CopyAction: Item {
         id: copyAction
@@ -267,7 +299,7 @@ Item {
         // HUD. The measure only bites past that width.
         width: root.mine
             ? Math.min(parent.width * 0.82,
-                Math.max((root.hasBody ? tailText.implicitWidth : 0) + root.contentInset * 2,
+                Math.max((root.hasBody ? tail.implicitWidth : 0) + root.contentInset * 2,
                     root.images.length * (root.imageSize + Theme.gap / 2) - Theme.gap / 2
                         + root.contentInset * 2, 72))
             : Math.min(parent.width, Theme.readingMeasure)
@@ -279,7 +311,7 @@ Item {
         Rectangle {
             anchors.fill: parent
             visible: root.mine
-            radius: Theme.bubbleRadius
+            radius: Theme.radius
             bottomRightRadius: Theme.bubbleTailRadius
             border.width: 1
             border.color: Theme.film(0.10)
@@ -389,62 +421,23 @@ Item {
                         // Named so a test can watch that a block already on
                         // screen is the same object, with the same text, after
                         // the reply has grown past it.
-                        // A fenced block is code and shows as code; the text
-                        // block stays beside it, hidden, so the reply's blocks
-                        // keep one shape.
-                        delegate: Item {
-                            id: block
+                        delegate: ReplyBlock {
                             required property string markdown
-                            readonly property var code: root.plainBody ? null : MarkdownSegments.fencedCode(block.markdown)
+                            objectName: "replyBlock"
+                            text: markdown
                             width: bodyView.width
-                            height: block.code ? codeView.implicitHeight : blockText.implicitHeight
-
-                            BodyBlock {
-                                id: blockText
-                                objectName: "replyBlock"
-                                visible: !block.code
-                                width: block.width
-                                text: root.plainBody ? block.markdown : MarkdownCompat.normalize(block.markdown, Theme.ghostAmber, Theme.info)
-                            }
-
-                            CodeBlock {
-                                id: codeView
-                                visible: block.code !== null
-                                width: block.width
-                                height: implicitHeight
-                                language: block.code ? block.code.language : ""
-                                code: block.code ? block.code.code : ""
-                            }
                         }
                     }
 
                     // The block still being written, or a reply's last: a
                     // reply that ends in a fence leaves it here, so it is
                     // shown as code here too.
-                    Item {
+                    ReplyBlock {
                         id: tail
-                        readonly property var code: root.plainBody || root.liveTail === ""
-                            ? null : MarkdownSegments.fencedCode(root.liveTail)
+                        objectName: "replyTail"
+                        text: root.liveTail
                         width: bodyView.width
                         visible: root.liveTail !== ""
-                        height: tail.code ? tailCode.implicitHeight : tailText.implicitHeight
-
-                        BodyBlock {
-                            id: tailText
-                            objectName: "replyTail"
-                            width: tail.width
-                            visible: !tail.code
-                            text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail, Theme.ghostAmber, Theme.info)
-                        }
-
-                        CodeBlock {
-                            id: tailCode
-                            visible: tail.code !== null
-                            width: tail.width
-                            height: implicitHeight
-                            language: tail.code ? tail.code.language : ""
-                            code: tail.code ? tail.code.code : ""
-                        }
                     }
                 }
 
@@ -529,7 +522,7 @@ Item {
                 visible: root.failure !== ""
                 width: parent.width
                 height: failureText.height + Theme.pad
-                radius: Theme.bubbleRadius
+                radius: Theme.radius
                 color: Theme.rose(0.10)
                 border.width: 1
                 border.color: Theme.rose(0.20)

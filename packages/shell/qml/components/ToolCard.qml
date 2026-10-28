@@ -28,7 +28,7 @@ Rectangle {
     readonly property bool completed: root.call().status === "complete"
     readonly property bool failed: root.call().status === "failed"
     readonly property var presentation: ToolTrace.view(
-        root.call(), root.completed, root.failed, root.expanded)
+        root.call(), root.completed, root.expanded)
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticOutput: root.presentation.diagnosticOutput
 
@@ -53,7 +53,7 @@ Rectangle {
 
     visible: root.trace !== ""
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
-    radius: Theme.bubbleRadiusSmall
+    radius: Theme.controlRadius
     color: cardHover.containsMouse ? Theme.amber(0.08) : Theme.amber(0.05)
     border.width: 1
     border.color: root.failed ? Theme.rose(0.35) : Theme.amber(0.10)
@@ -142,7 +142,7 @@ Rectangle {
             x: root.indent
             width: Math.min(parent.width - x, chipLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? chipLabel.implicitHeight + 6 : 0
-            radius: Theme.bubbleRadiusSmall
+            radius: Theme.controlRadius
             color: fileChip.current || chipArea.containsMouse
                 ? Theme.amber(0.16) : Theme.amber(0.08)
             border.width: 1

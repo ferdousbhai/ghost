@@ -53,6 +53,7 @@ pragma ComponentBehavior: Bound
 // numbers when Omarchy is absent, so these surfaces still run on a bare
 // Hyprland or in a nested compositor.
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import QtQuick
 
@@ -200,7 +201,6 @@ Singleton {
     // Quiet surfaces keep the active palette's hue; dividers carry hierarchy.
     readonly property color background: root.pick("background")
     readonly property color surface: root.blend(root.background, root.foreground, 0.035)
-    readonly property color surfaceDeep: root.blend(root.background, root.foreground, 0.018)
     /** Omarchy's `dark_background`: a well recessed into the canvas, such as a code block. */
     readonly property color well: root.pick("dark_background")
     readonly property color foregroundBright: root.pick("bright_foreground")
@@ -320,8 +320,6 @@ Singleton {
     // with the chrome, chips with the controls, the speaker tail at most 4px.
     property int radius: 0
     readonly property int controlRadius: Math.min(root.radius, 6)
-    readonly property int bubbleRadius: root.radius
-    readonly property int bubbleRadiusSmall: root.controlRadius
     readonly property int bubbleTailRadius: Math.min(root.radius, 4)
 
     // Spacing, each under the token omarchy-shell publishes it as.
@@ -439,20 +437,37 @@ Singleton {
         colorsFile.reload();
         shellFile.reload();
         nameFile.reload();
-        if (!roundingProbe.running) roundingProbe.running = true;
+        roundingLater.restart();
     }
 
     Component.onCompleted: roundingProbe.running = true
 
-    // Hyprland's window rounding, the number Omarchy's own chrome uses.
+    // Hyprland's window rounding, the number Omarchy's own chrome uses. It
+    // changes with a config reload, which Hyprland finishes on its own time,
+    // so it is read a beat after one, as Omarchy's Style does.
     Process {
         id: roundingProbe
-        command: ["hyprctl", "getoption", "decoration:rounding", "-j"]
-        stdout: SplitParser {
-            onRead: data => {
-                const match = /"int"\s*:\s*(\d+)/u.exec(data);
-                if (match) root.radius = Number(match[1]);
+        command: ["hyprctl", "-j", "getoption", "decoration:rounding"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const rounding = Number(JSON.parse(text).int);
+                    if (isFinite(rounding) && rounding >= 0) root.radius = rounding;
+                } catch (error) {}
             }
+        }
+    }
+
+    Timer {
+        id: roundingLater
+        interval: 200
+        onTriggered: roundingProbe.running = true
+    }
+
+    Connections {
+        target: Hyprland
+        function onRawEvent(event: var): void {
+            if (event.name === "configreloaded") roundingLater.restart();
         }
     }
 

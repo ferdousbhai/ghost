@@ -17,5 +17,10 @@ QtObject {
         return "";
     }
 
-    function execDetached(arguments: var): void {}
+    /** Every detached command, for a test to read. */
+    property var detached: []
+
+    function execDetached(arguments: var): void {
+        detached = detached.concat([arguments]);
+    }
 }

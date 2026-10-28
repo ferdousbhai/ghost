@@ -1,37 +1,49 @@
 import QtQuick
 import QtTest
+import Quickshell
+import Quickshell.Hyprland
+import "../qml"
 import "../qml/services/DesktopKeys.js" as Desk
 
 // What Ghost asks of Hyprland at runtime: the summon key, claimed only when
-// free, and the rules that keep its keyboard windows over the desktop.
+// free, the rules that keep its keyboard windows over the desktop, and taking
+// both back.
 TestCase {
+    id: tc
     name: "DesktopKeys"
+    when: windowShown
 
     readonly property string id: "ferdousbhai.ghost"
 
-    function test_theSummonKeyIsClaimedOnlyWhenFree(): void {
+    Component {
+        id: keysComponent
+        DesktopKeys {}
+    }
+
+    function test_whoHoldsTheSummonKey(): void {
         compare(Desk.summonKeyState([], id), "free");
         compare(Desk.summonKeyState([{ modmask: 64, key: "G", submap: "" }], id), "free");
-        compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "", arg: "omarchy-shell shell toggle ferdousbhai.ghost" }], id), "ours");
+        compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "", arg: "omarchy-shell shell toggle ferdousbhai.ghost" }], id), "owner");
+        // The contrib snippet's bind, made from Lua, lists a function number.
+        compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "", arg: "12", description: "Summon ghost" }], id), "owner");
+        // An earlier claim by the shell is the shell's to take over.
+        compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "", arg: "13", description: "Summon ghost (shell)" }], id), "shell");
         compare(Desk.summonKeyState([{ modmask: 68, key: "g", submap: "", arg: "some-other-app" }], id), "taken");
-        // An earlier claim from Lua lists a function number, not the command.
-        compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "", arg: "12", description: "Summon ghost" }], id), "ours");
         // A bind inside another key mode does not hold the key in the default one.
         compare(Desk.summonKeyState([{ modmask: 68, key: "G", submap: "resize", arg: "x" }], id), "free");
         compare(Desk.summonKeyState(null, id), "free");
     }
 
-    function test_theSummonBindTogglesThePlugin(): void {
-        const lua = Desk.summonBindLua(id);
-        verify(lua.startsWith('hl.bind("SUPER + CTRL + G", hl.dsp.exec_cmd("omarchy-shell shell toggle ferdousbhai.ghost")'));
-        compare(Desk.summonUnbindLua(), 'hl.unbind("SUPER + CTRL + G")');
+    function test_theSummonBindReplacesAnyEarlierClaim(): void {
+        compare(Desk.summonBindLua(id), 'hl.unbind("SUPER + CTRL + G"); hl.bind("SUPER + CTRL + G", '
+            + 'hl.dsp.exec_cmd("omarchy-shell shell toggle ferdousbhai.ghost"), { description = "Summon ghost (shell)" })');
     }
 
     // Ghost's keyboard windows: found by title (with the host's app-id), kept
     // floating over the tiling at their monitor's size, pinned, undecorated.
     function test_theWindowRulesFindAndShapeGhostsWindows(): void {
-        const lua = Desk.windowRulesLua();
-        verify(lua.indexOf('hl.window_rule({ name = "ghost-windows"') === 0);
+        const lua = Desk.setUpLua("t1");
+        verify(lua.indexOf('ghost_shell = "t1"; hl.window_rule({ name = "ghost-windows"') === 0);
         // Lua source: an escaped backslash, so Hyprland's pattern is ^org\.quickshell$.
         verify(lua.indexOf('class = "^org\\\\.quickshell$"') > 0);
         verify(lua.indexOf('title = "^(Ghost|Ghost prompt)$"') > 0);
@@ -40,8 +52,64 @@ TestCase {
             verify(lua.indexOf(effect) > 0, effect);
     }
 
+    // The way out: only while this shell's setup is current, and the key only
+    // when this shell bound it.
+    function test_withdrawingTakesBackOnlyWhatThisShellMade(): void {
+        const both = Desk.withdrawLua("t1", true);
+        verify(both.indexOf('if ghost_shell == "t1" then hl.unbind("SUPER + CTRL + G"); hl.window_rule({ name = "ghost-windows", enabled = false') === 0);
+        verify(both.endsWith("ghost_shell = nil end"));
+        verify(Desk.withdrawLua("t1", false).indexOf("hl.unbind") < 0);
+    }
+
     function test_focusFindsAWindowByItsWholeTitle(): void {
         compare(Desk.focusDispatch(Desk.HUD_TITLE), 'hl.dsp.focus({ window = "title:^Ghost$" })');
         compare(Desk.titlePattern("a.b (c)"), "^a\\.b \\(c\\)$");
+    }
+
+    function answerProbe(keys: var, binds: var): void {
+        const probe = findChild(keys, "bindsProbe");
+        verify(probe.running);
+        probe.stdout.text = JSON.stringify(binds);
+        probe.stdout.streamFinished();
+        probe.simulateExited(0, 0);
+    }
+
+    // Mounted: a free key is claimed, the claim is withdrawn on unload, and a
+    // config reload during a read reads again rather than trusting the old one.
+    function test_aFreeKeyIsClaimedAndGivenBack(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        const evaluator = findChild(keys, "evaluator");
+        compare(evaluator.command[2], Desk.setUpLua(keys.token));
+        answerProbe(keys, []);
+        compare(keys.summonKey, "free");
+        verify(keys.boundSummon);
+        evaluator.simulateExited(0, 0);
+        compare(evaluator.command[2], Desk.summonBindLua(id));
+
+        const token = keys.token;
+        Quickshell.detached = [];
+        keys.destroy();
+        wait(0);
+        compare(Quickshell.detached.length, 1);
+        compare(Quickshell.detached[0][2], Desk.withdrawLua(token, true));
+    }
+
+    function test_theOwnersBindIsLeftAlone(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        answerProbe(keys, [{ modmask: 68, key: "G", submap: "", arg: "1", description: "Summon ghost" }]);
+        compare(keys.summonKey, "owner");
+        verify(!keys.boundSummon);
+        compare(keys.pending.length, 0);
+    }
+
+    function test_aReloadDuringAReadReadsAgain(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        Hyprland.rawEvent({ name: "configreloaded", data: "" });
+        answerProbe(keys, [{ modmask: 68, key: "G", submap: "", arg: "1", description: "Summon ghost (shell)" }]);
+        // The read straddled a reload: it is not trusted, and a new one runs.
+        compare(keys.summonKey, "");
+        wait(0);
+        answerProbe(keys, []);
+        compare(keys.summonKey, "free");
     }
 }

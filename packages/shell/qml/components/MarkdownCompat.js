@@ -57,9 +57,14 @@ function rewrite(plain) {
         .replace(/(^|[^\w\\_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, "$1*$2*");
 }
 
+/** Text markdown would read nothing into: its punctuation spelled as entities. */
+function literal(text) {
+    return escaped(text).replace(/[\\`*_[\]~!#|]/g, ch => "&#" + ch.charCodeAt(0) + ";");
+}
+
 function protectedSpan(match, linkColor, codeColor) {
     if (match[1] !== undefined && codeColor)
-        return '<span style="color:' + codeColor + '">' + escaped(match[0].slice(match[1].length, -match[1].length)) + "</span>";
+        return '<span style="color:' + codeColor + '">' + literal(match[0].slice(match[1].length, -match[1].length)) + "</span>";
     if (match[3] !== undefined) return anchor(match[3], labelHtml(match[2]), linkColor);
     if (match[4] !== undefined) return anchor(match[4], escaped(match[4]), linkColor);
     if (/^https?:/.test(match[0])) return anchor(match[0], escaped(match[0]), linkColor);

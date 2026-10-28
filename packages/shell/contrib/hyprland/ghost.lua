@@ -18,5 +18,5 @@ o.bind("SUPER + CTRL + G", "Summon ghost", "omarchy-shell shell toggle ferdousbh
 -- Open history and settings instead (the bar's ghost mark does the same).
 -- o.bind("SUPER + CTRL + SHIFT + G", "Ghost history", "omarchy-shell ghost section home")
 
--- Nothing else to bind: the presence and the HUD are layers over the desktop,
--- not windows, so no window rule applies to them.
+-- Nothing else to bind: the shell sets the window rules for the prompt and
+-- the HUD itself, at runtime.

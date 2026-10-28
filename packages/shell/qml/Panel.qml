@@ -58,6 +58,11 @@ Item {
         if (payload.ghost && payload.sessionId)
             Ghostd.openConversationForGhost(String(payload.ghost), String(payload.sessionId));
         else if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
+        // The window left open behind another app comes back as it was.
+        if (!payload.section && !payload.sessionId && hud.shown) {
+            hud.raise();
+            return;
+        }
         // No ghost to ask (none yet, or ghostd is down): the window says why.
         if (!payload.section && !payload.sessionId && Ghostd.activeGhost !== "") {
             Presence.summon();
@@ -80,6 +85,7 @@ Item {
 
     GhostHud {
         id: hud
+        objectName: "hud"
         // However the window went away (SUPER+W included), the host's own open
         // flag goes too, so a panel rebuild does not reopen what the owner closed.
         // A rebuild's teardown hides the window too; that is not the owner closing it.

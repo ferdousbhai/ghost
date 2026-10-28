@@ -185,64 +185,31 @@ Rectangle {
         anchors.topMargin: Theme.pad
         spacing: Theme.gap
 
-        Item {
+        PaneHeader {
             width: parent.width
-            height: Math.max(titles.implicitHeight, buttons.height)
+            title: "Hooks"
+            subtitle: root.busy ? "Saving…"
+                : Ghostd.activeHookCount === 0
+                    ? "No lifecycle hooks are loaded."
+                    : Ghostd.activeHookCount + (Ghostd.activeHookCount === 1
+                        ? " lifecycle hook is loaded."
+                        : " lifecycle hooks are loaded.")
+            subtitleColor: root.busy ? Theme.ghostAmber : Theme.foregroundDim
 
-            Column {
-                id: titles
-                anchors.left: parent.left
-                anchors.right: buttons.left
-                anchors.rightMargin: Theme.gap
-                spacing: Theme.gap / 3
-
-                Text {
-                    width: parent.width
-                    text: "Hooks"
-                    textFormat: Text.PlainText
-                    color: Theme.foregroundBright
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeHeading
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    width: parent.width
-                    text: root.busy ? "Saving…"
-                        : Ghostd.activeHookCount === 0
-                            ? "No lifecycle hooks are loaded."
-                            : Ghostd.activeHookCount + (Ghostd.activeHookCount === 1
-                                ? " lifecycle hook is loaded."
-                                : " lifecycle hooks are loaded.")
-                    textFormat: Text.PlainText
-                    color: root.busy ? Theme.ghostAmber : Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    wrapMode: Text.WordWrap
-                }
+            ActionButton {
+                objectName: "hooksNewButton"
+                label: "+ New"
+                primary: true
+                enabled: root.editable && !root.busy && !root.editing
+                Accessible.description: "Add a command hook to hooks.json"
+                onClicked: root.beginDraft()
             }
 
-            Row {
-                id: buttons
-                anchors.right: parent.right
-                anchors.top: parent.top
-                spacing: Theme.gap
-
-                ActionButton {
-                    objectName: "hooksNewButton"
-                    label: "+ New"
-                    primary: true
-                    enabled: root.editable && !root.busy && !root.editing
-                    Accessible.description: "Add a command hook to hooks.json"
-                    onClicked: root.beginDraft()
-                }
-
-                ActionButton {
-                    label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
-                    enabled: !Ghostd.hookConfigLoading && !root.editing
-                    Accessible.description: "Reload hooks.json"
-                    onClicked: root.load(true)
-                }
+            ActionButton {
+                label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
+                enabled: !Ghostd.hookConfigLoading && !root.editing
+                Accessible.description: "Reload hooks.json"
+                onClicked: root.load(true)
             }
         }
 

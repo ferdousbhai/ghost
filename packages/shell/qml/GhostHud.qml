@@ -2,11 +2,8 @@ pragma ComponentBehavior: Bound
 
 // GhostHud — history, the board, routines and settings, the way the desktop
 // shows its own menu: a card over everything on the focused monitor, on the
-// theme's [menu] scrim. It is a window, not a layer: one the size of the
-// monitor, transparent but for the scrim and card, that Hyprland floats, pins
-// and leaves undecorated by the rules DesktopKeys sets. As the focused window
-// it is what SUPER+W closes, so a habitual close can never reach the app
-// behind it, and every other shortcut (a screenshot, the volume) still works. It opens on the
+// theme's [menu] scrim. It is a window shaped by DesktopKeys' rules, so
+// SUPER+W closes it rather than the app behind. It opens on the
 // Launcher (a filter over conversations and places); choosing a row grows the
 // card into that view, and Esc steps back to the list, then out. Panel.qml
 // owns it and forwards the host shell's summons (a section or conversation
@@ -93,9 +90,7 @@ FloatingWindow {
 
     function open(): void {
         hud.shown = true;
-        // A new window takes the focus; one left open behind another app is
-        // brought back to it.
-        Hyprland.dispatch(Desk.focusDispatch(Desk.HUD_TITLE));
+        hud.raise();
         Ghostd.refresh();
         Dictation.refresh();
         hud.showSection("home");
@@ -103,6 +98,11 @@ FloatingWindow {
 
     function close(): void {
         hud.shown = false;
+    }
+
+    /** Give the window the focus: a new one, or one left open behind another app. */
+    function raise(): void {
+        Hyprland.dispatch(Desk.focusDispatch(Desk.HUD_TITLE));
     }
 
     function focused(): bool {
@@ -363,22 +363,12 @@ FloatingWindow {
                 z: 20
                 spacing: Theme.gap
 
-                Text {
+                GlyphButton {
                     text: "‹"
-                    color: backArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
-                    font.family: Theme.fontFamily
+                    name: "Back to the list"
+                    restColor: Theme.foregroundDim
                     font.pixelSize: Theme.fontSizeHeading
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Back to the list"
-
-                    MouseArea {
-                        id: backArea
-                        anchors.fill: parent
-                        anchors.margins: -Theme.gap
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: hud.showSection("home")
-                    }
+                    onClicked: hud.showSection("home")
                 }
 
                 // A pane titles itself; the bar only holds the way back and out.
@@ -394,22 +384,10 @@ FloatingWindow {
                 }
 
                 // The way out, in sight; Esc steps back to the list first.
-                Text {
+                GlyphButton {
                     text: "×"
-                    color: closeArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeTitle
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Close Ghost"
-
-                    MouseArea {
-                        id: closeArea
-                        anchors.fill: parent
-                        anchors.margins: -Theme.gap
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: hud.close()
-                    }
+                    name: "Close Ghost"
+                    onClicked: hud.close()
                 }
             }
 

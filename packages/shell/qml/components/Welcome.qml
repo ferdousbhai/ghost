@@ -65,7 +65,7 @@ Column {
 
         Rectangle {
             anchors.fill: parent
-            radius: Theme.bubbleRadius
+            radius: Theme.radius
             color: Theme.film(0.04)
             border.width: 1
             border.color: Theme.film(0.10)
@@ -90,7 +90,6 @@ Column {
     // The invitation, as words rather than a box: a bordered panel here read
     // as a field to type into, and the composer below is that field.
     Text {
-        id: invitation
         anchors.horizontalCenter: parent.horizontalCenter
         visible: Ghostd.reachable
         width: parent.width
@@ -108,7 +107,7 @@ Column {
         visible: !Ghostd.reachable
         width: parent.width
         height: unreachable.implicitHeight + Theme.pad * 2
-        radius: Theme.bubbleRadius
+        radius: Theme.radius
         color: Theme.rose(0.08)
         border.width: 1
         border.color: Theme.rose(0.20)

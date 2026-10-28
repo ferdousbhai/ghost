@@ -54,45 +54,20 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.pad
         spacing: Theme.gap
-        // The same header as Board's and MCP's: a title, and under it what
-        // the pane is (or what went wrong), so the panes read as one family.
-        RowLayout {
+        PaneHeader {
             Layout.fillWidth: true
-            spacing: Theme.gap
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Theme.gap / 2
-                Text {
-                    textFormat: Text.PlainText
-                    text: "Routines"
-                    color: Theme.foregroundBright
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeHeading
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    text: Ghostd.routineWriteError || Ghostd.routinesError || Ghostd.activeGhost
-                        + "'s systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
-                    color: (Ghostd.routineWriteError || Ghostd.routinesError) ? Theme.danger : Theme.foregroundDim
-                    wrapMode: Text.Wrap
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-            }
+            title: "Routines"
+            subtitle: Ghostd.routineWriteError || Ghostd.routinesError || Ghostd.activeGhost
+                + "'s systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
+            subtitleColor: (Ghostd.routineWriteError || Ghostd.routinesError) ? Theme.danger : Theme.foregroundDim
             ActionButton {
-                Layout.alignment: Qt.AlignTop
                 label: Ghostd.routinesLoading ? "Refreshing…" : "Refresh"
                 enabled: !Ghostd.routinesLoading
                 onClicked: root.refresh()
             }
         }
-        // The rule every pane draws under its header, as far below it.
         Rectangle {
             Layout.fillWidth: true
-            Layout.topMargin: Theme.gap
-            Layout.bottomMargin: Theme.gap
             Layout.preferredHeight: 1
             color: Theme.border
         }
@@ -244,25 +219,14 @@ Rectangle {
         closePolicy: Popup.NoAutoClose
         onClosed: root.editSlug = ""
         padding: Theme.pad
-        background: Rectangle { color: Theme.menuBackground; border.color: Theme.menuBorder; radius: Theme.radius }
+        background: PopupFrame {}
         contentItem: ColumnLayout {
             spacing: Theme.gap
-            Text {
-                textFormat: Text.PlainText
-                text: root.editSlug
-                color: Theme.foregroundBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeHeading
-                font.weight: Font.DemiBold
-            }
-            Text {
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                textFormat: Text.PlainText
+            PaneHeader {
                 Layout.fillWidth: true
-                text: Ghostd.routineWriteError || (root.editGhost + "'s units. Save verifies both and reloads systemd; previous sources remain recoverable.")
-                color: Ghostd.routineWriteError ? Theme.danger : Theme.foregroundDim
-                wrapMode: Text.Wrap
+                title: root.editSlug
+                subtitle: Ghostd.routineWriteError || (root.editGhost + "'s units. Save verifies both and reloads systemd; previous sources remain recoverable.")
+                subtitleColor: Ghostd.routineWriteError ? Theme.danger : Theme.foregroundDim
             }
             SectionLabel { text: "Timer unit" }
             SourceArea { id: timerSource; objectName: "routineTimerSource"; readOnly: Ghostd.routineActionRequest !== null }
@@ -293,17 +257,10 @@ Rectangle {
         height: root.height - Theme.pad * 2
         modal: true
         padding: Theme.pad
-        background: Rectangle { color: Theme.menuBackground; border.color: Theme.menuBorder; radius: Theme.radius }
+        background: PopupFrame {}
         contentItem: ColumnLayout {
             spacing: Theme.gap
-            Text {
-                textFormat: Text.PlainText
-                text: "Journal"
-                color: Theme.foregroundBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeHeading
-                font.weight: Font.DemiBold
-            }
+            PaneHeader { Layout.fillWidth: true; title: "Journal" }
             SourceArea { id: journalText; readOnly: true; wrapMode: TextEdit.WrapAnywhere }
             Repeater {
                 model: root.logSessions
@@ -317,8 +274,12 @@ Rectangle {
         }
     }
 
-    // A unit file or journal: monospace on the code well, so it reads as
-    // source the way a reply's code block does.
+    component PopupFrame: Rectangle {
+        color: Theme.menuBackground
+        border.color: Theme.menuBorder
+        radius: Theme.radius
+    }
+
     component SectionLabel: Text {
         textFormat: Text.PlainText
         color: Theme.foregroundDim
@@ -326,8 +287,9 @@ Rectangle {
         font.pixelSize: Theme.fontSizeSmall
     }
 
+    // A unit file or journal on the code well, in the info colour, so it
+    // reads as source the way a reply's code block does.
     component SourceArea: ScrollView {
-        id: area
         property alias text: field.text
         property alias readOnly: field.readOnly
         property alias wrapMode: field.wrapMode

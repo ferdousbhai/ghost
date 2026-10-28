@@ -21,12 +21,11 @@ the host unloads the panel whenever it hides) draws it.
 The HUD (history, board, routines, character, ghosts, hooks, MCP, remote
 access) opens from the bar dot, a notification, the card's `open`, or any
 summon naming a section. It is drawn the way the desktop draws its own menu,
-with the theme's `[menu]` tokens (`Theme.menu*`): a window titled `Ghost` that
-Hyprland floats and pins at the focused monitor's size (`DesktopKeys` asks for
-that rule at runtime), transparent but for a scrim and the card. As the focused
-window it is what SUPER+W closes, and every other shortcut keeps working; the
-summon prompt is the same kind of window, `Ghost prompt`. It opens on the `Launcher`, a filter over conversations and places
-at a fixed height on screen; Enter on a row grows the card into that view,
+with the theme's `[menu]` tokens (`Theme.menu*`): a window titled `Ghost`,
+transparent but for a scrim and the card, which `DesktopKeys` has Hyprland
+float and pin at the focused monitor's size (why it is a window is in
+`CONTRACTS.md`). It opens on the `Launcher`, a filter over conversations and
+places at a fixed height on screen; Enter on a row grows the card into that view,
 and Enter with nothing matching asks the ghost. Esc steps back (a standing
 question, the workbench, the view, then out), as do the toggle and a scrim
 click; a turn runs on behind it, and Shift+Esc stops one. Handing something
@@ -68,9 +67,9 @@ Two Omarchy decisions live outside those files. Its fontconfig binds
 `monospace` to JetBrainsMono Nerd Font machine-wide, so the shell asks for
 `monospace` rather than pinning a family. And `shell.toml` publishes no radius:
 Omarchy's chrome rounds as Hyprland's windows do (`decoration:rounding`, read
-with `hyprctl getoption`), square by default, so `Theme.radius` reads the same
-number and Ghost's cards, rows and dialogs match Omarchy's menu. Chat bubbles
-keep their own shapes.
+with `hyprctl getoption`, again after each config reload), square by default,
+so `Theme.radius` reads the same number and Ghost's cards, rows, dialogs and
+chat bubbles match Omarchy's menu.
 
 Lists follow the desktop menu's restraint: at rest a launcher row is its title
 and a state mark (pin, unread, waiting, running); a row's detail appears while

@@ -109,27 +109,17 @@ FocusScope {
         height: Theme.controlHeight + Theme.pad * 1.2
 
         // The way back from the ghosts to the conversations.
-        Text {
+        GlyphButton {
             id: back
             visible: root.ghostMode
             anchors.left: parent.left
             anchors.leftMargin: Theme.pad
             anchors.verticalCenter: parent.verticalCenter
             text: "‹"
-            color: backArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
-            font.family: Theme.fontFamily
+            name: "Back to the list"
+            restColor: Theme.foregroundDim
             font.pixelSize: Theme.fontSizeHeading
-            Accessible.role: Accessible.Button
-            Accessible.name: "Back to the list"
-
-            MouseArea {
-                id: backArea
-                anchors.fill: parent
-                anchors.margins: -Theme.gap
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.backRequested()
-            }
+            onClicked: root.backRequested()
         }
 
         TextInput {
@@ -204,27 +194,15 @@ FocusScope {
 
         // The way out, in sight: Esc does the same, and SUPER+W closes the window.
         // Inside the header, so the chip and filter can anchor to it.
-        Text {
+        GlyphButton {
             id: closeMark
             objectName: "launcherClose"
             anchors.right: parent.right
             anchors.rightMargin: Theme.pad
             anchors.verticalCenter: parent.verticalCenter
             text: "×"
-            color: closeArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundFaint
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeTitle
-            Accessible.role: Accessible.Button
-            Accessible.name: "Close (Esc)"
-
-            MouseArea {
-                id: closeArea
-                anchors.fill: parent
-                anchors.margins: -Theme.gap
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.closeRequested()
-            }
+            name: "Close Ghost"
+            onClicked: root.closeRequested()
         }
     }
 
@@ -413,7 +391,7 @@ FocusScope {
 
                 // On the row under the pointer or keyboard: move it to Trash,
                 // asked first (the Delete key does the same).
-                Text {
+                GlyphButton {
                     id: trash
                     objectName: "trashConversation"
                     visible: row.chosen && row.modelData.kind === "session" && !row.editing
@@ -421,20 +399,10 @@ FocusScope {
                     anchors.rightMargin: Theme.pad - Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
                     text: "×"
-                    color: trashArea.containsMouse ? Theme.danger : Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeTitle
-                    Accessible.role: Accessible.Button
-                    Accessible.name: "Move to Trash"
-
-                    MouseArea {
-                        id: trashArea
-                        anchors.fill: parent
-                        anchors.margins: -Theme.gap
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.deleteRequested(row.modelData.id, row.modelData.label)
-                    }
+                    name: "Move to Trash"
+                    restColor: Theme.foregroundDim
+                    hoverColor: Theme.danger
+                    onClicked: root.deleteRequested(row.modelData.id, row.modelData.label)
                 }
             }
         }

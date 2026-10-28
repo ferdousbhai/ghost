@@ -100,8 +100,8 @@ that has already exited and the preview keeps running.
 
 ### What you should see
 
-- **The component maps nothing until `open`.** The HUD is a layer surface
-  bound to `visible: false`; `preview.sh` calls the IPC `summon` method after the
+- **The component maps nothing until `open`.** The HUD is a window bound to
+  `visible: false`; `preview.sh` calls the IPC `summon` method after the
   isolated shell is ready.
 - On `open`: a `Ghost` window in `hyprctl clients`, floating, pinned, at the
   nested monitor's size from its corner, the desktop under the theme's menu

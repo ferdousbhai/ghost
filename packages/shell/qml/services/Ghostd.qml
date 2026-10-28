@@ -886,16 +886,27 @@ Singleton {
      * held back after a failure (until when), else its usage windows as
      * Omarchy measured them ("Session 9% · Weekly 71%"), else nothing.
      */
+    /** When a resting harness is tried again, or null when it is not resting. */
+    function restingUntil(harness: var): var {
+        const until = harness.resting && typeof harness.resting.until === "string" ? new Date(harness.resting.until) : null;
+        return until && !isNaN(until.getTime()) ? until : null;
+    }
+
+    /** A time as a note says it: the clock today, the day and clock otherwise. */
+    function noteTime(when: var): string {
+        return Qt.formatDateTime(when, when.toDateString() === new Date().toDateString() ? "HH:mm" : "d MMM HH:mm");
+    }
+
     function harnessNote(harness: var): string {
-        const resting = harness.resting;
-        if (resting && typeof resting.until === "string") {
-            const until = new Date(resting.until);
-            if (!isNaN(until.getTime()))
-                return "held back until " + Qt.formatDateTime(until, until - Date.now() < 86400000 ? "HH:mm" : "d MMM");
-        }
-        const windows = harness.usage && Array.isArray(harness.usage.windows) ? harness.usage.windows : [];
-        return windows.filter(w => w && typeof w.label === "string" && typeof w.percent === "number")
+        const until = root.restingUntil(harness);
+        if (until) return "held back until " + root.noteTime(until);
+        const usage = harness.usage || ({});
+        const windows = Array.isArray(usage.windows) ? usage.windows : [];
+        const note = windows.filter(w => w && typeof w.label === "string" && typeof w.percent === "number")
             .map(w => w.label.replace(/\s*\(.*\)\s*/u, "") + " " + Math.round(w.percent * 100) + "%").join(" · ");
+        // An old reading says when it was taken rather than passing for now.
+        const read = usage.stale === true && typeof usage.updatedAt === "string" ? new Date(usage.updatedAt) : null;
+        return note !== "" && read && !isNaN(read.getTime()) ? note + " · as of " + root.noteTime(read) : note;
     }
 
     /** The daemon's harness choice, or null when the body is not one. */
@@ -907,7 +918,7 @@ Singleton {
                 id: h.id,
                 effort: typeof h.effort === "string" ? h.effort : "",
                 note: root.harnessNote(h),
-                resting: !!(h.resting && typeof h.resting.until === "string")
+                resting: root.restingUntil(h) !== null
             })),
             ghostDefault: name(body.ghostDefault),
             omarchyDefault: name(body.omarchyDefault)

@@ -222,7 +222,7 @@ Item {
         anchors.rightMargin: (micButton.visible ? micButton.width + Theme.gap : 0)
             + (cancelDictation.visible ? cancelDictation.width + Theme.gap : 0)
         anchors.topMargin: root.trayHeight + root.statusHeight
-        radius: Theme.bubbleRadius
+        radius: Theme.radius
         color: field.activeFocus ? Theme.film(0.07) : Theme.film(0.05)
         border.width: 1
         border.color: field.activeFocus ? Theme.film(0.20) : Theme.film(0.10)

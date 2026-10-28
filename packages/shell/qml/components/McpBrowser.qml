@@ -129,32 +129,11 @@ Rectangle {
         anchors.margins: Theme.pad
         spacing: Theme.gap
 
-        RowLayout {
+        PaneHeader {
             Layout.fillWidth: true
-            spacing: Theme.gap
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Theme.gap / 3
-
-                Text {
-                    text: "MCP servers"
-                    color: Theme.foregroundBright
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeHeading
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: "Additional servers for " + (Ghostd.activeGhost || "this ghost")
-                        + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    wrapMode: Text.WordWrap
-                }
-            }
+            title: "MCP servers"
+            subtitle: "Additional servers for " + (Ghostd.activeGhost || "this ghost")
+                + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
 
             ActionButton {
                 id: refreshButton

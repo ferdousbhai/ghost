@@ -135,8 +135,23 @@ TestCase {
             { id: "codex", usage: null, resting: null }
         ] }));
         compare(findChild(header, "harnessNote-claude").text, "Session 9% · Weekly 71%");
-        verify(findChild(header, "harnessNote-pi").text.startsWith("held back until "));
+        // Not today, so the day is named as well as the time.
+        compare(findChild(header, "harnessNote-pi").text,
+            "held back until " + Qt.formatDateTime(new Date("2026-11-01T00:00:00.000Z"), "d MMM HH:mm"));
         verify(!findChild(header, "harnessNote-codex").visible);
+    }
+
+    // An old usage reading says when it was taken.
+    function test_aStaleUsageReadingSaysWhen(): void {
+        const header = createTemporaryObject(headerComponent, tc);
+        tc.click(header, "harnessLabel");
+        const taken = new Date(Date.now() - 3600000);
+        tc.requests[0].complete(200, tc.choice({ harnesses: [
+            { id: "claude", usage: { stale: true, updatedAt: taken.toISOString(),
+                windows: [{ label: "Session (5-hour)", percent: 0.4, resetsAt: null }] } }
+        ] }));
+        compare(findChild(header, "harnessNote-claude").text,
+            "Session 40% · as of " + Qt.formatDateTime(taken, taken.toDateString() === new Date().toDateString() ? "HH:mm" : "d MMM HH:mm"));
     }
 
     function test_aFailedReadShowsQuietlyInThePicker(): void {

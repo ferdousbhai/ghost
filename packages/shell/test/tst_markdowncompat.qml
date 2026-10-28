@@ -106,4 +106,16 @@ TestCase {
     function test_unclosedFenceStaysCode(): void {
         compare(MarkdownCompat.normalize("```\n_x_"), "```\n_x_");
     }
+
+    // A coloured code span is raw HTML around its text, and Qt reads markdown
+    // between tags: its punctuation is spelled as entities so it stays literal.
+    function test_colouredCodeSpansStayLiteral(): void {
+        function plain(markdown) {
+            return tc.rendered(MarkdownCompat.normalize(markdown, "#e0af68", "#7aa2f7")).replace(/<[^>]*>/g, "");
+        }
+        compare(plain("`a*b*c`"), "a*b*c");
+        compare(plain("`**/*.ts`"), "**/*.ts");
+        compare(plain("`C:\\x\\_y`"), "C:\\x\\_y");
+        compare(plain("`[x](y) ~~z~~`"), "[x](y) ~~z~~");
+    }
 }

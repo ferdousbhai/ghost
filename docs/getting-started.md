@@ -124,8 +124,8 @@ plain Hyprland), or summon with `omarchy-shell shell toggle ferdousbhai.ghost`.
 
 The summon prompt and history are windows that float over everything, so a
 habitual `SUPER+W` closes Ghost rather than the app behind it, while your other
-shortcuts (screenshots, volume, workspaces) keep working; `Esc` and the `×`
-close it too.
+shortcuts (screenshots, volume, workspaces) keep working. `Esc` closes the
+prompt; in the history it steps back first, and the `×` closes it.
 
 ## 4. Create a ghost
 

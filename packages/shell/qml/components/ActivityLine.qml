@@ -37,8 +37,8 @@ Item {
         return null;
     }
     /** pi's line for the call in flight: the call itself, then how long it has run. */
-    readonly property string toolLine: root.liveTool
-        ? ToolTrace.text(root.liveTool, false, false, true) + root.elapsed(root.liveTool) : ""
+    readonly property string liveCall: root.liveTool ? ToolTrace.text(root.liveTool, false, true) : ""
+    readonly property string toolLine: root.liveCall !== "" ? root.liveCall + root.elapsed(root.liveTool) : ""
     readonly property var lastTool: Ghostd.toolActivities.length > 0
         ? Ghostd.toolActivities[Ghostd.toolActivities.length - 1] : null
     readonly property string phrase: root.toolLine !== "" ? root.toolLine
@@ -67,7 +67,7 @@ Item {
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         if (root.lastTool && root.lastTool.status === "failed") {
             const error = ToolTrace.output(root.lastTool);
-            return ToolTrace.text(root.lastTool, true, true, true) + " failed" + (error !== "" ? ": " + error : "");
+            return ToolTrace.text(root.lastTool, true, true) + " failed" + (error !== "" ? ": " + error : "");
         }
         return "Working";
     }
@@ -100,10 +100,18 @@ Item {
         interval: 430
         repeat: true
         running: Ghostd.working && !Theme.reducedMotion
-        onTriggered: {
-            root.ellipsisStep = (root.ellipsisStep + 1) % 4;
-            root.now = Date.now();
-        }
+        onTriggered: root.ellipsisStep = (root.ellipsisStep + 1) % 4
+    }
+
+    // The clock a call's elapsed time is read against: a second's resolution,
+    // and kept whether or not motion is reduced, since it is a number, not an
+    // animation.
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.liveTool !== null
+        triggeredOnStart: true
+        onTriggered: root.now = Date.now()
     }
 
     Row {

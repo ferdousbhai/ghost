@@ -104,11 +104,8 @@ TestCase {
         const was = Theme.radius;
         compare(Theme.radius, 0);
         compare(Theme.controlRadius, 0);
-        compare(Theme.bubbleRadius, 0);
         Theme.radius = 10;
         compare(Theme.controlRadius, 6);
-        compare(Theme.bubbleRadius, 10);
-        compare(Theme.bubbleRadiusSmall, 6);
         compare(Theme.bubbleTailRadius, 4);
         Theme.radius = was;
     }

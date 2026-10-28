@@ -30,3 +30,5 @@ PresenceEdge 1.0 PresenceEdge.qml
 PresencePrompt 1.0 PresencePrompt.qml
 Launcher 1.0 Launcher.qml
 CodeBlock 1.0 CodeBlock.qml
+PaneHeader 1.0 PaneHeader.qml
+GlyphButton 1.0 GlyphButton.qml

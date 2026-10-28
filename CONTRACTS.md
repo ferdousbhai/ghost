@@ -723,13 +723,15 @@ runtime preserves owner data.
   The shell asks Hyprland for what it needs at runtime through `hyprctl
   eval` ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)), so every
   install has it and no config file is edited: `SUPER+CTRL+G` toggles the
-  presence unless a default-mode binding already holds it (one bound to this
-  plugin, or described "Summon ghost", counts as Ghost's), unbound when the
-  plugin unloads; and the named window rule `ghost-windows` (class
-  `org.quickshell`, those two titles: float, pin, monitor size from its
-  corner, no border, rounding, shadow, or open animation, out of Omarchy's
-  default inactive opacity). Both are re-made after each Hyprland config
-  reload. It runs inside Omarchy's own shell
+  presence unless a default-mode binding already holds it (the owner's own,
+  bound to this plugin or described "Summon ghost", is left in place; the
+  shell's claim is described "Summon ghost (shell)"), and the named window
+  rule `ghost-windows` (class `org.quickshell`, those two titles: float, pin,
+  monitor size from its corner, no border, rounding, shadow, or open
+  animation, out of Omarchy's default inactive opacity). Both are withdrawn
+  when the plugin unloads, only by the shell that last made them, and re-made
+  after each Hyprland config reload; the `ghost` IPC's `status` reports
+  `summonKey` (`free`, `shell`, `owner`, or `taken`). It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

@@ -60,7 +60,8 @@ Item {
                 streaming: Ghostd.streaming,
                 reachable: Ghostd.reachable,
                 activity: Ghostd.activity,
-                error: Ghostd.lastError
+                error: Ghostd.lastError,
+                summonKey: desktopKeys.summonKey
             });
         }
 

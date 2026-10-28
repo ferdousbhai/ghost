@@ -203,7 +203,7 @@ TestCase {
         Ghostd.streaming = true;
         Ghostd.toolActivities = [tool("bash", "running", { command: command })];
         compare(line.phrase, "$ " + command);
-        verify(ToolTrace.text(Ghostd.toolActivities[0], false, false, false).endsWith("…"));
+        verify(ToolTrace.text(Ghostd.toolActivities[0], false, false).endsWith("…"));
     }
 
     function test_longStatusWrapsAndCanBeReadToTheEnd(): void {

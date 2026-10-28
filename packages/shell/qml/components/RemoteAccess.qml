@@ -135,7 +135,7 @@ Rectangle {
         Qt.callLater(function () { remoteSwitch.forceActiveFocus(); });
     }
 
-    Column {
+    PaneHeader {
         id: header
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
@@ -143,27 +143,8 @@ Rectangle {
         anchors.rightMargin: Theme.pad
         anchors.top: parent.top
         anchors.topMargin: Theme.pad
-        spacing: Theme.gap / 3
-
-        Text {
-            width: parent.width
-            text: "Remote access"
-            textFormat: Text.PlainText
-            color: Theme.foregroundBright
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeHeading
-            font.weight: Font.DemiBold
-        }
-
-        Text {
-            width: parent.width
-            text: "Reach Ghost from your phone or another device, served privately to your tailnet by Tailscale."
-            textFormat: Text.PlainText
-            color: Theme.foregroundDim
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            wrapMode: Text.WordWrap
-        }
+        title: "Remote access"
+        subtitle: "Reach Ghost from your phone or another device, served privately to your tailnet by Tailscale."
     }
 
     Rectangle {

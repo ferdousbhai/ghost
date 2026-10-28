@@ -5,5 +5,7 @@ import QtQuick
 Item {
     property string title: ""
     property color color
+    /** Never mapped, so never the active window. */
+    readonly property Item contentItem: Item {}
     visible: false
 }

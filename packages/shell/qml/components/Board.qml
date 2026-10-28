@@ -46,34 +46,14 @@ Rectangle {
         anchors.margins: Theme.pad
         spacing: Theme.gap
 
-        RowLayout {
+        PaneHeader {
             Layout.fillWidth: true
-            spacing: Theme.gap
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Theme.gap / 2
-
-                Text {
-                    text: root.hasBoard && root.board.title !== "" ? root.board.title : "Board"
-                    color: Theme.foregroundBright
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeHeading
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: root.hasBoard
-                        ? root.board.path + (root.board.modified !== ""
-                            ? " · " + Qt.formatDateTime(new Date(root.board.modified), "ddd HH:mm") : "")
-                        : "Columns are ## headings, cards are - items, notes are indented lines."
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    elide: Text.ElideMiddle
-                }
-            }
+            title: root.hasBoard && root.board.title !== "" ? root.board.title : "Board"
+            subtitle: root.hasBoard
+                ? root.board.path + (root.board.modified !== ""
+                    ? " · " + Qt.formatDateTime(new Date(root.board.modified), "ddd HH:mm") : "")
+                : "Columns are ## headings, cards are - items, notes are indented lines."
+            subtitleElide: Text.ElideMiddle
 
             ActionButton {
                 label: root.hasBoard ? "Edit" : "Create"

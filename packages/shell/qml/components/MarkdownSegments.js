@@ -176,13 +176,14 @@ function opensFence(line) {
  */
 function fencedCode(segment) {
     var lines = String(segment || "").replace(/\n+$/u, "").split("\n");
-    var opener = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)/u.exec(lines[0] || "");
-    if (!opener) return null;
+    var fence = opensFence(lines[0]);
+    if (fence === "") return null;
     var body = lines.slice(1);
-    if (body.length > 0 && closesFence(body[body.length - 1], opener[1])) body.pop();
+    if (body.length > 0 && closesFence(body[body.length - 1], fence)) body.pop();
     // A fence that closes before the end leaves text after it: not one block.
-    if (body.some(function (line) { return closesFence(line, opener[1]); })) return null;
-    return { language: opener[2] || "", code: body.join("\n") };
+    if (body.some(function (line) { return closesFence(line, fence); })) return null;
+    var info = lines[0].trim().slice(fence.length).trim();
+    return { language: /^[^\s`]*/u.exec(info)[0], code: body.join("\n") };
 }
 
 /** A fence closes only on a run of its own character at least as long, as in CommonMark. */

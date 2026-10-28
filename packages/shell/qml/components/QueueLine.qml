@@ -37,7 +37,7 @@ ColumnLayout {
                 required property string modelData
                 implicitWidth: Math.min(chipText.implicitWidth + Theme.gap, lane.width * 0.72)
                 implicitHeight: 22
-                radius: Theme.bubbleRadiusSmall
+                radius: Theme.controlRadius
                 color: Theme.film(0.05)
                 border.width: 1
                 border.color: Theme.film(0.10)

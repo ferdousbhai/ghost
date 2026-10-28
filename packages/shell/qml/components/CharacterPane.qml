@@ -81,40 +81,16 @@ Rectangle {
         anchors.top: parent.top
         height: titles.implicitHeight + Theme.pad * 2
 
-        Column {
+        PaneHeader {
             id: titles
             anchors.left: parent.left
-            anchors.leftMargin: Theme.pad
-            anchors.right: actions.left
-            anchors.rightMargin: Theme.gap
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.gap / 2
-
-            Text {
-                text: "Character"
-                color: Theme.foregroundBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeHeading
-                font.weight: Font.DemiBold
-            }
-
-            Text {
-                width: parent.width
-                text: (Ghostd.activeGhost === "" ? "The ghost" : Ghostd.activeGhost)
-                    + "'s persona, read at the start of every turn."
-                color: Theme.foregroundDim
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                elide: Text.ElideRight
-            }
-        }
-
-        Row {
-            id: actions
             anchors.right: parent.right
-            anchors.rightMargin: Theme.pad
+            anchors.margins: Theme.pad
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.gap * 2
+            title: "Character"
+            subtitle: (Ghostd.activeGhost === "" ? "The ghost" : Ghostd.activeGhost)
+                + "'s persona, read at the start of every turn."
+            subtitleElide: Text.ElideRight
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
