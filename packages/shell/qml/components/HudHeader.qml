@@ -234,6 +234,18 @@ Item {
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
+
+                        // What is worth knowing before choosing it: held back
+                        // after a failure, or how much of its limits is used.
+                        Text {
+                            objectName: "harnessNote-" + harnessRow.modelData.id
+                            visible: text !== ""
+                            text: harnessRow.modelData.note || ""
+                            color: harnessRow.modelData.resting ? Theme.ghostRose : Theme.foregroundFaint
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeCaption
+                            anchors.verticalCenter: harnessName.verticalCenter
+                        }
                     }
                 }
             }

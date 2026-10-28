@@ -513,7 +513,7 @@ Rectangle {
 
                                 width: chipLabel.implicitWidth + Theme.pad
                                 height: Theme.controlHeight - Theme.gap / 2
-                                radius: height / 2
+                                radius: Theme.controlRadius
                                 color: chip.chosen ? Theme.amber(0.22) : Theme.film(0.05)
                                 border.width: 1
                                 border.color: chip.chosen ? Theme.amber(0.55) : Theme.border

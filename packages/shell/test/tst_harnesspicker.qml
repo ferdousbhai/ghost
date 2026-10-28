@@ -123,6 +123,22 @@ TestCase {
         verify(findChild(header, "harnessChoose-codex") !== null);
     }
 
+    // Before choosing, the picker says what matters: a harness held back after
+    // a failure, and how much of each one's limits is used.
+    function test_thePickerNotesUsageAndAHeldBackHarness(): void {
+        const header = createTemporaryObject(headerComponent, tc);
+        tc.click(header, "harnessLabel");
+        tc.requests[0].complete(200, tc.choice({ harnesses: [
+            { id: "claude", usage: { windows: [{ label: "Session (5-hour)", percent: 0.09, resetsAt: null },
+                { label: "Weekly (7-day)", percent: 0.71, resetsAt: null }] } },
+            { id: "pi", usage: null, resting: { until: "2026-11-01T00:00:00.000Z", reason: "429" } },
+            { id: "codex", usage: null, resting: null }
+        ] }));
+        compare(findChild(header, "harnessNote-claude").text, "Session 9% · Weekly 71%");
+        verify(findChild(header, "harnessNote-pi").text.startsWith("held back until "));
+        verify(!findChild(header, "harnessNote-codex").visible);
+    }
+
     function test_aFailedReadShowsQuietlyInThePicker(): void {
         const header = createTemporaryObject(headerComponent, tc);
         tc.click(header, "harnessLabel");

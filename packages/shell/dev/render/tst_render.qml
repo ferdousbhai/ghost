@@ -18,6 +18,7 @@ TestCase {
 
     readonly property string out: "dev/render/out/"
     property var sent: []
+    property bool boardMissing: false
 
     Rectangle { id: stage; anchors.fill: parent; color: Theme.background }
 
@@ -42,6 +43,8 @@ TestCase {
                 lastRun: "Wed 2026-10-28 00:00:03 EET", enabled: "enabled", active: "active",
                 command: "/usr/bin/ghost say --new --ghost dous \"Tidy my notes\"", result: "success", serviceActive: "inactive"
             }], recoveries: [] });
+            else if (/\/api\/board$/.test(url) && tc.boardMissing) xhr.complete(200, { path: "/home/owner/Documents/board.md",
+                exists: false, title: "", modified: "", truncated: false, columns: [] });
             else if (/\/api\/board$/.test(url)) xhr.complete(200, { path: "/home/owner/Documents/board.md", exists: true,
                 title: "Board", modified: "2026-10-28T10:00:00Z", truncated: false, columns: [
                     { title: "Now", cards: [{ text: "Ship the launcher redesign", done: false, notes: ["design pass done"] },
@@ -49,6 +52,14 @@ TestCase {
                     { title: "Next", cards: [{ text: "Recall in the launcher", notes: [] }] },
                     { title: "Done", cards: [{ text: "Bar mark in herdr's states", done: true, notes: [] }] }] });
             else if (/\/character$/.test(url)) xhr.complete(200, { body: "# Dous\n\nYou are Dous, the owner's ghost. Short answers, plain words.\n", limit: 16000 });
+            else if (/\/harness$/.test(url)) xhr.complete(200, { harnesses: [
+                { id: "claude", usage: { status: null, stale: false, updatedAt: null, windows: [
+                    { label: "Session (5-hour)", percent: 0.09, resetsAt: null }, { label: "Weekly (7-day)", percent: 0.71, resetsAt: null }] },
+                    effort: "low", resting: null },
+                { id: "opencode", usage: null, effort: null, resting: null },
+                { id: "pi", usage: null, effort: null,
+                    resting: { until: "2026-11-01T00:00:00.000Z", reason: "429 monthly API usage threshold reached" } }
+            ], ghostDefault: null, omarchyDefault: "claude" });
             else if (/\/api\/remote$/.test(url)) xhr.complete(200, { enabled: true, state: "on", scheme: "https",
                 hostname: "omarchy.tail58bdd3.ts.net", url: "https://omarchy.tail58bdd3.ts.net",
                 tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
@@ -217,6 +228,72 @@ TestCase {
         tc.shot(hud, "hud-chat-empty");
         hud.destroy();
         wait(30);
+    }
+
+    // States a session reaches beyond each surface's first look.
+    Component {
+        id: headerBoxC
+        Item {
+            property alias header: boxHeader
+            width: 900
+            height: 420
+            HudHeader { id: boxHeader; width: parent.width }
+        }
+    }
+    Component { id: queueC; QueueLine { width: 640 } }
+    function test_states(): void {
+        Ghostd.reachable = true;
+        const box = headerBoxC.createObject(stage, { x: 20, y: 20 });
+        box.header.togglePicker();
+        tc.shot(box, "hud-header-picker");
+        box.destroy();
+        wait(30);
+
+        snap(toolC, { expanded: true, activity: { id: "4", name: "bash", status: "complete",
+            arguments: { command: "cloud-tasks lists --json" }, summary: "[{\"id\":\"icloud:C1B4\",\"name\":\"Reminders\"}]" } }, "tool-expanded");
+        snap(queueC, { followUps: ["also check the issue tracker"] }, "queue-line");
+
+        const mcp = mcpC.createObject(stage, { x: 20, y: 20 });
+        tc.answer();
+        mcp.beginAdd();
+        tc.shot(mcp, "pane-mcp-adding");
+        mcp.destroy();
+        wait(30);
+
+        const hooks = hooksC.createObject(stage, { x: 20, y: 20 });
+        tc.answer();
+        wait(60);
+        hooks.beginDraft();
+        tc.shot(hooks, "pane-hooks-new");
+        hooks.destroy();
+        wait(30);
+
+        Ghostd.refreshRoutines();
+        const routines = routinesC.createObject(stage, { x: 20, y: 20 });
+        tc.answer();
+        Ghostd.routineConfigReady("dous", "daily-notes", { timer: "[Timer]\nOnCalendar=daily\nPersistent=true\n",
+            service: "[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost dous \"Tidy my notes\"\n", revision: "r1" });
+        tc.shot(routines, "pane-routines-editing");
+        routines.destroy();
+        wait(30);
+
+        tc.boardMissing = true;
+        Ghostd.refreshBoard();
+        snap(boardC, {}, "pane-board-empty");
+        tc.boardMissing = false;
+
+        const sessions = Ghostd.sessions;
+        Ghostd.sessions = [];
+        const launcher = launcherC.createObject(stage, { x: 20, y: 20 });
+        launcher.reset();
+        tc.shot(launcher, "launcher-empty");
+        launcher.destroy();
+        Ghostd.sessions = sessions;
+        wait(30);
+
+        Dictation.state = "recording";
+        snap(promptC, {}, "prompt-listening");
+        Dictation.state = "";
     }
 
     Component {

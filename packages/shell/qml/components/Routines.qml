@@ -243,34 +243,36 @@ Rectangle {
         modal: true
         closePolicy: Popup.NoAutoClose
         onClosed: root.editSlug = ""
-        background: Rectangle { color: Theme.background; border.color: Theme.border; radius: Theme.controlRadius }
+        padding: Theme.pad
+        background: Rectangle { color: Theme.menuBackground; border.color: Theme.menuBorder; radius: Theme.radius }
         contentItem: ColumnLayout {
             spacing: Theme.gap
-            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Edit " + root.editGhost + "/" + root.editSlug; color: Theme.foreground }
+            Text {
+                textFormat: Text.PlainText
+                text: root.editSlug
+                color: Theme.foregroundBright
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeHeading
+                font.weight: Font.DemiBold
+            }
             Text {
                 font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: Ghostd.routineWriteError || "Save verifies both units and reloads systemd. Previous sources remain recoverable."
+                text: Ghostd.routineWriteError || (root.editGhost + "'s units. Save verifies both and reloads systemd; previous sources remain recoverable.")
                 color: Ghostd.routineWriteError ? Theme.danger : Theme.foregroundDim
                 wrapMode: Text.Wrap
             }
-            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Timer unit"; color: Theme.foreground }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                TextArea { id: timerSource; objectName: "routineTimerSource"; readOnly: Ghostd.routineActionRequest !== null; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.Wrap }
-            }
-            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Service unit"; color: Theme.foreground }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                TextArea { id: serviceSource; readOnly: Ghostd.routineActionRequest !== null; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.Wrap }
-            }
+            SectionLabel { text: "Timer unit" }
+            SourceArea { id: timerSource; objectName: "routineTimerSource"; readOnly: Ghostd.routineActionRequest !== null }
+            SectionLabel { text: "Service unit" }
+            SourceArea { id: serviceSource; readOnly: Ghostd.routineActionRequest !== null }
             RowLayout {
                 ActionButton {
                     objectName: "routineSave"
                     label: "Save"
+                    primary: true
                     enabled: !Ghostd.routinesLoading && Ghostd.activeGhost === root.editGhost
                     onClicked: Ghostd.mutateRoutine(root.editGhost, encodeURIComponent(root.editSlug) + "/config", "PUT", { timer: timerSource.text, service: serviceSource.text, revision: root.editRevision })
                 }
@@ -290,14 +292,19 @@ Rectangle {
         width: root.width - Theme.pad * 2
         height: root.height - Theme.pad * 2
         modal: true
-        background: Rectangle { color: Theme.background; border.color: Theme.border }
+        padding: Theme.pad
+        background: Rectangle { color: Theme.menuBackground; border.color: Theme.menuBorder; radius: Theme.radius }
         contentItem: ColumnLayout {
-            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Routine journal"; color: Theme.foreground }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                TextArea { id: journalText; readOnly: true; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.WrapAnywhere }
+            spacing: Theme.gap
+            Text {
+                textFormat: Text.PlainText
+                text: "Journal"
+                color: Theme.foregroundBright
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeHeading
+                font.weight: Font.DemiBold
             }
+            SourceArea { id: journalText; readOnly: true; wrapMode: TextEdit.WrapAnywhere }
             Repeater {
                 model: root.logSessions
                 delegate: ActionButton {
@@ -310,4 +317,33 @@ Rectangle {
         }
     }
 
+    // A unit file or journal: monospace on the code well, so it reads as
+    // source the way a reply's code block does.
+    component SectionLabel: Text {
+        textFormat: Text.PlainText
+        color: Theme.foregroundDim
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmall
+    }
+
+    component SourceArea: ScrollView {
+        id: area
+        property alias text: field.text
+        property alias readOnly: field.readOnly
+        property alias wrapMode: field.wrapMode
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        background: Rectangle { color: Theme.well; border.color: Theme.border; radius: Theme.controlRadius }
+        TextArea {
+            id: field
+            color: Theme.info
+            selectionColor: Theme.menuSelectedBackground
+            selectedTextColor: Theme.menuSelectedText
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
+            wrapMode: TextEdit.Wrap
+            padding: Theme.gap
+            background: null
+        }
+    }
 }

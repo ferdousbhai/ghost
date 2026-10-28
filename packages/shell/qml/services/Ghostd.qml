@@ -881,6 +881,23 @@ Singleton {
         root.harnessError = "";
     }
 
+    /**
+     * One line of what a harness's state is worth knowing before choosing it:
+     * held back after a failure (until when), else its usage windows as
+     * Omarchy measured them ("Session 9% · Weekly 71%"), else nothing.
+     */
+    function harnessNote(harness: var): string {
+        const resting = harness.resting;
+        if (resting && typeof resting.until === "string") {
+            const until = new Date(resting.until);
+            if (!isNaN(until.getTime()))
+                return "held back until " + Qt.formatDateTime(until, until - Date.now() < 86400000 ? "HH:mm" : "d MMM");
+        }
+        const windows = harness.usage && Array.isArray(harness.usage.windows) ? harness.usage.windows : [];
+        return windows.filter(w => w && typeof w.label === "string" && typeof w.percent === "number")
+            .map(w => w.label.replace(/\s*\(.*\)\s*/u, "") + " " + Math.round(w.percent * 100) + "%").join(" · ");
+    }
+
     /** The daemon's harness choice, or null when the body is not one. */
     function harnessChoiceFrom(body: var): var {
         if (!body || typeof body !== "object" || !Array.isArray(body.harnesses)) return null;
@@ -888,7 +905,9 @@ Singleton {
         return {
             harnesses: body.harnesses.filter(h => h && name(h.id) !== null).map(h => ({
                 id: h.id,
-                effort: typeof h.effort === "string" ? h.effort : ""
+                effort: typeof h.effort === "string" ? h.effort : "",
+                note: root.harnessNote(h),
+                resting: !!(h.resting && typeof h.resting.until === "string")
             })),
             ghostDefault: name(body.ghostDefault),
             omarchyDefault: name(body.omarchyDefault)
