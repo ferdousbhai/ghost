@@ -48,8 +48,23 @@ function contains(text, query) {
 }
 
 /**
- * The rows for `query` over `sessions` (Ghostd's ordered listing: pinned,
- * then newest). Headers are rows too, but never selectable. `hookCount`, the
+ * Conversations in the order a messenger keeps them: pinned, then those with
+ * an unread reply, then the rest, each newest first. An unread reply stays in
+ * view until it is read, however much talk happens elsewhere meanwhile.
+ */
+function ordered(sessions) {
+    var rank = function (session) {
+        return session.pinned === true ? 0 : session.unread === true ? 1 : 2;
+    };
+    var time = function (session) {
+        return Date.parse(session.updatedAt || "") || 0;
+    };
+    return (sessions || []).filter(function (session) { return !!session; })
+        .slice().sort(function (a, b) { return rank(a) - rank(b) || time(b) - time(a); });
+}
+
+/**
+ * The rows for `query` over `sessions`, in `ordered` order. Headers are rows too, but never selectable. `hookCount`, the
  * owner's loaded hooks, is the Hooks row's detail when there are any.
  *
  * Empty query: the conversations, then the places. The filter is also where
@@ -62,9 +77,9 @@ function rows(query, sessions, ghost, now, hookCount) {
     var q = String(query || "").trim().toLowerCase();
     var out = [];
     var conversations = [];
-    for (var i = 0; i < (sessions || []).length; i++) {
-        var session = sessions[i];
-        if (!session) continue;
+    var listed = ordered(sessions);
+    for (var i = 0; i < listed.length; i++) {
+        var session = listed[i];
         var title = titleOf(session);
         if (q !== "" && !contains(title, q) && !contains(session.preview, q)) continue;
         conversations.push({

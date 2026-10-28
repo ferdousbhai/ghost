@@ -42,6 +42,19 @@ TestCase {
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 
+    // Like a messenger: pinned, then unread replies, each newest first.
+    function test_unreadRepliesComeBeforeNewerReadOnes(): void {
+        const rows = Launcher.rows("", [
+            { id: "read-newest", title: "r1", updatedAt: "2026-10-28T11:59:00Z" },
+            { id: "unread-old", title: "u1", unread: true, updatedAt: "2026-10-20T10:00:00Z" },
+            { id: "pinned-old", title: "p1", pinned: true, updatedAt: "2026-10-01T10:00:00Z" },
+            { id: "unread-new", title: "u2", unread: true, updatedAt: "2026-10-27T10:00:00Z" },
+            { id: "read-old", title: "r2", updatedAt: "2026-10-02T10:00:00Z" }
+        ], "casper", now, 0);
+        compare(rows.filter(row => row.kind === "session").map(row => row.id),
+            ["pinned-old", "unread-new", "unread-old", "read-newest", "read-old"]);
+    }
+
     function test_aConversationRowSaysWhatItIs(): void {
         const rows = Launcher.rows("", sessions, "casper", now, 0);
         const untitled = rows.find(row => row.id === "b");
