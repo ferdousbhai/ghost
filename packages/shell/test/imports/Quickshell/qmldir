@@ -6,3 +6,4 @@ Scope 1.0 Scope.qml
 ShellScreen 1.0 ShellScreen.qml
 Region 1.0 Region.qml
 ExclusionMode 1.0 ExclusionMode.qml
+FloatingWindow 1.0 FloatingWindow.qml

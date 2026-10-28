@@ -698,7 +698,12 @@ runtime preserves owner data.
   dismissed or opened in the window. Edge surfaces take no input and reserve
   no space. A payload naming a `section` or `sessionId` opens the HUD: a card
   over everything on the focused monitor, on the theme's `[menu]` scrim and
-  card tokens like Omarchy's own menu, holding the keyboard while up. Section
+  card tokens like Omarchy's own menu. The HUD and the presence prompt, the
+  two surfaces that take the keyboard, are windows titled `Ghost` and
+  `Ghost prompt`, not layers: Hyprland floats, pins, and sizes each to its
+  monitor without decoration, so as the focused window SUPER+W closes Ghost,
+  never the app behind it, and every other binding keeps working. A
+  compositor close is a dismissal. Section
   `home` is its launcher, a filter over the ghost's conversations and its
   places (the other sections) that asks the ghost what was typed when nothing
   matches; a row grows the card into that section. Esc steps back (a
@@ -715,17 +720,16 @@ runtime preserves owner data.
   composer with its suggested answers as buttons (1–6 on the card); a chosen
   answer is sent as the owner's message, and `dismiss` withdraws it. The
   launcher lists such conversations after pinned ones, before unread ones.
-  The shell asks Hyprland for its keys at runtime through `hyprctl eval`
-  ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)), so every
-  install has them and no config file is edited: `SUPER+CTRL+G` toggles the
+  The shell asks Hyprland for what it needs at runtime through `hyprctl
+  eval` ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)), so every
+  install has it and no config file is edited: `SUPER+CTRL+G` toggles the
   presence unless a default-mode binding already holds it (one bound to this
-  plugin, or described "Summon ghost", counts as Ghost's), re-made after each
-  Hyprland config reload and unbound when the plugin unloads. While the
-  presence prompt or HUD holds the keyboard Hyprland runs the `ghost`
-  submap, in which `SUPER+W`, `SUPER+Q`, and the summon key close Ghost and
-  every other binding waits; a Hyprland `layer.closed` hook resets it once
-  neither `ghost-hud` nor `ghost-presence-prompt` is mapped, so a crashed
-  shell cannot leave the owner's shortcuts suspended. It runs inside Omarchy's own shell
+  plugin, or described "Summon ghost", counts as Ghost's), unbound when the
+  plugin unloads; and the named window rule `ghost-windows` (class
+  `org.quickshell`, those two titles: float, pin, monitor size from its
+  corner, no border, rounding, shadow, or open animation, out of Omarchy's
+  default inactive opacity). Both are re-made after each Hyprland config
+  reload. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

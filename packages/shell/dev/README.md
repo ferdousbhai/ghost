@@ -103,8 +103,9 @@ that has already exited and the preview keeps running.
 - **The component maps nothing until `open`.** The HUD is a layer surface
   bound to `visible: false`; `preview.sh` calls the IPC `summon` method after the
   isolated shell is ready.
-- On `open`: a `ghost-hud` layer over the nested monitor, the desktop under
-  the theme's menu scrim, and the launcher card a fifth of the way down: a
+- On `open`: a `Ghost` window in `hyprctl clients`, floating, pinned, at the
+  nested monitor's size from its corner, the desktop under the theme's menu
+  scrim, and the launcher card a fifth of the way down: a
   filter (`Search, or ask casper…`), the mock's conversations with ages and
   unread dots, then casper's places (Board,
   Routines, Character, Ghosts, Hooks, MCP servers, Remote access). Typing
@@ -130,13 +131,13 @@ that has already exited and the preview keeps running.
   narration stays as its own message, its tool call settled behind that
   message's quiet "1 step" toggle rather than in a card of its own, and the
   reply arrives as the next message.
-- On a plain toggle with the HUD closed: four `ghost-presence` edge layers
-  and a full-screen `ghost-presence-prompt` layer in `hyprctl layers`, the
+- On a plain toggle with the HUD closed: four `ghost-presence` edge layers in
+  `hyprctl layers` and a `Ghost prompt` window in `hyprctl clients`, the
   prompt focused (`wtype` types into it under the exported variables). `Enter`
   replaces the prompt with a `ghost-presence-card` ticker over 10px edges; the
   reply then fills the card with no toast. A second toggle shows
-  `continuing`; `Esc` or a second toggle closes the prompt and removes its
-  layer. Without Voxtype the mic stays hidden; with `GHOST_PREVIEW_VOXTYPE=1`
+  `continuing`; `Esc` or a second toggle closes the prompt and unmaps its
+  window. Without Voxtype the mic stays hidden; with `GHOST_PREVIEW_VOXTYPE=1`
   (below) the summon sets the private `$XDG_RUNTIME_DIR/voxtype/state` to
   `recording` while the owner's stays `idle`, Esc returns it to `idle`, and
   Enter on an empty prompt goes `transcribing`, then sends what was heard or,
@@ -147,8 +148,9 @@ that has already exited and the preview keeps running.
   opens that conversation; subsequent toasts replace it while it remains live.
 - `Esc` behaves as getting-started's key table says: back from a view to the
   list, then out, and a running turn survives it.
-- `hyprctl layers` lists `ghost-hud` while it is up; `hyprctl clients` lists
-  nothing of Ghost's. A scrim click closes it.
+- With a terminal open behind it, `hyprctl dispatch 'hl.dsp.window.close()'`
+  (what SUPER+W runs) closes the `Ghost` or `Ghost prompt` window and leaves
+  the terminal; summoning again works. A scrim click closes it too.
 
 
 ## Validation

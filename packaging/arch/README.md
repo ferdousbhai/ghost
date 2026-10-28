@@ -105,7 +105,7 @@ The supported release target is Omarchy. Ghost depends on Omarchy's Hyprland
 and Quickshell desktop shape, and carries its keybinding samples under
 `/usr/share/doc/ghost/shell-contrib/` for the owner to enable. There is no generic Arch/Hyprland support promise. Packaging never
 edits `~/.config/hypr` or `~/.config/omarchy`; the HUD asks Hyprland for its
-summon key and modal key mode at runtime instead (see CONTRACTS.md).
+summon key and its window rule at runtime instead (see CONTRACTS.md).
 
 ## Upgrades, rollback, and uninstall
 

@@ -6,15 +6,20 @@
 
 var SUMMON_KEYS = "SUPER + CTRL + G";
 var SUMMON_MODMASK = 64 | 4; // SUPER | CTRL
-var SUBMAP = "ghost";
-/** The overlays that hold the keyboard; the key mode lasts while one is up. */
-var MODAL_LAYERS = ["ghost-hud", "ghost-presence-prompt"];
+var SUMMON_DESCRIPTION = "Summon ghost";
+
+/**
+ * The titles of Ghost's two keyboard windows, the HUD and the presence prompt.
+ * A plugin's windows carry the host shell's app-id, so the title is what the
+ * window rules and focus requests find them by.
+ */
+var HUD_TITLE = "Ghost";
+var PROMPT_TITLE = "Ghost prompt";
+var HOST_CLASS = "^org\\.quickshell$";
 
 function command(pluginId, verb) {
     return "omarchy-shell shell " + verb + " " + pluginId;
 }
-
-var SUMMON_DESCRIPTION = "Summon ghost";
 
 /**
  * Whether the summon key is free: "free", "ours" (already bound to this
@@ -49,36 +54,30 @@ function summonUnbindLua() {
     return "hl.unbind(" + luaString(SUMMON_KEYS) + ")";
 }
 
-/**
- * The "ghost" key mode, and the hook that leaves it. In the mode the close
- * shortcuts close Ghost instead of the window under it, and the summon key
- * toggles it away; every other shortcut waits until Ghost lets go. The hook
- * is Hyprland's own, so a crashed shell cannot strand the owner without
- * shortcuts: once no modal Ghost layer is mapped, the mode resets.
- */
-function submapLua(pluginId) {
-    var hide = "hl.dsp.exec_cmd(" + luaString(command(pluginId, "hide")) + ")";
-    var toggle = "hl.dsp.exec_cmd(" + luaString(command(pluginId, "toggle")) + ")";
-    var layers = MODAL_LAYERS.map(function (name) { return "[" + luaString(name) + "] = true"; }).join(", ");
-    return [
-        "hl.define_submap(" + luaString(SUBMAP) + ", function()",
-        "  hl.bind(\"SUPER + W\", " + hide + ", { description = \"Close ghost\" })",
-        "  hl.bind(\"SUPER + Q\", " + hide + ", { description = \"Close ghost\" })",
-        "  hl.bind(" + luaString(SUMMON_KEYS) + ", " + toggle + ", { description = \"Close ghost\" })",
-        "end)",
-        "if ghost_modal_watch then ghost_modal_watch:remove() end",
-        "ghost_modal_watch = hl.on(\"layer.closed\", function()",
-        "  if hl.get_current_submap() ~= " + luaString(SUBMAP) + " then return end",
-        "  local modal = { " + layers + " }",
-        "  for _, layer in ipairs(hl.get_layers()) do",
-        "    if modal[layer.namespace] then return end",
-        "  end",
-        "  hl.dispatch(hl.dsp.submap(\"reset\"))",
-        "end)",
-    ].join("\n");
+/** A title as a whole-string pattern for a window rule or focus request. */
+function titlePattern(title) {
+    return "^" + String(title).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$";
 }
 
-/** The dispatcher expression entering or leaving the key mode. */
-function submapDispatch(active) {
-    return "hl.dsp.submap(" + luaString(active ? SUBMAP : "reset") + ")";
+/**
+ * How Hyprland keeps Ghost's keyboard windows: floating over the tiling, the
+ * size of their monitor from its corner, pinned across workspaces, with no
+ * border, rounding, shadow or open animation of their own (they draw their own
+ * scrim and card, and animate them), and out of Omarchy's default inactive
+ * opacity. Named, so a re-run after a config reload replaces rather than adds.
+ */
+function windowRulesLua() {
+    var title = "^(" + [HUD_TITLE, PROMPT_TITLE].map(function (name) {
+        return titlePattern(name).slice(1, -1);
+    }).join("|") + ")$";
+    return "hl.window_rule({ name = \"ghost-windows\", match = { class = " + luaString(HOST_CLASS)
+        + ", title = " + luaString(title) + " }, float = true, pin = true,"
+        + " size = { \"monitor_w\", \"monitor_h\" }, move = { 0, 0 },"
+        + " border_size = 0, rounding = 0, no_shadow = true, no_anim = true,"
+        + " opacity = \"1 1\", tag = \"-default-opacity\" })";
+}
+
+/** The dispatcher expression focusing the Ghost window with `title`. */
+function focusDispatch(title) {
+    return "hl.dsp.focus({ window = " + luaString("title:" + titlePattern(title)) + " })";
 }

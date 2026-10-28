@@ -1,27 +1,24 @@
-// DesktopKeys — Ghost's shortcuts, asked of Hyprland at runtime.
+// DesktopKeys — what Ghost asks of Hyprland at runtime, so every install has
+// it and no config file is edited:
 //
-// Two things a keyboard needs from the compositor, which the plugin sets up
-// itself so that every install has them and no config file is edited:
+//   summon key     SUPER+CTRL+G toggles the presence, bound with `hyprctl eval`
+//                  when no bind of the owner's holds it (one already bound to
+//                  this plugin, from the contrib snippet, counts as ours).
+//                  Withdrawn when the plugin unloads.
+//   window rules   The HUD and the presence prompt are ordinary windows that
+//                  Hyprland floats, pins, sizes to their monitor and leaves
+//                  undecorated. Being the focused window is what makes SUPER+W
+//                  close Ghost rather than the app behind it, while every
+//                  other shortcut keeps working.
 //
-//   summon key   SUPER+CTRL+G toggles the presence, bound with `hyprctl eval`
-//                when no bind of the owner's holds it (one already bound to
-//                this plugin, from the contrib snippet, counts as ours).
-//                Re-made after every Hyprland config reload, which drops
-//                runtime binds; withdrawn when the plugin unloads.
-//   key mode     While the summon prompt or the HUD holds the keyboard,
-//                Hyprland runs the "ghost" submap: its close shortcuts close
-//                Ghost instead of the window underneath, and the rest wait.
-//                Hyprland's own hook resets it once no modal Ghost layer is
-//                mapped, so a crashed shell never strands the owner's keys.
-//
+// A Hyprland config reload drops runtime binds and rules; both are made again.
 // Mounted by Service.qml, the half of the plugin that is always loaded.
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-import "services"
 import "services/Plugin.js" as Plugin
-import "services/DesktopKeys.js" as Keys
+import "services/DesktopKeys.js" as Desk
 
 Item {
     id: root
@@ -31,19 +28,11 @@ Item {
     /** This plugin bound the summon key, so it unbinds it on the way out. */
     property bool boundSummon: false
 
-    /** An overlay holds the keyboard. */
-    readonly property bool modal: Presence.composing || Ghostd.hudVisible
-
-    onModalChanged: Hyprland.dispatch(Keys.submapDispatch(root.modal))
-
     Component.onCompleted: root.setUp()
-    Component.onDestruction: {
-        if (root.modal) Hyprland.dispatch(Keys.submapDispatch(false));
-        if (root.boundSummon) root.evaluate(Keys.summonUnbindLua());
-    }
+    Component.onDestruction: if (root.boundSummon) root.evaluate(Desk.summonUnbindLua())
 
     function setUp(): void {
-        root.evaluate(Keys.submapLua(Plugin.ID));
+        root.evaluate(Desk.windowRulesLua());
         if (!bindsProbe.running) bindsProbe.running = true;
     }
 
@@ -55,7 +44,7 @@ Item {
     function claim(state: string): void {
         root.summonKey = state;
         if (state === "free") {
-            root.evaluate(Keys.summonBindLua(Plugin.ID));
+            root.evaluate(Desk.summonBindLua(Plugin.ID));
             root.boundSummon = true;
         } else if (state === "taken") {
             console.info("ghost: SUPER+CTRL+G is bound to something else; summon with `omarchy-shell shell toggle "
@@ -76,19 +65,17 @@ Item {
                     console.warn("ghost: unreadable `hyprctl binds -j`; leaving the summon key alone");
                     return;
                 }
-                root.claim(Keys.summonKeyState(binds, Plugin.ID));
+                root.claim(Desk.summonKeyState(binds, Plugin.ID));
             }
         }
     }
 
-    // A config reload drops every runtime bind and submap: make them again.
     Connections {
         target: Hyprland
         function onRawEvent(event: var): void {
             if (event.name !== "configreloaded") return;
             root.boundSummon = false;
             root.setUp();
-            if (root.modal) Hyprland.dispatch(Keys.submapDispatch(true));
         }
     }
 }

@@ -17,10 +17,10 @@ Item {
 
     /**
      * The host's `toggle` hides the panel when this is true and summons it
-     * otherwise. Both surfaces are overlays that hold the keyboard while up,
-     * so shown is open.
+     * otherwise. The HUD is a window, so it counts as open only while focused:
+     * one left behind another app is brought back by the toggle, not hidden.
      */
-    property bool opened: Presence.composing || hud.shown
+    property bool opened: Presence.composing || hud.shown && hud.focused()
     /** Injected by the host once the Loader resolves. */
     property var shell: null
 

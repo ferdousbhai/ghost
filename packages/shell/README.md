@@ -21,9 +21,11 @@ the host unloads the panel whenever it hides) draws it.
 The HUD (history, board, routines, character, ghosts, hooks, MCP, remote
 access) opens from the bar dot, a notification, the card's `open`, or any
 summon naming a section. It is drawn the way the desktop draws its own menu,
-with the theme's `[menu]` tokens (`Theme.menu*`): a `ghost-hud` layer over
-everything on the focused monitor, a scrim, and a card that holds the
-keyboard. It opens on the `Launcher`, a filter over conversations and places
+with the theme's `[menu]` tokens (`Theme.menu*`): a window titled `Ghost` that
+Hyprland floats and pins at the focused monitor's size (`DesktopKeys` asks for
+that rule at runtime), transparent but for a scrim and the card. As the focused
+window it is what SUPER+W closes, and every other shortcut keeps working; the
+summon prompt is the same kind of window, `Ghost prompt`. It opens on the `Launcher`, a filter over conversations and places
 at a fixed height on screen; Enter on a row grows the card into that view,
 and Enter with nothing matching asks the ghost. Esc steps back (a standing
 question, the workbench, the view, then out), as do the toggle and a scrim

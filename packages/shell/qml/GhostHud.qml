@@ -2,7 +2,11 @@ pragma ComponentBehavior: Bound
 
 // GhostHud — history, the board, routines and settings, the way the desktop
 // shows its own menu: a card over everything on the focused monitor, on the
-// theme's [menu] scrim, holding the keyboard until it closes. It opens on the
+// theme's [menu] scrim. It is a window, not a layer: one the size of the
+// monitor, transparent but for the scrim and card, that Hyprland floats, pins
+// and leaves undecorated by the rules DesktopKeys sets. As the focused window
+// it is what SUPER+W closes, so a habitual close can never reach the app
+// behind it, and every other shortcut (a screenshot, the volume) still works. It opens on the
 // Launcher (a filter over conversations and places); choosing a row grows the
 // card into that view, and Esc steps back to the list, then out. Panel.qml
 // owns it and forwards the host shell's summons (a section or conversation
@@ -10,25 +14,27 @@ pragma ComponentBehavior: Bound
 //
 // Shape decisions:
 //
-//   one monitor           the focused one at open, like the presence prompt.
+//   one monitor           the focused one at open, where Hyprland maps a new
+//                         window; the rules size it to that monitor.
 //   the list's place      a fixed top a fifth of the way down, so filtering
 //                         shortens the card without moving the field; a view
 //                         grows from there to most of the screen.
 //   leaving               Esc after a standing question, the workbench and the
-//                         view, the summon toggle, or a click on the scrim. A
-//                         turn keeps running when it closes; Shift+Esc stops one.
+//                         view, the summon toggle, a click on the scrim, or the
+//                         compositor closing the window (SUPER+W). A turn keeps
+//                         running when it closes; Shift+Esc stops one.
 //   hand-offs             opening a link, a file or the external editor closes
 //                         it, or the app it opened would sit underneath.
 import Quickshell
 import Quickshell.Hyprland
-import Quickshell.Wayland
 import QtQuick
 import QtQuick.Layouts
 import "services"
 import "components"
 import "components/Launcher.js" as LauncherRows
+import "services/DesktopKeys.js" as Desk
 
-WlrLayershell {
+FloatingWindow {
     id: hud
 
     /** Driven by Panel.qml. Bound to `visible`. */
@@ -39,9 +45,6 @@ WlrLayershell {
     readonly property var sections: ["chat", "board", "routines", "character", "hooks", "mcp", "remote"]
     /** The card is a list: the launcher, over conversations or over ghosts. */
     readonly property bool home: hud.currentSection === "home" || hud.currentSection === "ghosts"
-
-    /** The monitor it covers, fixed at open. */
-    property string screenName: ""
 
     // Deleting a conversation and banishing a ghost are asked in a modal over
     // the whole card rather than in the row: a row is one line of a scrolling
@@ -68,13 +71,18 @@ WlrLayershell {
     }
 
     visible: hud.shown
-    screen: Quickshell.screens.find(screen => screen.name === hud.screenName) || Quickshell.screens[0] || null
-    anchors { top: true; bottom: true; left: true; right: true } // qmllint disable missing-property
+    // DesktopKeys' rules find it by this title (a plugin's windows carry the
+    // host shell's app-id) and size it to the monitor; these sizes are only
+    // what it asks for before they apply.
+    title: Desk.HUD_TITLE
     color: "transparent"
-    exclusionMode: ExclusionMode.Ignore
-    namespace: "ghost-hud"
-    layer: WlrLayer.Overlay
-    keyboardFocus: WlrKeyboardFocus.Exclusive
+    implicitWidth: 1280
+    implicitHeight: 800
+
+    // The compositor can close the window itself (SUPER+W). Without this,
+    // `shown` stays true, the host takes the hidden HUD for open, and the next
+    // summon only "hides" it.
+    onVisibleChanged: if (!hud.visible) hud.shown = false
 
     // Materialize on summon: the content takes a breath of scale and opacity
     // instead of cutting in.
@@ -85,8 +93,10 @@ WlrLayershell {
     }
 
     function open(): void {
-        if (!hud.shown) hud.screenName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
         hud.shown = true;
+        // A new window takes the focus; one left open behind another app is
+        // brought back to it.
+        Hyprland.dispatch(Desk.focusDispatch(Desk.HUD_TITLE));
         Ghostd.refresh();
         Dictation.refresh();
         hud.showSection("home");
