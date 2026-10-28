@@ -25,6 +25,7 @@ FocusScope {
     signal deleteRequested(string sessionId, string title)
     signal banishRequested(string name)
     signal backRequested()
+    signal closeRequested()
 
     /** "home" (conversations and places) or "ghosts". */
     property string mode: "home"
@@ -138,7 +139,7 @@ FocusScope {
             objectName: "launcherFilter"
             anchors.left: orb.right
             anchors.leftMargin: Theme.gap * 1.5
-            anchors.right: ghostChip.left
+            anchors.right: ghostChip.visible ? ghostChip.left : closeMark.left
             anchors.rightMargin: Theme.gap
             anchors.verticalCenter: parent.verticalCenter
             focus: true
@@ -185,8 +186,8 @@ FocusScope {
         Text {
             id: ghostChip
             visible: !root.ghostMode
-            anchors.right: parent.right
-            anchors.rightMargin: Theme.pad
+            anchors.right: closeMark.left
+            anchors.rightMargin: Theme.gap * 2
             anchors.verticalCenter: parent.verticalCenter
             text: Ghostd.activeGhost + (Ghostd.ghosts.length > 1 ? "  ⇥" : "")
             color: chipArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
@@ -200,6 +201,31 @@ FocusScope {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.nextGhost()
             }
+        }
+    }
+
+    // The way out, in sight: Esc does the same, and Super+W while Ghost holds
+    // the keyboard (DesktopKeys).
+    Text {
+        id: closeMark
+        objectName: "launcherClose"
+        anchors.right: parent.right
+        anchors.rightMargin: Theme.pad
+        anchors.verticalCenter: header.verticalCenter
+        text: "×"
+        color: closeArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundFaint
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeTitle
+        Accessible.role: Accessible.Button
+        Accessible.name: "Close (Esc)"
+
+        MouseArea {
+            id: closeArea
+            anchors.fill: parent
+            anchors.margins: -Theme.gap
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.closeRequested()
         }
     }
 

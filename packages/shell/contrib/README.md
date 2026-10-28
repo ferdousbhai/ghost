@@ -7,9 +7,11 @@ is `/usr/share/doc/ghost/ARCH.md`.
 
 ## The summon key
 
-[`hyprland/ghost.lua`](hyprland/ghost.lua) binds `SUPER+CTRL+G` to the summon toggle
-for Omarchy 4's Lua config; [`hyprland/ghost.conf`](hyprland/ghost.conf) is the
-same for a `.conf` config. The package ships both to
+The plugin binds `SUPER+CTRL+G` itself at runtime when no binding of yours
+holds it (`DesktopKeys.qml`). These samples are for anything else:
+[`hyprland/ghost.lua`](hyprland/ghost.lua) binds the summon toggle for Omarchy
+4's Lua config and [`hyprland/ghost.conf`](hyprland/ghost.conf) for a `.conf`
+config; change the key there to summon on another. The package ships both to
 `/usr/share/doc/ghost/shell-contrib/hyprland/` as samples; copy the one your
 config uses. Nothing here edits your Omarchy configuration.
 

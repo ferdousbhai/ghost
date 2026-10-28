@@ -78,6 +78,10 @@ Item {
 
     PresenceOverlay {}
 
+    DesktopKeys {
+        id: desktopKeys
+    }
+
     Connections {
         target: Presence
 

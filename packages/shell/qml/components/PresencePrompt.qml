@@ -34,6 +34,19 @@ Rectangle {
         Ghostd.selectGhost(names[(names.indexOf(Ghostd.activeGhost) + 1) % names.length]);
     }
 
+    // How to leave, in sight; Super+W does the same while Ghost holds the keyboard.
+    Text {
+        anchors.right: parent.right
+        anchors.rightMargin: Theme.pad
+        anchors.top: parent.top
+        anchors.topMargin: Theme.pad
+        text: "esc to close"
+        color: Theme.foregroundFaint
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeCaption
+        z: 1
+    }
+
     // Swallow clicks so the screen behind does not read one as "dismiss".
     MouseArea { anchors.fill: parent; onClicked: field.forceActiveFocus() }
 

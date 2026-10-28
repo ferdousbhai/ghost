@@ -330,6 +330,7 @@ WlrLayershell {
             onDeleteRequested: (sessionId, title) => hud.ask("conversation", sessionId, title)
             onBanishRequested: name => hud.ask("ghost", name, "")
             onBackRequested: hud.showSection("home")
+            onCloseRequested: hud.close()
         }
 
         ColumnLayout {
@@ -378,6 +379,25 @@ WlrLayershell {
                     visible: hud.currentSection === "chat"
                     Layout.fillWidth: true
                     onRefocused: composer.take()
+                }
+
+                // The way out, in sight; Esc steps back to the list first.
+                Text {
+                    text: "×"
+                    color: closeArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundFaint
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeTitle
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Close Ghost"
+
+                    MouseArea {
+                        id: closeArea
+                        anchors.fill: parent
+                        anchors.margins: -Theme.gap
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: hud.close()
+                    }
                 }
             }
 

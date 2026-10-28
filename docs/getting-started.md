@@ -114,12 +114,17 @@ first run at `~/.local/state/ghost/api-token` (mode 0600); the HUD and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
 To replace it, delete the file and `systemctl --user restart ghostd`.
 
-**Summon key.** Packaging deliberately never edits `~/.config/hypr` or
-`~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
-`/usr/share/doc/ghost/shell-contrib/` — `hyprland/ghost.lua` for Omarchy 4's
-Lua config, `hyprland/ghost.conf` for plain Hyprland. Until you do, open the
-history and settings from your app launcher, or summon with
-`omarchy-shell shell toggle ferdousbhai.ghost`.
+**Summon key.** `SUPER+CTRL+G` summons the ghost as soon as the shell loads
+the plugin: Ghost asks Hyprland for the binding at runtime, so nothing in
+`~/.config/hypr` or `~/.config/omarchy` is edited. If one of your own bindings
+already holds that key, Ghost leaves it alone and says so in the shell's log;
+bind another key with a snippet from `/usr/share/doc/ghost/shell-contrib/`
+(`hyprland/ghost.lua` for Omarchy 4's Lua config, `hyprland/ghost.conf` for
+plain Hyprland), or summon with `omarchy-shell shell toggle ferdousbhai.ghost`.
+
+While the summon prompt or history is open, your other shortcuts pause, so a
+habitual `SUPER+W` or `SUPER+Q` closes Ghost rather than the app behind it;
+`Esc` and the `×` close it too.
 
 ## 4. Create a ghost
 

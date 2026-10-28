@@ -714,7 +714,18 @@ runtime preserves owner data.
   and green. An open question shows on the presence card and above the chat
   composer with its suggested answers as buttons (1–6 on the card); a chosen
   answer is sent as the owner's message, and `dismiss` withdraws it. The
-  launcher lists such conversations after pinned ones, before unread ones. It runs inside Omarchy's own shell
+  launcher lists such conversations after pinned ones, before unread ones.
+  The shell asks Hyprland for its keys at runtime through `hyprctl eval`
+  ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)), so every
+  install has them and no config file is edited: `SUPER+CTRL+G` toggles the
+  presence unless a default-mode binding already holds it (one bound to this
+  plugin, or described "Summon ghost", counts as Ghost's), re-made after each
+  Hyprland config reload and unbound when the plugin unloads. While the
+  presence prompt or HUD holds the keyboard Hyprland runs the `ghost`
+  submap, in which `SUPER+W`, `SUPER+Q`, and the summon key close Ghost and
+  every other binding waits; a Hyprland `layer.closed` hook resets it once
+  neither `ghost-hud` nor `ghost-presence-prompt` is mapped, so a crashed
+  shell cannot leave the owner's shortcuts suspended. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and
