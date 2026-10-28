@@ -63,7 +63,6 @@ omarchy-shell ghost section hooks
 omarchy-shell ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
-hyprctl dispatch 'hl.dsp.focus({ window = "title:^Ghost( — .*)?$" })'
 hyprctl dispatch 'hl.dsp.exec_cmd("notify-send preview")'
 ```
 
@@ -101,11 +100,11 @@ that has already exited and the preview keeps running.
 
 ### What you should see
 
-- **The component maps nothing until `open`.** The HUD is a `FloatingWindow`
+- **The component maps nothing until `open`.** The HUD is a layer surface
   bound to `visible: false`; `preview.sh` calls the IPC `summon` method after the
   isolated shell is ready.
-- On `open`: a 998×620 window that Hyprland tiles into the
-  layout like any app. The HUD uses a neutral reading canvas with the current
+- On `open`: the takeover, a `ghost-hud` layer covering the nested monitor
+  with the desktop dimmed round a centred surface. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`; `+` in its Ghosts header), transcript in the middle, composer at the
   bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
@@ -127,7 +126,7 @@ that has already exited and the preview keeps running.
   narration stays as its own message, its tool call settled behind that
   message's quiet "1 step" toggle rather than in a card of its own, and the
   reply arrives as the next message.
-- On a plain toggle with the window hidden: four `ghost-presence` edge layers
+- On a plain toggle with the takeover closed: four `ghost-presence` edge layers
   and a full-screen `ghost-presence-prompt` layer in `hyprctl layers`, the
   prompt focused (`wtype` types into it under the exported variables). `Enter`
   replaces the prompt with a `ghost-presence-card` ticker over 10px edges; the
@@ -142,11 +141,10 @@ that has already exited and the preview keeps running.
   its conversation is being viewed in the focused chat panel or followed by
   the presence. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
-- `Esc` behaves as getting-started's key table says; it never closes the
-  window.
-- `hyprctl clients -j` lists it as a real toplevel — it is NOT in
-  `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
-  on title (`^Ghost( — .*)?$`), not on class.
+- `Esc` behaves as getting-started's key table says: it leaves the takeover
+  last, after a question and the workbench, and a running turn survives it.
+- `hyprctl layers` lists `ghost-hud` while it is up; `hyprctl clients` lists
+  nothing of Ghost's. A backdrop click closes it.
 
 
 ## Validation
@@ -154,18 +152,6 @@ that has already exited and the preview keeps running.
 ```sh
 pnpm --filter @ghost/omarchy lint     # qmllint over every QML file under qml/
 ```
-
-With that env file sourced and the preview's window visible, run the native
-focus regression from `packages/shell`:
-
-```sh
-quickshell -p "$PWD/focus-probe.qml"
-```
-
-It opens two windows inside the nested compositor and checks focused Chat,
-unfocused Chat, and focused Board. It refuses a non-preview runtime or live port.
-Unlike a mocked compositor title, Qt's own window focus reflects actual input
-focus even when Hyprland's client cache has not populated its title.
 
 Use `/usr/lib/qt6/bin/qmllint`, never `/usr/bin/qmllint` — on Arch the
 latter is a **Qt 5 stub that exits 0 on any input**, including files with
@@ -182,8 +168,8 @@ Use this preview for changes involving focus, layout, notifications, or file
 writes; mocked unit tests alone cannot prove those behaviors. Check the
 surfaces affected by the change:
 
-- Focused Chat marks replies read; Board, unfocused Chat, and a narrow
-  workbench hiding Chat preserve unread state.
+- Chat in the takeover and the presence card mark replies read; Board, a
+  closed takeover, and a narrow workbench hiding Chat preserve unread state.
 - Resources open on demand and add no chat messages.
 - Notifications replace their prior server ID and open the originating
   conversation when clicked.

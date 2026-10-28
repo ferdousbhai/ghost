@@ -72,7 +72,7 @@ Singleton {
         root.continuing = false;
     }
 
-    /** Hand the conversation to the chat window and forget the card. */
+    /** Hand the conversation to the HUD and forget the card. */
     function openInWindow(): void {
         const ghost = root.ghost;
         const sessionId = root.sessionId;

@@ -15,15 +15,8 @@ o.bind("SUPER + CTRL + G", "Summon ghost", "omarchy-shell shell toggle ferdousbh
 -- Summon a named ghost directly.
 -- o.bind("SUPER + SHIFT + G", "Summon casper", "omarchy-shell ghost summon casper")
 
--- Open the chat window instead (the bar's ghost mark does the same).
--- o.bind("SUPER + CTRL + SHIFT + G", "Ghost window", "omarchy-shell ghost section chat")
+-- Open history and settings instead (the bar's ghost mark does the same).
+-- o.bind("SUPER + CTRL + SHIFT + G", "Ghost history", "omarchy-shell ghost section chat")
 
--- Nothing else to bind. The chat window is a real toplevel window, so
--- Hyprland's own binds act on it like any app: SHIFT+SUPER+<n> sends it to a workspace and it
--- tiles and resizes in the normal layout.
---
--- A window rule has to match by title, not app-id: a plugin's window carries
--- the host shell's app-id (org.quickshell), and only a root shell.qml may set
--- one. Uncomment to float it at a fixed size instead of tiling:
--- hl.window_rule({ match = { title = "^Ghost( — .*)?$" }, float = true })
--- hl.window_rule({ match = { title = "^Ghost( — .*)?$" }, size = { 880, 620 } })
+-- Nothing else to bind: the presence and the HUD are layers over the desktop,
+-- not windows, so no window rule applies to them.

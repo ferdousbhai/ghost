@@ -4,8 +4,8 @@
 // panel is summoned, injects `shell`, and reads `opened` to know what it is
 // showing. A plain summon opens the desktop presence's prompt (Presence,
 // drawn by Service.qml); a payload naming a section or a conversation opens
-// GhostHud, an ordinary xdg-toplevel window Hyprland tiles like any app. This
-// file is only the seam between the host's contract and those two.
+// GhostHud, the full-screen takeover. This file is only the seam between the
+// host's contract and those two.
 import QtQuick
 import "services"
 import "services/Plugin.js" as Plugin
@@ -17,11 +17,10 @@ Item {
 
     /**
      * The host's `toggle` hides the panel when this is true and summons it
-     * otherwise, so it means "prompt open, or window shown and focused": a HUD
-     * open behind other windows or on another workspace is raised by toggle,
-     * not hidden.
+     * otherwise. Both surfaces are overlays that hold the keyboard while up,
+     * so shown is open.
      */
-    property bool opened: Presence.composing || hud.shown && hud.focused()
+    property bool opened: Presence.composing || hud.shown
     /** Injected by the host once the Loader resolves. */
     property var shell: null
 

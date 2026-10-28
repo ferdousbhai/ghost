@@ -133,7 +133,7 @@ Item {
         Text {
             anchors.verticalCenter: parent.verticalCenter
             visible: Ghostd.working
-            text: "Esc to stop"
+            text: "Shift+Esc to stop"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall

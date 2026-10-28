@@ -1,34 +1,33 @@
 pragma ComponentBehavior: Bound
 
-// GhostHud — the chat window. A normal xdg-toplevel (FloatingWindow), NOT a
-// wlr-layer surface: Hyprland tiles it, resizes it, and moves it between
-// workspaces with its own binds like any app. Panel.qml owns it and forwards
-// the host shell's summons (keybind, bar widget, `ghost` CLI) to open/close.
+// GhostHud — history, the board, routines and settings, as a takeover: a
+// full-screen layer over everything on the focused monitor, fullscreen apps
+// included, that holds the keyboard until it closes. Like the presence, it is
+// part of the desktop rather than a window among others; the WM does not tile,
+// move or close it. Panel.qml owns it and forwards the host shell's summons
+// (a section or conversation payload: bar mark, desktop entry, toast, the
+// presence card's "open") to open/close.
 //
-// Window-shape decisions:
+// Takeover-shape decisions:
 //
-//   FloatingWindow        the one Quickshell 0.3.0 construct that presents as a
-//                         standard toplevel, so the compositor owns placement,
-//                         tiling and monitors and no screen-move code is needed.
-//   title                 "Ghost — <name>". Inside omarchy-shell the app-id is
-//                         the host's (only a root shell.qml may set one), so the
-//                         title is what finds this window again: `titlePattern`.
-//   color / no border     the window paints an opaque Theme.background and lets
-//                         Hyprland draw the frame, border and rounding. An app
-//                         drawing its own rounded border inside the WM's frame
-//                         just doubles the edge.
-//
-// Summon is launch-or-focus, not overlay-toggle: `open` reveals the window and
-// focuses it; the host's toggle (SUPER+CTRL+G, the bar mark) hides it only
-// when it is already the focused window (Panel.qml's `opened`).
+//   one monitor           the focused one at open, like the presence prompt;
+//                         other screens stay usable by pointer.
+//   backdrop              the desktop stays visible, dimmed, around a centred
+//                         surface; clicking it closes the takeover.
+//   leaving               Esc after a standing question and the workbench,
+//                         the summon toggle, or a backdrop click. A turn keeps
+//                         running when it closes; Shift+Esc stops one.
+//   hand-offs             opening a link, a file or the external editor closes
+//                         it, or the app it opened would sit underneath.
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Wayland
 import QtQuick
 import QtQuick.Layouts
 import "services"
 import "components"
 
-FloatingWindow {
+WlrLayershell {
     id: hud
 
     /** Driven by Panel.qml. Bound to `visible`. */
@@ -39,9 +38,8 @@ FloatingWindow {
     readonly property var sections: navigation.destinations.map(destination => destination.id)
     readonly property int navigationWidth: navigation.implicitWidth
 
-    // How this window is named to the compositor, and the regex that finds it
-    // again. Both halves of launch-or-focus go through here.
-    readonly property string titlePattern: "^Ghost( — .*)?$"
+    /** The monitor it covers, fixed at open. */
+    property string screenName: ""
 
     // Deleting a conversation and banishing a ghost are asked in a modal over
     // the whole window rather than in the row: the row is 16px of a scrolling
@@ -60,7 +58,7 @@ FloatingWindow {
     // threshold would ignore.
     readonly property int chatMinimumWidth: 380
     readonly property int paneMinimumWidth: 320
-    readonly property int bodyWidth: hud.width - Theme.pad * 2
+    readonly property int bodyWidth: card.width - Theme.pad * 2
         - hud.navigationWidth - Theme.sectionGap
         - (hud.sidebarOpen ? Theme.sidebarMeasure + Theme.sectionGap : 0)
     readonly property bool workbenchOpen: Workbench.filePath !== ""
@@ -73,19 +71,16 @@ FloatingWindow {
     }
 
     visible: hud.shown
-    color: Theme.background
-    title: Ghostd.activeGhost === "" ? "Ghost" : "Ghost — " + Ghostd.activeGhost
-
-    // A reasonable default; the WM resizes/tiles from here. minimumSize keeps a
-    // tiled slice from collapsing the composer and roster into nothing.
-    implicitWidth: 998
-    implicitHeight: 620
-    minimumSize: Qt.size(568, 360)
-
+    screen: Quickshell.screens.find(screen => screen.name === hud.screenName) || Quickshell.screens[0] || null
+    anchors { top: true; bottom: true; left: true; right: true } // qmllint disable missing-property
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    namespace: "ghost-hud"
+    layer: WlrLayer.Overlay
+    keyboardFocus: WlrKeyboardFocus.Exclusive
 
     // Materialize on summon: the content takes a breath of scale and opacity
-    // instead of cutting in. Content-level, because the compositor owns the
-    // surface itself; Hyprland's own open animation composes with it.
+    // instead of cutting in.
     onShownChanged: {
         Ghostd.hudVisible = hud.shown;
         if (hud.shown && !Theme.reducedMotion)
@@ -93,13 +88,8 @@ FloatingWindow {
     }
 
     function open(): void {
+        if (!hud.shown) hud.screenName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
         hud.shown = true;
-        // The "focus" half of launch-or-focus. A freshly mapped toplevel is
-        // auto-focused by Hyprland; this also pulls an already-open window
-        // (possibly on another workspace) to the foreground. Hyprland 0.55+
-        // dispatches Lua expressions; the old `focuswindow` spelling is parsed
-        // as invalid Lua.
-        Hyprland.dispatch('hl.dsp.focus({ window = "title:' + hud.titlePattern + '" })');
         Ghostd.refresh();
         Dictation.refresh();
         hud.showSection("chat");
@@ -108,11 +98,6 @@ FloatingWindow {
     function close(): void {
         hud.shown = false;
     }
-
-    // The compositor can close the window itself (SUPER+W). Without this,
-    // `shown` stays true, the host takes the hidden HUD for open, and the next
-    // summon only "hides" it.
-    onVisibleChanged: if (!hud.visible) hud.shown = false
 
     function focused(): bool {
         return hud.contentItem.Window.active;
@@ -183,13 +168,39 @@ FloatingWindow {
         }
     }
 
+    Connections {
+        target: ExternalLinks
+        function onHandedOff(): void {
+            hud.close();
+        }
+    }
+
+    // The desktop, dimmed; a click on it is a click away from Ghost.
+    Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(Theme.background.r, Theme.background.g, Theme.background.b, 0.72)
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: hud.close()
+        }
+    }
+
     Rectangle {
         id: card
 
-        // Fill the window and paint a plain rectangle; Hyprland draws the frame,
-        // border and rounding for a normal toplevel.
-        anchors.fill: parent
+        // Most of the screen, square like the rest of Omarchy, with enough
+        // backdrop left round it to read as over the desktop, not instead of it.
+        readonly property int inset: Math.max(Theme.sectionGap * 2, Math.round(Math.min(hud.width, hud.height) * 0.04))
+        anchors.centerIn: parent
+        width: Math.min(hud.width - card.inset * 2, Theme.ch(200))
+        height: hud.height - card.inset * 2
         color: Theme.background
+        border.width: 1
+        border.color: Theme.film(0.22)
+
+        // Clicks inside the card are the card's business, not the backdrop's.
+        MouseArea { anchors.fill: parent }
 
         ParallelAnimation {
             id: materialize
@@ -210,17 +221,14 @@ FloatingWindow {
         }
 
         focus: true
-        // Esc-to-close is unusual for a normal app window, so Esc only dismisses
-        // a standing question, then cancels a running turn, then closes the
-        // workbench; the window itself goes with SUPER+CTRL+G. Left unhandled
-        // once there is nothing of ours to dismiss, so it never swallows a
-        // compositor bind.
+        // Esc steps back out: a standing question, then the workbench, then
+        // the takeover itself. A turn runs on behind it; Shift+Esc stops one.
         Keys.onEscapePressed: event => {
             event.accepted = true;
             if (hud.pending !== null) hud.dismissPending();
-            else if (Ghostd.working) Ghostd.cancel();
+            else if ((event.modifiers & Qt.ShiftModifier) && Ghostd.working) Ghostd.cancel();
             else if (hud.workbenchOpen) Workbench.close();
-            else event.accepted = false;
+            else hud.close();
         }
         // Ctrl+B toggles the whole left sidebar, editor-style; Ctrl+N starts a
         // conversation, as in any chat app. These reach the card by focus-chain
@@ -365,7 +373,7 @@ FloatingWindow {
 
                         ActivityLine {
                             Layout.fillWidth: true
-                            maxHeight: Math.max(90, Math.floor(hud.height * 0.28))
+                            maxHeight: Math.max(90, Math.floor(card.height * 0.28))
                         }
 
                         QueueLine {
@@ -379,7 +387,7 @@ FloatingWindow {
                             Layout.fillWidth: true
                             // Room for a real draft before it scrolls, never the
                             // whole pane: the transcript above must stay in view.
-                            maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
+                            maxHeight: Math.max(160, Math.floor(card.height * 0.4))
                             transcript: transcriptView
                             onNewConversationRequested: sidebar.startConversation()
 

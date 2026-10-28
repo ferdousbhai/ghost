@@ -184,6 +184,7 @@ Singleton {
         Quickshell.execDetached(plan.workingDirectory === ""
             ? ({ command: plan.command })
             : ({ command: plan.command, workingDirectory: plan.workingDirectory }));
+        ExternalLinks.handedOff();
     }
 
     // Probing PATH reads the candidate file, which is only reasonable because

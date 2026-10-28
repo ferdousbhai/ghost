@@ -678,8 +678,13 @@ runtime preserves owner data.
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
   dismissed or opened in the window. Edge surfaces take no input and reserve
-  no space. A payload naming a `section` or `sessionId` opens the chat window;
-  the bar dot and desktop entry open it on `chat`. It runs inside Omarchy's own shell
+  no space. A payload naming a `section` or `sessionId` opens the HUD, a takeover:
+  a full-screen layer over everything on the focused monitor that holds the
+  keyboard while up, its sections centred on the dimmed desktop. Esc (after a
+  standing question and the workbench), the toggle, or a backdrop click
+  closes it, a running turn continuing behind it; Shift+Esc stops a turn.
+  Opening a link, a file, or the external editor closes it. The bar dot and
+  desktop entry open it on `chat`. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and
@@ -687,7 +692,7 @@ runtime preserves owner data.
   host's `bar.showTooltip`/`hideTooltip` API and `tooltipHovered` lifecycle;
   Omarchy owns its theme, sizing, and placement. The widget exposes
   `triggerPress(button)` so the host's drag-aware click forwarding toggles the
-  window on left click through the injected `bar.shell` facade. The package installs it
+  HUD on left click through the injected `bar.shell` facade. The package installs it
   to `/usr/share/ghost/plugin`; the per-user symlink into
   `~/.config/omarchy/plugins/` belongs to the install script, which waits for
   shell discovery before enabling the plugin. Setup ends with `ghost new <name>`; harness sign-in is external.

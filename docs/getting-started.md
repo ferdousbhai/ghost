@@ -99,7 +99,7 @@ line.
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
 — it is a plugin inside your own `omarchy-shell`, summoned with
-`omarchy-shell shell toggle ferdousbhai.ghost`; its chat window opens with
+`omarchy-shell shell toggle ferdousbhai.ghost`; history and settings open with
 `omarchy-shell ghost section chat`.
 
 Confirm the client can reach and authenticate to the daemon:
@@ -118,7 +118,7 @@ To replace it, delete the file and `systemctl --user restart ghostd`.
 `~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
 `/usr/share/doc/ghost/shell-contrib/` — `hyprland/ghost.lua` for Omarchy 4's
 Lua config, `hyprland/ghost.conf` for plain Hyprland. Until you do, open the
-chat window from your app launcher, or summon with
+history and settings from your app launcher, or summon with
 `omarchy-shell shell toggle ferdousbhai.ghost`.
 
 ## 4. Create a ghost
@@ -198,11 +198,12 @@ The prompt closes and the ghost works in the background: a thin shimmer stays
 on the edges and a ticker says what it is doing. Its reply replaces the
 ticker as a card. Summon again while the card is up to follow up in the same
 conversation (`new ×` starts a fresh one instead); `×` or `Esc` on the card
-dismisses it, and `open` shows the conversation in the chat window.
+dismisses it, and `open` shows the conversation in history.
 
-The chat window (the ghost mark in the Omarchy bar, your app launcher, or
-`omarchy-shell ghost section chat`) keeps the history and settings. An
-empty conversation shows the ghost's glyph, its name, and the static line
+History and settings (the ghost mark in the Omarchy bar, your app launcher,
+or `omarchy-shell ghost section chat`) take over the screen you are on, over
+whatever is open, until you leave with `Esc`, the summon key, or a click on
+the dimmed desktop around them. An empty conversation shows the ghost's glyph, its name, and the static line
 `What's on your mind?`.
 
 Type, and:
@@ -212,7 +213,8 @@ Type, and:
 | `Enter` | send |
 | `Shift+Enter` | newline |
 | `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
-| `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
+| `Esc` | dismiss a pending confirmation, then close the workbench, then leave; a running turn keeps going |
+| `Shift+Esc` | stop a running turn |
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 | `Ctrl+N` | start a new conversation (the composer's `+`) |
 | `PageUp` / `PageDown` | scroll the transcript a page |
@@ -225,7 +227,7 @@ appears only while it moves or under the pointer.
 
 The rail on the right switches sections: **Chat**, **Board**, **Routines**,
 **Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
-mark in the Omarchy bar toggles the window.
+mark in the Omarchy bar toggles them.
 
 ## 7. The same ghost from the terminal
 

@@ -17,11 +17,14 @@ over it follows up in the same conversation. The `Presence` singleton holds
 that state and `PresenceOverlay` (mounted by the always-loaded service, since
 the host unloads the panel whenever it hides) draws it.
 
-The chat HUD opens from the bar dot, a notification, the card's `open`, or any
-summon naming a section. It is a normal `FloatingWindow` (`xdg-toplevel`), so
-Hyprland owns tiling, focus, resizing, and workspace movement; window rules
-use its title because a plugin window carries the host shell's app-id. Focus
-comes from Qt's own window state. A toggle hides it only when it is focused.
+The HUD (history, board, routines, character, hooks, MCP, remote access)
+opens from the bar dot, a notification, the card's `open`, or any summon
+naming a section, as a takeover: a full-screen `ghost-hud` layer on the
+focused monitor, over fullscreen apps too, that holds the keyboard while it
+is up, its sections centred on the dimmed desktop. Esc steps back out (a
+standing question, the workbench, then the takeover), as do the toggle and a
+backdrop click; a turn runs on behind it, and Shift+Esc stops one. Handing
+something to another app (a link, a file, the external editor) closes it.
 
 Every QML import here is a relative path. Inside the host, `qs.` resolves to
 Omarchy's shell root, so `import qs.services` would bind these files to

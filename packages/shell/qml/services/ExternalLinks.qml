@@ -7,6 +7,9 @@ import "ExternalLinkPolicy.js" as Policy
 Singleton {
     id: root
 
+    /** Something outside Ghost now has the owner's attention; the takeover makes way. */
+    signal handedOff()
+
     function openModelUrl(url: string): void {
         if (!Policy.isModelUrl(url)) {
             console.warn("ghost shell rejected an unsafe model-authored URL");
@@ -15,6 +18,7 @@ Singleton {
         // Allowed URLs begin with a scheme, so none can be parsed as an option
         // by xdg-open (which does not portably support a `--` separator).
         Quickshell.execDetached(["xdg-open", url]);
+        root.handedOff();
     }
 
     /**
@@ -28,5 +32,6 @@ Singleton {
             return;
         }
         Quickshell.execDetached(["xdg-open", path]);
+        root.handedOff();
     }
 }
