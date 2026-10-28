@@ -38,7 +38,7 @@ import {
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, which, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   harnessRow,
@@ -250,6 +250,8 @@ function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: Abo
  */
 export function stablePolicySections(options: {
   documents: string;
+  /** Recall is installed, so Owner context names its search. */
+  recall: boolean;
   runningSource: RunningSource | null;
   firstMeeting: boolean;
 }): string[] {
@@ -257,7 +259,7 @@ export function stablePolicySections(options: {
     OMARCHY_COMPUTER_USE_POLICY,
     HARNESS_LIMITS_POLICY,
     BACKGROUND_WORK_POLICY,
-    renderOwnerContextPolicy(options.documents),
+    renderOwnerContextPolicy(options.documents, options.recall),
     SCHEDULED_WORK_POLICY,
     renderSelfMaintenancePolicy(options.runningSource),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
@@ -371,6 +373,8 @@ export class SessionHost {
       homeDir: ghost.dir,
       extraSections: stablePolicySections({
         documents: resolveDocumentsDirectory(this.env, this.ownerHome),
+        // Checked each turn, like the character: installing Recall needs no restart.
+        recall: which("recall", this.env) !== null,
         runningSource: this.runningSource,
         firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
       }),

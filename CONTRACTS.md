@@ -41,7 +41,10 @@ neither indexes it nor injects any part of it, and the system prompt only names
 the directory. A ghost searches it on demand, as a task needs
 (`ghost help memory`). Recall, an optional product of its own
 (`ghost-products`), may index folders the owner selects; its hits are derived,
-possibly stale candidates, and the source file is authoritative.
+possibly stale candidates, and the source file is authoritative. While
+`recall` is on the daemon's PATH (checked each turn), the prompt also names
+`recall search` as the first lookup for things whose words or place are
+unknown.
 `ghost sessions --semantic QUERY` optionally ranks current conversation titles
 and previews through `recall rank`; it does not read transcripts or index notes.
 Missing, incompatible, or unresponsive Recall falls back to title/preview text

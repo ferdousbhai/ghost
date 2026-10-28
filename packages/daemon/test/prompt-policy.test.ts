@@ -11,6 +11,13 @@ describe("owner context policy", () => {
     expect(policy).not.toContain(".agents/skills");
   });
 
+  it("names Recall's search only when it is installed", () => {
+    expect(renderOwnerContextPolicy("/home/owner/Documents")).not.toContain("recall");
+    const policy = renderOwnerContextPolicy("/home/owner/Documents", true);
+    expect(policy).toContain('`recall search "<meaning>"`');
+    expect(policy).toContain("`--code`");
+  });
+
   it("points at a lookup recipe `ghost help` prints", () => {
     const pointer = /`ghost help (\w+)`/u.exec(renderOwnerContextPolicy("/home/owner/Documents"))?.[1];
     expect(pointer).toBe("memory");
