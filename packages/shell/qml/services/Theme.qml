@@ -238,6 +238,22 @@ Singleton {
     readonly property color borderStrong: root.controlBorder("selected",
         "controls.selected-border-alpha")
 
+    // [menu]: the card Omarchy's launcher, clipboard and emoji pickers share.
+    // The launcher and takeover draw with these so they read as the desktop's
+    // own surfaces; each key's defaults are Omarchy's.
+    function menuColor(key: string, fallbackValue: color, fallbackAlpha: real): color {
+        const base = root.shellColor("menu." + key, fallbackValue);
+        const alpha = root.shellNumber("menu." + key + "-alpha", fallbackAlpha);
+        return Qt.rgba(base.r, base.g, base.b, alpha);
+    }
+    readonly property color menuBackground: root.menuColor("background", root.background, 1)
+    readonly property color menuText: root.shellColor("menu.text", root.foreground)
+    readonly property color menuBorder: root.menuColor("border", root.foreground, 1)
+    readonly property color menuScrim: root.menuColor("scrim", root.background, 0.5)
+    readonly property color menuSelectedBackground: root.menuColor("selected-background", root.foreground, 0.08)
+    readonly property color menuSelectedText: root.shellColor("menu.selected-text", root.accent)
+    readonly property color menuSelectedBorder: root.menuColor("selected-border", root.foreground, 0)
+
     // One inherited accent carries focus, selection, and the active state.
     readonly property color accent: root.pick("accent")
     readonly property color danger: root.pick("red")
@@ -346,14 +362,6 @@ Singleton {
      */
     readonly property int readingMeasure: root.ch(92)
 
-    /**
-     * The HUD's one list column: the roster stacked over the conversations.
-     * Four columns wider than the 26 a name needs, because the
-     * longest thing read down it is a conversation title and a title that wraps
-     * costs a whole row of the list. The roster takes the same measure to stay
-     * flush with the conversations under it, not because a ghost name needs it.
-     */
-    readonly property int sidebarMeasure: root.ch(30)
 
     /**
      * The space Qt's markdown renderer leaves between two blocks.

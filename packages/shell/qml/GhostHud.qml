@@ -1,22 +1,22 @@
 pragma ComponentBehavior: Bound
 
-// GhostHud — history, the board, routines and settings, as a takeover: a
-// full-screen layer over everything on the focused monitor, fullscreen apps
-// included, that holds the keyboard until it closes. Like the presence, it is
-// part of the desktop rather than a window among others; the WM does not tile,
-// move or close it. Panel.qml owns it and forwards the host shell's summons
-// (a section or conversation payload: bar mark, desktop entry, toast, the
-// presence card's "open") to open/close.
+// GhostHud — history, the board, routines and settings, the way the desktop
+// shows its own menu: a card over everything on the focused monitor, on the
+// theme's [menu] scrim, holding the keyboard until it closes. It opens on the
+// Launcher (a filter over conversations and places); choosing a row grows the
+// card into that view, and Esc steps back to the list, then out. Panel.qml
+// owns it and forwards the host shell's summons (a section or conversation
+// payload: bar mark, desktop entry, toast, the presence card's "open").
 //
-// Takeover-shape decisions:
+// Shape decisions:
 //
-//   one monitor           the focused one at open, like the presence prompt;
-//                         other screens stay usable by pointer.
-//   backdrop              the desktop stays visible, dimmed, around a centred
-//                         surface; clicking it closes the takeover.
-//   leaving               Esc after a standing question and the workbench,
-//                         the summon toggle, or a backdrop click. A turn keeps
-//                         running when it closes; Shift+Esc stops one.
+//   one monitor           the focused one at open, like the presence prompt.
+//   the list's place      a fixed top a fifth of the way down, so filtering
+//                         shortens the card without moving the field; a view
+//                         grows from there to most of the screen.
+//   leaving               Esc after a standing question, the workbench and the
+//                         view, the summon toggle, or a click on the scrim. A
+//                         turn keeps running when it closes; Shift+Esc stops one.
 //   hand-offs             opening a link, a file or the external editor closes
 //                         it, or the app it opened would sit underneath.
 import Quickshell
@@ -26,24 +26,25 @@ import QtQuick
 import QtQuick.Layouts
 import "services"
 import "components"
+import "components/Launcher.js" as LauncherRows
 
 WlrLayershell {
     id: hud
 
     /** Driven by Panel.qml. Bound to `visible`. */
     property bool shown: false
-    property bool sidebarOpen: true
-    property string currentSection: "chat"
-    /** The navigable sections, in rail order; the body stack follows it. */
-    readonly property var sections: navigation.destinations.map(destination => destination.id)
-    readonly property int navigationWidth: navigation.implicitWidth
+    /** "home" (the launcher) or one of `sections`. */
+    property string currentSection: "home"
+    /** The views a row opens, in the body stack's order. */
+    readonly property var sections: ["chat", "board", "routines", "character", "ghosts", "hooks", "mcp", "remote"]
+    readonly property bool home: hud.currentSection === "home"
 
     /** The monitor it covers, fixed at open. */
     property string screenName: ""
 
     // Deleting a conversation and banishing a ghost are asked in a modal over
-    // the whole window rather than in the row: the row is 16px of a scrolling
-    // sidebar, and a question that costs something deserves the middle of the
+    // the whole card rather than in the row: a row is one line of a scrolling
+    // list, and a question that costs something deserves the middle of the
     // screen. One question stands at a time, as { kind: "conversation" |
     // "ghost", id, title } or null. It lives here, not in the list that raised it, because the dialog
     // outlives the delegate (a refresh rebuilds every row).
@@ -52,15 +53,10 @@ WlrLayershell {
     readonly property string pendingGhost: hud.pendingId("ghost")
 
     // The file pane sits beside the chat when both columns can still be read,
-    // and takes the chat's place when they cannot. The test is on the width
-    // actually left for the two of them, not on the window: an open sidebar
-    // costs its list column plus the gap beside it, which a raw window-width
-    // threshold would ignore.
+    // and takes the chat's place when they cannot.
     readonly property int chatMinimumWidth: 380
     readonly property int paneMinimumWidth: 320
     readonly property int bodyWidth: card.width - Theme.pad * 2
-        - hud.navigationWidth - Theme.sectionGap
-        - (hud.sidebarOpen ? Theme.sidebarMeasure + Theme.sectionGap : 0)
     readonly property bool workbenchOpen: Workbench.filePath !== ""
     readonly property bool workbenchSplit: hud.workbenchOpen
         && hud.bodyWidth >= hud.chatMinimumWidth + hud.paneMinimumWidth + Theme.sectionGap
@@ -92,7 +88,7 @@ WlrLayershell {
         hud.shown = true;
         Ghostd.refresh();
         Dictation.refresh();
-        hud.showSection("chat");
+        hud.showSection("home");
     }
 
     function close(): void {
@@ -105,9 +101,31 @@ WlrLayershell {
 
     /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
-        if (hud.sections.indexOf(section) < 0) return;
+        if (section !== "home" && hud.sections.indexOf(section) < 0) return;
         hud.currentSection = section;
-        if (section === "chat") composer.take();
+        if (section === "home") launcher.reset();
+        else if (section === "chat") composer.take();
+    }
+
+    /** A fresh conversation, the keyboard in its composer. */
+    function startConversation(): void {
+        Ghostd.newConversation();
+        hud.showSection("chat");
+    }
+
+    function launch(row: var): void {
+        if (row.kind === "new") {
+            hud.startConversation();
+        } else if (row.kind === "ask") {
+            Ghostd.newConversation();
+            Ghostd.send(row.detail);
+            hud.showSection("chat");
+        } else if (row.kind === "session") {
+            Ghostd.openConversation(row.id);
+            hud.showSection("chat");
+        } else if (row.kind === "place") {
+            hud.showSection(row.id);
+        }
     }
 
     function pendingId(kind: string): string {
@@ -122,7 +140,8 @@ WlrLayershell {
     function dismissPending(): void {
         hud.clearPendingError();
         hud.pending = null;
-        composer.take();
+        if (hud.home) launcher.reset();
+        else if (hud.currentSection === "chat") composer.take();
     }
 
     // A dialog shows only the daemon's refusal of its own attempt, so that
@@ -178,7 +197,7 @@ WlrLayershell {
     // The desktop, dimmed; a click on it is a click away from Ghost.
     Rectangle {
         anchors.fill: parent
-        color: Qt.rgba(Theme.background.r, Theme.background.g, Theme.background.b, 0.72)
+        color: Theme.menuScrim
 
         MouseArea {
             anchors.fill: parent
@@ -189,15 +208,28 @@ WlrLayershell {
     Rectangle {
         id: card
 
-        // Most of the screen, square like the rest of Omarchy, with enough
-        // backdrop left round it to read as over the desktop, not instead of it.
+        // The list is a launcher's width at a fixed top; a view grows from
+        // that top to most of the screen, leaving scrim round it so it reads
+        // as over the desktop, not instead of it.
         readonly property int inset: Math.max(Theme.sectionGap * 2, Math.round(Math.min(hud.width, hud.height) * 0.04))
-        anchors.centerIn: parent
-        width: Math.min(hud.width - card.inset * 2, Theme.ch(200))
-        height: hud.height - card.inset * 2
-        color: Theme.background
+        readonly property int listTop: Math.round(hud.height * 0.2)
+        x: Math.round((hud.width - card.width) / 2)
+        y: hud.home ? card.listTop : card.inset
+        width: hud.home ? Math.min(hud.width - card.inset * 2, Theme.ch(76) + Theme.pad * 2)
+            : Math.min(hud.width - card.inset * 2, Theme.ch(180))
+        // A standing question needs room the list alone may not give it.
+        height: hud.home
+            ? (hud.pending !== null ? Math.max(launcher.implicitHeight, Theme.ch(40)) : launcher.implicitHeight)
+            : hud.height - card.inset * 2
+        color: Theme.menuBackground
         border.width: 1
-        border.color: Theme.film(0.22)
+        border.color: Theme.menuBorder
+        radius: Theme.radius
+        clip: true
+
+        Behavior on y { enabled: !Theme.reducedMotion; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on width { enabled: !Theme.reducedMotion; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on height { enabled: !Theme.reducedMotion; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
         // Clicks inside the card are the card's business, not the backdrop's.
         MouseArea { anchors.fill: parent }
@@ -222,29 +254,28 @@ WlrLayershell {
 
         focus: true
         // Esc steps back out: a standing question, then the workbench, then
-        // the takeover itself. A turn runs on behind it; Shift+Esc stops one.
+        // the view back to the list, then the HUD itself. A turn runs on
+        // behind it; Shift+Esc stops one.
         Keys.onEscapePressed: event => {
             event.accepted = true;
             if (hud.pending !== null) hud.dismissPending();
             else if ((event.modifiers & Qt.ShiftModifier) && Ghostd.working) Ghostd.cancel();
             else if (hud.workbenchOpen) Workbench.close();
+            else if (!hud.home) hud.showSection("home");
             else hud.close();
         }
-        // Ctrl+B toggles the whole left sidebar, editor-style; Ctrl+N starts a
-        // conversation, as in any chat app. These reach the card by focus-chain
-        // propagation even while the composer holds focus, since a plain
-        // TextEdit consumes neither. The transcript's scroll keys come first
-        // (FollowingList.handleKey).
+        // Ctrl+N starts a conversation, as in any chat app. It reaches the card
+        // by focus-chain propagation even while the composer holds focus,
+        // since a plain TextEdit does not consume it. The transcript's scroll
+        // keys come first (FollowingList.handleKey).
         Keys.onPressed: event => {
             if (hud.currentSection !== "chat") return;
             if (transcriptView.visible && transcriptView.handleKey(event)) {
                 event.accepted = true;
                 return;
             }
-            if (!(event.modifiers & Qt.ControlModifier)) return;
-            if (event.key === Qt.Key_B) hud.sidebarOpen = !hud.sidebarOpen;
-            else if (event.key === Qt.Key_N) sidebar.startConversation();
-            else return;
+            if (!(event.modifiers & Qt.ControlModifier) || event.key !== Qt.Key_N) return;
+            hud.startConversation();
             event.accepted = true;
         }
 
@@ -276,16 +307,65 @@ WlrLayershell {
             }
         }
 
+        Launcher {
+            id: launcher
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            visible: hud.home
+            focus: hud.home
+            maxListHeight: hud.height - card.listTop - card.inset - Theme.controlHeight * 4
+            onActivated: row => hud.launch(row)
+            onDeleteRequested: (sessionId, title) => hud.ask("conversation", sessionId, title)
+        }
+
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Theme.pad
-            anchors.rightMargin: Theme.pad + hud.navigationWidth + Theme.sectionGap
+            visible: !hud.home
             spacing: Theme.gap
 
-            HudHeader {
+            // The way back to the list, and where this view is.
+            RowLayout {
                 Layout.fillWidth: true
                 z: 20
-                onRefocused: composer.take()
+                spacing: Theme.gap
+
+                Text {
+                    text: "‹"
+                    color: backArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeHeading
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Back to the list"
+
+                    MouseArea {
+                        id: backArea
+                        anchors.fill: parent
+                        anchors.margins: -Theme.gap
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: hud.showSection("home")
+                    }
+                }
+
+                Text {
+                    visible: hud.currentSection !== "chat"
+                    Layout.fillWidth: true
+                    text: {
+                        const place = LauncherRows.PLACES.find(entry => entry.id === hud.currentSection);
+                        return place ? place.label : "";
+                    }
+                    color: Theme.menuText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeTitle
+                }
+
+                HudHeader {
+                    visible: hud.currentSection === "chat"
+                    Layout.fillWidth: true
+                    onRefocused: composer.take()
+                }
             }
 
             // One pane per entry of `hud.sections`, in the same order.
@@ -296,24 +376,6 @@ WlrLayershell {
 
                 RowLayout {
                     spacing: Theme.sectionGap
-
-                    // Toggled as one unit with Ctrl+B.
-                    Sidebar {
-                        id: sidebar
-                        visible: hud.sidebarOpen
-                        // A nested Layout defaults Layout.fillWidth to true, which
-                        // would let the sidebar swallow the whole row and crush the
-                        // transcript; pin it to a fixed column instead.
-                        Layout.fillWidth: false
-                        Layout.preferredWidth: Theme.sidebarMeasure
-                        Layout.minimumWidth: Theme.sidebarMeasure
-                        Layout.maximumWidth: Theme.sidebarMeasure
-                        Layout.fillHeight: true
-                        onRefocused: composer.take()
-                        onGhostDeleteRequested: name => hud.ask("ghost", name, "")
-                        onConversationDeleteRequested: (sessionId, title) =>
-                            hud.ask("conversation", sessionId, title)
-                    }
 
                     ColumnLayout {
                         // A narrow window has room for one column, so the file pane
@@ -389,7 +451,7 @@ WlrLayershell {
                             // whole pane: the transcript above must stay in view.
                             maxHeight: Math.max(160, Math.floor(card.height * 0.4))
                             transcript: transcriptView
-                            onNewConversationRequested: sidebar.startConversation()
+                            onNewConversationRequested: hud.startConversation()
 
                             onSubmitted: prompt => {
                                 transcriptView.toEnd();
@@ -418,20 +480,40 @@ WlrLayershell {
                 }
 
                 Board {
-                    onCloseRequested: hud.showSection("chat")
+                    onCloseRequested: hud.showSection("home")
                 }
 
                 Routines {
-                    onCloseRequested: hud.showSection("chat")
+                    onCloseRequested: hud.showSection("home")
                 }
 
-                // Character replaces chat rather than nesting its roster/conversation
-                // sidebar inside its own surface. The persona edits through the
+                // The persona edits through the
                 // daemon's validating writer rather than the workbench's direct
                 // file editor: the daemon owns the size cap, so a bad edit is
                 // refused at Save instead of breaking the next cold start.
                 CharacterPane {
-                    onClosed: hud.showSection("chat")
+                    onClosed: hud.showSection("home")
+                }
+
+                // Every ghost: pick one to make it the list's, summon a new
+                // one, rename, or banish (asked in the dialog below).
+                Flickable {
+                    id: ghostsScroll
+                    contentWidth: width
+                    contentHeight: roster.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    Roster {
+                        id: roster
+                        width: Math.min(ghostsScroll.width, Theme.ch(60))
+                        onPicked: {
+                            // The open file lives in the ghost we just left.
+                            Workbench.close();
+                            hud.showSection("home");
+                        }
+                        onDeleteRequested: name => hud.ask("ghost", name, "")
+                    }
                 }
 
                 // Machine-level hook configuration is global: the owner's command
@@ -442,26 +524,13 @@ WlrLayershell {
                 McpBrowser {}
 
                 RemoteAccess {
-                    onCloseRequested: hud.showSection("chat")
+                    onCloseRequested: hud.showSection("home")
                 }
             }
         }
 
-        // A permanent rail floating at the right edge, reserving its width
-        // instead of covering the content.
-        GhostNavigation {
-            id: navigation
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.rightMargin: Theme.pad
-            anchors.bottom: parent.bottom
-            currentSection: hud.currentSection
-            activeHookCount: Ghostd.activeHookCount
-            onSelected: section => hud.showSection(section)
-        }
-
-        // The dialogs sit over the whole card, above the layout, so the scrim
-        // dims the sidebar and transcript alike.
+        // The dialogs sit over the whole card, above the layout, so their scrim
+        // dims whatever the card shows.
         ConfirmDialog {
             id: deleteDialog
 

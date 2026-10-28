@@ -17,14 +17,17 @@ over it follows up in the same conversation. The `Presence` singleton holds
 that state and `PresenceOverlay` (mounted by the always-loaded service, since
 the host unloads the panel whenever it hides) draws it.
 
-The HUD (history, board, routines, character, hooks, MCP, remote access)
-opens from the bar dot, a notification, the card's `open`, or any summon
-naming a section, as a takeover: a full-screen `ghost-hud` layer on the
-focused monitor, over fullscreen apps too, that holds the keyboard while it
-is up, its sections centred on the dimmed desktop. Esc steps back out (a
-standing question, the workbench, then the takeover), as do the toggle and a
-backdrop click; a turn runs on behind it, and Shift+Esc stops one. Handing
-something to another app (a link, a file, the external editor) closes it.
+The HUD (history, board, routines, character, ghosts, hooks, MCP, remote
+access) opens from the bar dot, a notification, the card's `open`, or any
+summon naming a section. It is drawn the way the desktop draws its own menu,
+with the theme's `[menu]` tokens (`Theme.menu*`): a `ghost-hud` layer over
+everything on the focused monitor, a scrim, and a card that holds the
+keyboard. It opens on the `Launcher`, a filter over conversations and places
+at a fixed height on screen; Enter on a row grows the card into that view,
+and Enter with nothing matching asks the ghost. Esc steps back (a standing
+question, the workbench, the view, then out), as do the toggle and a scrim
+click; a turn runs on behind it, and Shift+Esc stops one. Handing something
+to another app (a link, a file, the external editor) closes it.
 
 Every QML import here is a relative path. Inside the host, `qs.` resolves to
 Omarchy's shell root, so `import qs.services` would bind these files to

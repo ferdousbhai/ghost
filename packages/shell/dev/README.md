@@ -103,13 +103,15 @@ that has already exited and the preview keeps running.
 - **The component maps nothing until `open`.** The HUD is a layer surface
   bound to `visible: false`; `preview.sh` calls the IPC `summon` method after the
   isolated shell is ready.
-- On `open`: the takeover, a `ghost-hud` layer covering the nested monitor
-  with the desktop dimmed round a centred surface. The HUD uses a neutral reading canvas with the current
-  Omarchy accent and semantic status colours. Roster on the left (`casper`,
-  `moaning-myrtle`; `+` in its Ghosts header), transcript in the middle, composer at the
-  bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
-  rail floating at the right edge. `preview.sh` summons it with
-  `{"section":"chat"}`; a plain summon opens the presence instead (below).
+- On `open`: a `ghost-hud` layer over the nested monitor, the desktop under
+  the theme's menu scrim, and the launcher card a fifth of the way down: a
+  filter (`Search, or ask casper…`), `New conversation`, the mock's
+  conversations with ages and unread dots, then casper's places (Board,
+  Routines, Character, Ghosts, Hooks, MCP servers, Remote access). Typing
+  filters; Enter grows the card into the chosen view with a `‹` back to the
+  list; Enter on a filter nothing matches asks casper. `preview.sh` summons
+  it with `{"section":"home"}`; a plain summon opens the presence instead
+  (below).
   The nested session binds no keys (the summon key would reach the owner's
   own HUD); drive the preview with `omarchy-shell shell toggle ferdousbhai.ghost`
   under the exported variables.
@@ -126,7 +128,7 @@ that has already exited and the preview keeps running.
   narration stays as its own message, its tool call settled behind that
   message's quiet "1 step" toggle rather than in a card of its own, and the
   reply arrives as the next message.
-- On a plain toggle with the takeover closed: four `ghost-presence` edge layers
+- On a plain toggle with the HUD closed: four `ghost-presence` edge layers
   and a full-screen `ghost-presence-prompt` layer in `hyprctl layers`, the
   prompt focused (`wtype` types into it under the exported variables). `Enter`
   replaces the prompt with a `ghost-presence-card` ticker over 10px edges; the
@@ -141,10 +143,10 @@ that has already exited and the preview keeps running.
   its conversation is being viewed in the focused chat panel or followed by
   the presence. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
-- `Esc` behaves as getting-started's key table says: it leaves the takeover
-  last, after a question and the workbench, and a running turn survives it.
+- `Esc` behaves as getting-started's key table says: back from a view to the
+  list, then out, and a running turn survives it.
 - `hyprctl layers` lists `ghost-hud` while it is up; `hyprctl clients` lists
-  nothing of Ghost's. A backdrop click closes it.
+  nothing of Ghost's. A scrim click closes it.
 
 
 ## Validation
@@ -168,8 +170,9 @@ Use this preview for changes involving focus, layout, notifications, or file
 writes; mocked unit tests alone cannot prove those behaviors. Check the
 surfaces affected by the change:
 
-- Chat in the takeover and the presence card mark replies read; Board, a
-  closed takeover, and a narrow workbench hiding Chat preserve unread state.
+- Chat in the HUD and the presence card mark replies read; the launcher,
+  Board, a closed HUD, and a narrow workbench hiding Chat preserve unread
+  state.
 - Resources open on demand and add no chat messages.
 - Notifications replace their prior server ID and open the originating
   conversation when clicked.

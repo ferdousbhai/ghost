@@ -34,7 +34,7 @@ Item {
     function triggerPress(button: int): void {
         if (button !== Qt.LeftButton || !root.bar) return;
         root.bar.hideTooltip(root);
-        if (root.bar.shell) root.bar.shell.toggle(root.selfId, '{"section":"chat"}');
+        if (root.bar.shell) root.bar.shell.toggle(root.selfId, '{"section":"home"}');
     }
 
     readonly property string status: !Ghostd.reachable

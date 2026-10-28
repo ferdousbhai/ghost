@@ -52,7 +52,7 @@ Item {
     // the roster would re-emerge each time.
     property var summoned: ({})
 
-    implicitWidth: Theme.sidebarMeasure
+    implicitWidth: Theme.ch(30)
     implicitHeight: column.implicitHeight
 
     Column {

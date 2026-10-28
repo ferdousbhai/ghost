@@ -35,7 +35,7 @@ Item {
         if (hud.shown || !root.shell || !root.shell.isPluginOpen
             || !root.shell.isPluginOpen(root.selfId)) return;
         Qt.callLater(() => {
-            if (!root.summoned) root.open('{"section":"chat"}');
+            if (!root.summoned) root.open('{"section":"home"}');
         });
     }
 

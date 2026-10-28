@@ -100,7 +100,7 @@ line.
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
 — it is a plugin inside your own `omarchy-shell`, summoned with
 `omarchy-shell shell toggle ferdousbhai.ghost`; history and settings open with
-`omarchy-shell ghost section chat`.
+`omarchy-shell ghost section home`.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -131,7 +131,7 @@ ghost use sage        # save it as your default ghost (~/.config/ghost/cli.json)
 ghost list
 ```
 
-HUD: in the left sidebar (`Ctrl+B` toggles it), click the `+` in the **Ghosts**
+HUD: open the ghost mark in the bar, choose **Ghosts**, click the `+` in its
 header, type a name, press Enter.
 
 Either route posts to the same daemon route, which creates `~/ghosts/sage/`
@@ -200,22 +200,35 @@ ticker as a card. Summon again while the card is up to follow up in the same
 conversation (`new ×` starts a fresh one instead); `×` or `Esc` on the card
 dismisses it, and `open` shows the conversation in history.
 
-History and settings (the ghost mark in the Omarchy bar, your app launcher,
-or `omarchy-shell ghost section chat`) take over the screen you are on, over
-whatever is open, until you leave with `Esc`, the summon key, or a click on
-the dimmed desktop around them. An empty conversation shows the ghost's glyph, its name, and the static line
-`What's on your mind?`.
+History and settings open the way your desktop's own menu does (the ghost
+mark in the Omarchy bar, your app launcher, or
+`omarchy-shell ghost section home`): a card over whatever is open, with a
+filter on top and the ghost's conversations and places under it.
 
-Type, and:
+| Key | Effect |
+|---|---|
+| typing | filter conversations and places |
+| `Up` / `Down` (`Ctrl+K` / `Ctrl+J`) | move |
+| `Enter` | open the row; with nothing matching, ask the ghost what you typed |
+| `Tab` | the next ghost's list |
+| `Ctrl+N` | new conversation |
+| `Ctrl+R` / `Ctrl+P` / `Delete` | rename, pin, or trash the selected conversation |
+| `Esc` | close |
+
+A row grows the card into its view: a conversation, **Board**, **Routines**,
+**Character**, **Ghosts**, **Hooks**, **MCP servers**, or **Remote access**;
+`‹` or `Esc` goes back to the list. An empty conversation shows the ghost's
+glyph, its name, and the static line `What's on your mind?`.
+
+In a conversation, type, and:
 
 | Key | Effect |
 |---|---|
 | `Enter` | send |
 | `Shift+Enter` | newline |
 | `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
-| `Esc` | dismiss a pending confirmation, then close the workbench, then leave; a running turn keeps going |
+| `Esc` | dismiss a pending confirmation, then close the workbench, then back to the list; a running turn keeps going |
 | `Shift+Esc` | stop a running turn |
-| `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 | `Ctrl+N` | start a new conversation (the composer's `+`) |
 | `PageUp` / `PageDown` | scroll the transcript a page |
 | `Ctrl+Home` / `Ctrl+End` | jump to the transcript's start / back to its end, following new output again |
@@ -225,9 +238,7 @@ The transcript follows new output only while you are at its end. Scrolled
 up, it stays put and shows **↓ Jump to latest message**; its scrollbar
 appears only while it moves or under the pointer.
 
-The rail on the right switches sections: **Chat**, **Board**, **Routines**,
-**Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
-mark in the Omarchy bar toggles them.
+Clicking the ghost mark in the Omarchy bar toggles the card.
 
 ## 7. The same ghost from the terminal
 

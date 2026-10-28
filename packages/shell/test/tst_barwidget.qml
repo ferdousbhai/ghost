@@ -61,7 +61,7 @@ TestCase {
         widget.triggerPress(Qt.LeftButton);
         compare(calls.length, 1);
         compare(calls[0][0], "ferdousbhai.ghost");
-        compare(calls[0][1], '{"section":"chat"}');
+        compare(calls[0][1], '{"section":"home"}');
         widget.triggerPress(Qt.LeftButton);
         compare(calls.length, 2);
     }

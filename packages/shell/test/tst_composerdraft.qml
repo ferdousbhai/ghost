@@ -3,20 +3,14 @@ import QtTest
 import "../qml/components"
 import "../qml/services"
 
-// The composer's `+` and Ctrl+N share one entry point: a fresh conversation,
-// the search field cleared, and the keyboard handed back to the composer.
+// The composer's `+` asks for a fresh conversation, and text ghostd hands back
+// joins the draft rather than replacing it.
 TestCase {
-    name: "SidebarCompose"
+    name: "ComposerDraft"
     when: windowShown
     width: 400
     height: 600
     visible: true
-
-    Sidebar {
-        id: sidebar
-        width: 300
-        height: 600
-    }
 
     Composer {
         id: composer
@@ -24,10 +18,9 @@ TestCase {
         y: 540
         width: 300
         height: 48
-        onNewConversationRequested: sidebar.startConversation()
     }
 
-    SignalSpy { id: refocused; target: sidebar; signalName: "refocused" }
+    SignalSpy { id: requested; target: composer; signalName: "newConversationRequested" }
 
     function init(): void {
         Ghostd.turnStates = ({});
@@ -35,21 +28,13 @@ TestCase {
         Ghostd.currentSessionId = "";
         Ghostd.sessionIds = ({ casper: "" });
         Ghostd.sessions = [];
-        refocused.clear();
+        requested.clear();
     }
 
     function cleanup(): void {
         Ghostd.turnStates = ({});
         Ghostd.currentSessionId = "";
         Ghostd.sessions = [];
-    }
-
-    function test_startConversationOpensADraftAndRefocuses(): void {
-        sidebar.startConversation();
-        verify(Ghostd.currentSessionId !== "");
-        compare(Ghostd.sessions.length, 1);
-        compare(Ghostd.sessions[0].messageCount, 0);
-        compare(refocused.count, 1);
     }
 
     // A stop or a refused follow-up hands text back; what the owner typed since stays.
@@ -63,9 +48,8 @@ TestCase {
         composer.text = "";
     }
 
-    function test_composeButtonOpensADraft(): void {
+    function test_composeButtonAsksForANewConversation(): void {
         mouseClick(composer, 18, 24);
-        verify(Ghostd.currentSessionId !== "");
-        compare(refocused.count, 1);
+        compare(requested.count, 1);
     }
 }

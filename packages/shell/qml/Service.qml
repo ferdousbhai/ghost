@@ -25,7 +25,7 @@ Item {
 
     onShellChanged: if (root.shell && Ghostd.reopenAfterReload) {
         Ghostd.reopenAfterReload = false;
-        root.summon(({ section: "chat" }));
+        root.summon(({ section: "home" }));
     }
 
     // `omarchy-shell ghost <verb>`; the plain toggle is the shell's own

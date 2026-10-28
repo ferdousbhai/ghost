@@ -23,14 +23,6 @@ TestCase {
         }
     }
 
-    Component {
-        id: navigationComponent
-        GhostNavigation {
-            width: 72
-            height: 600
-        }
-    }
-
     function status(overrides: var): var {
         return Object.assign({
             enabled: false,
@@ -143,18 +135,6 @@ TestCase {
             compare(actionBlock.visible, row[2] !== "", row[0]);
             compare(actionCommand.text, row[2], row[0]);
         }
-    }
-
-    // Generic destination activation is tst_hooksbrowser's coverage; this
-    // pins only what is remote-access-specific — the label the owner reads.
-    function test_navigationOffersRemoteAccess(): void {
-        const navigation = createTemporaryObject(navigationComponent, tc);
-        verify(navigation !== null);
-        const remote = navigation.destinations.find(function (destination) {
-            return destination.id === "remote";
-        });
-        verify(remote !== undefined);
-        compare(remote.label, "Remote access");
     }
 
     function test_switchPostsExactEnabledBody(): void {

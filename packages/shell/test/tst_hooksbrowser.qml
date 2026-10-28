@@ -26,15 +26,6 @@ TestCase {
         }
     }
 
-    Component {
-        id: navigationComponent
-        Components.GhostNavigation {
-            width: 72
-            height: 520
-            activeHookCount: 7
-        }
-    }
-
     property var requests: []
 
     function configDocument(): var {
@@ -166,20 +157,5 @@ TestCase {
         mouseClick(findChild(browser, "hookDeleteButton"));
         compare(tc.requests.length, 2);
         compare(JSON.parse(tc.requests[1].body), configDocument());
-    }
-
-
-    function test_navigationContainsKeyboardActivatableHooksDestination(): void {
-        const navigation = createTemporaryObject(navigationComponent, tc);
-        verify(navigation !== null);
-        const hookIndex = navigation.destinations.findIndex(function (destination) {
-            return destination.id === "hooks";
-        });
-        verify(hookIndex > 0);
-        verify(navigation.destinations[hookIndex].label.indexOf("7 loaded") >= 0);
-        let selected = "";
-        navigation.selected.connect(function (section) { selected = section; });
-        navigation.activate(hookIndex);
-        compare(selected, "hooks");
     }
 }

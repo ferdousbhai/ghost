@@ -17,5 +17,5 @@ config uses. Nothing here edits your Omarchy configuration.
 
 [`ghost.desktop`](ghost.desktop) and [`icons/`](icons) give Ghost an
 application entry and a hicolor icon so it appears in launchers. The package
-installs both. The entry opens history and settings with `ghost section chat`, a
+installs both. The entry opens history and settings with `ghost section home`, a
 summon, not a toggle: launching an app shows it, never hides it.

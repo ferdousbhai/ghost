@@ -678,13 +678,16 @@ runtime preserves owner data.
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
   dismissed or opened in the window. Edge surfaces take no input and reserve
-  no space. A payload naming a `section` or `sessionId` opens the HUD, a takeover:
-  a full-screen layer over everything on the focused monitor that holds the
-  keyboard while up, its sections centred on the dimmed desktop. Esc (after a
-  standing question and the workbench), the toggle, or a backdrop click
-  closes it, a running turn continuing behind it; Shift+Esc stops a turn.
-  Opening a link, a file, or the external editor closes it. The bar dot and
-  desktop entry open it on `chat`. It runs inside Omarchy's own shell
+  no space. A payload naming a `section` or `sessionId` opens the HUD: a card
+  over everything on the focused monitor, on the theme's `[menu]` scrim and
+  card tokens like Omarchy's own menu, holding the keyboard while up. Section
+  `home` is its launcher, a filter over the ghost's conversations and its
+  places (the other sections) that asks the ghost what was typed when nothing
+  matches; a row grows the card into that section. Esc steps back (a
+  standing question, the workbench, the section to `home`, then out), as do
+  the toggle and a scrim click; a running turn continues behind it, and
+  Shift+Esc stops one. Opening a link, a file, or the external editor closes
+  it. The bar dot and desktop entry open it on `home`. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and
