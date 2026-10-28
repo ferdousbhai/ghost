@@ -6,26 +6,6 @@ import "../qml/components/ToolTrace.js" as ToolTrace
 TestCase {
     name: "ToolTrace"
 
-    function test_liveSummaryBecomesOutcome(): void {
-        const activity = {
-            name: "grep",
-            status: "complete",
-            arguments: { pattern: "launch" },
-            summary: "Found the plan in roadmap.md"
-        };
-        compare(ToolTrace.text(activity, true, false, false), "Found the plan in roadmap.md");
-    }
-
-    function test_restoredCallUsesHumanFallback(): void {
-        const activity = {
-            name: "read",
-            status: "complete",
-            arguments: { path: "projects/roadmap.md" },
-            summary: ""
-        };
-        compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
-    }
-
     function test_nativeWriterUsesItsCapturedCwd(): void {
         const activity = {
             name: "write",
@@ -76,73 +56,70 @@ TestCase {
         compare(ToolTrace.text(many, false, false, false), "Working on the desktop");
     }
 
-    function test_failureKeepsPurpose(): void {
-        const activity = {
-            name: "ghost_browser",
-            status: "failed",
-            arguments: { action: "open", url: "https://example.com" },
-            summary: ""
-        };
-        compare(
-            ToolTrace.text(activity, false, true, false),
-            "Couldn’t complete: Opening https://example.com"
-        );
-    }
-
-    // The runtime does most of its work through its own coding tools; each
-    // reads as one sentence whether it is still running or finished.
-    function test_nativeToolsDescribeTheirWork(): void {
-        function trace(name, args, completed) {
-            return ToolTrace.text(
-                { name: name, status: "running", arguments: args, summary: "" },
-                completed === true, false, false);
+    // pi's convention: a call is shown as itself, what it does, never as what
+    // came back. Running or finished, the line is the same.
+    function test_callsReadTheWayPiShowsThem(): void {
+        function call(name, args, extra) {
+            return ToolTrace.text(Object.assign({ name: name, status: "running", arguments: args, summary: "" },
+                extra || ({})), false, false, false);
         }
-        compare(trace("read", { path: "docs/design.md" }), "Reading docs/design.md");
-        compare(trace("read", { path: "docs/design.md" }, true), "Read docs/design.md");
-        compare(trace("bash", { command: "pnpm test" }), "Running pnpm test");
-        compare(trace("grep", { pattern: "retry" }), "Searching for “retry”");
-        compare(trace("find", { pattern: "*.qml" }), "Looking for files matching “*.qml”");
-        compare(trace("write", { path: "notes.md" }), "Writing notes.md");
-        compare(trace("edit", { path: "notes.md" }), "Editing notes.md");
-        compare(ToolTrace.fileTarget({ name: "edit", arguments: { path: "notes.md" } }),
-            "notes.md");
+        compare(call("bash", { command: "pnpm test" }), "$ pnpm test");
+        compare(call("read", { path: "docs/design.md" }), "read docs/design.md");
+        compare(call("read", { path: "docs/design.md", offset: 10, limit: 31 }), "read docs/design.md:10-40");
+        compare(call("write", { path: "notes.md" }), "write notes.md");
+        compare(call("edit", { path: "notes.md" }), "edit notes.md");
+        compare(call("ls", ({})), "ls .");
+        compare(call("grep", { pattern: "retry", path: "src", glob: "*.ts" }), "grep /retry/ in src (*.ts)");
+        compare(call("find", { pattern: "*.qml" }), "find *.qml in .");
+        compare(ToolTrace.fileTarget({ name: "edit", arguments: { path: "notes.md" } }), "notes.md");
     }
 
-    // Harnesses spell the same tools their own way; Claude Code's are capitalised
-    // and name the file `file_path`.
-    function test_harnessSpellingsDescribeTheSameWork(): void {
-        function trace(name, args) {
-            return ToolTrace.text(
-                { name: name, status: "complete", arguments: args, summary: "" },
-                true, false, false);
+    // Each harness spells the same tools its own way.
+    function test_harnessSpellingsReadTheSame(): void {
+        function call(name, args) {
+            return ToolTrace.text({ name: name, status: "complete", arguments: args, summary: "" }, true, false, false);
         }
-        compare(trace("Read", { file_path: "/tmp/notes.md" }), "Read /tmp/notes.md");
-        compare(trace("Bash", { command: "ls" }), "Ran ls");
-        compare(ToolTrace.fileTarget({ name: "Write", arguments: { file_path: "/tmp/a.md" } }),
-            "/tmp/a.md");
+        compare(call("Read", { file_path: "/tmp/notes.md" }), "read /tmp/notes.md");
+        compare(call("Bash", { command: "ls" }), "$ ls");
+        // Codex wraps its command; the script is the command.
+        compare(call("shell", { command: ["bash", "-lc", "git status"] }), "$ git status");
+        compare(call("apply_patch", { input: "*** Begin Patch\n*** Update File: src/app.ts\n@@" }), "edit src/app.ts");
+        compare(ToolTrace.fileTarget({ name: "Write", arguments: { file_path: "/tmp/a.md" } }), "/tmp/a.md");
     }
 
-    // A file's own bytes coming back as the "summary" says less than the
-    // sentence naming the file. A failure still speaks for itself.
-    function test_rawContentNeverOutranksTheSentence(): void {
-        const read = {
-            name: "read",
-            status: "complete",
-            arguments: { path: "docs/design.md" },
-            summary: "# design\nthe whole file, verbatim"
-        };
-        compare(ToolTrace.text(read, true, false, false), "Read docs/design.md");
-        const failed = Object.assign({}, read, { summary: "docs/design.md does not exist" });
-        compare(ToolTrace.text(failed, false, true, false), "docs/design.md does not exist");
+    // Paths read short: inside the call's directory, relative; home as ~.
+    function test_pathsReadShort(): void {
+        const cwd = "/home/owner/ghosts/casper/sessions/c1";
+        compare(ToolTrace.text({ name: "read", arguments: { path: cwd + "/notes.md" }, cwd: cwd }, false, false, false),
+            "read notes.md");
+        compare(ToolTrace.text({ name: "read", arguments: { path: "/home/owner/.config/hypr/bindings.lua" }, cwd: cwd },
+            false, false, false), "read ~/.config/hypr/bindings.lua");
     }
 
-    function test_unknownCallStaysOutOfTheTranscript(): void {
-        const activity = {
-            name: "internal_operation",
-            status: "running",
-            arguments: ({}),
-            summary: ""
-        };
-        compare(ToolTrace.text(activity, false, false, false), "");
+    // What came back is the output, shown on request or when the call failed;
+    // it never replaces the call, however informative it looks.
+    function test_resultsAreOutputNotTheLine(): void {
+        const read = { name: "read", status: "complete", arguments: { path: "docs/design.md" },
+            summary: "# design\nthe whole file, verbatim" };
+        compare(ToolTrace.text(read, true, false, false), "read docs/design.md");
+        const quiet = { name: "bash", status: "complete", arguments: { command: "true" }, summary: "(no output)" };
+        compare(ToolTrace.text(quiet, true, false, false), "$ true");
+        compare(ToolTrace.output(quiet), "(no output)");
+        const failed = { name: "read", status: "failed", arguments: { path: "docs/design.md" },
+            summary: "docs/design.md does not exist" };
+        compare(ToolTrace.text(failed, false, true, false), "read docs/design.md");
+        compare(ToolTrace.output(failed), "docs/design.md does not exist");
+    }
+
+    // A tool with no renderer of its own shows its name and arguments, as pi
+    // shows one: nothing the ghost does is out of sight.
+    function test_anyOtherToolShowsItsNameAndArguments(): void {
+        compare(ToolTrace.text({ name: "internal_operation", arguments: ({}) }, false, false, false), "internal_operation");
+        compare(ToolTrace.text({ name: "todo", arguments: { action: "add", text: "ship it" } }, false, false, false),
+            "todo action: add, text: ship it");
+        const long = ToolTrace.text({ name: "fetch", arguments: { url: "https://example.com/" + "x".repeat(200) } },
+            false, false, false);
+        compare(long.length, 100);
+        verify(long.endsWith("…"));
     }
 }

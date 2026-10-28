@@ -43,51 +43,113 @@ function toolName(activity) {
 }
 
 /**
- * The tools that are a verb and one argument. Every one of them reads the same
- * way — "Reading docs/design.md", "Ran pnpm test" — and writing them out was a
- * dozen near-identical blocks that had to be found and edited one at a time.
- * The sentence with no argument is spelled out rather than derived: "Searching
- * for the files" is not what "Searching the files" turns into.
+ * A path as pi shows one: relative to the call's working directory when it
+ * lies inside it, the home directory as `~`, otherwise as given.
  */
-var VERBS = {
-    read: {
-        past: "Read", present: "Reading", of: pathArgument,
-        alonePast: "Read a file", alonePresent: "Reading a file"
-    },
-    write: {
-        past: "Wrote", present: "Writing", of: pathArgument,
-        alonePast: "Wrote a file", alonePresent: "Writing a file"
-    },
-    edit: {
-        past: "Edited", present: "Editing", of: pathArgument,
-        alonePast: "Edited a file", alonePresent: "Editing a file"
-    },
-    ls: {
-        past: "Listed", present: "Listing", key: "path",
-        alonePast: "Listed a directory", alonePresent: "Listing a directory"
-    },
-    bash: {
-        past: "Ran", present: "Running", key: "command",
-        alonePast: "Ran a command", alonePresent: "Running a command"
-    },
-    grep: {
-        past: "Searched for", present: "Searching for", key: "pattern", quote: true,
-        alonePast: "Searched the files", alonePresent: "Searching the files"
-    },
-    find: {
-        past: "Looked for files matching", present: "Looking for files matching",
-        key: "pattern", quote: true,
-        alonePast: "Looked for files", alonePresent: "Looking for files"
-    }
-};
-
-function verbTrace(verb, activity, completed, limit) {
-    const raw = verb.of ? verb.of(activity) : argument(activity, verb.key);
-    if (raw === "") return completed ? verb.alonePast : verb.alonePresent;
-    return (completed ? verb.past : verb.present) + " "
-        + (verb.quote ? quoted(raw, limit) : compact(raw, limit));
+function shortPath(value, cwd) {
+    var path = String(value || "").trim();
+    if (path === "") return "";
+    if (cwd && path.indexOf(cwd + "/") === 0) path = path.slice(cwd.length + 1);
+    return path.replace(/^\/home\/[^/]+(?=\/|$)/u, "~");
 }
 
+/**
+ * A shell call's command line. Codex sends `["bash", "-lc", "<script>"]`;
+ * the script is the command, the wrapper is not.
+ */
+function shellCommand(activity) {
+    var args = activity.arguments || ({});
+    var command = args.command !== undefined ? args.command : args.cmd;
+    if (Array.isArray(command)) {
+        var wrapped = command.length === 3 && /(^|\/)(ba|z)?sh$/u.test(String(command[0]))
+            && /^-l?c$/u.test(String(command[1]));
+        command = wrapped ? command[2] : command.join(" ");
+    }
+    return typeof command === "string" ? command.trim() : "";
+}
+
+/** `:start` or `:start-end` from a read's offset and limit, as pi prints it. */
+function lineRange(activity) {
+    var args = activity.arguments || ({});
+    if (typeof args.offset !== "number" && typeof args.limit !== "number") return "";
+    var start = typeof args.offset === "number" && args.offset > 0 ? args.offset : 1;
+    return ":" + start + (typeof args.limit === "number" && args.limit > 0 ? "-" + (start + args.limit - 1) : "");
+}
+
+/** The file an edit names; a Codex patch names it in its first file header. */
+function editedPath(activity) {
+    var path = pathArgument(activity);
+    if (path !== "") return path;
+    var patch = argument(activity, "input") || argument(activity, "patch");
+    var header = /\*\*\* (?:Update|Add|Delete) File: (.+)/u.exec(patch);
+    return header ? header[1].trim() : "";
+}
+
+/** Every argument, `key: value`, the way pi shows a tool it has no renderer for. */
+function genericCall(name, activity, limit) {
+    var args = activity.arguments;
+    var parts = [];
+    if (args && typeof args === "object" && !Array.isArray(args)) {
+        for (var key in args) {
+            var value = args[key];
+            parts.push(key + ": " + (typeof value === "string" ? value : JSON.stringify(value)));
+        }
+    }
+    return compact(parts.length > 0 ? name + " " + parts.join(", ") : name, limit);
+}
+
+var SHELL_TOOLS = { bash: true, shell: true, exec_command: true, local_shell: true, run_terminal_cmd: true };
+
+/**
+ * A call as pi shows it: what is being done, never what came back. `$ git
+ * status`, `read ~/notes/plan.md:10-40`, `edit src/app.ts`, `grep /retry/ in
+ * src (*.ts)`, `find *.md in docs`, and any other tool as its name and
+ * arguments. Ghost's own desktop tools carry no command or path to show, so
+ * they keep their plain phrase.
+ */
+function piCall(activity, limit) {
+    var name = toolName(activity);
+    var cwd = fileCwd(activity);
+    var path = function (value, fallbackPath) {
+        var shown = shortPath(value, cwd);
+        return shown !== "" ? shown : fallbackPath;
+    };
+    if (SHELL_TOOLS[name]) {
+        var command = shellCommand(activity);
+        return "$ " + (command !== "" ? compact(command, limit) : "…");
+    }
+    switch (name) {
+    case "read":
+    case "view":
+    case "read_file":
+        return compact("read " + path(pathArgument(activity), "…") + lineRange(activity), limit);
+    case "write":
+    case "write_file":
+    case "create":
+        return compact("write " + path(pathArgument(activity), "…"), limit);
+    case "edit":
+    case "multiedit":
+    case "str_replace":
+    case "apply_patch":
+    case "patch":
+        return compact("edit " + path(editedPath(activity), "…"), limit);
+    case "ls":
+    case "list":
+    case "list_dir":
+        return compact("ls " + path(argument(activity, "path"), "."), limit);
+    case "grep":
+    case "search": {
+        var glob = argument(activity, "glob") || argument(activity, "include");
+        return compact("grep /" + argument(activity, "pattern") + "/ in " + path(argument(activity, "path"), ".")
+            + (glob !== "" ? " (" + glob + ")" : ""), limit);
+    }
+    case "find":
+    case "glob":
+        return compact("find " + argument(activity, "pattern") + " in " + path(argument(activity, "path"), "."), limit);
+    default:
+        return "";
+    }
+}
 
 /**
  * The file a call wrote, named the way the tool named it. Writers only — a
@@ -115,8 +177,8 @@ function fileCwd(activity) {
 // calls retain their arguments, while live result summaries do not.
 function fallback(activity, completed, limit) {
     const name = toolName(activity);
-    const verb = VERBS[name];
-    if (verb) return verbTrace(verb, activity, completed, limit);
+    const call = piCall(activity, limit);
+    if (call !== "") return call;
 
     switch (name) {
     case "desktop_look": {
@@ -156,42 +218,26 @@ function fallback(activity, completed, limit) {
         return completed ? "Worked on the desktop" : "Working on the desktop";
     }
     default:
-        return "";
+        return genericCall(String(activity.name || "tool"), activity, Math.min(limit, 100));
     }
 }
 
 /**
- * Tools whose result is the work itself rather than an account of it: a file's
- * bytes, a page's text, a directory's entries. The runtime puts that result on
- * the wire as `summary`, and 180 characters of it says less than "Read
- * src/foo.ts" does. A failure is the exception — its text is the only thing
- * that explains what went wrong.
- */
-function resultIsRawContent(activity) {
-    switch (toolName(activity)) {
-    case "read":
-    case "ls":
-        return true;
-    default:
-        return false;
-    }
-}
-
-/**
- * One sentence for a call. `expanded` is for a surface that wraps — an open
- * card, the activity line — and keeps a command or path whole; a one-line
- * surface gets a short argument it can elide.
+ * One line for a call, pi's way: the call itself, running or done. What came
+ * back is `output`, shown only where someone asks for it or the call failed;
+ * a result is the work's material ("(no output)", a file's bytes), not an
+ * account of what the ghost is doing. `expanded` is for a surface that wraps
+ * (an open card, the activity line) and keeps a command or path whole.
  */
 function text(activity, completed, failed, expanded) {
     activity = fields(activity);
-    const limit = expanded ? 1200 : 180;
-    const argumentLimit = expanded ? limit : 80;
-    const summary = !failed && resultIsRawContent(activity)
-        ? "" : compact(activity.summary || "", limit);
-    const base = summary || fallback(activity, completed, argumentLimit);
-    if (failed && summary === "" && base !== "")
-        return "Couldn’t complete: " + base;
-    return base;
+    return fallback(activity, completed, expanded ? 1200 : 100);
+}
+
+/** What the call returned, one line: the error of a failed call, the output of any. */
+function output(activity) {
+    activity = fields(activity);
+    return compact(activity.summary || "", 600);
 }
 
 function input(activity) {
@@ -216,6 +262,7 @@ function view(activity, completed, failed, expanded) {
     return {
         trace: text(activity, completed, failed, expanded),
         diagnosticInput: diagnosticInput,
+        diagnosticOutput: output(activity),
         fileTarget: fileTarget(activity),
         fileCwd: fileCwd(activity)
     };

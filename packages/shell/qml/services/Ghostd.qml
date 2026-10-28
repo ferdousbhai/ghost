@@ -2384,7 +2384,8 @@ Singleton {
                 name: event.toolName,
                 status: "running",
                 arguments: event.arguments || ({}),
-                cwd: typeof event.cwd === "string" ? event.cwd : ""
+                cwd: typeof event.cwd === "string" ? event.cwd : "",
+                startedAt: Date.now()
             });
             break;
         // An update or end only ever follows its call's start.

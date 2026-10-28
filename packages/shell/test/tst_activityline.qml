@@ -51,13 +51,16 @@ TestCase {
         compare(line.phrase, "Thinking");
 
         Ghostd.toolActivities = [tool("read", "running", { path: "docs/design.md" })];
-        compare(line.phrase, "Reading docs/design.md");
+        compare(line.phrase, "read docs/design.md");
 
-        // The call settles; the line says what was just done until the next
-        // step has a name of its own.
+        // The call settles; between calls the line never replays what came
+        // back (pi's convention), so it says the turn is working.
         Ghostd.toolActivities = [tool("read", "complete", { path: "docs/design.md" })];
         Ghostd.activity = "";
-        compare(line.phrase, "Read docs/design.md");
+        compare(line.phrase, "Working");
+        // A failed call is named, with its error.
+        Ghostd.toolActivities = [Object.assign(tool("bash", "failed", { command: "pnpm test" }), { summary: "exit 1: 2 tests failed" })];
+        compare(line.phrase, "$ pnpm test failed: exit 1: 2 tests failed");
         Ghostd.toolActivities = [];
         compare(line.phrase, "Working");
     }
@@ -146,12 +149,27 @@ TestCase {
         Ghostd.streaming = true;
 
         Ghostd.toolActivities = [tool("write", "running", ({}))];
-        compare(line.phrase, "Writing a file");
+        compare(line.phrase, "write …");
         Ghostd.toolActivities = [tool("write", "running", { path: "notes.md" })];
         Ghostd.activity = "write";
-        compare(line.phrase, "Writing notes.md");
+        compare(line.phrase, "write notes.md");
         Ghostd.activity = "";
-        compare(line.phrase, "Writing notes.md");
+        compare(line.phrase, "write notes.md");
+    }
+
+    // pi times a call: after a second the line says how long it has run, and
+    // never trails dots after a command.
+    function test_aRunningCallShowsHowLongItHasRun(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        Ghostd.streaming = true;
+        line.now = 100000;
+        Ghostd.toolActivities = [Object.assign(tool("bash", "running", { command: "pnpm test" }), { startedAt: 100000 })];
+        compare(line.phrase, "$ pnpm test");
+        line.now = 104200;
+        compare(line.phrase, "$ pnpm test · 4s");
+        line.now = 100000 + 75000;
+        compare(line.phrase, "$ pnpm test · 1m 15s");
     }
 
     // Parallel calls settle in any order; the newest one is the one running now.
@@ -163,7 +181,7 @@ TestCase {
             tool("read", "complete", { path: "docs/design.md" }),
             tool("grep", "running", { pattern: "retry" })
         ];
-        compare(line.phrase, "Searching for “retry”");
+        compare(line.phrase, "grep /retry/ in .");
     }
 
     function test_aFailedTurnShowsItsErrorInsteadOfActivity(): void {
@@ -181,10 +199,10 @@ TestCase {
         const line = createTemporaryObject(lineComponent, tc);
         verify(line !== null);
         const command = "pnpm --filter @ghost/daemon test test/stream-lifecycle.test.ts "
-            + "--reporter=verbose --bail 1";
+            + "test/session-host.test.ts --reporter=verbose --bail 1";
         Ghostd.streaming = true;
         Ghostd.toolActivities = [tool("bash", "running", { command: command })];
-        compare(line.phrase, "Running " + command);
+        compare(line.phrase, "$ " + command);
         verify(ToolTrace.text(Ghostd.toolActivities[0], false, false, false).endsWith("…"));
     }
 

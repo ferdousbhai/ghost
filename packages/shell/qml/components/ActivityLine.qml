@@ -20,6 +20,8 @@ Item {
 
     readonly property bool failing: !Ghostd.streaming && Ghostd.lastError !== ""
     property int ellipsisStep: 0
+    /** Wall time, ticking with the ellipsis, for a running call's elapsed time. */
+    property real now: Date.now()
 
     /**
      * The call the ghost is inside of, or null between calls. Parallel calls
@@ -34,19 +36,28 @@ Item {
         }
         return null;
     }
+    /** pi's line for the call in flight: the call itself, then how long it has run. */
     readonly property string toolLine: root.liveTool
-        ? ToolTrace.text(root.liveTool, false, false, true) : ""
+        ? ToolTrace.text(root.liveTool, false, false, true) + root.elapsed(root.liveTool) : ""
     readonly property var lastTool: Ghostd.toolActivities.length > 0
         ? Ghostd.toolActivities[Ghostd.toolActivities.length - 1] : null
     readonly property string phrase: root.toolLine !== "" ? root.toolLine
         : root.stateLine(Ghostd.activity)
 
+    /** " · 4s" once a call has run a second, as pi times one; "" before. */
+    function elapsed(tool: var): string {
+        const seconds = typeof tool.startedAt === "number" ? Math.floor((root.now - tool.startedAt) / 1000) : 0;
+        if (seconds < 1) return "";
+        return " · " + (seconds < 60 ? seconds + "s" : Math.floor(seconds / 60) + "m " + (seconds % 60) + "s");
+    }
+
     /**
      * The runtime's own word for a turn that is not inside a tool call, or the
-     * name of the owner hook it is waiting on. A tool
-     * name arriving here is not repeated — {@link toolLine} already said it,
-     * with the arguments that make it mean something. Between calls with no
-     * word of its own, the turn is still digesting the call that last settled.
+     * name of the owner hook it is waiting on. A tool name arriving here is not
+     * repeated: {@link toolLine} already said it, with the arguments that make
+     * it mean something. Between calls the line never replays what the last
+     * one returned (its output is material, not news), except that a call
+     * that failed is named with the first line of its error.
      */
     function stateLine(activity: string): string {
         if (activity.startsWith("thinking:")) return root.thoughtLine(activity.slice(9));
@@ -54,8 +65,10 @@ Item {
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
         if (activity.startsWith("starting:")) return "Starting " + activity.slice(9);
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
-        if (root.lastTool)
-            return ToolTrace.text(root.lastTool, true, root.lastTool.status === "failed", true);
+        if (root.lastTool && root.lastTool.status === "failed") {
+            const error = ToolTrace.output(root.lastTool);
+            return ToolTrace.text(root.lastTool, true, true, true) + " failed" + (error !== "" ? ": " + error : "");
+        }
         return "Working";
     }
 
@@ -87,7 +100,10 @@ Item {
         interval: 430
         repeat: true
         running: Ghostd.working && !Theme.reducedMotion
-        onTriggered: root.ellipsisStep = (root.ellipsisStep + 1) % 4
+        onTriggered: {
+            root.ellipsisStep = (root.ellipsisStep + 1) % 4;
+            root.now = Date.now();
+        }
     }
 
     Row {
@@ -134,7 +150,10 @@ Item {
                 width: phraseScroll.width
                 text: root.failing
                     ? Ghostd.lastError
-                    : root.phrase + (Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
+                    // A call line carries its own timer; dots after a command
+                    // would read as part of it.
+                    : root.phrase + (root.toolLine !== "" ? ""
+                        : Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
                 color: root.failing ? Theme.ghostRose : root.phraseColor
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall

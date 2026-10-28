@@ -1,9 +1,10 @@
 pragma ComponentBehavior: Bound
 
 // ToolCard — summon-ghost's amber whisper-card. One tool activity, rendered as
-// a human-readable trace inside the assistant's own message: a ghost glyph in
-// its halo, a light amber line ("Ghost updated memory."), and the diagnostics
-// folded away behind a click. Warm amber is the ghost's own temperature; the
+// a trace inside the assistant's own message: a ghost glyph in its halo, a
+// light amber line that is the call as pi shows it (`$ git status`, `read
+// notes/plan.md`), and what it returned folded away behind a click (shown
+// at once, in rose, when the call failed). Warm amber is the ghost's own temperature; the
 // cold spectral blue belongs to the thinking orb, not here.
 import QtQuick
 import Qt5Compat.GraphicalEffects
@@ -29,7 +30,7 @@ Rectangle {
     readonly property var presentation: ToolTrace.view(
         root.call(), root.completed, root.failed, root.expanded)
     readonly property string trace: root.presentation.trace
-    readonly property string diagnosticInput: root.presentation.diagnosticInput
+    readonly property string diagnosticOutput: root.presentation.diagnosticOutput
 
     // Paths resolve against the cwd captured when that exact call began; a
     // relative path with no cwd offers no chip rather than silently opening a
@@ -184,11 +185,12 @@ Rectangle {
             wrapMode: Text.Wrap
         }
 
+        // pi's result under its call: on request, or always when the call failed.
         Text {
-            visible: root.expanded && root.diagnosticInput !== ""
+            visible: (root.expanded || root.failed) && root.diagnosticOutput !== ""
             width: parent.width
-            text: "Input · " + root.diagnosticInput
-            color: root.detailColor
+            text: "Output · " + root.diagnosticOutput
+            color: root.failed ? Theme.ghostRose : root.detailColor
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.Wrap
