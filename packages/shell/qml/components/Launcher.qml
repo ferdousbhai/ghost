@@ -103,20 +103,13 @@ FocusScope {
         width: parent.width
         height: Theme.controlHeight + Theme.pad * 1.2
 
-        SpectralOrb {
-            id: orb
-            visible: !root.ghostMode
+        // The way back from the ghosts to the conversations.
+        Text {
+            id: back
+            visible: root.ghostMode
             anchors.left: parent.left
             anchors.leftMargin: Theme.pad
             anchors.verticalCenter: parent.verticalCenter
-            diameter: Theme.fontSizeTitle + 8
-            turnKey: "launcher"
-        }
-
-        // Where the orb sits on the list, the way back from the ghosts.
-        Text {
-            visible: root.ghostMode
-            anchors.centerIn: orb
             text: "‹"
             color: backArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -137,8 +130,8 @@ FocusScope {
         TextInput {
             id: filter
             objectName: "launcherFilter"
-            anchors.left: orb.right
-            anchors.leftMargin: Theme.gap * 1.5
+            anchors.left: back.visible ? back.right : parent.left
+            anchors.leftMargin: back.visible ? Theme.gap * 1.5 : Theme.pad
             anchors.right: ghostChip.visible ? ghostChip.left : closeMark.left
             anchors.rightMargin: Theme.gap
             anchors.verticalCenter: parent.verticalCenter

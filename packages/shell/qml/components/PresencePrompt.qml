@@ -66,6 +66,8 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 diameter: Theme.fontSize + 6
                 turnKey: "presence"
+                // Motion means the ghost is working; at rest the orb holds still.
+                running: Ghostd.anyStreaming
             }
 
             Text {
