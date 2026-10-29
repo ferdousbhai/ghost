@@ -33,3 +33,4 @@ CodeBlock 1.0 CodeBlock.qml
 PaneHeader 1.0 PaneHeader.qml
 GlyphButton 1.0 GlyphButton.qml
 ListeningLight 1.0 ListeningLight.qml
+VoicePicker 1.0 VoicePicker.qml

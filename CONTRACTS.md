@@ -549,7 +549,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the name `ghost` is reserved for `ghost-desktop` and refused. The next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
-| `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
+| `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, spoken? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `spoken: true` says the owner asked aloud and will hear the reply: the owner's pass, not a queued follow-up or a hook's continuation, carries `SPOKEN_TURN` (`prompt-policy.ts`) after the message, which the transcript keeps as written. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
@@ -782,7 +782,18 @@ owner's `turn_end` command hook. Completed turns,
   exits nonzero, crashes, or never starts shows as status text above the
   field, whatever the draft or state, until the next command; Voxtype reports
   no failed transcription, so the HUD shows none. Ghost ships no speech stack
-  of its own.
+  of its own. Talking back is optional the same way: with Piper installed
+  (`piper-tts`, or upstream's `piper`) and a voice chosen for the ghost in the
+  Character pane, a turn asked aloud (Voxtype transcribed into its prompt or
+  launcher filter since it opened) is sent `spoken`, and the opening of its
+  reply (`Speakable.js`: the first paragraph as said, at most 600 characters)
+  is read a sentence at a time as it streams, through `pw-play`. Voices are
+  Piper model files in `~/.local/share/piper/voices`: the pane plays each
+  catalogue voice's published sample with `mpv`, downloads one on request,
+  and removes one; each ghost's choice is in `~/.local/state/ghost/voices.json`,
+  silent until chosen. A new summon, a dismissal, closing the HUD, or the owner
+  recording again stops the speech. `Speech.qml` is the one seam a natively
+  spoken model would replace.
 - [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server
   with two tools, `desktop_look` (never changes the desktop) and `desktop_act`
   (ordered steps); any MCP client can run it. It is its own repository with

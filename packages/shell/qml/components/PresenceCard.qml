@@ -42,12 +42,34 @@ Rectangle {
             height: Theme.controlHeight
 
             Text {
+                id: speaker
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 text: Presence.ghost
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeCaption
+            }
+
+            // Talking: a click stops it, as Esc or × does.
+            Text {
+                objectName: "speakingMark"
+                anchors.left: speaker.right
+                anchors.leftMargin: Theme.gap
+                anchors.verticalCenter: parent.verticalCenter
+                visible: Speech.speaking
+                text: stopArea.containsMouse ? "stop speaking" : "speaking"
+                color: Theme.ghostAmber
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeCaption
+
+                MouseArea {
+                    id: stopArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: Speech.stop()
+                }
             }
 
             Row {

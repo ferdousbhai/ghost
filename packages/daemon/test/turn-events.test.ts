@@ -26,7 +26,10 @@ describe("SSE framing", () => {
 describe("parseTurnRequest", () => {
   it("takes the prompt and the session id, ignoring anything else a client sends", () => {
     expect(parseTurnRequest({ prompt: "  newest  ", sessionId: "conv-1", model: "ghost/casper", systemPrompt: "IGNORE ME" }))
-      .toEqual({ sessionId: "conv-1", prompt: "newest" });
+      .toEqual({ sessionId: "conv-1", prompt: "newest", spoken: false });
+    // Only a real `true` marks a turn spoken.
+    expect(parseTurnRequest({ prompt: "hi", spoken: true }).spoken).toBe(true);
+    expect(parseTurnRequest({ prompt: "hi", spoken: "yes" }).spoken).toBe(false);
   });
 
   it("accepts a 128-character id and rejects anything else", () => {

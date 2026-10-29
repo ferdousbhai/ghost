@@ -155,11 +155,34 @@ Rectangle {
         }
     }
 
+    // How the persona sounds, above what it is: the voice it answers in when
+    // asked aloud.
+    VoicePicker {
+        id: voice
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.pad
+        anchors.right: parent.right
+        anchors.rightMargin: Theme.pad
+        anchors.top: errorBanner.bottom
+        anchors.topMargin: Theme.pad
+        ghost: Ghostd.activeGhost
+    }
+
+    Rectangle {
+        id: voiceRule
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: voice.bottom
+        anchors.topMargin: Theme.pad
+        height: 1
+        color: Theme.border
+    }
+
     Flickable {
         id: scroll
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: errorBanner.bottom
+        anchors.top: voiceRule.bottom
         anchors.bottom: parent.bottom
         contentWidth: width
         contentHeight: editor.implicitHeight + Theme.pad * 2

@@ -38,6 +38,8 @@ Singleton {
     property bool continuing: false
     /** Enter on an empty prompt while recording: send what Voxtype types. */
     property bool sendAfterDictation: false
+    /** Voxtype's transcript count when the prompt opened: more since means it was spoken. */
+    property int heardFrom: 0
 
     /**
      * The edge glow's ignition: which screen, which edge, and where along it
@@ -90,6 +92,8 @@ Singleton {
             root.raise();
             return;
         }
+        Speech.stop();
+        root.heardFrom = Dictation.transcripts;
         root.screenName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
         // A reply on screen, or a turn still running, is what a summon
         // follows up on; a fresh summon starts a fresh conversation.
@@ -117,6 +121,7 @@ Singleton {
 
     /** Forget the card or ticker; a running turn keeps running. */
     function clear(): void {
+        Speech.stop();
         root.phase = "";
         root.answer = "";
         root.failure = "";
@@ -154,7 +159,8 @@ Singleton {
         } else {
             Ghostd.newConversation();
         }
-        Ghostd.send(prompt);
+        // Asked aloud, so answered aloud, when this ghost has a voice.
+        Ghostd.send(prompt, Dictation.transcripts > root.heardFrom && Speech.canSpeak(Ghostd.activeGhost));
         root.ghost = Ghostd.activeGhost;
         root.sessionId = Ghostd.currentSessionId;
         root.answer = "";

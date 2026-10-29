@@ -85,7 +85,10 @@ FloatingWindow {
         Ghostd.hudVisible = hud.shown;
         if (hud.shown && !Theme.reducedMotion)
             materialize.restart();
-        if (!hud.shown) hud.stopListening();
+        if (!hud.shown) {
+            hud.stopListening();
+            Speech.stop();
+        }
     }
 
     function open(): void {
@@ -148,7 +151,7 @@ FloatingWindow {
             hud.startConversation();
         } else if (row.kind === "ask") {
             Ghostd.newConversation();
-            Ghostd.send(row.detail);
+            Ghostd.send(row.detail, row.spoken === true);
             hud.showSection("chat");
         } else if (row.kind === "session") {
             Ghostd.openConversation(row.id);

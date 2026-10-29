@@ -12,11 +12,14 @@ green outline idle, amber working, blue unread, red waiting on the owner).
 
 `SUPER+CTRL+G` summons the presence: layer-shell surfaces glow along every
 screen edge, a ring ignited from under the prompt (`EdgeGlow.js`), and a
-prompt on the focused monitor takes the keyboard while Voxtype listens. After a send, the glow thins and a ticker, then the reply
-card, stays up without taking the keyboard until clicked; summoning again
-over it follows up in the same conversation. The `Presence` singleton holds
-that state and `PresenceOverlay` (mounted by the always-loaded service, since
-the host unloads the panel whenever it hides) draws it.
+prompt on the focused monitor takes the keyboard while Voxtype listens. After
+a send, the glow thins and a ticker, then the reply card, stays up without
+taking the keyboard until clicked; summoning again over it follows up in the
+same conversation. Asked aloud, a ghost with a voice answers aloud (`Speech`,
+through the owner's Piper; voices are picked in the Character pane). The
+`Presence` singleton holds that state and `PresenceOverlay` (mounted by the
+always-loaded service, since the host unloads the panel whenever it hides)
+draws it.
 
 The HUD (history, board, routines, character, ghosts, hooks, MCP, remote
 access) opens from the bar dot, a notification, the card's `open`, or any

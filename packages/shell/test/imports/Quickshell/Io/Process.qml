@@ -4,6 +4,7 @@ QtObject {
     property var command: []
     property bool running: false
     property var stdout: null
+    property var environment: ({})
 
     signal started()
     signal exited(int exitCode, int exitStatus)
