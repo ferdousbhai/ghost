@@ -1,6 +1,5 @@
 import QtQuick
 import QtTest
-import "../qml"
 import "../qml/components"
 import "../qml/services"
 import "FakeXhr.js" as FakeXhr
@@ -17,11 +16,6 @@ TestCase {
     visible: true
 
     property var sent: []
-
-    Component {
-        id: serviceComponent
-        Service {}
-    }
 
     Component {
         id: pickerComponent
@@ -161,25 +155,5 @@ TestCase {
         Speech.remove("en_US-amy-medium");
         compare(Speech.installed, []);
         compare(Speech.choices, ({}));
-    }
-
-    // A ghost asked to set up its voice does it through the shell's IPC.
-    function test_aGhostCanSetUpItsOwnVoice(): void {
-        const ipc = findChild(createTemporaryObject(serviceComponent, tc), "ghostIpc");
-        const listed = JSON.parse(ipc.voices());
-        verify(listed.piper);
-        verify(listed.voices.find(v => v.id === "en_US-amy-medium").installed);
-        compare(listed.chosen, { casper: "en_US-amy-medium" });
-
-        compare(ipc.voice("casper", "off"), "casper is silent");
-        compare(Speech.voiceFor("casper"), "");
-        compare(ipc.voice("casper", "en_US-amy-medium"), "casper speaks in en_US-amy-medium");
-        compare(Speech.voiceFor("casper"), "en_US-amy-medium");
-        // Any Piper voice by id; one not here downloads for the ghost that asked.
-        verify(ipc.voice("casper", "de_DE-thorsten-medium").startsWith("downloading de_DE-thorsten-medium"));
-        compare(Speech.installing, "de_DE-thorsten-medium");
-        verify(ipc.voice("casper", "en_US-ryan-medium").startsWith("already downloading"));
-        Speech.installing = "";
-        verify(ipc.voice("casper", "not a voice").startsWith("unknown voice"));
     }
 }

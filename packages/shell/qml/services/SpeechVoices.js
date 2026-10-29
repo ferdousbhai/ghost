@@ -2,11 +2,11 @@
 
 // The Piper voices the Character pane offers: a few English ones, women and
 // men, American and British, each heard from Piper's published sample before
-// anything is downloaded. Any other Piper voice installed (by the owner, or a
-// ghost asked for one by id) is offered too, under its file name.
+// anything is downloaded. Any other Piper voice the owner puts in the voices
+// directory is offered too, under its file name.
 
-var BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/";
-var SAMPLES = "https://rhasspy.github.io/piper-samples/samples/";
+var BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/";
+var SAMPLES = "https://rhasspy.github.io/piper-samples/samples/en/";
 
 var CATALOGUE = [
     { id: "en_US-lessac-medium", name: "Lessac", accent: "American", voice: "woman" },
@@ -17,22 +17,22 @@ var CATALOGUE = [
     { id: "en_GB-alan-medium", name: "Alan", accent: "British", voice: "man" }
 ];
 
-/** `en_US-lessac-medium` as its path in Piper's voice repository: language, locale, speaker, quality. */
-function path(id) {
-    var match = /^(([a-z]{2,3})_[A-Z]{2})-([A-Za-z0-9_]+)-(x_low|low|medium|high)$/.exec(String(id));
-    return match ? match[2] + "/" + match[1] + "/" + match[3] + "/" + match[4] : "";
+/** `en_US-lessac-medium` as its locale, speaker, and quality. */
+function parts(id) {
+    var match = /^([a-z]{2}_[A-Z]{2})-(.+)-(x_low|low|medium|high)$/.exec(String(id));
+    return match ? { locale: match[1], speaker: match[2], quality: match[3] } : null;
 }
 
-/** Where a voice's model downloads from, without the `.onnx` / `.onnx.json` suffix; any Piper voice id works. */
+/** Where a catalogue voice's model downloads from, without the `.onnx` / `.onnx.json` suffix. */
 function modelUrl(id) {
-    var p = path(id);
-    return p ? BASE + p + "/" + id : "";
+    var p = parts(id);
+    return p ? BASE + p.locale + "/" + p.speaker + "/" + p.quality + "/" + id : "";
 }
 
 /** Piper's published sample of a voice, played before it is installed. */
 function sampleUrl(id) {
-    var p = path(id);
-    return p ? SAMPLES + p + "/speaker_0.mp3" : "";
+    var p = parts(id);
+    return p ? SAMPLES + p.locale + "/" + p.speaker + "/" + p.quality + "/speaker_0.mp3" : "";
 }
 
 /**

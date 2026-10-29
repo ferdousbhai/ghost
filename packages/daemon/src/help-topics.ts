@@ -165,7 +165,7 @@ function notifications(): string[] {
 
 function dictation(): string[] {
   return [
-    "# Dictation, audio files, and your voice",
+    "# Dictation and audio files",
     "Speech is Omarchy's Voxtype (`command -v voxtype`). Check `voxtype transcribe --help` before relying on a flag.",
     "Transcribe an audio file: `voxtype transcribe` takes 16 kHz mono WAV, so convert anything else first:",
     "```sh",
@@ -174,11 +174,7 @@ function dictation(): string[] {
     "```",
     "Read the output before using it: not every line is transcript.",
     "The summon prompt starts the owner's dictation when it opens; it and the HUD composer start, stop, and cancel it (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
-    "Talking back is optional: with Piper and a voice chosen for you, a turn the owner asked aloud has your reply's opening read to them, and arrives marked <spoken>. When the owner asks you to set your voice up:",
-    "1. `omarchy-shell ghost voices` lists the voices (id, name, accent, installed), whether Piper is installed, and each ghost's choice.",
-    "2. Without Piper, open its install for the owner, who types their password there, then check `command -v piper-tts` once they say it finished: `omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-aur-add piper-tts-bin'`.",
-    "3. Ask which voice they want, unless they said; Lessac, Amy, Ryan, Norman (American) and Jenny, Alan (British) are listed, and any Piper voice id (`de_DE-thorsten-medium`) works.",
-    "4. `omarchy-shell ghost voice \"$GHOST\" <id>` gives it to you, downloading it first (~60 MB) when it is not installed; repeat `voices` until `installing` is empty. `off` silences you. The owner can hear samples and change it in the Character pane.",
+    "Talking back is optional: with the owner's Piper (`yay -S piper-tts-bin`) and a voice they chose for you in the Character pane, a turn they asked aloud has your reply's opening read to them, and arrives marked <spoken>.",
   ];
 }
 

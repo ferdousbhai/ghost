@@ -325,9 +325,7 @@ and any skill you installed untouched.
   choosing one downloads it (about 60 MB) for that ghost. When you ask aloud,
   the ghost reads the opening of its reply back; ask by typing and it stays
   quiet. `Esc`, `×`, a new summon, or starting to speak stops it, and
-  "Silent" turns it off for that ghost. Or just ask the ghost to set up its
-  voice: it opens Piper's install for you to type your password, and
-  downloads the voice you pick. Ghost ships no voice of its own.
+  "Silent" turns it off for that ghost. Ghost ships no voice of its own.
 - **Show it a picture.** Paste (`Ctrl+V`) or drop an image on the composer;
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
