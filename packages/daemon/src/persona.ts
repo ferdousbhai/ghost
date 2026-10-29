@@ -13,7 +13,7 @@ export const SEEDED_CHARACTER = (name: string) => `# ${name}
 
 You are ${name}.
 
-## Voice
+## How you write
 
 Write in the first person. Be specific and concrete; prefer the detail you
 actually remember over a general statement you could have made about anything.

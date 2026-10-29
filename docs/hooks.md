@@ -189,7 +189,9 @@ Handlers are cancelled when the turn is stopped.
 
 The owner's queued follow-up outranks a hook: Ghost skips `session_stop` for a
 pass while a follow-up waits, and drops a continuation when one arrives while
-the hook runs, so a hook never needs to watch for the owner typing. Ghost sets
+the hook runs, so a hook never needs to watch for the owner typing. Nor is
+`session_stop` asked while the ghost's own question (`ghost ask`) is open: the
+turn is waiting on the owner, and a continuation is not their answer. Ghost sets
 `stop_hook_active: true` on continuation passes. The hook owns its
 continuation policy, the same way Codex Stop hooks do: Ghost will keep honoring
 a blocking result until the hook accepts, the turn is stopped, or the hook fails

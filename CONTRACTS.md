@@ -430,7 +430,8 @@ opens with an attached photo, `![image](…)`, is a prompt, not a command.
 A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 --follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
-waits, and one sent while the hook runs replaces its continuation.
+waits, and one sent while the hook runs replaces its continuation. Nor is one
+asked while the ghost's open question (`ghost ask`) waits on the owner.
 A turn outlives its client: a dropped stream stops only the listening, and
 `POST /sessions/:id/stop` or daemon shutdown cancels it; an internal runtime
 or replay-storage failure ends it in error.

@@ -737,7 +737,9 @@ export class SessionHost {
         if (failure && (signal.aborted || turn.followUps.length === 0)) break;
         // The owner's own queued message is the next instruction: a stop hook
         // is not asked while one waits, and loses to one sent while it ran.
-        const continuation: string | null = failure || turn.followUps.length > 0
+        // Nor while the ghost's own question waits (`ghost ask`): the turn is
+        // waiting on the owner, and a hook's "keep going" is not their answer.
+        const continuation: string | null = failure || turn.followUps.length > 0 || await this.hasQuestion(ghost, id)
           ? null
           : await this.sessionStop(ghost, id, ownerPrompt, turnId, origin === "hook", signal, onHook);
         if (continuation && turn.followUps.length === 0) {
@@ -1217,6 +1219,11 @@ export class SessionHost {
   }
 
   /** Owner text reached the conversation: whatever was asked there is answered. */
+  /** The ghost has asked the owner something in this conversation that is still open. */
+  private async hasQuestion(ghost: Ghost, id: string): Promise<boolean> {
+    return id in await readQuestions(ghostPaths(ghost.dir).sessionDir);
+  }
+
   private async dropQuestion(ghost: Ghost, id: string): Promise<boolean> {
     let dropped = false;
     await this.updateQuestions(ghost, (questions) => {

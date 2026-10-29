@@ -672,6 +672,26 @@ describe("owner commands and hooks", () => {
     expect(messages[0]?.content).toEqual([{ type: "text", text: "what's next?" }]);
   });
 
+  // `ghost ask` ends the turn on the owner: a stop hook's "keep going" must
+  // not carry the ghost past its own question.
+  it("runs no session_stop hook while the ghost's question waits on the owner", async () => {
+    const stop = recordingStopHook();
+    const fake = harness([]);
+    const gate = fake.gate("asking");
+    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "Write this as my character file?" }], gate: gate.path }, ...replies("written")]);
+    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "set up your voice", emit: (event) => events.push(event) });
+    await waitFor(() => fake.calls().length === 1);
+    // The ghost runs `ghost ask` during its pass.
+    await sessions.setQuestion("casper", "c1", "Write this as my character file?", ["Write it", "Change something first"]);
+    gate.release();
+    await running;
+    expect(fake.calls()).toHaveLength(1);
+    expect(events.some((event) => event.type === "hook_start" && event.event === "session_stop")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
   it("gives repeated identical owner requests distinct hook identities", async () => {
     const stop = recordingStopHook();
     const fake = harness(replies("done", "verified", "done again", "verified again"));
