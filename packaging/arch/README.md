@@ -60,9 +60,10 @@ sudo pacman -R ghost
 omarchy-restart-shell
 ```
 
-The Omarchy **Remove → AI → Ghost** action removes all of Ghost, runtime
-included, and keeps every ghost home; use the commands above to keep the
-runtime.
+The Omarchy **Remove → AI → Ghost** action removes Ghost and keeps every
+ghost home. `ghost-runtime` goes with it when it came in as Ghost's
+dependency, and stays, daemon running, when it was installed on its own
+(the first command above marks it so).
 For checkout builds use the `-dev` package names. Building produces both
 archives; install just the `ghost-runtime-dev` archive when supplying your own UI.
 

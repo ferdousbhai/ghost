@@ -241,7 +241,7 @@ if grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-
   printf 'plain ln -sfn onto the plugin link would nest it inside an existing directory\n' >&2
   exit 1
 fi
-grep -Fq 'omarchy-pkg-drop ghost ghost-runtime' "$script_root/bin/omarchy-remove-ai-ghost"
+grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq 'omarchy-install-ai-ghost' "$script_root/omarchy-menu.jsonc"

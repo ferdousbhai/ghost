@@ -79,25 +79,37 @@ for hook in "$source_root/packaging/arch/ghost-dev.install" \
 done
 printf 'Split runtime/UI packaging regression passed\n'
 
-# Exercise the menu's removal with command doubles: it stops the daemon and
-# takes out the HUD, then drops both packages; ghost homes are not touched.
+# Exercise the menu's removal with command doubles. pkg-drop's pacman -Rns
+# takes a dependency-only ghost-runtime with Ghost, so the daemon stops; a
+# runtime the owner installed on its own stays, and so does its daemon.
 mkdir -p "$work/bin" "$work/home"
 cat > "$work/bin/mock" <<'SH'
 #!/bin/bash
 name="${0##*/}"
 printf '%s %s\n' "$name" "$*" >> "$GHOST_SPLIT_TEST_LOG"
-[[ "$name" != systemctl ]]
+case "$name $*" in
+  "pacman -Qqe ghost-runtime"|"pacman -Qq ghost-runtime") [[ $GHOST_SPLIT_EXPLICIT == yes ]] ;;
+  systemctl*) false ;;
+esac
 SH
 chmod 755 "$work/bin/mock"
-for command in omarchy-plugin-remove omarchy-pkg-drop systemctl; do
+for command in omarchy-plugin-remove omarchy-pkg-drop systemctl pacman; do
   ln -s mock "$work/bin/$command"
 done
-GHOST_SPLIT_TEST_LOG="$work/removal.log" HOME="$work/home" PATH="$work/bin:$PATH" \
-  bash "$source_root/packaging/omarchy/bin/omarchy-remove-ai-ghost" >/dev/null
-cat > "$work/removal.expected" <<'EXPECTED'
-systemctl --user disable --now ghostd.service
-omarchy-plugin-remove ferdousbhai.ghost --yes
-omarchy-pkg-drop ghost ghost-runtime
-EXPECTED
-cmp "$work/removal.expected" "$work/removal.log"
+for explicit in no yes; do
+  : > "$work/removal.log"
+  GHOST_SPLIT_TEST_LOG="$work/removal.log" GHOST_SPLIT_EXPLICIT="$explicit" HOME="$work/home" \
+    PATH="$work/bin:$PATH" bash "$source_root/packaging/omarchy/bin/omarchy-remove-ai-ghost" > "$work/removal.out"
+  if [[ $explicit == no ]]; then
+    printf '%s\n' 'pacman -Qqe ghost-runtime' 'systemctl --user disable --now ghostd.service' \
+      'omarchy-plugin-remove ferdousbhai.ghost --yes' 'omarchy-pkg-drop ghost' 'pacman -Qq ghost-runtime' \
+      > "$work/removal.expected"
+    grep -Fq 'Ghost has been removed.' "$work/removal.out"
+  else
+    printf '%s\n' 'pacman -Qqe ghost-runtime' 'omarchy-plugin-remove ferdousbhai.ghost --yes' \
+      'omarchy-pkg-drop ghost' 'pacman -Qq ghost-runtime' > "$work/removal.expected"
+    grep -Fq 'keeps running' "$work/removal.out"
+  fi
+  cmp "$work/removal.expected" "$work/removal.log"
+done
 printf 'Menu removal regression passed\n'
