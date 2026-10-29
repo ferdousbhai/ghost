@@ -407,13 +407,11 @@ through `ghost help events` and [the external event guide](events.md).
 
 ## Machine heat and strain
 
-`ghost machine` shows how hard the computer is working: a heat level from CPU
-use across all cores (raised by temperature or fan sensors where the machine
-has them), memory pressure, and the apps and services using the most CPU.
-
-To have a ghost woken when the machine runs hot, slows under memory pressure,
-or one program spins for a long time, ask it: "watch my machine". It installs a
-minutely `machine-watch` routine (`ghost help machine`), visible and pausable
-under Routines like any other. Each episode becomes one event conversation
-naming the culprits; the ghost fixes what is its own or plainly broken, least
-drastic first, and asks you before touching anything else.
+To have a ghost woken before the machine gets into trouble, ask it: "watch my
+machine". It installs a minutely `machine-watch` routine (`ghost help machine`),
+visible and pausable under Routines like any other. The routine stays quiet
+under ordinary load and wakes the ghost only near harm: a temperature close to
+its critical limit or fans at full speed, memory nearly exhausted, or a disk
+nearly full. Each becomes an event conversation naming the busiest programs;
+the ghost fixes what is its own or plainly broken, least drastic first, and
+asks you before touching anything else.

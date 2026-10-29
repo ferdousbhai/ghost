@@ -46,14 +46,18 @@ describe("ghost help topics", () => {
     expect(text).toContain("end when this turn's headless run does");
   });
 
-  it("machine: the minutely watch in the ghost's namespace, and fixes from least drastic, owner's units asked first", () => {
+  it("machine: a minutely script in the ghost's namespace that wakes it only near harm, fixes least drastic first", () => {
     const text = renderHelpTopic("machine", INPUT);
     expect(text).toContain("# ghost-timer-v1-4-aria-machine-watch.service");
-    expect(text).toContain("ExecStart=/usr/bin/ghost machine check --ghost aria --instructions ");
+    expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh");
     expect(text).toContain("OnCalendar=minutely");
-    expect(text).toContain("CPUWeight=idle");
     expect(text).toContain("list-unit-files '*-machine-watch.timer'");
-    expect(text).toContain("heat stays serious for 5 minutes, memory stays red for 2, or one unit holds a full core for 15");
+    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --ghost aria");
+    expect(text).toContain("(( status == 0 || status == 6 ))");
+    expect(text).toContain("$t >= $c - 5");
+    expect(text).toContain("$fan >= 0.95 * $max");
+    expect(text).toContain("a < 0.05 * t");
+    expect(text).toContain("$1 + 0 >= 97");
     expect(text).toContain("`systemctl --user freeze <unit>` (`thaw` resumes it exactly)");
     expect(text).toContain("never freeze or stop it");
     expect(text).toContain("ask before throttling or stopping it");

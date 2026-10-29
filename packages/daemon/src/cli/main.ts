@@ -29,7 +29,6 @@ import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
-import { machineCommand } from "./machine.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
@@ -223,15 +222,6 @@ export const COMMANDS: readonly Command[] = [
     positionals: [2, 3],
     flags: { value: ["instructions"] },
     run: eventCommand,
-  },
-  {
-    verb: "machine",
-    usage: "machine [check --instructions <text>] [-g <name>] [--json] [-q]",
-    summary: "Show heat, memory pressure, and the busiest units; check wakes the ghost when strain holds.",
-    example: "ghost machine",
-    positionals: [0, 1],
-    flags: { value: ["instructions"] },
-    run: machineCommand,
   },
   {
     verb: "remote",

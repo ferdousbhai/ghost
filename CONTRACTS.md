@@ -159,31 +159,19 @@ No Ghost endpoint needs public exposure. See `docs/events.md`.
 
 ### Machine watch
 
-A ghost knows what strains its machine through `ghost machine`
-([`machine.ts`](packages/daemon/src/machine.ts)), which reads only what every
-Linux machine reports: CPU use across all cores (`/proc/stat`), memory pressure
-(`/proc/pressure/memory`), CPU time and anonymous memory per systemd unit
-(cgroup v2 `cpu.stat`/`memory.stat`, slices walked, units as leaves except the
-`user@UID.service` manager), and hwmon temperatures and fans. Heat
-(nominal/fair/serious/critical) is the share of all cores busy, raised by any
-sensor near the limit it reports; memory (green/yellow/red) is stall time, not
-use. Sensors are never required, since many machines report no CPU temperature.
-`--json` prints the reading. The verb exists because no installed tool meets the
-constraint: `btop` and `systemd-cgtop` are interactive and keep no state across
-samples, and Omarchy announces low battery and crashes but no CPU or memory strain.
-
-Alerts are a routine, not a daemon loop: a minutely systemd timer with slug
-`machine-watch` (`ghost help machine`) runs `ghost machine check`, which folds
-one sample into `$XDG_STATE_HOME/ghost/machine-<ghost>.json` (0600) and
-delivers each condition that has held — heat serious 5 minutes, memory red 2,
-one unit at a full core 15 — once per episode through the event intake as source
-`machine`, id `<condition>:<ISO start>` (`heat`, `memory`, or `runaway:<cgroup
-path>`), with the JSON reading and the top units' busiest processes as payload.
-An episode ends after 5 calm minutes; a gap over 3 minutes between samples
-(sleep, a paused timer) never counts as holding. A refused delivery is retried
-by the next check and fails the unit. One ghost per machine installs it, only
-when the owner asks; the routines view pauses, inspects, and removes it. Ghost
-throttles or stops nothing itself: the recipe has the ghost fix only its own or
+Ghost adds no machine-monitoring code: a ghost reads strain with installed
+tools (`omarchy system stats`, batch `systemd-cgtop`, `/proc/pressure`,
+`sensors -j`, `df`), and `ghost help machine` gives the opt-in watch, a minutely
+routine with slug `machine-watch` running a Bash script the ghost saves. It wakes
+the ghost only near harm, never for ordinary load: a temperature within 5 °C of
+its sensor's critical limit or a fan at 95% of its maximum, available memory
+under 5%, swap over 85% used (systemd-oomd acts at 90%), or memory full-stall
+avg60 of 20% or more, or `/` or `$HOME` 97% full. Each condition is a `ghost
+event machine <kind>-<YYYYMMDDHH>` (heat, memory, disk), so at most one per kind
+an hour; exit 6 (an id already accepted with older data) counts as delivered.
+The payload is the tools' own output, naming the busiest units and processes.
+One ghost per machine installs it, only when the owner asks; the routines view
+pauses, inspects, and removes it. The recipe has the ghost fix only its own or
 plainly broken units, least drastic first (CPU weight, freeze, stop), and ask
 the owner about everything else. Low battery reaches a ghost through Omarchy's
 `battery-low` hook calling `ghost event`.
