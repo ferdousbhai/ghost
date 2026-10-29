@@ -791,7 +791,10 @@ owner's `turn_end` command hook. Completed turns,
   Piper model files in `~/.local/share/piper/voices`: the pane plays each
   catalogue voice's published sample with `mpv`, downloads one on request,
   and removes one; each ghost's choice is in `~/.local/state/ghost/voices.json`,
-  silent until chosen. A new summon, a dismissal, closing the HUD, or the owner
+  silent until chosen. A ghost asked to set its voice up does it through the
+  `ghost` IPC (`ghost help dictation`): `voices` lists them, Piper's presence,
+  and each ghost's choice; `voice <ghost> <id|off>` chooses one, downloading
+  any Piper voice id first. A new summon, a dismissal, closing the HUD, or the owner
   recording again stops the speech. `Speech.qml` is the one seam a natively
   spoken model would replace.
 - [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server

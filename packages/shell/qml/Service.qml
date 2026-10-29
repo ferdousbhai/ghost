@@ -10,6 +10,7 @@ import QtQuick
 import Quickshell.Io
 import "services"
 import "services/Plugin.js" as Plugin
+import "services/SpeechVoices.js" as Voices
 
 Item {
     id: root
@@ -31,6 +32,7 @@ Item {
     // `omarchy-shell ghost <verb>`; the plain toggle is the shell's own
     // `toggle ferdousbhai.ghost`.
     IpcHandler {
+        objectName: "ghostIpc"
         target: "ghost"
 
         function open(): void {
@@ -51,6 +53,44 @@ Item {
 
         function section(name: string): void {
             root.summon(({ section: name }));
+        }
+
+        /**
+         * The voices a ghost can answer in, for a ghost setting its own up
+         * (`ghost help dictation`): whether Piper is installed, what is
+         * downloading, each ghost's choice, and the voices on offer.
+         */
+        function voices(): string {
+            Speech.refresh();
+            return JSON.stringify({
+                piper: Speech.engine !== "",
+                installing: Speech.installing,
+                error: Speech.installError,
+                chosen: Speech.choices,
+                voices: Voices.offered(Speech.installed).map(voice => ({
+                    id: voice.id, name: voice.name, detail: voice.detail, installed: voice.installed
+                }))
+            });
+        }
+
+        /**
+         * Give `ghost` the voice `id`, downloading it first if it is not
+         * installed, or `off` for silence. Says what it did.
+         */
+        function voice(ghost: string, id: string): string {
+            if (ghost === "") return "name the ghost";
+            if (id === "" || id === "off") {
+                Speech.choose(ghost, "");
+                return ghost + " is silent";
+            }
+            if (Speech.installed.indexOf(id) >= 0) {
+                Speech.choose(ghost, id);
+                return ghost + " speaks in " + id;
+            }
+            if (Voices.modelUrl(id) === "") return "unknown voice " + id + "; `omarchy-shell ghost voices` lists them";
+            if (Speech.installing !== "") return "already downloading " + Speech.installing + "; ask again when it is done";
+            Speech.install(id, ghost);
+            return "downloading " + id + " for " + ghost + "; `omarchy-shell ghost voices` shows when it is done";
         }
 
         function status(): string {
