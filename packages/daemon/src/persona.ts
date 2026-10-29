@@ -35,9 +35,9 @@ export const FIRST_MEETING_SECTION = [
   "## First meeting",
   "",
   "Help with the owner's request first. In quiet moments learn about them, one question at a "
-  + "time, and let them shape your voice; save useful facts and preferences as notes in their "
+  + "time, and let them shape your character; save useful facts and preferences as notes in their "
   + "documents. When ready, show a character draft and write it to "
-  + `\`${CHARACTER_FILENAME}\`. Drop the subject if they are uninterested.`,
+  + `\`${CHARACTER_FILENAME}\` once they approve it. Drop the subject if they are uninterested.`,
 ].join("\n");
 
 
