@@ -79,8 +79,8 @@ for hook in "$source_root/packaging/arch/ghost-dev.install" \
 done
 printf 'Split runtime/UI packaging regression passed\n'
 
-# Exercise the removal action with command doubles: it must mark the backend
-# explicit before invoking the recursive package remover, and never stop it.
+# Exercise the menu's removal with command doubles: it stops the daemon and
+# takes out the HUD, then drops both packages; ghost homes are not touched.
 mkdir -p "$work/bin" "$work/home"
 cat > "$work/bin/mock" <<'SH'
 #!/bin/bash
@@ -89,16 +89,15 @@ printf '%s %s\n' "$name" "$*" >> "$GHOST_SPLIT_TEST_LOG"
 [[ "$name" != systemctl ]]
 SH
 chmod 755 "$work/bin/mock"
-for command in omarchy sudo pacman omarchy-pkg-drop systemctl; do
+for command in omarchy-plugin-remove omarchy-pkg-drop systemctl; do
   ln -s mock "$work/bin/$command"
 done
 GHOST_SPLIT_TEST_LOG="$work/removal.log" HOME="$work/home" PATH="$work/bin:$PATH" \
   bash "$source_root/packaging/omarchy/bin/omarchy-remove-ai-ghost" >/dev/null
 cat > "$work/removal.expected" <<'EXPECTED'
-omarchy plugin remove ferdousbhai.ghost --yes
-pacman -Qq ghost-runtime
-sudo pacman -D --asexplicit ghost-runtime
-omarchy-pkg-drop ghost
+systemctl --user disable --now ghostd.service
+omarchy-plugin-remove ferdousbhai.ghost --yes
+omarchy-pkg-drop ghost ghost-runtime
 EXPECTED
 cmp "$work/removal.expected" "$work/removal.log"
-printf 'UI removal preserves runtime regression passed\n'
+printf 'Menu removal regression passed\n'

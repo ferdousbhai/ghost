@@ -15,23 +15,25 @@ bash -n "$installer"
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/bin" "$work/home"
-cat > "$work/bin/omarchy" <<'EOF'
+cat > "$work/bin/omarchy-plugin-list" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "$*" == 'plugin list --json' ]]; then
-  count=$(cat "$TEST_STATE/count")
-  count=$((count + 1))
-  echo "$count" > "$TEST_STATE/count"
-  if [[ "$TEST_DISCOVERY" == delayed && "$count" -ge 3 ]]; then
-    echo '[{"id":"ferdousbhai.ghost"}]'
-  else
-    echo '[]'
-  fi
+[[ "$*" == '--json' ]]
+count=$(cat "$TEST_STATE/count")
+count=$((count + 1))
+echo "$count" > "$TEST_STATE/count"
+if [[ "$TEST_DISCOVERY" == delayed && "$count" -ge 3 ]]; then
+  echo '[{"id":"ferdousbhai.ghost"}]'
 else
-  [[ "$*" == 'plugin enable ferdousbhai.ghost' ]]
-  [[ "$(cat "$TEST_STATE/count")" -ge 3 ]]
-  echo enabled >> "$TEST_STATE/actions"
+  echo '[]'
 fi
+EOF
+cat > "$work/bin/omarchy-plugin-enable" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == 'ferdousbhai.ghost' ]]
+[[ "$(cat "$TEST_STATE/count")" -ge 3 ]]
+echo enabled >> "$TEST_STATE/actions"
 EOF
 for command in omarchy-pkg-add systemctl omarchy-shell sleep; do
   printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/$command"
@@ -39,7 +41,7 @@ done
 for command in bash cat grep jq ln mkdir rm; do
   ln -s "$(command -v "$command")" "$work/bin/$command"
 done
-chmod +x "$work/bin/omarchy"
+chmod +x "$work/bin/omarchy-plugin-list" "$work/bin/omarchy-plugin-enable"
 for command in omarchy-pkg-add systemctl omarchy-shell sleep; do
   chmod +x "$work/bin/$command"
 done
