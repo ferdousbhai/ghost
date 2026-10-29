@@ -47,13 +47,6 @@ export const ASKING_POLICY = [
 ].join("\n");
 
 /**
- * Appended to the owner's message on a turn they asked aloud, whose reply the
- * HUD reads to them: per turn, so it costs nothing on a typed one.
- */
-export const SPOKEN_TURN = "<spoken>The owner asked this aloud and hears your reply's first paragraph read to them: "
-  + "lead with the answer in plain spoken sentences, no markdown, code, or lists in it.</spoken>";
-
-/**
  * The owner's own directory: deliverables, notes, and the board every ghost on
  * this machine shares; `ghost help memory` has the lookup recipe. With Recall
  * installed, its search is named here too, since a lookup two hops away (help,

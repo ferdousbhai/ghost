@@ -3,7 +3,6 @@
  * (persona, cwd, env, resume, MCP), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
-import { SPOKEN_TURN } from "../src/prompt-policy.js";
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -658,20 +657,6 @@ describe("owner commands and hooks", () => {
     expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: true });
   });
 
-  // A turn asked aloud tells the harness its reply is heard; the transcript
-  // keeps what the owner said, and the next typed turn hears nothing of it.
-  it("tells the harness a spoken turn's reply is read aloud, for that turn only", async () => {
-    const fake = harness(replies("Sure.", "Done."));
-    const sessions = host({ harnesses: [fake] });
-    await sessions.runTurn("casper", { sessionId: "c1", prompt: "what's next?", spoken: true, emit: () => {} });
-    await turn(sessions, "and after that?");
-    const [spoken, typed] = fake.calls();
-    expect(spoken?.prompt).toBe(`what's next?\n\n${SPOKEN_TURN}`);
-    expect(typed?.prompt).toBe("and after that?");
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
-    expect(messages[0]?.content).toEqual([{ type: "text", text: "what's next?" }]);
-  });
-
   // `ghost ask` ends the turn on the owner: a stop hook's "keep going" must
   // not carry the ghost past its own question.
   it("runs no session_stop hook while the ghost's question waits on the owner", async () => {
@@ -681,7 +666,7 @@ describe("owner commands and hooks", () => {
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "Write this as my character file?" }], gate: gate.path }, ...replies("written")]);
     const sessions = host({ harnesses: [fake], hooks: stop.hooks });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "set up your voice", emit: (event) => events.push(event) });
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "draft your character", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
     // The ghost runs `ghost ask` during its pass.
     await sessions.setQuestion("casper", "c1", "Write this as my character file?", ["Write it", "Change something first"]);

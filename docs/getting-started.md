@@ -319,13 +319,8 @@ and any skill you installed untouched.
   hold `F9` and speak, or click the mic at the right of the composer; the
   composer says when it is listening, and `Esc` or its `×` discards the
   recording or transcription. A ghost can also transcribe an audio file with
-  Voxtype (`ghost help dictation`).
-- **Hear it answer.** Install Piper (`yay -S piper-tts-bin`), then open the
-  ghost's Character pane and pick a voice: `▶` plays its sample first, and
-  choosing one downloads it (about 60 MB) for that ghost. When you ask aloud,
-  the ghost reads the opening of its reply back; ask by typing and it stays
-  quiet. `Esc`, `×`, a new summon, or starting to speak stops it, and
-  "Silent" turns it off for that ghost. Ghost ships no voice of its own.
+  Voxtype (`ghost help dictation`). Ghost adds nothing else: no
+  speech stack, no voice of its own.
 - **Show it a picture.** Paste (`Ctrl+V`) or drop an image on the composer;
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.

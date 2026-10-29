@@ -55,7 +55,6 @@ import {
   HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   renderOwnerContextPolicy,
-  SPOKEN_TURN,
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
@@ -132,8 +131,6 @@ export interface SessionHostOptions {
 export interface RunTurnOptions {
   sessionId?: string | null;
   prompt: string;
-  /** The owner asked aloud; see SPOKEN_TURN. */
-  spoken?: boolean;
   emit: (event: TurnEvent) => void;
 }
 
@@ -606,7 +603,7 @@ export class SessionHost {
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt" | "spoken"> & { promptRecorded?: boolean },
+    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { promptRecorded?: boolean },
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -634,7 +631,7 @@ export class SessionHost {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
-            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId, options.spoken === true); }
+            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
             catch (error) {
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
@@ -689,7 +686,6 @@ export class SessionHost {
     signal: AbortSignal,
     promptRecorded = false,
     initialTurnId: string,
-    spoken = false,
   ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -727,9 +723,6 @@ export class SessionHost {
           const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;
         }
-        // Only what the owner said aloud is heard back: not a queued typed
-        // follow-up, nor a stop hook's continuation.
-        if (spoken && origin === undefined) passPrompt = `${passPrompt}\n\n${SPOKEN_TURN}`;
         const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
         // A failed pass ends the turn only when nothing is queued behind it:
         // the owner's follow-ups were accepted and still run.

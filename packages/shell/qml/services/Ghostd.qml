@@ -2122,11 +2122,8 @@ Singleton {
         root.attachments = kept;
     }
 
-    /**
-     * Start a turn with `text`, or queue it as a follow-up while one runs.
-     * `spoken`: the owner asked aloud, so the reply is read to them (Speech).
-     */
-    function send(text: string, spoken: bool): void {
+    /** Start a turn with `text`, or queue it as a follow-up while one runs. */
+    function send(text: string): void {
         if (root.streaming) {
             root.queueMessage(text);
             return;
@@ -2140,7 +2137,6 @@ Singleton {
         root.ensureLocalSessionRow(ghost, sessionId, 1);
 
         root.beginTurnFor(state);
-        state.spoken = spoken === true;
         root.appendTurnRow(state, {
             role: "user", text: prompt, toolActivity: [], error: "", pending: false
         });
@@ -2162,8 +2158,7 @@ Singleton {
         root.dispatch(xhr, "POST",
             root.ghostPath(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify(state.spoken ? { prompt: prompt, sessionId: state.sessionId, spoken: true }
-                : { prompt: prompt, sessionId: state.sessionId }), () => xhr === state.request);
+            JSON.stringify({ prompt: prompt, sessionId: state.sessionId }), () => xhr === state.request);
     }
 
     /**
@@ -2519,7 +2514,6 @@ Singleton {
         if (row.text !== body)
             root.setTurnRow(state, state.assistantRow, "text", body);
         state.presentationDirty = false;
-        if (state.spoken) Speech.follow(state.ghost, state.key + "#" + state.assistantRow, body, false);
         root.projectTurnFields(state);
     }
 
@@ -2548,7 +2542,6 @@ Singleton {
         root.flushTurn(state, true);
         root.resetInteractionStateFor(state);
         let text = "";
-        const finishedRow = state.assistantRow;
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
             root.setTurnRow(state, state.assistantRow, "pending", false);
             if (errorMessage !== "")
@@ -2567,7 +2560,6 @@ Singleton {
             // A turn that completed is proof the daemon answered; drop any stale
             // error banner so it does not linger under a good reply.
             state.lastError = "";
-            if (state.spoken) Speech.follow(state.ghost, state.key + "#" + finishedRow, text, true);
             root.turnFinished(state.ghost, text, state.sessionId, root.notificationTitle(state));
         }
         root.projectTurnFields(state);

@@ -135,19 +135,16 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
 export interface TurnRequest {
   sessionId: string | null;
   prompt: string;
-  /** The owner asked aloud, and the reply will be read to them. */
-  spoken: boolean;
 }
 
-/** Parse a turn request body, `{ prompt, sessionId?, spoken? }`. */
+/** Parse a turn request body, `{ prompt, sessionId? }`. */
 export function parseTurnRequest(body: Record<string, unknown>): TurnRequest {
-  const { prompt, sessionId, spoken } = body;
+  const { prompt, sessionId } = body;
   if (typeof prompt !== "string" || prompt.trim() === "") {
     throw new GhostError("invalid_request", "\"prompt\" must be non-empty text.", 400);
   }
   return {
     sessionId: typeof sessionId === "string" && sessionId ? requireConversationId(sessionId) : null,
     prompt: prompt.trim(),
-    spoken: spoken === true,
   };
 }

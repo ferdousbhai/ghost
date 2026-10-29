@@ -29,13 +29,6 @@ Singleton {
     /** Why the last `voxtype record` command failed; cleared by the next attempt. */
     property string failure: ""
     readonly property string label: DictationState.label(root.state)
-    /**
-     * Counts the transcripts Voxtype has started: a prompt that saw this rise
-     * since it opened was (at least partly) spoken, which typing it in could
-     * never do, since Voxtype's typing looks like anyone's.
-     */
-    property int transcripts: 0
-    onStateChanged: if (root.state === "transcribing") root.transcripts += 1
 
     readonly property string statePath: {
         const runtime = Quickshell.env("XDG_RUNTIME_DIR");

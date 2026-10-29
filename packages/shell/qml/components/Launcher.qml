@@ -73,7 +73,6 @@ FocusScope {
     /** Fresh on every open: an empty filter, the newest conversations, the keyboard here. */
     function reset(): void {
         root.askAfterDictation = false;
-        root.heardFrom = Dictation.transcripts;
         filter.text = "";
         Ghostd.ghostRenameError = "";
         root.now = Date.now();
@@ -95,13 +94,11 @@ FocusScope {
 
     /** Enter stopped the recording: ask with the transcript once it has stopped arriving. */
     property bool askAfterDictation: false
-    /** Voxtype's transcript count when the list opened: more since means the filter was spoken. */
-    property int heardFrom: 0
 
     function dictationSettled(): void {
         root.askAfterDictation = false;
         const text = filter.text.trim();
-        if (text !== "" && Ghostd.activeGhost !== "") root.activate({ kind: "ask", id: "ask", detail: text });
+        if (text !== "" && Ghostd.activeGhost !== "") root.activated({ kind: "ask", id: "ask", detail: text });
     }
 
     // Voxtype types a transcript a few characters at a time; ask once it has
@@ -125,11 +122,7 @@ FocusScope {
     }
 
     function activate(row: var): void {
-        if (!row || row.kind === "header") return;
-        // An ask from a spoken filter is answered aloud, when the ghost has a voice.
-        if (row.kind === "ask")
-            row = Object.assign({}, row, { spoken: Dictation.transcripts > root.heardFrom && Speech.canSpeak(Ghostd.activeGhost) });
-        root.activated(row);
+        if (row && row.kind !== "header") root.activated(row);
     }
 
     // The desktop's menu refreshes ages each time it opens; so does this.

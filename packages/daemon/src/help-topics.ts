@@ -166,7 +166,7 @@ function notifications(): string[] {
 function dictation(): string[] {
   return [
     "# Dictation and audio files",
-    "Speech is Omarchy's Voxtype (`command -v voxtype`). Check `voxtype transcribe --help` before relying on a flag.",
+    "Speech is Omarchy's Voxtype (`command -v voxtype`); Ghost adds no speech stack, voice loop, or text-to-speech. Check `voxtype transcribe --help` before relying on a flag.",
     "Transcribe an audio file: `voxtype transcribe` takes 16 kHz mono WAV, so convert anything else first:",
     "```sh",
     "ffmpeg -i <input> -ar 16000 -ac 1 /tmp/<name>.wav",
@@ -174,7 +174,6 @@ function dictation(): string[] {
     "```",
     "Read the output before using it: not every line is transcript.",
     "The summon prompt starts the owner's dictation when it opens; it and the HUD composer start, stop, and cancel it (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
-    "Talking back is optional: with the owner's Piper (`yay -S piper-tts-bin`) and a voice they chose for you in the Character pane, a turn they asked aloud has your reply's opening read to them, and arrives marked <spoken>.",
   ];
 }
 
