@@ -27,6 +27,18 @@ package from Omarchy's repository; `omarchy update` keeps it current:
 omarchy pkg add ghost
 ```
 
+Omarchy's repository takes a few hours or more to carry a new release. To
+install the latest release now, run this as yourself:
+
+```sh
+curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash
+```
+
+It installs from Omarchy's repository when that already has the latest
+release, and otherwise builds Omarchy's own recipe for it; either way the
+packages are the same, and `omarchy update` keeps them current afterwards.
+It also starts Ghost for your login (section 3).
+
 For checkout development, use the
 [rolling package recipe](../packaging/arch/README.md). Install matching runtime
 and UI packages together; a workspace build alone does not update the app.

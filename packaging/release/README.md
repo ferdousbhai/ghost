@@ -64,7 +64,13 @@ release carrying:
 - `ghost-<version>.tar.gz`;
 - `ghost-runtime-<version>-linux-any.tar.zst`;
 - `SHA256SUMS`, for checking a download by hand (Omarchy's sync uses
-  GitHub's own asset digests).
+  GitHub's own asset digests);
+- `ghost-recipe.tar.gz` (Omarchy's `pkgbuilds/ghost` rendered for this
+  release), `install.sh` and `omarchy-install-ai-ghost`: what
+  `ferdousbhai.com/ghost/install.sh`, a redirect to the latest release's
+  `install.sh`, runs for an owner ahead of Omarchy's sync.
+  [`test-install-script.sh`](test-install-script.sh), which the gate runs,
+  checks its choices.
 
 Users install the `ghost` package from Omarchy's repository. The
 Install → AI → Ghost entry contributed to Omarchy is

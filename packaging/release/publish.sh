@@ -112,6 +112,16 @@ cp -- "$out/ghost-$version.tar.gz" "$out/ghost-runtime-$version-linux-any.tar.zs
 )
 rm -rf -- "$work"
 
+# What ferdousbhai.com/ghost/install.sh fetches from the latest release, for an
+# owner ahead of Omarchy's sync: Omarchy's own recipe for this release, the
+# installer, and the Install menu's steps it ends with.
+recipe="$(mktemp -d)"
+bash "$source_root/packaging/omarchy/render-contribution.sh" "$recipe/ghost" "$version" "$source_sha" "$runtime_sha"
+tar -czf "$out/ghost-recipe.tar.gz" -C "$recipe" --owner=0 --group=0 --sort=name ghost
+rm -rf -- "$recipe"
+install -m 755 -- "$source_root/packaging/release/install.sh" "$out/install.sh"
+install -m 755 -- "$source_root/packaging/omarchy/bin/omarchy-install-ai-ghost" "$out/omarchy-install-ai-ghost"
+
 printf '\nrelease inputs for %s %s (%s):\n' "$repository" "$tag" "$commit"
 cat -- "$out/SHA256SUMS"
 if (( dry_run )); then
@@ -124,11 +134,14 @@ git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`omarchy pkg add ghost\`, from Omarchy's package repository. These are the source and runtime inputs Omarchy builds that package from." \
+  --notes "Install on Omarchy: \`omarchy pkg add ghost\`, from Omarchy's package repository. Ahead of it, \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` builds Omarchy's own recipe for this release. The source and runtime archives are what Omarchy builds the package from." \
   -- \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
-  "$out/SHA256SUMS"
+  "$out/SHA256SUMS" \
+  "$out/ghost-recipe.tar.gz" \
+  "$out/install.sh" \
+  "$out/omarchy-install-ai-ghost"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 printf "Omarchy's sync-upstream bumps pkgbuilds/ghost within six hours; owners get it from omarchy update once Omarchy builds and promotes it. Recipe changes need an omarchy-pkgs PR.\n"

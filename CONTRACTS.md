@@ -762,7 +762,13 @@ runtime preserves owner data.
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
   archive, runtime archive, and `SHA256SUMS`; Omarchy's sync reads GitHub's
-  asset digests. The only install path for owners is Omarchy's package repository.
+  asset digests. Owners install from Omarchy's package repository. Ahead of
+  its sync, `ferdousbhai.com/ghost/install.sh` (the release's `install.sh`)
+  installs the same packages: from that repository when it has the latest
+  release, else built with makepkg from Omarchy's own recipe for it
+  (`ghost-recipe.tar.gz`), never from a second package repository, so
+  `omarchy update` carries on from there. It ends with the Install menu's
+  own steps (`omarchy-install-ai-ghost`, also attached to the release).
 
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).
