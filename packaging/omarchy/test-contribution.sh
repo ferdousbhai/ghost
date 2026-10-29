@@ -46,16 +46,18 @@ expected=(
 [[ "$(stat -c '%a' "$contribution/ghost-runtime.install")" == 644 ]]
 [[ "$(stat -c '%a' "$contribution/.omarchy/package.json")" == 644 ]]
 # The declarative upstream block is what omarchy-pkgs' sync-upstream reads;
-# a hook alongside it would be an error there.
+# a hook alongside it would be an error there. Release files are `assets`,
+# named within the release and checked against GitHub's own digests, the
+# form omarchy-pkgs uses for a GitHub release feed.
 jq -e --arg repository "$repository" '
   .source == "local"
   and .release_ring == "fast"
   and .upstream.github == $repository
   and .upstream.digests == true
-  and (.upstream | has("assets") | not)
-  and .upstream.sources.any == [
-    "https://github.com/\($repository)/releases/download/{tag}/ghost-{pkgver}.tar.gz",
-    "https://github.com/\($repository)/releases/download/{tag}/ghost-runtime-{pkgver}-linux-any.tar.zst"
+  and (.upstream | has("sources") | not)
+  and .upstream.assets.any == [
+    "ghost-{pkgver}.tar.gz",
+    "ghost-runtime-{pkgver}-linux-any.tar.zst"
   ]
 ' "$contribution/.omarchy/package.json" >/dev/null
 

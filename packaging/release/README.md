@@ -76,20 +76,30 @@ Install → AI → Ghost entry contributed to Omarchy is
 The rendered contribution
 ([`../omarchy/render-contribution.sh`](../omarchy/render-contribution.sh)) is
 what went into `pkgbuilds/ghost` of omarchy-pkgs; its `.omarchy/package.json`
-declares this release feed (`upstream.github`, the runtime asset, and the
-source archive URL), so `sync-upstream` rewrites `pkgver` and both checksum
-arrays on its own when a newer `vX.Y.Z` tag appears, and Omarchy builds,
-signs, and promotes the package through its `edge` → `rc` → `stable`
-channels. [`../omarchy/test-contribution.sh`](../omarchy/test-contribution.sh)
+declares this release feed (`upstream.github` and the two release assets,
+checked against GitHub's digests), so `sync-upstream` rewrites `pkgver` and
+both checksum arrays on its own when a newer `vX.Y.Z` release appears, and
+Omarchy builds, signs, and promotes the package through its `edge` → `rc` →
+`stable` channels. Ghost is not in sync-upstream's hourly lane: its feed is
+checked every six hours, and it takes the latest release only, so a release
+published between two checks waits for the next, and one superseded before
+it is skipped. [`../omarchy/test-contribution.sh`](../omarchy/test-contribution.sh)
 models that rewrite. A change to the recipe template here is a change to
 propose upstream, by hand; the menu entries and install/remove scripts for
 the Omarchy repository itself are in [`../omarchy/`](../omarchy/).
 
 ## After publishing
 
-Omarchy's `sync-upstream` picks the release up; nothing is pushed to
-omarchy-pkgs. One thing does not follow the tag on its own:
+Nothing is pushed to omarchy-pkgs for a release. Within six hours its
+`sync-upstream` bumps `pkgbuilds/ghost` to the release, and owners get it
+from `omarchy update` once Omarchy has built and promoted it; that schedule
+is Omarchy's, not the release's, and there is no other install path to hand
+owners meanwhile. Two things do not follow the tag on their own:
 
+- **Recipe changes.** The sync rewrites only the version and checksums. A
+  change to the recipe itself (dependencies, descriptions, install
+  messages, the feed) is a pull request to omarchy-pkgs rendered from
+  [`../omarchy/`](../omarchy/), reviewed by Omarchy's maintainers.
 - **A checkout install** is the owner's to pull, build, and restart; follow
   [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md). Ghost
   does not poll for releases.

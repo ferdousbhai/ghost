@@ -131,5 +131,5 @@ gh release create "$tag" \
   "$out/SHA256SUMS"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
-printf "Omarchy's sync-upstream picks the release up and rebuilds the ghost package; nothing to push.\n"
+printf "Omarchy's sync-upstream bumps pkgbuilds/ghost within six hours; owners get it from omarchy update once Omarchy builds and promotes it. Recipe changes need an omarchy-pkgs PR.\n"
 printf 'next: "After publishing" in packaging/release/README.md\n'
