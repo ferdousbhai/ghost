@@ -702,7 +702,7 @@ runtime preserves owner data.
   no space. The glow is one ring of colour flowing round the screen; a summon
   ignites it from where it came from (under the prompt, or the bar mark that
   was clicked), lighting outward both ways until the fronts meet, and the HUD
-  keeps a softer ring on its screen while it is open. A payload naming a `section` or `sessionId` opens the HUD: a card
+  keeps a softer ring on its screen. The ring flows and breathes while Ghost is the foreground app (the prompt or the HUD has the keyboard) and goes out behind another app. A payload naming a `section` or `sessionId` opens the HUD: a card
   over everything on the focused monitor, on the theme's `[menu]` scrim and
   card tokens like Omarchy's own menu. The HUD and the presence prompt, the
   two surfaces that take the keyboard, are windows titled `Ghost` and

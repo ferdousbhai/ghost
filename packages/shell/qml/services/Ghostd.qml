@@ -331,6 +331,8 @@ Singleton {
     /** A host plugin reload closed the open HUD; the reloaded Service reopens it. */
     property bool reopenAfterReload: false
     property bool hudChatFocused: false
+    /** The HUD is open and has the keyboard: Ghost is the foreground app. */
+    property bool hudForeground: false
     onHudChatFocusedChanged: if (root.hudChatFocused) root.markCurrentConversationRead()
 
     property alias transcript: transcriptModel

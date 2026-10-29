@@ -61,18 +61,34 @@ Scope {
                 : screenScope.modelData.name === Presence.screenName
 
             /** Full while summoned, softer around the menu on its screen, a shimmer while working, dark otherwise. */
-            readonly property real strength: Presence.composing ? 1
-                : Ghostd.hudVisible && screenScope.modelData.name === Presence.hudScreen ? 0.55
+            readonly property real strength: Presence.composing && Presence.promptFocused ? 1
+                : Ghostd.hudForeground && screenScope.modelData.name === Presence.hudScreen ? 0.55
                 : Presence.working ? 0.22 : 0
             property real shown: screenScope.strength
             Behavior on shown { NumberAnimation { duration: Theme.durSlow; easing.type: Easing.OutCubic } }
+
+            /** Ghost is the foreground app here: the prompt or the menu has the keyboard. */
+            readonly property bool foreground: Presence.composing && Presence.promptFocused
+                || Ghostd.hudForeground && screenScope.modelData.name === Presence.hudScreen
 
             property real phase: 0
             NumberAnimation on phase {
                 from: 0; to: 1
                 loops: Animation.Infinite
-                duration: Presence.composing ? 6000 : 14000
+                duration: screenScope.foreground ? 6000 : 14000
                 running: screenScope.shown > 0.01 || screenScope.flare > 0
+            }
+
+            // While Ghost is in front, the ring breathes as well as flowing,
+            // so it reads as alive rather than lit; behind another app it is gone.
+            property real breath: 1
+            SequentialAnimation on breath {
+                running: screenScope.foreground && !Theme.reducedMotion
+                loops: Animation.Infinite
+                onRunningChanged: if (!running) screenScope.breath = 1
+                NumberAnimation { to: 1.25; duration: 1800; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.85; duration: 1800; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1; duration: 900; easing.type: Easing.InOutSine }
             }
 
             // An ignition on this screen: the ring lights outward both ways
@@ -100,10 +116,10 @@ Scope {
                 NumberAnimation { target: screenScope; property: "flare"; to: 0; duration: 650; easing.type: Easing.InOutSine }
             }
 
-            PresenceEdge { screen: screenScope.modelData; edge: "top"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
-            PresenceEdge { screen: screenScope.modelData; edge: "bottom"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
-            PresenceEdge { screen: screenScope.modelData; edge: "left"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
-            PresenceEdge { screen: screenScope.modelData; edge: "right"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "top"; strength: Math.min(1, screenScope.shown * screenScope.breath); phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "bottom"; strength: Math.min(1, screenScope.shown * screenScope.breath); phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "left"; strength: Math.min(1, screenScope.shown * screenScope.breath); phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "right"; strength: Math.min(1, screenScope.shown * screenScope.breath); phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
 
             // The ticker, then the card, where the prompt was.
             WlrLayershell {

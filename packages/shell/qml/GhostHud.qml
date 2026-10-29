@@ -192,6 +192,12 @@ FloatingWindow {
 
     Binding {
         target: Ghostd
+        property: "hudForeground"
+        value: hud.shown && hud.focused()
+    }
+
+    Binding {
+        target: Ghostd
         property: "hudChatFocused"
         value: hud.shown && hud.focused() && hud.currentSection === "chat"
             && (!hud.workbenchOpen || hud.workbenchSplit)
