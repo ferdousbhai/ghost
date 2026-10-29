@@ -542,7 +542,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
 | `POST /api/ghosts/:ghost/events` | Owner-only [external event intake](#external-events); the GET event stream remains conversation invalidations. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests, without its `path`; never written through the API. |
-| `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: the checkout's HEAD moved, or an install rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); unknown is false. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
+| `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs, and unknown is false. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
@@ -700,8 +700,8 @@ runtime preserves owner data.
   unclicked shows the turn's activity, then its reply or error, until
   dismissed or opened in the window. Edge surfaces take no input and reserve
   no space. The glow is one ring of colour flowing round the screen; a summon
-  ignites it from where it came from (under the prompt, or the bar mark that
-  was clicked), lighting outward both ways until the fronts meet, and the HUD
+  ignites it from where it came from (under the prompt, the bar mark that
+  was clicked, else the top edge), lighting outward both ways until the fronts meet, and the HUD
   keeps a softer ring on its screen. The ring flows and breathes while Ghost is the foreground app (the prompt or the HUD has the keyboard) and goes out behind another app. A payload naming a `section` or `sessionId` opens the HUD: a card
   over everything on the focused monitor, on the theme's `[menu]` scrim and
   card tokens like Omarchy's own menu. The HUD and the presence prompt, the
@@ -714,7 +714,9 @@ runtime preserves owner data.
   places (the other sections) that asks the ghost what was typed when nothing
   matches; a row grows the card into that section. Opened on `home`, it
   listens as the prompt does: Voxtype types into the filter, Enter while
-  listening asks the ghost what was said, and leaving the list stops it. Esc steps back (a
+  listening asks the ghost what was said, and choosing a row with the
+  arrows or leaving the list stops it. A restore (a reload or rebuild putting
+  the window back) neither listens nor ignites. Esc steps back (a
   standing question, the workbench, the section to `home`, then out), as do
   the toggle and a scrim click; a running turn continues behind it, and
   Shift+Esc stops one. Opening a link, a file, or the external editor closes

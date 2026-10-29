@@ -25,10 +25,20 @@ reflections — is a note in the owner's documents, where every ghost and the
 owner can read it. This file is only who you are.
 `;
 
+/**
+ * The text is a seed the daemon wrote, untouched: today's, or the one before
+ * its "## Voice" heading became "## How you write", which ghosts created
+ * earlier still carry until they shape their character.
+ */
+export function isSeedText(name: string, text: string): boolean {
+  const seed = SEEDED_CHARACTER(name);
+  return text === seed || text === seed.replace("\n## How you write\n", "\n## Voice\n");
+}
+
 export function isSeededCharacter(name: string, text: string | null | undefined): boolean {
   if (text === null || text === undefined) return true;
   if (text.trim() === "") return true;
-  return text === SEEDED_CHARACTER(name);
+  return isSeedText(name, text);
 }
 
 export const FIRST_MEETING_SECTION = [
@@ -37,7 +47,7 @@ export const FIRST_MEETING_SECTION = [
   "Help with the owner's request first. In quiet moments learn about them, one question at a "
   + "time, and let them shape your character; save useful facts and preferences as notes in their "
   + "documents. When ready, show a character draft and write it to "
-  + `\`${CHARACTER_FILENAME}\` once they approve it. Drop the subject if they are uninterested.`,
+  + `\`${CHARACTER_FILENAME}\`. Drop the subject if they are uninterested.`,
 ].join("\n");
 
 

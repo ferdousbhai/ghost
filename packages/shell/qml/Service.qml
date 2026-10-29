@@ -25,7 +25,8 @@ Item {
 
     onShellChanged: if (root.shell && Ghostd.reopenAfterReload) {
         Ghostd.reopenAfterReload = false;
-        root.summon(({ section: "home" }));
+        // Put back as it was: no ignition, and no mic the owner did not ask for.
+        root.summon(({ section: "home", restore: true }));
     }
 
     // `omarchy-shell ghost <verb>`; the plain toggle is the shell's own

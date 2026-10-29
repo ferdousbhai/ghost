@@ -202,6 +202,23 @@ TestCase {
         Dictation.state = "";
     }
 
+    // Esc after Enter-while-listening: the question is not sent from a closed menu.
+    function test_anAbandonedAskIsNotSent(): void {
+        const launcher = createTemporaryObject(launcherComponent, tc);
+        const chosen = [];
+        launcher.activated.connect(row => chosen.push(row.kind));
+        launcher.reset();
+        Dictation.state = "recording";
+        keyClick(Qt.Key_Return);
+        verify(launcher.askAfterDictation);
+        launcher.abandonAsk();
+        for (const ch of "late words") keyClick(ch);
+        Dictation.state = "idle";
+        wait(900);
+        compare(chosen, []);
+        Dictation.state = "";
+    }
+
     function test_deleteAsksAboutTheSelectedConversation(): void {
         const launcher = createTemporaryObject(launcherComponent, tc);
         const asked = [];

@@ -212,7 +212,8 @@ dismisses it, and `open` shows the conversation in history.
 
 Clicking the ghost in the bar opens history the same way: the edges light
 from the mark, and it is already listening. Speak to fill the search, then
-press `Enter` to ask the ghost what you said, or type to find a conversation.
+press `Enter` to ask the ghost what you said, or type and use the arrows to
+pick a conversation (the arrows stop the listening, so `Enter` opens it).
 
 History and settings open the way your desktop's own menu does (the ghost
 mark in the Omarchy bar, your app launcher, or

@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
 import { ghostPaths, isGhostHome, isValidGhostName } from "../src/ghosts.js";
-import { isSeededCharacter } from "../src/persona.js";
+import { isSeededCharacter, SEEDED_CHARACTER } from "../src/persona.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
@@ -117,6 +117,15 @@ describe("GhostRegistry.rename", () => {
     expect(character).toContain("You are wisp.");
     expect(character).not.toContain("title:");
     expect(isSeededCharacter("wisp", character)).toBe(true);
+  });
+
+  // A ghost seeded before "## Voice" became "## How you write" is still
+  // unshaped: it keeps its first meeting, and a rename re-seeds it.
+  it("still knows a seed written before the heading changed", () => {
+    const legacy = SEEDED_CHARACTER("mina").replace("\n## How you write\n", "\n## Voice\n");
+    expect(legacy).not.toBe(SEEDED_CHARACTER("mina"));
+    expect(isSeededCharacter("mina", legacy)).toBe(true);
+    expect(isSeededCharacter("mina", legacy.replace("You are mina.", "You are Mina, a printer."))).toBe(false);
   });
 
   it("leaves owner-authored Markdown alone", () => {

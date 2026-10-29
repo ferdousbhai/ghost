@@ -142,8 +142,8 @@ makes `-t ghostd` catch it. `ghost status` prints the
 daemon's version, its commit, and the root of the checkout it is running from,
 or reports a packaged install when there is no checkout behind it, then when
 the daemon started. It adds a `restart needed` line when the code on disk is
-newer than the running daemon: an install or a checkout change that has not
-been restarted into yet. Dev builds all report the same version, so this line,
+newer than the running daemon: an install or a build that has not been
+restarted into yet. Dev builds all report the same version, so this line,
 not the version, is what says an update is live.
 
 ## Canary before adopting

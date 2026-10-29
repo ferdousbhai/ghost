@@ -81,7 +81,15 @@ FocusScope {
         filter.forceActiveFocus();
     }
 
+    /** The HUD closed: an Enter-while-listening ask still waiting is not sent. */
+    function abandonAsk(): void {
+        root.askAfterDictation = false;
+        askTimer.stop();
+    }
+
     function move(direction: int): void {
+        // Choosing a row by hand is not speaking: stop listening, so Enter opens it.
+        if (Dictation.cancellable && !root.askAfterDictation) Dictation.cancel();
         root.selected = Launcher.step(root.rows, root.selected, direction);
         list.positionViewAtIndex(root.selected, ListView.Contain);
     }

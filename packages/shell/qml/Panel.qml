@@ -37,7 +37,7 @@ Item {
         if (hud.shown || !root.shell || !root.shell.isPluginOpen
             || !root.shell.isPluginOpen(root.selfId)) return;
         Qt.callLater(() => {
-            if (!root.summoned) root.open('{"section":"home"}');
+            if (!root.summoned) root.open('{"section":"home","restore":true}');
         });
     }
 
@@ -76,7 +76,9 @@ Item {
         Presence.dismiss();
         // The window shows this reply now; the card would only repeat it.
         if (Presence.mine(String(payload.ghost || ""), String(payload.sessionId || ""))) Presence.clear();
-        const opening = !hud.shown;
+        // A restore (a reload or a rebuild putting the window back) is not
+        // the owner summoning: no ignition, and no mic they did not ask for.
+        const opening = !hud.shown && payload.restore !== true;
         hud.open();
         if (payload.section) hud.showSection(String(payload.section));
         if (opening) Presence.igniteMenu();

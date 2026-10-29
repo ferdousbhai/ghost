@@ -55,16 +55,12 @@ export function resolveRunningSource(version: string, startDir: string, entry?: 
 
 /**
  * The code on disk is no longer what this process runs, so it needs a
- * restart to run it: a checkout has moved to another commit, or an install
- * rewrote the entry file after this process started. The file's ctime says
- * when it was written here; a package cannot backdate it the way it carries
- * its build time as the mtime. Unknown is false.
+ * restart to run it: an install or a build rewrote the entry file after this
+ * process started. The file's ctime says when it was written here; a package
+ * cannot backdate it the way it carries its build time as the mtime, and a
+ * commit that was not built changes nothing that runs. Unknown is false.
  */
 export function replacedSinceStart(running: RunningSource): boolean {
-  if (running.root !== null) {
-    const now = readHeadCommit(running.root);
-    return running.commit !== null && now !== null && now !== running.commit;
-  }
   if (running.entry === undefined || running.startedAt === undefined) return false;
   try {
     return statSync(running.entry).ctimeMs > running.startedAt;

@@ -121,15 +121,17 @@ describe("replacedSinceStart", () => {
     expect(replacedSinceStart({ ...running, entry: join(base, "missing.js") })).toBe(true);
   });
 
-  it("sees a checkout moved to another commit, and knows nothing without an entry", () => {
+  it("goes by what runs, not what is committed, and knows nothing without an entry", () => {
     const base = tempRoot();
     const root = workspace(join(base, "checkout"));
     gitCommit(root);
+    // A checkout's commit moving without a build changes nothing that runs.
     const running = resolveRunningSource("0.0.1", join(root, "packages", "daemon"));
-    expect(replacedSinceStart(running)).toBe(false);
-    expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(true);
-    // An unreadable checkout is unknown, not stale.
-    expect(replacedSinceStart({ ...running, root: join(base, "nowhere") })).toBe(false);
+    expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(false);
+    // A build rewrote the entry it runs from: stale, checkout or not.
+    const entry = join(base, "main.js");
+    writeFileSync(entry, "built");
+    expect(replacedSinceStart({ ...running, entry, startedAt: Date.now() - 60_000 })).toBe(true);
     expect(replacedSinceStart({ version: "1", root: null, commit: null })).toBe(false);
   });
 });

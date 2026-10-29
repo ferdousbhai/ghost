@@ -85,7 +85,10 @@ FloatingWindow {
         Ghostd.hudVisible = hud.shown;
         if (hud.shown && !Theme.reducedMotion)
             materialize.restart();
-        if (!hud.shown) hud.stopListening();
+        if (!hud.shown) {
+            hud.stopListening();
+            launcher.abandonAsk();
+        }
     }
 
     function open(): void {
@@ -119,6 +122,15 @@ FloatingWindow {
     }
 
     onHomeChanged: if (!hud.home) hud.stopListening()
+
+    // Dictation that ended another way (Enter, the mic, F9) is no longer this
+    // window's to cancel.
+    Connections {
+        target: Dictation
+        function onStateChanged(): void {
+            if (!Dictation.cancellable) hud.listening = false;
+        }
+    }
 
     /** Give the window the focus: a new one, or one left open behind another app. */
     function raise(): void {

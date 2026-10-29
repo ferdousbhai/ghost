@@ -1211,12 +1211,12 @@ export class SessionHost {
     });
   }
 
-  /** Owner text reached the conversation: whatever was asked there is answered. */
   /** The ghost has asked the owner something in this conversation that is still open. */
   private async hasQuestion(ghost: Ghost, id: string): Promise<boolean> {
     return id in await readQuestions(ghostPaths(ghost.dir).sessionDir);
   }
 
+  /** Owner text reached the conversation: whatever was asked there is answered. */
   private async dropQuestion(ghost: Ghost, id: string): Promise<boolean> {
     let dropped = false;
     await this.updateQuestions(ghost, (questions) => {

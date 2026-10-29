@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "./persona.js";
+import { CHARACTER_FILENAME, isSeedText, SEEDED_CHARACTER } from "./persona.js";
 import { GhostError } from "./errors.js";
 
 export interface Ghost {
@@ -167,7 +167,7 @@ export class GhostRegistry {
     // A failure here leaves the old name in the seed, not a half-renamed ghost.
     const file = ghostPaths(target).characterFile;
     try {
-      if (readFileSync(file, "utf8") === SEEDED_CHARACTER(name)) {
+      if (isSeedText(name, readFileSync(file, "utf8"))) {
         const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
         writeFileSync(temporary, SEEDED_CHARACTER(nextName), { flag: "wx", mode: statSync(file).mode & 0o777 });
         renameSync(temporary, file);

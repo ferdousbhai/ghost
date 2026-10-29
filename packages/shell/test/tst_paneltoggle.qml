@@ -31,6 +31,18 @@ TestCase {
         verify(!hud.listening);
     }
 
+    // Putting the window back after a reload is not the owner summoning it.
+    function test_aRestoreNeitherListensNorIgnites(): void {
+        Ghostd.activeGhost = "dous";
+        Dictation.state = "idle";
+        const panel = createTemporaryObject(panelComponent, this);
+        const before = Presence.ignitions;
+        panel.open('{"section":"home","restore":true}');
+        verify(findChild(panel, "hud").shown);
+        verify(!findChild(panel, "hud").listening);
+        compare(Presence.ignitions, before);
+    }
+
     function test_theMenuOpenedOnAPaneDoesNotListen(): void {
         Ghostd.activeGhost = "dous";
         Dictation.state = "idle";

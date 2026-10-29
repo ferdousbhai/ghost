@@ -61,9 +61,9 @@ export async function statusCommand(
       lines.push(`daemon commit  ${daemon.body.source?.commit ?? "unknown"}`);
       lines.push(`daemon source  ${daemon.body.source?.root ?? "packaged install"}`);
       if (daemon.body.startedAt) lines.push(`daemon started ${daemon.body.startedAt}`);
-      // The install changed under a running daemon: what is on disk is not what answers.
+      // The code changed under a running daemon: what is on disk is not what answers.
       if (daemon.body.restartNeeded === true)
-        lines.push("restart needed the installed code is newer than this daemon: systemctl --user restart ghostd");
+        lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
     }
     if (remote) {
       const url = remote.body.url ? ` ${remote.body.url}` : "";

@@ -312,5 +312,23 @@ describe("CLI API adaptation", () => {
     expect(response.stdout).toContain("daemon version 1.4.0");
     expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
     expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
+    expect(response.stdout).not.toContain("restart needed");
+  });
+
+  // An update that was not restarted into still answers under the same
+  // version; status says so, and points at the safe way to restart.
+  it("says when the code on disk is newer than the running daemon", async () => {
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts") return jsonResponse([]);
+      if (path === "/api/status") {
+        return jsonResponse({ version: "1.4.0", source: { commit: null, root: null },
+          startedAt: "2026-10-28T12:40:53.000Z", restartNeeded: true });
+      }
+      return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
+    };
+    const response = await runCli(["status"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(response.stdout).toContain("daemon started 2026-10-28T12:40:53.000Z");
+    expect(response.stdout).toContain("restart needed code on disk is newer than this daemon (ghost help self)");
   });
 });
