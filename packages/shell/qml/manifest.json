@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ferdousbhai.ghost",
   "name": "Ghost",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "author": "Ferdous Bhai",
   "license": "Apache-2.0",
   "description": "An owner-local AI persona with its own character, tools, and desktop reach: summoned, it lights the screen edges and listens; it works in the background and answers in a card. History and settings open like the desktop's own menu, and the bar mark shows its state in herdr's colours. Needs the ghost package for the daemon. Summon with: omarchy-shell shell toggle ferdousbhai.ghost",
