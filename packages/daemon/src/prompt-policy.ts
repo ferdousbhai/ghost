@@ -9,6 +9,7 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
   "For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or "
     + "`omarchy <group> --help` and run it from Bash. Use the `ghost` MCP server's `desktop_look` "
     + "and `desktop_act` when Omarchy has no route, the route failed, or the task is inside an application.",
+  "A spoken voice the owner hears (Piper, not your persona's tone): `ghost help dictation`.",
 ].join("\n");
 
 /**
