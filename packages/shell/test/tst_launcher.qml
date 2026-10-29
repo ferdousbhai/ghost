@@ -183,6 +183,25 @@ TestCase {
         compare(chosen[2], "new:new");
     }
 
+    // Enter while listening means "that's it": the ghost is asked what was
+    // said once Voxtype has typed it, whatever row the words happen to match.
+    function test_enterWhileListeningAsksWhatWasSaid(): void {
+        const launcher = createTemporaryObject(launcherComponent, tc);
+        const chosen = [];
+        launcher.activated.connect(row => chosen.push(row.kind + ":" + row.detail));
+        launcher.reset();
+        Dictation.state = "recording";
+        keyClick(Qt.Key_Return);
+        verify(launcher.askAfterDictation);
+        compare(chosen, []);
+        // The transcript arrives as typing, then the recording settles.
+        for (const ch of "fix the readme") keyClick(ch);
+        Dictation.state = "idle";
+        tryCompare(launcher, "askAfterDictation", false, 2000);
+        compare(chosen, ["ask:fix the readme"]);
+        Dictation.state = "";
+    }
+
     function test_deleteAsksAboutTheSelectedConversation(): void {
         const launcher = createTemporaryObject(launcherComponent, tc);
         const asked = [];

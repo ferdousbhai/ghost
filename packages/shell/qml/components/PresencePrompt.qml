@@ -148,40 +148,11 @@ Rectangle {
                 }
             }
 
-            // The listening light: amber while Voxtype records; a click toggles it.
-            Rectangle {
+            ListeningLight {
                 id: listening
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                visible: Dictation.available
-                width: Theme.controlHeight
-                height: width
-                radius: width / 2
-                color: Dictation.recording ? Theme.ghostAmber : Theme.film(0.10)
-
-                SequentialAnimation on opacity {
-                    running: Dictation.recording
-                    loops: Animation.Infinite
-                    onRunningChanged: if (!running) listening.opacity = 1
-                    NumberAnimation { to: 0.55; duration: 700; easing.type: Easing.InOutSine }
-                    NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-                }
-
-                GhostGlyph {
-                    anchors.centerIn: parent
-                    size: Theme.fontSize + 2
-                    path: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"
-                    tint: Dictation.recording ? Theme.background : Theme.foregroundBright
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        field.forceActiveFocus();
-                        Dictation.toggle();
-                    }
-                }
+                input: field
             }
         }
 

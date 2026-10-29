@@ -76,8 +76,13 @@ Item {
         Presence.dismiss();
         // The window shows this reply now; the card would only repeat it.
         if (Presence.mine(String(payload.ghost || ""), String(payload.sessionId || ""))) Presence.clear();
+        const opening = !hud.shown;
         hud.open();
         if (payload.section) hud.showSection(String(payload.section));
+        if (opening) Presence.igniteMenu();
+        // The menu listens as it opens, as the prompt does: say what to find
+        // or ask, and Enter asks it.
+        if (opening && hud.home) hud.listen();
     }
 
     function close(): void {

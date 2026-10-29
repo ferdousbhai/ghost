@@ -39,6 +39,34 @@ Singleton {
     /** Enter on an empty prompt while recording: send what Voxtype types. */
     property bool sendAfterDictation: false
 
+    /**
+     * The edge glow's ignition: which screen, which edge, and where along it
+     * (0..1 from its top or left end), counted so each summon starts one.
+     * The menu's glow stays on `hudScreen` while it is open.
+     */
+    property string ignitionScreen: ""
+    property string ignitionEdge: "bottom"
+    property real ignitionAt: 0.5
+    property int ignitions: 0
+    property string hudScreen: ""
+    /** Where the bar mark was clicked ({ screen, edge, at, time }), for the menu's ignition to start there. */
+    property var clickedAt: null
+
+    function ignite(screen: string, edge: string, at: real): void {
+        root.ignitionScreen = screen;
+        root.ignitionEdge = edge;
+        root.ignitionAt = at;
+        root.ignitions += 1;
+    }
+
+    /** The menu opening: its glow starts from the bar mark when that was the click, else above it. */
+    function igniteMenu(): void {
+        const click = root.clickedAt !== null && Date.now() - root.clickedAt.time < 1500 ? root.clickedAt : null;
+        root.clickedAt = null;
+        root.hudScreen = click ? click.screen : Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+        root.ignite(root.hudScreen, click ? click.edge : "top", click ? click.at : 0.5);
+    }
+
     /** Service.qml summons the window on this; only it holds the host shell. */
     signal windowRequested(string ghost, string sessionId)
 
@@ -68,6 +96,8 @@ Singleton {
         root.continuing = root.phase !== "" && root.ghost === Ghostd.activeGhost;
         root.sendAfterDictation = false;
         root.composing = true;
+        // From under the prompt, where it sits.
+        root.ignite(root.screenName, "bottom", 0.5);
         Dictation.refresh();
         if (Dictation.state === "idle") Dictation.toggle();
     }

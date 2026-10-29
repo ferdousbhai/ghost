@@ -11,8 +11,8 @@ summon), and `bar-widget` (the ghost mark, in herdr's agent-state colours:
 green outline idle, amber working, blue unread, red waiting on the owner).
 
 `SUPER+CTRL+G` summons the presence: layer-shell surfaces glow along every
-screen edge and a prompt on the focused monitor takes the keyboard while
-Voxtype listens. After a send, the glow thins and a ticker, then the reply
+screen edge, a ring ignited from under the prompt (`EdgeGlow.js`), and a
+prompt on the focused monitor takes the keyboard while Voxtype listens. After a send, the glow thins and a ticker, then the reply
 card, stays up without taking the keyboard until clicked; summoning again
 over it follows up in the same conversation. The `Presence` singleton holds
 that state and `PresenceOverlay` (mounted by the always-loaded service, since

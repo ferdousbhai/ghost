@@ -72,6 +72,7 @@ FocusScope {
 
     /** Fresh on every open: an empty filter, the newest conversations, the keyboard here. */
     function reset(): void {
+        root.askAfterDictation = false;
         filter.text = "";
         Ghostd.ghostRenameError = "";
         root.now = Date.now();
@@ -89,6 +90,35 @@ FocusScope {
         const names = Ghostd.ghosts.map(g => g.name);
         if (names.length < 2) return;
         Ghostd.selectGhost(names[(names.indexOf(Ghostd.activeGhost) + 1) % names.length]);
+    }
+
+    /** Enter stopped the recording: ask with the transcript once it has stopped arriving. */
+    property bool askAfterDictation: false
+
+    function dictationSettled(): void {
+        root.askAfterDictation = false;
+        const text = filter.text.trim();
+        if (text !== "" && Ghostd.activeGhost !== "") root.activated({ kind: "ask", id: "ask", detail: text });
+    }
+
+    // Voxtype types a transcript a few characters at a time; ask once it has
+    // gone quiet after the recording stopped.
+    Timer {
+        id: askTimer
+        interval: 700
+        onTriggered: root.dictationSettled()
+    }
+    Connections {
+        target: Dictation
+        function onStateChanged(): void {
+            if (root.askAfterDictation && Dictation.state === "idle") askTimer.restart();
+        }
+    }
+    Connections {
+        target: filter
+        function onTextChanged(): void {
+            if (root.askAfterDictation) askTimer.restart();
+        }
     }
 
     function activate(row: var): void {
@@ -127,7 +157,7 @@ FocusScope {
             objectName: "launcherFilter"
             anchors.left: back.visible ? back.right : parent.left
             anchors.leftMargin: back.visible ? Theme.gap * 1.5 : Theme.pad
-            anchors.right: ghostChip.visible ? ghostChip.left : closeMark.left
+            anchors.right: mic.visible ? mic.left : ghostChip.visible ? ghostChip.left : closeMark.left
             anchors.rightMargin: Theme.gap
             anchors.verticalCenter: parent.verticalCenter
             focus: true
@@ -143,8 +173,10 @@ FocusScope {
                 visible: filter.text === ""
                 verticalAlignment: Text.AlignVCenter
                 text: root.ghostMode ? "Find a ghost, or name a new one…"
+                    : root.askAfterDictation ? "Transcribing…"
+                    : Dictation.recording ? "Listening… or type"
                     : Ghostd.activeGhost === "" ? "Search" : "Search, or ask " + Ghostd.activeGhost + "…"
-                color: Theme.foregroundFaint
+                color: !root.ghostMode && Dictation.recording ? Theme.ghostAmber : Theme.foregroundFaint
                 font: filter.font
             }
 
@@ -152,7 +184,12 @@ FocusScope {
                 const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
                 if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_J)) root.move(1);
                 else if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_K)) root.move(-1);
-                else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.activate(root.current);
+                else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && Dictation.recording && !root.ghostMode) {
+                    // Enter while listening is "that's it": stop, and ask
+                    // the ghost what was said once Voxtype has typed it.
+                    root.askAfterDictation = true;
+                    Dictation.toggle();
+                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.activate(root.current);
                 else if (event.key === Qt.Key_Tab && !root.ghostMode) root.nextGhost();
                 else if (ctrl && event.key === Qt.Key_N && !root.ghostMode) root.activated({ kind: "new", id: "new" });
                 else if (ctrl && event.key === Qt.Key_P && root.current && root.current.kind === "session")
@@ -168,6 +205,16 @@ FocusScope {
                 else return;
                 event.accepted = true;
             }
+        }
+
+        ListeningLight {
+            id: mic
+            visible: Dictation.available && !root.ghostMode
+            anchors.right: ghostChip.left
+            anchors.rightMargin: Theme.gap * 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: Theme.controlHeight * 0.8
+            input: filter
         }
 
         // Whose launcher this is; Tab or a click moves to the next ghost.

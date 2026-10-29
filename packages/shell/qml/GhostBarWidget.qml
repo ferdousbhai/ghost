@@ -38,7 +38,19 @@ Item {
     function triggerPress(button: int): void {
         if (button !== Qt.LeftButton || !root.bar) return;
         root.bar.hideTooltip(root);
+        root.noteClick();
         if (root.bar.shell) root.bar.shell.toggle(root.selfId, '{"section":"home"}');
+    }
+
+    /** Where on the screen's edge the mark sits, so the menu's glow starts from it. */
+    function noteClick(): void {
+        const screen = root.Screen;
+        if (screen.name === "" || screen.width <= 0 || screen.height <= 0) return;
+        const edge = typeof root.bar.position === "string" ? root.bar.position : "top";
+        const centre = root.mapToItem(null, root.width / 2, root.height / 2);
+        const horizontal = edge === "top" || edge === "bottom";
+        const at = horizontal ? centre.x / screen.width : centre.y / screen.height;
+        Presence.clickedAt = { screen: screen.name, edge: edge, at: Math.max(0, Math.min(1, at)), time: Date.now() };
     }
 
     /** herdr's states, most urgent first: "offline", "blocked", "working", "done", or "idle". */

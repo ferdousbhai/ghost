@@ -210,6 +210,10 @@ ticker as a card. Summon again while the card is up to follow up in the same
 conversation (`new ×` starts a fresh one instead); `×` or `Esc` on the card
 dismisses it, and `open` shows the conversation in history.
 
+Clicking the ghost in the bar opens history the same way: the edges light
+from the mark, and it is already listening. Speak to fill the search, then
+press `Enter` to ask the ghost what you said, or type to find a conversation.
+
 History and settings open the way your desktop's own menu does (the ghost
 mark in the Omarchy bar, your app launcher, or
 `omarchy-shell ghost section home`): a card over whatever is open, with a

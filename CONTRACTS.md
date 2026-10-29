@@ -698,7 +698,10 @@ runtime preserves owner data.
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
   dismissed or opened in the window. Edge surfaces take no input and reserve
-  no space. A payload naming a `section` or `sessionId` opens the HUD: a card
+  no space. The glow is one ring of colour flowing round the screen; a summon
+  ignites it from where it came from (under the prompt, or the bar mark that
+  was clicked), lighting outward both ways until the fronts meet, and the HUD
+  keeps a softer ring on its screen while it is open. A payload naming a `section` or `sessionId` opens the HUD: a card
   over everything on the focused monitor, on the theme's `[menu]` scrim and
   card tokens like Omarchy's own menu. The HUD and the presence prompt, the
   two surfaces that take the keyboard, are windows titled `Ghost` and
@@ -708,7 +711,9 @@ runtime preserves owner data.
   compositor close is a dismissal. Section
   `home` is its launcher, a filter over the ghost's conversations and its
   places (the other sections) that asks the ghost what was typed when nothing
-  matches; a row grows the card into that section. Esc steps back (a
+  matches; a row grows the card into that section. Opened on `home`, it
+  listens as the prompt does: Voxtype types into the filter, Enter while
+  listening asks the ghost what was said, and leaving the list stops it. Esc steps back (a
   standing question, the workbench, the section to `home`, then out), as do
   the toggle and a scrim click; a running turn continues behind it, and
   Shift+Esc stops one. Opening a link, a file, or the external editor closes

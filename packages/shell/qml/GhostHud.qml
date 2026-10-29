@@ -85,6 +85,7 @@ FloatingWindow {
         Ghostd.hudVisible = hud.shown;
         if (hud.shown && !Theme.reducedMotion)
             materialize.restart();
+        if (!hud.shown) hud.stopListening();
     }
 
     function open(): void {
@@ -98,6 +99,26 @@ FloatingWindow {
     function close(): void {
         hud.shown = false;
     }
+
+    /** This window started Voxtype, so it stops it when the launcher goes. */
+    property bool listening: false
+
+    /** Start Voxtype for the launcher's filter, unless it is already busy. */
+    function listen(): void {
+        Dictation.refresh();
+        if (Dictation.state !== "idle") return;
+        Dictation.toggle();
+        hud.listening = true;
+    }
+
+    /** Stop what `listen` started: a transcript must not type into a pane or another app. */
+    function stopListening(): void {
+        if (!hud.listening) return;
+        hud.listening = false;
+        Dictation.cancel();
+    }
+
+    onHomeChanged: if (!hud.home) hud.stopListening()
 
     /** Give the window the focus: a new one, or one left open behind another app. */
     function raise(): void {

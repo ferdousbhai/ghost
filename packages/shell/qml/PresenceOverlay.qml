@@ -14,6 +14,7 @@ import QtQuick
 import "services"
 import "components"
 import "services/DesktopKeys.js" as Desk
+import "services/EdgeGlow.js" as EdgeGlow
 
 Scope {
     // The prompt: the whole monitor, so a click outside the pill dismisses it
@@ -59,8 +60,9 @@ Scope {
                 ? screenScope.modelData === Quickshell.screens[0]
                 : screenScope.modelData.name === Presence.screenName
 
-            /** Full while summoned, a shimmer while working, dark otherwise. */
+            /** Full while summoned, softer around the menu on its screen, a shimmer while working, dark otherwise. */
             readonly property real strength: Presence.composing ? 1
+                : Ghostd.hudVisible && screenScope.modelData.name === Presence.hudScreen ? 0.55
                 : Presence.working ? 0.22 : 0
             property real shown: screenScope.strength
             Behavior on shown { NumberAnimation { duration: Theme.durSlow; easing.type: Easing.OutCubic } }
@@ -70,13 +72,38 @@ Scope {
                 from: 0; to: 1
                 loops: Animation.Infinite
                 duration: Presence.composing ? 6000 : 14000
-                running: screenScope.shown > 0.01
+                running: screenScope.shown > 0.01 || screenScope.flare > 0
             }
 
-            PresenceEdge { screen: screenScope.modelData; edge: "top"; strength: screenScope.shown; phase: screenScope.phase }
-            PresenceEdge { screen: screenScope.modelData; edge: "bottom"; strength: screenScope.shown; phase: screenScope.phase }
-            PresenceEdge { screen: screenScope.modelData; edge: "left"; strength: screenScope.shown; phase: screenScope.phase }
-            PresenceEdge { screen: screenScope.modelData; edge: "right"; strength: screenScope.shown; phase: screenScope.phase }
+            // An ignition on this screen: the ring lights outward both ways
+            // from where the summon came from, bright heads riding the
+            // fronts, and settles once they meet opposite it.
+            property real from: 0
+            property real front: 1
+            property real flare: 0
+            Connections {
+                target: Presence
+                function onIgnitionsChanged(): void {
+                    if (Presence.ignitionScreen !== screenScope.modelData.name || Theme.reducedMotion) return;
+                    screenScope.from = EdgeGlow.origin(Presence.ignitionEdge, Presence.ignitionAt,
+                        screenScope.modelData.width, screenScope.modelData.height);
+                    ignition.restart();
+                }
+            }
+            SequentialAnimation {
+                id: ignition
+                PropertyAction { target: screenScope; properties: "front,flare"; value: 0 }
+                ParallelAnimation {
+                    NumberAnimation { target: screenScope; property: "front"; to: 1; duration: 950; easing.type: Easing.OutQuad }
+                    NumberAnimation { target: screenScope; property: "flare"; to: 1; duration: 180; easing.type: Easing.OutQuad }
+                }
+                NumberAnimation { target: screenScope; property: "flare"; to: 0; duration: 650; easing.type: Easing.InOutSine }
+            }
+
+            PresenceEdge { screen: screenScope.modelData; edge: "top"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "bottom"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "left"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
+            PresenceEdge { screen: screenScope.modelData; edge: "right"; strength: screenScope.shown; phase: screenScope.phase; from: screenScope.from; front: screenScope.front; flare: screenScope.flare }
 
             // The ticker, then the card, where the prompt was.
             WlrLayershell {

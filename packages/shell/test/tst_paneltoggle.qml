@@ -15,6 +15,43 @@ TestCase {
     function cleanup(): void {
         Presence.dismiss();
         Ghostd.activeGhost = "";
+        Dictation.state = "";
+    }
+
+    // The menu listens as it opens on its list, and stops when the list goes:
+    // a transcript must not type into a pane.
+    function test_theMenuListensWhileItsListIsUp(): void {
+        Ghostd.activeGhost = "dous";
+        Dictation.state = "idle";
+        const panel = createTemporaryObject(panelComponent, this);
+        const hud = findChild(panel, "hud");
+        panel.open('{"section":"home"}');
+        verify(hud.listening);
+        hud.showSection("board");
+        verify(!hud.listening);
+    }
+
+    function test_theMenuOpenedOnAPaneDoesNotListen(): void {
+        Ghostd.activeGhost = "dous";
+        Dictation.state = "idle";
+        const panel = createTemporaryObject(panelComponent, this);
+        panel.open('{"section":"board"}');
+        verify(!findChild(panel, "hud").listening);
+    }
+
+    // The menu's glow starts from where the bar mark was clicked.
+    function test_theMenuIgnitesFromTheClick(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = createTemporaryObject(panelComponent, this);
+        const before = Presence.ignitions;
+        Presence.clickedAt = { screen: "DP-1", edge: "top", at: 0.93, time: Date.now() };
+        panel.open('{"section":"home"}');
+        compare(Presence.ignitions, before + 1);
+        compare(Presence.ignitionScreen, "DP-1");
+        compare(Presence.ignitionEdge, "top");
+        compare(Presence.ignitionAt, 0.93);
+        compare(Presence.hudScreen, "DP-1");
+        verify(Presence.clickedAt === null);
     }
 
     function test_aPlainSummonRefocusesAnOpenWindow(): void {
