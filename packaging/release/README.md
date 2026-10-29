@@ -99,8 +99,9 @@ the Omarchy repository itself are in [`../omarchy/`](../omarchy/).
 Nothing is pushed to omarchy-pkgs for a release. Within six hours its
 `sync-upstream` bumps `pkgbuilds/ghost` to the release, and owners get it
 from `omarchy update` once Omarchy has built and promoted it; that schedule
-is Omarchy's, not the release's, and there is no other install path to hand
-owners meanwhile. Two things do not follow the tag on their own:
+is Omarchy's, not the release's. Meanwhile the release's `install.sh`
+(`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash`) builds it from
+`ghost-recipe.tar.gz`. Two things do not follow the tag on their own:
 
 - **Recipe changes.** The sync rewrites only the version and checksums. A
   change to the recipe itself (dependencies, descriptions, install
