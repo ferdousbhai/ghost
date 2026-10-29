@@ -13,7 +13,7 @@ function checkoutLines(running: RunningSource | null): string[] {
   const checkout = running?.root ?? null;
   if (checkout === null) {
     return [
-      `${running ? `You run from a packaged install under ${PACKAGED_ROOT}, whose files are not yours to edit.` : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}, and any part of it is yours to change to fit the owner: run yourself from your own clone (\`ghost help self\`).`,
+      `${running ? `You run from a packaged install under ${PACKAGED_ROOT}, which pacman owns and you cannot write.` : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}, and any part of it is yours to change to fit the owner: run yourself from your own clone (\`ghost help self\`).`,
     ];
   }
   return [

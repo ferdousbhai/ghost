@@ -858,7 +858,7 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
   reason, and the same reason is in the commit. See
   [`docs/self-maintenance.md`](docs/self-maintenance.md).
 - Any part of Ghost's code is a ghost's to change to fit its owner. A
-  packaged install's files are never edited: a ghost changes itself by running
+  packaged install's files are pacman's and never edited: a ghost changes itself by running
   from its own clone under the owner's home (an `ExecStart` drop-in for
   ghostd, a `~/.local/bin/ghost` launcher, the plugin link), each step undone
   by removing it.

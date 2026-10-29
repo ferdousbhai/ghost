@@ -24,11 +24,11 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).not.toContain("systemd-run");
   });
 
-  // A packaged install's files are not the ghost's, but its code is: it may
-  // change any of it, from its own clone, as every user's ghost can.
+  // pacman owns a packaged install's files, but the ghost's code is its own:
+  // it may change any of it, from its own clone, as every user's ghost can.
   it("gives a packaged install its own clone to change, never the package", () => {
     const policy = renderSelfMaintenancePolicy(PACKAGED);
-    expect(policy).toContain("/usr/lib/ghost/runtime, whose files are not yours to edit");
+    expect(policy).toContain("/usr/lib/ghost/runtime, which pacman owns and you cannot write");
     expect(policy).toContain("https://github.com/ferdousbhai/ghost");
     expect(policy).toContain("any part of it is yours to change to fit the owner");
     expect(policy).toContain("`ghost help self`");

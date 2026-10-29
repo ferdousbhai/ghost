@@ -7,8 +7,8 @@ that survives the daemon it restarts.
 
 Any part of Ghost's code is a ghost's to change, to fit its owner: its
 persona, its HUD, its daemon, its recipes. On Omarchy, Ghost is a packaged
-install whose root-owned files no ghost edits; a ghost changes itself by
-running from its own clone instead, as below, which needs no sudo beyond
+install whose files pacman owns and a ghost cannot write; a ghost changes
+itself by running from its own clone instead, as below, which needs no sudo beyond
 installing `pnpm` and is undone in a few commands. That clone powers every
 ghost on the machine, so the ghost tells the owner before it switches over
 and before it restarts. Read `ghost help self` for the edit, test, commit,
