@@ -198,6 +198,7 @@ async function serveDaemon(
   const runningSource = resolveRunningSource(
     DAEMON_VERSION,
     dirname(fileURLToPath(import.meta.url)),
+    fileURLToPath(import.meta.url),
   );
   registry.ensureRoot();
 

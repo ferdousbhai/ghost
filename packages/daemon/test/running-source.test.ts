@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findSourceRoot, readHeadCommit, resolveRunningSource } from "../src/running-source.js";
+import { findSourceRoot, readHeadCommit, replacedSinceStart, resolveRunningSource } from "../src/running-source.js";
 
 /** Make `root` a git repository with one commit, and return that commit. */
 function gitCommit(root: string): string {
@@ -101,5 +101,35 @@ describe("resolveRunningSource", () => {
       root,
       commit,
     });
+  });
+});
+
+// A daemon outlives its install: what answers can be older than what is on
+// disk, and `ghost status` has to be able to say so.
+describe("replacedSinceStart", () => {
+  it("sees an installed entry file rewritten after the daemon started", () => {
+    const base = tempRoot();
+    const entry = join(base, "ghostd.js");
+    writeFileSync(entry, "old");
+    const running = resolveRunningSource("1.0.0", base, entry);
+    expect(running.entry).toBe(entry);
+    // Started after the file was written: current.
+    expect(replacedSinceStart({ ...running, startedAt: Date.now() + 60_000 })).toBe(false);
+    // Written after the daemon started (its ctime, which an install cannot backdate): stale.
+    expect(replacedSinceStart({ ...running, startedAt: Date.now() - 60_000 })).toBe(true);
+    // An entry that is gone was replaced under another name.
+    expect(replacedSinceStart({ ...running, entry: join(base, "missing.js") })).toBe(true);
+  });
+
+  it("sees a checkout moved to another commit, and knows nothing without an entry", () => {
+    const base = tempRoot();
+    const root = workspace(join(base, "checkout"));
+    gitCommit(root);
+    const running = resolveRunningSource("0.0.1", join(root, "packages", "daemon"));
+    expect(replacedSinceStart(running)).toBe(false);
+    expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(true);
+    // An unreadable checkout is unknown, not stale.
+    expect(replacedSinceStart({ ...running, root: join(base, "nowhere") })).toBe(false);
+    expect(replacedSinceStart({ version: "1", root: null, commit: null })).toBe(false);
   });
 });

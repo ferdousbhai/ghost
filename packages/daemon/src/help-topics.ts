@@ -65,7 +65,7 @@ function self(): string[] {
     '  --description="<reason>" \\',
     "  systemctl --user restart ghostd.service",
     "```",
-    "The transient unit survives the daemon. Verify afterward with `ghost status` and `journalctl --user -t ghostd`; restart never sends a model prompt.",
+    "The transient unit survives the daemon. Verify afterward with `ghost status` (no `restart needed` line) and `journalctl --user -t ghostd`; restart never sends a model prompt.",
     "A HUD change needs `omarchy-restart-shell`: the HUD is an omarchy-shell plugin, not a unit of yours, and a rescan leaves QML the shell already loaded in place.",
     "Omarchy owns package updates; update a checkout only when the owner asks.",
     "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",

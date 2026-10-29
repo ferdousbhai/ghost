@@ -4,13 +4,16 @@
  * HEAD commit. Never throws: an unreadable checkout only means "unknown".
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export interface RunningSource {
   readonly version: string;
   readonly commit: string | null;
   readonly root: string | null;
+  /** The file this process was started from, and when it started. */
+  readonly entry?: string;
+  readonly startedAt?: number;
 }
 
 const WORKSPACE_PACKAGE_NAME = "ghost-workspace";
@@ -44,9 +47,31 @@ export function readHeadCommit(root: string): string | null {
 }
 
 /** What is running: `version` plus the checkout behind it when there is one. */
-export function resolveRunningSource(version: string, startDir: string): RunningSource {
+export function resolveRunningSource(version: string, startDir: string, entry?: string): RunningSource {
   const root = findSourceRoot(startDir);
-  return { version, root, commit: root === null ? null : readHeadCommit(root) };
+  const running = { version, root, commit: root === null ? null : readHeadCommit(root) };
+  return entry === undefined ? running : { ...running, entry, startedAt: Date.now() };
+}
+
+/**
+ * The code on disk is no longer what this process runs, so it needs a
+ * restart to run it: a checkout has moved to another commit, or an install
+ * rewrote the entry file after this process started. The file's ctime says
+ * when it was written here; a package cannot backdate it the way it carries
+ * its build time as the mtime. Unknown is false.
+ */
+export function replacedSinceStart(running: RunningSource): boolean {
+  if (running.root !== null) {
+    const now = readHeadCommit(running.root);
+    return running.commit !== null && now !== null && now !== running.commit;
+  }
+  if (running.entry === undefined || running.startedAt === undefined) return false;
+  try {
+    return statSync(running.entry).ctimeMs > running.startedAt;
+  } catch {
+    // Gone: an upgrade replaced it under another name.
+    return true;
+  }
 }
 
 /** Where the package installs the skills Ghost ships. */

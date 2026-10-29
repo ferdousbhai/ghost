@@ -10,6 +10,9 @@ import type { CliContext } from "./types.js";
 interface DaemonStatus {
   version: RunningSource["version"] | null;
   source?: { commit: RunningSource["commit"]; root: RunningSource["root"] };
+  /** When the running daemon started, and whether the code on disk has changed since. */
+  startedAt?: string | null;
+  restartNeeded?: boolean;
 }
 
 export async function statusCommand(
@@ -34,7 +37,12 @@ export async function statusCommand(
     defaultGhost,
     version: ctx.version,
     ...(daemon
-      ? { daemonVersion: daemon.body.version, source: daemon.body.source ?? null }
+      ? {
+        daemonVersion: daemon.body.version,
+        source: daemon.body.source ?? null,
+        daemonStartedAt: daemon.body.startedAt ?? null,
+        restartNeeded: daemon.body.restartNeeded === true,
+      }
       : {}),
     ...(remote ? { remote: remote.body } : { remote: { state: "unavailable" } }),
   };
@@ -52,6 +60,10 @@ export async function statusCommand(
       lines.push(`daemon version ${daemon.body.version ?? "unknown"}`);
       lines.push(`daemon commit  ${daemon.body.source?.commit ?? "unknown"}`);
       lines.push(`daemon source  ${daemon.body.source?.root ?? "packaged install"}`);
+      if (daemon.body.startedAt) lines.push(`daemon started ${daemon.body.startedAt}`);
+      // The install changed under a running daemon: what is on disk is not what answers.
+      if (daemon.body.restartNeeded === true)
+        lines.push("restart needed the installed code is newer than this daemon: systemctl --user restart ghostd");
     }
     if (remote) {
       const url = remote.body.url ? ` ${remote.body.url}` : "";

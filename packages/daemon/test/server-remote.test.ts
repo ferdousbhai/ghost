@@ -187,6 +187,8 @@ describe("tailnet identity", () => {
     expect(await owner.json()).toEqual({
       version: "1.4.0",
       source: { commit: runningSource.commit, root: runningSource.root },
+      startedAt: null,
+      restartNeeded: false,
     });
 
     const guest = await fetch(`${base}/api/status`, { headers: asTailnet("guest@example.com") });
@@ -206,7 +208,7 @@ describe("tailnet identity", () => {
   it("reports an unknown source when the daemon was started without one", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${TOKEN}` } });
-    expect(await response.json()).toEqual({ version: null, source: { commit: null, root: null } });
+    expect(await response.json()).toEqual({ version: null, source: { commit: null, root: null }, startedAt: null, restartNeeded: false });
   });
 
   it("honours guests: none and a configured owner login", async () => {

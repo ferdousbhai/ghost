@@ -35,7 +35,7 @@ import {
   type TurnEvent,
   type TurnResumeEvent,
 } from "./turn-events.js";
-import type { RunningSource } from "./running-source.js";
+import { replacedSinceStart, type RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
 
 export interface ServerOptions {
@@ -737,9 +737,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(context.response, 200, isGuest(context) ? board : { path, ...board });
     }),
     route("GET", "api/status", ownerOnly(({ response }) => {
+      const running = options.runningSource;
       jsonResponse(response, 200, {
-        version: options.runningSource?.version ?? null,
-        source: { commit: options.runningSource?.commit ?? null, root: options.runningSource?.root ?? null },
+        version: running?.version ?? null,
+        source: { commit: running?.commit ?? null, root: running?.root ?? null },
+        startedAt: running?.startedAt === undefined ? null : new Date(running.startedAt).toISOString(),
+        restartNeeded: running ? replacedSinceStart(running) : false,
       });
     })),
     route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,
