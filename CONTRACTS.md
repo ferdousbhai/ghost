@@ -3,6 +3,10 @@
 Stable boundaries shared by Ghost's packages and clients. Change these in one
 commit with every consumer. Implementation detail belongs in code and tests.
 
+What belongs here is what another package, a third-party client, or the
+owner's own configuration relies on. How a package behaves inside itself
+belongs in its README.
+
 ## Product boundary
 
 Ghost is an owner-local Omarchy application: one owner, one machine, any number
@@ -686,106 +690,61 @@ runtime preserves owner data.
   persona prompt, configuration, authentication, conversations, the harness table, MCP, hooks, lifecycle,
   HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
-  package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring `service`
-  (the daemon connection, the desktop presence, and
-  the notifications a shut window would swallow), `panel` (the summon), and
-  `bar-widget` (the state dot) kinds. A summon payload with neither `section`
-  nor `sessionId` opens the presence: every screen's edges glow and a prompt
-  on the focused monitor takes the keyboard (the window instead while no ghost
-  is listed). A prompt left open behind another app is refocused as it was
-  (a named ghost is selected first), and so is the window when no `ghost` is
-  named. Sending starts a new conversation, or continues the presence's while
-  its ticker or reply card is up, unless the owner chose new. The prompt then
-  closes, the glow thins, and a ticker that takes no keyboard focus
-  unclicked shows the turn's activity, then its reply or error, until
-  dismissed or opened in the window. Edge surfaces take no input and reserve
-  no space. The glow is one ring of colour flowing round the screen; a summon
-  ignites it from where it came from (under the prompt, the bar mark that
-  was clicked, else the top edge), lighting outward both ways until the fronts meet, and the HUD
-  keeps a softer ring on its screen. The ring flows and breathes while Ghost is the foreground app (the prompt or the HUD has the keyboard) and goes out behind another app. A payload naming a `section` or `sessionId` opens the HUD: a card
-  over everything on the focused monitor, on the theme's `[menu]` scrim and
-  card tokens like Omarchy's own menu. The HUD and the presence prompt, the
-  two surfaces that take the keyboard, are windows titled `Ghost` and
-  `Ghost prompt`, not layers: Hyprland floats, pins, and sizes each to its
-  monitor without decoration, so as the focused window SUPER+W closes Ghost,
-  never the app behind it, and every other binding keeps working. A
-  compositor close is a dismissal. Section
-  `home` is its launcher, a filter over the ghost's conversations and its
-  places (the other sections) that asks the ghost what was typed when nothing
-  matches; a row grows the card into that section. Opened on `home`, it
-  listens as the prompt does: Voxtype types into the filter, Enter while
-  listening asks the ghost what was said, and choosing a row with the
-  arrows or leaving the list stops it. A restore (a reload or rebuild putting
-  the window back) neither listens nor ignites. Esc steps back (a
-  standing question, the workbench, the section to `home`, then out), as do
-  the toggle and a scrim click; a running turn continues behind it, and
-  Shift+Esc stops one. Opening a link, a file, or the external editor closes
-  it. The bar dot and desktop entry open it on `home`. The bar mark is the
-  ghost glyph in herdr's agent states over every conversation of the selected
-  ghost, most urgent first: filled red while one holds an open `question`
-  (blocked), filled amber while one runs (working), filled blue while one has
-  an unread reply (done), a green outline otherwise (idle), and a dim outline
-  while ghostd is unreachable; the colours are the theme's red, yellow, blue,
-  and green. An open question shows on the presence card and above the chat
-  composer with its suggested answers as buttons (1–6 on the card); a chosen
-  answer is sent as the owner's message, and `dismiss` withdraws it. The
-  launcher lists such conversations after pinned ones, before unread ones.
-  The shell asks Hyprland for what it needs at runtime through `hyprctl
-  eval` ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)), so every
-  install has it and no config file is edited: `SUPER+CTRL+G` toggles the
-  presence unless a default-mode binding already holds it (the owner's own,
-  bound to this plugin or described "Summon ghost", is left in place; the
-  shell's claim is described "Summon ghost (shell)"), and the named window
-  rule `ghost-windows` (class `org.quickshell`, those two titles: float, pin,
-  monitor size from its corner, no border, rounding, shadow, or open
-  animation, out of Omarchy's default inactive opacity). Both are withdrawn
-  when the plugin unloads, only by the shell that last made them, and re-made
-  after each Hyprland config reload; the `ghost` IPC's `status` reports
-  `summonKey` (`shell`, `owner`, `taken`, or `none`: free on a `.conf` config,
-  which runs no Lua, so `contrib/hyprland/ghost.conf` carries the key and the
-  rule there; empty until read). It runs inside Omarchy's own shell
-  process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
-  imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
-  root. The bar widget fills the injected `bar.barSize` across the bar and
-  the host's 27px icon slot along it. Hover text uses the
-  host's `bar.showTooltip`/`hideTooltip` API and `tooltipHovered` lifecycle;
-  Omarchy owns its theme, sizing, and placement. The widget exposes
-  `triggerPress(button)` so the host's drag-aware click forwarding toggles the
-  HUD on left click through the injected `bar.shell` facade. The package installs it
-  to `/usr/share/ghost/plugin`; the per-user symlink into
-  `~/.config/omarchy/plugins/` belongs to the install script, which waits for
-  shell discovery before enabling the plugin. Setup ends with `ghost new <name>`; harness sign-in is external.
-  The plugin is distributed only by the `ghost` package, never as a
-  `omarchy plugin add` git checkout: the window and the daemon are one product
-  and must be the same version, and a second channel cannot hold that lock.
-  Desktop toasts belong to the shell service. Optional mobile delivery uses the
-owner's `turn_end` command hook. Completed turns,
-  and terminal failures notify unless their conversation is
-  being viewed in the focused, visible chat panel or followed by the presence.
-  Only that chat and the presence's reply card mark replies read. Focus is the HUD's own Qt window state, not a compositor title cache.
-  Cancellation is quiet. Toasts use
-  the conversation title and a reply/error excerpt, replace live toasts
-  per ghost and conversation using the notification server’s IDs, and open that
-  conversation through a summon payload
-  `{ "ghost": "name", "sessionId": "id", "section": "chat" }`, carried in
-  Omarchy’s `omarchy-exec-argv` notification hint.
-  It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
-  state (character, control files) directly; the one deliberate
-  exception is the workbench file editor, which writes ordinary files at the
-  owner's explicit direction. A conflict or failed save blocks closing,
-  switching files, and opening the external editor until resolved.
-  Dictation is Omarchy's Voxtype: the shell reads
-  `$XDG_RUNTIME_DIR/voxtype/state`, focuses the composer, then runs
-  `voxtype record start` when idle or `stop` when recording; the mic is
-  disabled while transcribing. Esc in the composer or its cancel control runs
-  `voxtype record cancel` while recording or transcribing. The presence prompt
-  starts recording when it opens and Voxtype is idle; a send or dismissal
-  cancels it, and Enter on an empty prompt while recording stops it and sends
-  the transcript once Voxtype has typed it. A command that
-  exits nonzero, crashes, or never starts shows as status text above the
-  field, whatever the draft or state, until the next command; Voxtype reports
-  no failed transcription, so the HUD shows none. Ghost ships no speech stack
-  of its own.
+  package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring
+  `service` (the daemon connection, the desktop presence, and the
+  notifications a shut window would swallow), `panel` (the summon), and
+  `bar-widget` (the ghost mark) kinds. How it behaves is its
+  [README](packages/shell/README.md); what others rely on:
+  - **The summon payload**, sent by the host's toggle and summon, the `ghost`
+    IPC, notifications, and the desktop entry: `{}` opens the presence prompt
+    (the HUD while no ghost is listed); `ghost` selects one first; `section`
+    opens the HUD there; `sessionId` with `ghost` opens that conversation;
+    `restore: true` puts the HUD back after a reload without igniting or
+    listening. With nothing named, a prompt or HUD left open behind another
+    app is refocused rather than closed or reopened.
+  - **The `ghost` IPC target** (`omarchy-shell ghost <verb>`): `open`,
+    `close`, `summon <name>`, `ask <prompt>`, `section <name>`, `refresh`,
+    and `status`, a JSON object of `ghost`, `shown`, `streaming`,
+    `reachable`, `activity`, `error`, and `summonKey`.
+  - **Hyprland**, asked at runtime through `hyprctl eval`
+    ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)) so no config
+    file is edited: `SUPER+CTRL+G` unless a default-mode binding holds it (the
+    owner's own, bound to this plugin or described "Summon ghost", stays; the
+    shell's is described "Summon ghost (shell)"), and the named window rule
+    `ghost-windows` for its two keyboard windows, titled `Ghost` and
+    `Ghost prompt`. Both are withdrawn when the plugin unloads, only by the
+    shell that last made them, and re-made after each config reload.
+    `summonKey` is `shell`, `owner`, `taken`, or `none` (free on a `.conf`
+    config, which runs no Lua, so `contrib/hyprland/ghost.conf` carries the
+    key and the rule there), and empty until read.
+  - **Notifications**: completed turns and terminal failures notify unless
+    their conversation is viewed in the focused, visible chat or followed by
+    the presence, and only those two mark replies read; cancellation is
+    quiet. A toast uses the conversation title and a reply or error excerpt,
+    replaces live toasts per ghost and conversation through the notification
+    server's IDs, and opens its conversation with the summon payload
+    `{ "ghost", "sessionId", "section": "chat" }` in Omarchy's
+    `omarchy-exec-argv` hint. Optional mobile delivery is the owner's
+    `turn_end` command hook.
+  - **State** moves only through the authenticated HTTP/SSE API; the shell
+    never edits daemon-validated ghost state (character, control files)
+    directly. The one exception is the workbench file editor, which writes
+    ordinary files at the owner's explicit direction.
+  - **Dictation** is Omarchy's Voxtype: the shell reads
+    `$XDG_RUNTIME_DIR/voxtype/state` and runs `voxtype record
+    start|stop|cancel`. Ghost ships no speech stack of its own.
+  - **Hosting**: it runs inside Omarchy's own shell process, so Ghost ships no
+    shell, unit, or tray helper, and its QML imports are relative paths
+    (inside the host, `qs.` resolves to Omarchy's shell root). The bar widget
+    takes the host's injected `bar` facade: `barSize`, the tooltip API, the
+    `shell` facade, and `triggerPress(button)` for the host's click
+    forwarding. The package installs the plugin to `/usr/share/ghost/plugin`;
+    the per-user link into `~/.config/omarchy/plugins/` belongs to the
+    install script, which waits for shell discovery before enabling it. It
+    is distributed only by the `ghost` package, never as an
+    `omarchy plugin add` checkout: the HUD and the daemon are one product
+    and must be the same version, and a second channel cannot hold that lock.
+    Setup ends with `ghost new <name>`; harness sign-in is external.
 - [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server
   with two tools, `desktop_look` (never changes the desktop) and `desktop_act`
   (ordered steps); any MCP client can run it. It is its own repository with
