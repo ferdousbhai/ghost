@@ -157,6 +157,37 @@ Disconnecting the bridge or pausing/removing its systemd routine stops intake;
 reconnecting may replay provider history according to that provider's retention.
 No Ghost endpoint needs public exposure. See `docs/events.md`.
 
+### Machine watch
+
+A ghost knows what strains its machine through `ghost machine`
+([`machine.ts`](packages/daemon/src/machine.ts)), which reads only what every
+Linux machine reports: CPU use across all cores (`/proc/stat`), memory pressure
+(`/proc/pressure/memory`), CPU time and anonymous memory per systemd unit
+(cgroup v2 `cpu.stat`/`memory.stat`, slices walked, units as leaves except the
+`user@UID.service` manager), and hwmon temperatures and fans. Heat
+(nominal/fair/serious/critical) is the share of all cores busy, raised by any
+sensor near the limit it reports; memory (green/yellow/red) is stall time, not
+use. Sensors are never required, since many machines report no CPU temperature.
+`--json` prints the reading. The verb exists because no installed tool meets the
+constraint: `btop` and `systemd-cgtop` are interactive and keep no state across
+samples, and Omarchy announces low battery and crashes but no CPU or memory strain.
+
+Alerts are a routine, not a daemon loop: a minutely systemd timer with slug
+`machine-watch` (`ghost help machine`) runs `ghost machine check`, which folds
+one sample into `$XDG_STATE_HOME/ghost/machine-<ghost>.json` (0600) and
+delivers each condition that has held — heat serious 5 minutes, memory red 2,
+one unit at a full core 15 — once per episode through the event intake as source
+`machine`, id `<condition>:<ISO start>` (`heat`, `memory`, or `runaway:<cgroup
+path>`), with the JSON reading and the top units' busiest processes as payload.
+An episode ends after 5 calm minutes; a gap over 3 minutes between samples
+(sleep, a paused timer) never counts as holding. A refused delivery is retried
+by the next check and fails the unit. One ghost per machine installs it, only
+when the owner asks; the routines view pauses, inspects, and removes it. Ghost
+throttles or stops nothing itself: the recipe has the ghost fix only its own or
+plainly broken units, least drastic first (CPU weight, freeze, stop), and ask
+the owner about everything else. Low battery reaches a ghost through Omarchy's
+`battery-low` hook calling `ghost event`.
+
 ### Mobile links and completion delivery
 
 The viewer accepts `?ghost=<name>&session=<id>` links, preserves the selected
@@ -447,8 +478,11 @@ Ghost only stores an attached image where the harness can open it.
 
 There is no `ask` tool: a question to the owner is an ordinary reply.
 
-Background work is shell work: a ghost detaches a command
-(`setsid -f`), logs to a file, and ends it with `ghost say --follow-up`, which
+Background work is shell work: a ghost detaches a command into its own
+low-priority transient unit (`systemd-run --user --scope -p CPUWeight=20
+setsid -f`), so it yields to the owner's apps, outlives a daemon restart, and
+stops by unit name; it logs to a file under `$XDG_RUNTIME_DIR`, outside the
+daemon's private `/tmp`, and ends it with `ghost say --follow-up`, which
 queues after a live turn or, when the conversation is idle, starts its next
 turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
@@ -613,7 +647,7 @@ and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
 status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
-`self`, `harnesses`, `background`, `memory`) and ones it does not
+`self`, `harnesses`, `background`, `machine`, `memory`) and ones it does not
 (`dictation`, `events`, `notifications`;
 [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost the shell's `$GHOST` names and needing no daemon; they are prompt-visible contract text like the policy

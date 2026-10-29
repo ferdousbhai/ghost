@@ -8,7 +8,7 @@
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation", "events", "notifications"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "memory", "dictation", "events", "notifications"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -99,10 +99,43 @@ function background(): string[] {
     "# Background work",
     "Your harness's own background jobs end when this turn's headless run does. Work that must outlive the turn runs detached, logs to a file, and wakes you when it ends:",
     "```sh",
-    "setsid -f bash -c 'cmd > /tmp/job.log 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log /tmp/job.log\" >/dev/null 2>&1'",
+    "systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20 \\",
+    "  setsid -f bash -c 'cmd > \"$XDG_RUNTIME_DIR/<name>.log\" 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log $XDG_RUNTIME_DIR/<name>.log\" >/dev/null 2>&1'",
     "```",
     "`$GHOST` and `$GHOST_SESSION` are set in your shell, so `ghost` verbs address this conversation without `-g`/`-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
-    "Nothing else watches the job: read its log, and keep its PID if you may need to stop it.",
+    "The job is its own low-priority unit: it yields the CPU to the owner's apps, survives a daemon restart (so its log is outside your private /tmp), and `systemctl --user stop <unit>` ends it. Nothing else watches it: read its log.",
+  ];
+}
+
+function machine(input: HelpTopicInput): string[] {
+  const unit = `${scheduleUnitPrefix(input.ghostName)}machine-watch`;
+  return [
+    "# Machine heat and strain",
+    "Heat and fan noise follow sustained work: almost always processes using CPU for minutes, sometimes graphics; charging, a hot room, or blocked vents leave no process to blame.",
+    "`ghost machine` (`--json` for detail) shows heat (nominal, fair, serious, critical: the share of all cores busy, raised by any temperature or fan sensor near its limit), memory pressure (green, yellow, red: stalls, not use), the sensors, and the systemd units using the most CPU.",
+    "The watch runs `ghost machine check` each minute and wakes you with a `machine` event when heat stays serious for 5 minutes, memory stays red for 2, or one unit holds a full core for 15; one event per episode, which ends after 5 calm minutes. One ghost per machine runs it: when the owner wants machine alerts and `systemctl --user list-unit-files '*-machine-watch.timer'` lists none, install this pair (`ghost help timers` for the rest):",
+    "```ini",
+    `# ${unit}.service`,
+    "[Service]",
+    "Type=oneshot",
+    "CPUWeight=idle",
+    `ExecStart=${input.cliPath} machine check --ghost ${input.ghostName} --instructions "The machine is under sustained strain. Find the cause and handle it as ghost help machine says."`,
+    "```",
+    "```ini",
+    `# ${unit}.timer`,
+    "[Timer]",
+    "OnCalendar=minutely",
+    "AccuracySec=1s",
+    "[Install]",
+    "WantedBy=timers.target",
+    "```",
+    "When woken, the payload ranks units with their busiest processes. Confirm with `ps`, `systemctl --user status <unit>`, and `journalctl`, then:",
+    "- Work the owner started on purpose (a build, an export, a game): leave it.",
+    "- Yours (`ghost-job-*`, a browser you opened) or plainly broken (a leftover, a loop, a restart storm): least drastic first, `systemctl --user set-property --runtime <unit> CPUWeight=idle`, then `systemctl --user freeze <unit>` (`thaw` resumes it exactly), then `stop`. `ghostd.service` runs every ghost's turns, you included: never freeze or stop it; end the process you started in it by PID.",
+    "- Anything else, and every system unit, is the owner's: ask before throttling or stopping it.",
+    "- No unit to blame: say what the sensors suggest.",
+    "Tell the owner what you found, what you changed, and the command that undoes it.",
+    `Low battery: Omarchy runs each script in ~/.config/omarchy/hooks/battery-low.d/ with the level as $1; one running \`${input.cliPath} event battery "low-$(date +%Y%m%d%H)" --ghost ${input.ghostName} --instructions '<what to do>' "$1"\` wakes you.`,
   ];
 }
 
@@ -180,6 +213,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation, events: () => events(input), notifications }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), memory, dictation, events: () => events(input), notifications }[topic]();
   return `${lines.join("\n")}\n`;
 }

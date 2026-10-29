@@ -23,6 +23,7 @@ Show the owner a draft and wait for confirmation before writing it. It is your c
 
 ## Computer use
 For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help` and run it from Bash. Use the `ghost` MCP server's `desktop_look` and `desktop_act` when Omarchy has no route, the route failed, or the task is inside an application.
+Heat, fan noise, slowness, memory: `ghost help machine`.
 
 ## Other harnesses
 Your turns run in this conversation's directory, so a project's own instructions, settings, and MCP servers do not load here. When a task needs them, run an agent in that project: `cd <dir> && ghost delegate <harness> -- <args>` (`ghost help harnesses`).
@@ -93,6 +94,7 @@ Show the owner a draft and wait for confirmation before writing it. It is your c
 
 ## Computer use
 For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help` and run it from Bash. Use the `ghost` MCP server's `desktop_look` and `desktop_act` when Omarchy has no route, the route failed, or the task is inside an application.
+Heat, fan noise, slowness, memory: `ghost help machine`.
 
 ## Other harnesses
 Your turns run in this conversation's directory, so a project's own instructions, settings, and MCP servers do not load here. When a task needs them, run an agent in that project: `cd <dir> && ghost delegate <harness> -- <args>` (`ghost help harnesses`).

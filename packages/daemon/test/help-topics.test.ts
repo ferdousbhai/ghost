@@ -5,7 +5,7 @@ const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", 
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "memory", "dictation", "events", "notifications"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "memory", "dictation", "events", "notifications"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });
@@ -36,10 +36,29 @@ describe("ghost help topics", () => {
 
   it("background: the detached recipe that wakes the conversation", () => {
     const text = renderHelpTopic("background", INPUT);
+    expect(text).toContain("systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20");
     expect(text).toContain("setsid -f bash -c");
+    expect(text).toContain("$XDG_RUNTIME_DIR/<name>.log");
+    expect(text).not.toContain("/tmp/job.log");
+    expect(text).toContain("`systemctl --user stop <unit>` ends it");
     expect(text).toContain("ghost say --follow-up");
     expect(text).toContain("`$GHOST` and `$GHOST_SESSION`");
     expect(text).toContain("end when this turn's headless run does");
+  });
+
+  it("machine: the minutely watch in the ghost's namespace, and fixes from least drastic, owner's units asked first", () => {
+    const text = renderHelpTopic("machine", INPUT);
+    expect(text).toContain("# ghost-timer-v1-4-aria-machine-watch.service");
+    expect(text).toContain("ExecStart=/usr/bin/ghost machine check --ghost aria --instructions ");
+    expect(text).toContain("OnCalendar=minutely");
+    expect(text).toContain("CPUWeight=idle");
+    expect(text).toContain("list-unit-files '*-machine-watch.timer'");
+    expect(text).toContain("heat stays serious for 5 minutes, memory stays red for 2, or one unit holds a full core for 15");
+    expect(text).toContain("`systemctl --user freeze <unit>` (`thaw` resumes it exactly)");
+    expect(text).toContain("never freeze or stop it");
+    expect(text).toContain("ask before throttling or stopping it");
+    expect(text).toContain("the command that undoes it");
+    expect(text).toContain("~/.config/omarchy/hooks/battery-low.d/");
   });
 
   it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {
