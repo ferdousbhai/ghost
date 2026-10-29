@@ -9,6 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { renderMarkdown } from "./remote-markdown.js";
+import { toolCall } from "./remote-tool-call.js";
 
 const icon = (paths: string, cls = "icon") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
@@ -184,6 +185,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   const seg = (id) => encodeURIComponent(id);
   const mint = () => "remote-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
   ${renderMarkdown.toString()}
+  ${toolCall.toString()}
   const GLYPH = ${JSON.stringify(GLYPH)};
   let ghost = null, session = null, draft = null, events = null, streaming = false, owner = false;
   let pending = [];
@@ -539,6 +541,12 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       // Only the call running now, the way the HUD's activity line shows it; a
       // finished reply keeps none of them.
       const activity = document.createElement("div"); activity.className = "activity";
+      // The call, then how long it has run, as pi times one.
+      let call = "", callStarted = 0, clock = 0;
+      const tick = () => {
+        const s = Math.floor((Date.now() - callStarted) / 1000);
+        activity.textContent = call + (s < 1 ? "" : " \u00b7 " + (s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s"));
+      };
       follow(true);
       const parts = [];
       let renderedTexts = 0;
@@ -564,7 +572,13 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
           } else if (ev.type === "tool_execution_start") {
             parts.push({ type: "toolCall" });
-            activity.textContent = ev.toolName + "\u2026"; replies.at(-1).after(activity);
+            call = toolCall(ev.toolName, ev.arguments, ev.cwd); callStarted = Date.now(); tick();
+            clearInterval(clock); clock = setInterval(tick, 1000);
+            replies.at(-1).after(activity);
+          } else if (ev.type === "tool_execution_end") {
+            clearInterval(clock);
+            // A failed call stays named, with its error, until the next words or call.
+            if (ev.isError) activity.textContent = call + " failed" + (ev.summary ? ": " + ev.summary.replace(/\\s+/g, " ").trim().slice(0, 600) : "");
           }
           // A stop hook runs once the reply is complete; only a continuation shows.
           else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");
@@ -573,6 +587,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
         }
       } finally {
         replies.at(-1).classList.remove("pending");
+        clearInterval(clock);
         activity.remove();
       }
     } finally {

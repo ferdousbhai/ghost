@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { type MarkdownDocument, renderMarkdown } from "../src/remote-markdown.js";
+import { toolCall } from "../src/remote-tool-call.js";
 import { REMOTE_VIEWER_HTML } from "../src/remote-viewer.js";
 
 type FakeNode = { tag: string; attrs: Record<string, string>; kids: (FakeNode | string)[]; append: (...k: (FakeNode | string)[]) => void; setAttribute: (k: string, v: string) => void };
@@ -138,7 +139,7 @@ describe("remote viewer transcript", () => {
       document: { createElement: () => element() }, follow() {}, nearBottom: () => true,
       turnEvents: async function* () { yield* events; },
       bubbles: (parts: Array<{ type: string; text: string }>) => parts.filter(p => p.type === "text").map(p => p.text).filter(Boolean),
-      renderMarkdown: (text: string) => text, loadSessions() {},
+      renderMarkdown: (text: string) => text, loadSessions() {}, toolCall,
     };
     const send = new Function(...Object.keys(context), `${source}; return send;`)(...Object.values(context));
     await send();
