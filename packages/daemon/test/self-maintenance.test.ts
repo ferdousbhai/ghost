@@ -24,12 +24,14 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).not.toContain("systemd-run");
   });
 
-  it("gives a packaged install no checkout and no edit loop", () => {
+  // A packaged install's files are not the ghost's, but its code is: it may
+  // change any of it, from its own clone, as every user's ghost can.
+  it("gives a packaged install its own clone to change, never the package", () => {
     const policy = renderSelfMaintenancePolicy(PACKAGED);
-    expect(policy).toContain("/usr/lib/ghost/runtime");
-    expect(policy).toContain("there is no checkout");
+    expect(policy).toContain("/usr/lib/ghost/runtime, whose files are not yours to edit");
     expect(policy).toContain("https://github.com/ferdousbhai/ghost");
-    expect(policy).toContain("Never edit a checkout you were not given.");
+    expect(policy).toContain("any part of it is yours to change to fit the owner");
+    expect(policy).toContain("`ghost help self`");
     expect(policy).not.toContain("systemd-run");
   });
 

@@ -56,6 +56,7 @@ function timers(input: HelpTopicInput): string[] {
 function self(): string[] {
   return [
     "# Self-maintenance",
+    "Any part of your code is yours to change to fit the owner. From a packaged install, first run yourself from your own clone: `git clone https://github.com/ferdousbhai/ghost ~/src/ghost`, then `pnpm install && pnpm build` in it (without pnpm, run `omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-add pnpm'` alone in the foreground and the owner types their password there), then switch over as /usr/share/doc/ghost/docs/self-maintenance.md shows; its \"Back to the package\" undoes it. Tell the owner before you switch.",
     "Read the checkout's AGENTS.md and CONTRACTS.md; follow its authorized branch, commit, and push workflow. Edit, test the affected package, typecheck, commit with the reason, build, and restart.",
     "Commit your own changes; preserve other sessions' edits. Never restore, stash, or discard changes you did not make.",
     "The checkout is shared by every ghost. CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",

@@ -13,11 +13,11 @@ function checkoutLines(running: RunningSource | null): string[] {
   const checkout = running?.root ?? null;
   if (checkout === null) {
     return [
-      `${running ? `You run from a packaged install under ${PACKAGED_ROOT}; there is no checkout.` : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone. Never edit a checkout you were not given.`,
+      `${running ? `You run from a packaged install under ${PACKAGED_ROOT}, whose files are not yours to edit.` : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}, and any part of it is yours to change to fit the owner: run yourself from your own clone (\`ghost help self\`).`,
     ];
   }
   return [
-    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine. Edit it directly after reading its \`AGENTS.md\` and \`CONTRACTS.md\`; never edit a checkout you were not given.`,
+    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine. Any part of it is yours to change to fit the owner; read its \`AGENTS.md\` and \`CONTRACTS.md\` first.`,
   ];
 }
 

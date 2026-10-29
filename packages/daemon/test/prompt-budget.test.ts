@@ -19,12 +19,12 @@ import { stablePolicySections } from "../src/session-host.js";
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
 const HOME_DIR = "/home/owner/ghosts/casper";
-const CHECKOUT = "/home/owner/src/ghost";
 const DOCUMENTS = "/home/owner/Documents";
+/** A packaged install, as Omarchy users run Ghost: its Self-maintenance is the longer of the two. */
 const RUNNING: RunningSource = {
   version: "0.0.1",
-  commit: "0".repeat(40),
-  root: CHECKOUT,
+  commit: null,
+  root: null,
 };
 
 /**
@@ -61,11 +61,11 @@ const CEILINGS: Record<string, number> = {
   "Asking the owner": 257,
   "Owner context": 887,
   "Scheduled work": 221,
-  "Self-maintenance": 390,
+  "Self-maintenance": 422,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 3426;
+const TOTAL_CEILING = 3458;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

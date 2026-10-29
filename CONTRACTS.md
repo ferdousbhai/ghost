@@ -857,6 +857,11 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
   in a transient `systemd-run --user` unit whose `--description` carries the
   reason, and the same reason is in the commit. See
   [`docs/self-maintenance.md`](docs/self-maintenance.md).
+- Any part of Ghost's code is a ghost's to change to fit its owner. A
+  packaged install's files are never edited: a ghost changes itself by running
+  from its own clone under the owner's home (an `ExecStart` drop-in for
+  ghostd, a `~/.local/bin/ghost` launcher, the plugin link), each step undone
+  by removing it.
 
 Focused tests beside the implementation are part of these contracts. GitHub
 issues track unfinished work and release evidence; this file describes the

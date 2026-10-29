@@ -5,10 +5,14 @@ machinery for this. The clone is an ordinary directory, git is the
 code history, journald is the lifecycle history, and systemd is the guardian
 that survives the daemon it restarts.
 
-Only edit the checkout reported by `ghost status` and authorized by the owner.
-It powers every ghost on the machine. A packaged install has no checkout;
-never edit its root-owned bundles. Read `ghost help self` for the edit, test,
-commit, build, and restart recipe. Preserve peer edits and follow the owner's
+Any part of Ghost's code is a ghost's to change, to fit its owner: its
+persona, its HUD, its daemon, its recipes. On Omarchy, Ghost is a packaged
+install whose root-owned files no ghost edits; a ghost changes itself by
+running from its own clone instead, as below, which needs no sudo beyond
+installing `pnpm` and is undone in a few commands. That clone powers every
+ghost on the machine, so the ghost tells the owner before it switches over
+and before it restarts. Read `ghost help self` for the edit, test, commit,
+build, and restart recipe. Preserve peer edits and follow the owner's
 branch/push instructions.
 
 ## Discover the running install
@@ -34,7 +38,18 @@ The package installs `/usr/bin/ghostd`, a shell launcher that execs Bun against
 ghost cannot change it. To run your own build instead, keep the packaged unit
 and override its `ExecStart` with a launcher of the same shape.
 
-Write the launcher:
+Clone and build first. The build needs `git` and `bun` (both installed with
+Ghost) and `pnpm` (`omarchy-pkg-add pnpm`, which asks for the owner's
+password):
+
+```sh
+git clone https://github.com/ferdousbhai/ghost ~/src/ghost
+cd ~/src/ghost && pnpm install && pnpm build
+```
+
+Write the launchers, one for the daemon and one for the `ghost` command, so
+`ghost help` and the CLI match the code that runs (`~/.local/bin` comes first
+on the unit's `PATH`):
 
 ```sh
 mkdir -p ~/.local/bin
@@ -44,23 +59,30 @@ exec /usr/bin/bun \
   /home/<owner>/src/ghost/packages/daemon/dist/main.js "$@"
 EOF
 chmod 755 ~/.local/bin/ghostd-dev
+cat > ~/.local/bin/ghost <<'EOF'
+#!/usr/bin/env bash
+exec /usr/bin/bun \
+  /home/<owner>/src/ghost/packages/daemon/dist/cli/main.js "$@"
+EOF
+chmod 755 ~/.local/bin/ghost
 ```
 
-Then override the unit:
+Then override the unit with a drop-in, the file `systemctl --user edit`
+writes, without its editor:
 
 ```sh
-systemctl --user edit ghostd.service
-```
-
-```ini
+mkdir -p ~/.config/systemd/user/ghostd.service.d
+cat > ~/.config/systemd/user/ghostd.service.d/clone.conf <<'EOF'
 [Service]
 ExecStart=
 ExecStart=%h/.local/bin/ghostd-dev
+EOF
+systemctl --user daemon-reload
 ```
 
 The empty `ExecStart=` is required: without it systemd appends rather than
-replaces. Apply with `systemctl --user daemon-reload && systemctl --user
-restart ghostd`.
+replaces. Restart into it the way `ghost help self` does, from a transient
+unit, so the restart survives the daemon it stops.
 
 Computer use is a separate executable each harness pass runs as its `ghost`
 MCP server: `$GHOST_DESKTOP` when set, else `ghost-desktop` on PATH. It is its own repository,
@@ -193,8 +215,20 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 > its build will collide with yours, and a restart will ship whatever happened
 > to be built last. Give the ghosts their own clone.
 
+## Back to the package
+
+```sh
+rm ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev ~/.local/bin/ghost
+systemctl --user daemon-reload
+ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
+```
+
+Then restart ghostd (as above) and the shell (`omarchy-restart-shell`). The
+clone stays where it is, and `git` in it still holds every change.
+
 ## Updates
 
-Omarchy owns package updates. For checkout updates, pull, build, and restart
-only within the owner's instructions. See [getting started](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md#10-if-something-is-wrong)
+Omarchy owns package updates. While a ghost runs from its clone, a package
+update changes nothing that runs; the clone takes upstream changes with
+`git pull`, a build, and a restart, within the owner's instructions. See [getting started](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md#10-if-something-is-wrong)
 for the packaged upgrade commands.
