@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { parseHooksDocument, type GhostHookCommandConfig } from "../hook-policy.js";
 import { ArgsError } from "./args.js";
+import { readArgumentJson } from "./common.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -16,8 +16,7 @@ export async function hooksCommand(ctx: CliContext): Promise<number> {
       break;
     case "set": {
       if (!file) throw new ArgsError("ghost hooks set needs a JSON file path");
-      const document: unknown = JSON.parse(readFileSync(file, "utf8"));
-      body = await ctx.client.request("PUT", "/api/hooks/config", document);
+      body = await ctx.client.request("PUT", "/api/hooks/config", readArgumentJson(file));
       break;
     }
     default:

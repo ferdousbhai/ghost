@@ -1,4 +1,7 @@
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { SessionSummary } from "../src/session-host.js";
 import { ArgsError, parseArgs } from "../src/cli/args.js";
@@ -235,6 +238,31 @@ describe("ghost help", () => {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);
       expect(result.stderr, argv.join(" ")).not.toContain("cannot reach ghostd");
+    }
+  });
+
+  it("refuses a missing or malformed input file before asking the daemon anything", async () => {
+    const fetch: CliFetch = async (input) => {
+      throw new Error(`unexpected request to ${String(input)}`);
+    };
+    const dir = mkdtempSync(join(tmpdir(), "ghost-cli-files-"));
+    try {
+      const missing = join(dir, "missing.json");
+      const malformed = join(dir, "malformed.json");
+      writeFileSync(malformed, "{ not json");
+      for (const [argv, message] of [
+        [["mcp", "add", "github", malformed], `${malformed} is not valid JSON`],
+        [["mcp", "set", "github", missing], "ENOENT"],
+        [["hooks", "set", malformed], `${malformed} is not valid JSON`],
+        [["character", "set", missing], "ENOENT"],
+        [["routines", "edit", "daily", missing], "Edit expects the JSON"],
+      ] as const) {
+        const result = await runCli([...argv], { env: { GHOST: "casper" }, home: dir, fetch });
+        expect(result.code, argv.join(" ")).toBe(2);
+        expect(result.stderr, argv.join(" ")).toContain(message);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

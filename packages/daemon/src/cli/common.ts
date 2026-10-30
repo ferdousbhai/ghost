@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { readPrivateFileText, writePrivateJsonAtomic } from "../private-file.js";
 import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
@@ -12,6 +12,24 @@ import { xdgBaseDir } from "../xdg-user-dirs.js";
 export async function stdinText(stdin: CliStdin): Promise<string> {
   if (typeof stdin === "string") return stdin;
   return (await Array.fromAsync(stdin, String)).join("");
+}
+
+/** A file named on the command line, read before ghostd is asked: one that cannot be read is a usage error. */
+export function readArgumentFile(path: string): string {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    throw new ArgsError(errorMessage(error));
+  }
+}
+
+export function readArgumentJson(path: string): unknown {
+  const text = readArgumentFile(path);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ArgsError(`${path} is not valid JSON`);
+  }
 }
 
 export function stdinIsTty(stdin: CliStdin): boolean {

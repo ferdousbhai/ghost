@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { readArgumentFile, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
@@ -31,8 +31,9 @@ export async function characterCommand(ctx: CliContext): Promise<number> {
     return 0;
   }
   if (action !== "set" || !file) throw new ArgsError("ghost character takes `show` or `set <file>`");
+  const text = readArgumentFile(file);
   const name = await resolveGhost(ctx);
-  const body = await ctx.client.request("PUT", ghostPath(name, "/character"), { body: readFileSync(file, "utf8") });
+  const body = await ctx.client.request("PUT", ghostPath(name, "/character"), { body: text });
   emit(ctx, body, () => `Character replaced for ${name}.\n`);
   return 0;
 }
@@ -147,6 +148,11 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
   if ((noArg && slug) || (oneArg && (!slug || file)) || (action === "edit" && (!slug || !file)) || (!noArg && !oneArg && action !== "edit")) {
     throw new ArgsError("ghost routines takes list, pause/resume/run/config/logs/remove <slug>, edit <slug> <file>, recoveries, or restore <id>");
   }
+  let config: unknown;
+  if (action === "edit") {
+    try { config = JSON.parse(file === "-" ? await stdinText(ctx.runtime.stdin) : readFileSync(file as string, "utf8")); }
+    catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
+  }
   const ghost = await resolveGhost(ctx);
   const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
   if (action === "list") {
@@ -165,9 +171,6 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
   } else {
     let result: unknown;
     if (action === "edit") {
-      let config: unknown;
-      try { config = JSON.parse(file === "-" ? await stdinText(ctx.runtime.stdin) : readFileSync(file as string, "utf8")); }
-      catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
       result = await request("PUT", `${target}/config`, config);
     } else if (action === "remove") {
       const config = await request<{ revision: string }>("GET", `${target}/config`);
