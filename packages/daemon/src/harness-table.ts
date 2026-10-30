@@ -139,21 +139,22 @@ function tomlInlineTable(values: Readonly<Record<string, string>>): string {
   return `{${Object.entries(values).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")}}`;
 }
 
-/** `[mcp_servers.<name>]` rows, the Codex dialect Grok also reads. */
+/** A server's `[mcp_servers.<name>]` fields as TOML keys and values, the Codex dialect Grok also reads. */
+function mcpTomlFields(config: MCPServerConfig): [string, string][] {
+  if (config.type === "http" || config.type === "sse") {
+    return [["url", JSON.stringify(config.url)], ...(config.headers ? [["http_headers", tomlInlineTable(config.headers)] as [string, string]] : [])];
+  }
+  return [
+    ["command", JSON.stringify(config.command)],
+    ["args", JSON.stringify(config.args ?? [])],
+    ...(config.env ? [["env", tomlInlineTable(config.env)] as [string, string]] : []),
+    ...(config.cwd ? [["cwd", JSON.stringify(config.cwd)] as [string, string]] : []),
+  ];
+}
+
 function mcpServersToml(servers: readonly HarnessMcpServer[]): string {
-  return servers.map(({ name, config }) => {
-    const lines = [`[mcp_servers.${tomlKey(name)}]`];
-    if (config.type === "http" || config.type === "sse") {
-      lines.push(`url = ${JSON.stringify(config.url)}`);
-      if (config.headers) lines.push(`http_headers = ${tomlInlineTable(config.headers)}`);
-    } else {
-      lines.push(`command = ${JSON.stringify(config.command)}`, `args = ${JSON.stringify(config.args ?? [])}`);
-      if (config.env) lines.push(`env = ${tomlInlineTable(config.env)}`);
-      if (config.cwd) lines.push(`cwd = ${JSON.stringify(config.cwd)}`);
-    }
-    lines.push("enabled = true");
-    return lines.join("\n");
-  }).join("\n\n");
+  return servers.map(({ name, config }) => [`[mcp_servers.${tomlKey(name)}]`,
+    ...mcpTomlFields(config).map(([key, value]) => `${key} = ${value}`), "enabled = true"].join("\n")).join("\n\n");
 }
 
 /**
@@ -676,15 +677,8 @@ const ROWS: readonly HarnessRow[] = [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
         "-c", `model_reasoning_effort="${EFFORT}"`,
-        ...turn.mcp.flatMap(({ name, config }) => {
-          const key = `mcp_servers.${tomlKey(name)}`;
-          if (config.type === "http" || config.type === "sse") {
-            return ["-c", `${key}.url=${JSON.stringify(config.url)}`,
-              ...(config.headers ? ["-c", `${key}.http_headers=${tomlInlineTable(config.headers)}`] : [])];
-          }
-          return ["-c", `${key}.command=${JSON.stringify(config.command)}`, "-c", `${key}.args=${JSON.stringify(config.args ?? [])}`,
-            ...(config.env ? ["-c", `${key}.env=${tomlInlineTable(config.env)}`] : [])];
-        }),
+        ...turn.mcp.flatMap(({ name, config }) =>
+          mcpTomlFields(config).flatMap(([key, value]) => ["-c", `mcp_servers.${tomlKey(name)}.${key}=${value}`])),
         "--", turn.prompt,
       ],
     }),

@@ -376,6 +376,12 @@ describe("launch lines", () => {
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
   });
 
+  it("codex and grok give a stdio MCP server the cwd it resolved to", () => {
+    const turn = { ...TURN, mcp: [{ name: "notes", config: { command: "./serve", cwd: "/home/me/ghosts/casper" } }] };
+    expect(harnessRow("codex")?.launch(turn).argv).toEqual(expect.arrayContaining(["-c", 'mcp_servers.notes.cwd="/home/me/ghosts/casper"']));
+    expect(harnessRow("grok")?.launch(turn).files?.[".grok/config.toml"]).toContain('cwd = "/home/me/ghosts/casper"');
+  });
+
   it("grok gets the persona as --rules, since it reads no AGENTS.md", () => {
     const launch = harnessRow("grok")?.launch(TURN);
     expect(launch?.argv).toEqual(expect.arrayContaining(["--rules", "You are Casper."]));
