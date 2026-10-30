@@ -30,7 +30,7 @@ Singleton {
     readonly property string home: {
         const ghost = Ghostd.activeGhost;
         if (ghost === "") return "";
-        for (const row of (Ghostd.ghosts || [])) {
+        for (const row of Ghostd.ghosts) {
             if (row && row.name === ghost) return String(row.dir || "");
         }
         return "";
