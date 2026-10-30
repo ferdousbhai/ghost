@@ -112,8 +112,6 @@ Item {
         anchors.centerIn: parent
         width: 16
         height: 16
-        // The orb's bloom reaches past the glyph's box on purpose.
-        clip: false
 
         GhostGlyph {
             objectName: "barMark"
