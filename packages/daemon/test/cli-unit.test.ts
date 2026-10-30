@@ -293,6 +293,16 @@ describe("ghost help", () => {
 });
 
 describe("CLI API adaptation", () => {
+  it("watch --exit-on-first stops at the first event, whatever else arrived with it", async () => {
+    const fetch: CliFetch = async () => new Response('data: {"n":1}\n\ndata: {"n":2}\n\ndata: {"n"', {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+    const result = await runCli(["watch", "--exit-on-first"], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result).toMatchObject({ code: 0, stderr: "" });
+    expect(result.stdout.trim().split("\n")).toEqual(['{"n":1}']);
+  });
+
   it("still prints against a daemon too old to answer /api/status", async () => {
     const paths: string[] = [];
     const fetch: CliFetch = async (input) => {

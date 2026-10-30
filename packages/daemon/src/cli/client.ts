@@ -190,6 +190,8 @@ export class DaemonClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let pending = "";
+    // A handler that returned false has had its last event.
+    let stopped = false;
     const consume = async (complete = false): Promise<void> => {
       const normalized = pending.replace(/\r\n/g, "\n");
       const frames = normalized.split("\n\n");
@@ -203,6 +205,7 @@ export class DaemonClient {
         try {
           const keepGoing = await onEvent(JSON.parse(data) as unknown);
           if (keepGoing === false) {
+            stopped = true;
             await reader.cancel().catch(() => undefined);
             return;
           }
@@ -213,7 +216,7 @@ export class DaemonClient {
       }
     };
     try {
-      while (true) {
+      while (!stopped) {
         const { done, value } = await reader.read();
         pending += decoder.decode(value, { stream: !done });
         await consume(done);
