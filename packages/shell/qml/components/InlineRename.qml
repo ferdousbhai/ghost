@@ -7,8 +7,7 @@
 // because you looked away is worse than one that has to be undone.
 //
 // Plain TextInput rather than a Controls TextField, for the reason Composer.qml
-// spells out: Controls drags a whole style stack into a shell that themes
-// itself from Omarchy.
+// spells out: a Controls field's style colours compete with the shell's tokens.
 //
 // Two things live on the LIST rather than here, and have to: the draft text and
 // the latch saying which row is being renamed. A background re-list rebuilds

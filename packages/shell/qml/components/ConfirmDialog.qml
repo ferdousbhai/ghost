@@ -140,9 +140,8 @@ Item {
                 lineHeight: Theme.lineHeight
             }
 
-            // Type-the-name gate. Plain TextInput, not a Controls TextField:
-            // the shell themes itself from Omarchy and will not carry a style
-            // stack for one field.
+            // Type-the-name gate. Plain TextInput, not a Controls TextField,
+            // for the reason Composer.qml gives.
             Rectangle {
                 width: parent.width
                 height: Theme.controlHeight - Theme.gap
