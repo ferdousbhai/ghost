@@ -290,6 +290,12 @@ describe("ghost help", () => {
     }
     expect((await runCli(["help", "help"])).stdout).toContain("memory|dictation");
   });
+
+  it("refuses a topic it does not know, as it refuses an unknown verb", async () => {
+    const result = await runCli(["help", "timer"]);
+    expect(result).toMatchObject({ code: 2, stdout: "" });
+    expect(result.stderr).toBe("ghost: Unknown help topic: timer\n");
+  });
 });
 
 describe("CLI API adaptation", () => {

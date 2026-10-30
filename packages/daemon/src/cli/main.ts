@@ -307,9 +307,13 @@ export const COMMANDS: readonly Command[] = [
         }));
         return EXIT_CODE.success;
       }
-      ctx.runtime.stdout.write(
-        topic === "exit-codes" ? EXIT_CODES_TEXT : topic ? commandHelp(topic) : USAGE,
-      );
+      if (topic === undefined) ctx.runtime.stdout.write(USAGE);
+      else if (topic === "exit-codes") ctx.runtime.stdout.write(EXIT_CODES_TEXT);
+      else {
+        const command = COMMANDS.find((candidate) => candidate.verb === topic);
+        if (!command) throw new ArgsError(`Unknown help topic: ${topic}`);
+        ctx.runtime.stdout.write(renderCommandHelp(command));
+      }
       return EXIT_CODE.success;
     },
   },
@@ -332,11 +336,6 @@ const EVERY_ARG = argsWith({
 
 const USAGE = renderUsage(COMMANDS);
 const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
-
-function commandHelp(verb: string): string {
-  const command = COMMANDS.find((candidate) => candidate.verb === verb);
-  return command ? renderCommandHelp(command) : USAGE;
-}
 
 function version(runtime: Pick<CliRuntime, "env">): string {
   // The injected env is consulted first so the test seam still overrides the
