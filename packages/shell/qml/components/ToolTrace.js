@@ -1,18 +1,5 @@
 .pragma library
 
-/**
- * The activity a card is asking about, or a stand-in for one.
- *
- * A Repeater re-evaluates a delegate's bindings while it is tearing it down,
- * with `modelData` already gone, so every public function here can be called
- * with nothing at all — and each of them reaches straight into the object.
- * Normalising once at the entry points beats a guard on every field read, and
- * beats what it replaced: a card spending its last frame throwing TypeErrors.
- */
-function fields(activity) {
-    return activity || ({});
-}
-
 function compact(value, limit) {
     const oneLine = String(value || "").replace(/\s+/gu, " ").trim();
     return oneLine.length > limit ? oneLine.slice(0, limit - 1) + "…" : oneLine;
@@ -109,7 +96,6 @@ var EDIT_TOOLS = { edit: true, multiedit: true, str_replace: true, apply_patch: 
  * against the cwd captured on that activity.
  */
 function fileTarget(activity) {
-    activity = fields(activity);
     var name = toolName(activity);
     if (WRITE_TOOLS[name]) return pathArgument(activity);
     if (EDIT_TOOLS[name]) return editedPath(activity);
@@ -117,7 +103,6 @@ function fileTarget(activity) {
 }
 
 function fileCwd(activity) {
-    activity = fields(activity);
     return typeof activity.cwd === "string" ? activity.cwd.trim() : "";
 }
 
@@ -200,12 +185,11 @@ function call(activity, completed, limit) {
  * (an open card, the activity line) and keeps a command or path whole.
  */
 function text(activity, completed, expanded) {
-    return call(fields(activity), completed, expanded ? 1200 : 100);
+    return call(activity, completed, expanded ? 1200 : 100);
 }
 
 /** What the call returned, one line: the error of a failed call, the output of any. */
 function output(activity) {
-    activity = fields(activity);
     return compact(activity.summary || "", 600);
 }
 
