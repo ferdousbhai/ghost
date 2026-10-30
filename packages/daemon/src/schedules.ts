@@ -33,7 +33,7 @@ import { silentLogger, type Logger } from "./log.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
-const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
+export const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
 export const MAX_SCHEDULE_SLUG_LENGTH = 64;
 
 const UNIT_SUFFIXES = [".timer", ".service"] as const;

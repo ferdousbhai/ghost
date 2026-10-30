@@ -6,13 +6,14 @@
  * every turn of every ghost. The text is still contract text the ghost acts
  * on: keep it exact, and keep the prompt's pointer sentences in step.
  */
-import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, scheduleUnitPrefix } from "./schedules.js";
+import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
 export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "memory", "dictation", "events", "notifications"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
-  readonly ghostName: string;
+  /** The ghost the recipe is for; placeholders stand in when none is named. */
+  readonly ghostName: string | undefined;
   /** Where the ghost's systemd user units go. */
   readonly unitDir: string;
   /** The `ghost` executable a unit may exec. */
@@ -23,8 +24,16 @@ export function isHelpTopic(value: string): value is HelpTopic {
   return (HELP_TOPICS as readonly string[]).includes(value);
 }
 
+function ghost(input: HelpTopicInput): string {
+  return input.ghostName ?? "<ghost>";
+}
+
+function unitPrefix(input: HelpTopicInput): string {
+  return input.ghostName ? scheduleUnitPrefix(input.ghostName) : `${SCHEDULE_UNIT_PREFIX}<name-length>-<ghost>-`;
+}
+
 function timers(input: HelpTopicInput): string[] {
-  const unit = `${scheduleUnitPrefix(input.ghostName)}<slug>`;
+  const unit = `${unitPrefix(input)}<slug>`;
   return [
     "# Timers",
     "A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
@@ -36,7 +45,7 @@ function timers(input: HelpTopicInput): string[] {
     "Type=oneshot",
     "# Or the turn is SIGTERMed after ~90s, mid-answer.",
     "TimeoutStartSec=infinity",
-    `ExecStart=${input.cliPath} say --new --ghost ${input.ghostName} "<the prompt>"`,
+    `ExecStart=${input.cliPath} say --new --ghost ${ghost(input)} "<the prompt>"`,
     "```",
     "```ini",
     `# ${unit}.timer`,
@@ -108,7 +117,7 @@ function background(): string[] {
 }
 
 function machine(input: HelpTopicInput): string[] {
-  const unit = `${scheduleUnitPrefix(input.ghostName)}machine-watch`;
+  const unit = `${unitPrefix(input)}machine-watch`;
   return [
     "# Machine heat and strain",
     "Heat and fan noise follow sustained work, almost always CPU; charging, a hot room, or blocked vents leave no process to blame. Look with `omarchy system stats`, `systemd-cgtop -b -n 2 -d 5 --raw --depth=6 --order=cpu` (CPU, % of one core, and memory per app and service), /proc/pressure/memory (time stalled waiting for memory), `sensors -j`, and `df -h`.",
@@ -143,7 +152,7 @@ function machine(input: HelpTopicInput): string[] {
     ")",
     "failed=0",
     "for kind in $alerts; do",
-    `  ${input.cliPath} event machine "$kind-$(date +%Y%m%d%H)" --ghost ${input.ghostName} --instructions 'The machine is near harm. Find the cause and handle it as ghost help machine says.' "$payload"`,
+    `  ${input.cliPath} event machine "$kind-$(date +%Y%m%d%H)" --ghost ${ghost(input)} --instructions 'The machine is near harm. Find the cause and handle it as ghost help machine says.' "$payload"`,
     "  # 6: this hour's alert was already accepted with earlier data.",
     "  status=$?; (( status == 0 || status == 6 )) || failed=1",
     "done",
@@ -168,7 +177,7 @@ function machine(input: HelpTopicInput): string[] {
     "- Anything else, and every system unit, is the owner's: ask before throttling or stopping it. A full disk: find what grew (`du -xh -d1 <dir> | sort -h`) and ask; trash with `gio trash`, never `rm`.",
     "- No unit to blame: say what the sensors suggest.",
     "Tell the owner what you found, what you changed, and the command that undoes it.",
-    `Low battery: Omarchy runs each script in ~/.config/omarchy/hooks/battery-low.d/ with the level as $1; one running \`${input.cliPath} event battery "low-$(date +%Y%m%d%H)" --ghost ${input.ghostName} --instructions '<what to do>' "$1"\` wakes you.`,
+    `Low battery: Omarchy runs each script in ~/.config/omarchy/hooks/battery-low.d/ with the level as $1; one running \`${input.cliPath} event battery "low-$(date +%Y%m%d%H)" --ghost ${ghost(input)} --instructions '<what to do>' "$1"\` wakes you.`,
   ];
 }
 
@@ -203,7 +212,7 @@ function events(input: HelpTopicInput): string[] {
     "failed=0",
     "while IFS= read -r event; do",
     `  id=$(jq -r '.id' <<< "$event")`,
-    `  jq -c '.payload' <<< "$event" | ${input.cliPath} event github:OWNER/REPO "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' - || failed=1`,
+    `  jq -c '.payload' <<< "$event" | ${input.cliPath} event github:OWNER/REPO "$id" --ghost ${ghost(input)} --instructions 'Summarize this notification and identify any action I need to take.' - || failed=1`,
     'done < "$work/events.jsonl"',
     'exit "$failed"',
     "```",

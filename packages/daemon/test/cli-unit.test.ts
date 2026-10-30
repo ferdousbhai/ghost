@@ -5,6 +5,7 @@ import { ArgsError, parseArgs } from "../src/cli/args.js";
 import { EXIT_CODES } from "../src/cli/client.js";
 import { latestSession, resolveSessionPrefix } from "../src/cli/common.js";
 import { COMMANDS } from "../src/cli/main.js";
+import { HELP_TOPICS } from "../src/help-topics.js";
 import { relativeTime } from "../src/cli/output.js";
 import type { CliFetch } from "../src/cli/types.js";
 import { runCli } from "./helpers/cli.js";
@@ -138,6 +139,15 @@ describe("ghost help <topic>", () => {
     expect(result.stdout).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(result.stdout).toContain('"/tmp/ghost-cli-unit/xdg/systemd/user"');
     expect(result.stdout).toContain("ExecStart=/usr/bin/ghost say --new --ghost casper");
+  });
+
+  it("renders every recipe before any ghost is named", async () => {
+    for (const topic of HELP_TOPICS) {
+      const result = await runCli(["help", topic], { env: { PATH: "/nonexistent" }, home: "/tmp/ghost-cli-unit" });
+      expect(result.stderr, topic).toBe("");
+      expect(result.code, topic).toBe(0);
+      if (topic === "timers") expect(result.stdout).toContain("ghost-timer-v1-<name-length>-<ghost>-<slug>");
+    }
   });
 
   it("restarts without sending a model prompt", async () => {

@@ -300,9 +300,8 @@ export const COMMANDS: readonly Command[] = [
       const topic = ctx.parsed.positionals[0];
       if (topic !== undefined && isHelpTopic(topic)) {
         // Rendered for the ghost the shell belongs to; no daemon needed.
-        const ghostName = preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost")) ?? "<ghost>";
         ctx.runtime.stdout.write(renderHelpTopic(topic, {
-          ghostName,
+          ghostName: preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost")),
           unitDir: resolveScheduleUnitDirectory(ctx.runtime.home, ctx.runtime.env),
           cliPath: ghostCliPath(ctx.runtime.env),
         }));
