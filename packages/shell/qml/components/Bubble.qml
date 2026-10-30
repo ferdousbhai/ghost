@@ -83,37 +83,6 @@ Item {
     onPlainBodyChanged: root.renderBody()
     onBusyChanged: root.renderBody()
 
-    // One block of the body, in the reading column's own type.
-    //
-    // Qt's markdown renderer owns the parts of the type scale we cannot reach
-    // from QML: heading sizes are hard-coded multiples of font.pixelSize (h1
-    // 2.0, h2 1.5, h3 1.2) and code spans take the system fixed font rather
-    // than Theme.fontFamilyMono. What is set here is therefore all that Text
-    // exposes; MarkdownCompat only rewrites what Qt drops or ignores (links
-    // wear the ghost's amber there, never Theme.accent — the inherited Omarchy
-    // accent is blue in most themes, and reading copy is not a web page).
-    component BodyBlock: Text {
-        id: blockText
-
-        textFormat: root.plainBody ? Text.PlainText : Text.MarkdownText
-        color: root.hookNotice ? Theme.foregroundDim
-            : (root.mine ? Theme.foregroundBright : Theme.foreground)
-        font.family: Theme.fontFamily
-        font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
-        lineHeight: Theme.lineHeight
-        wrapMode: Text.Wrap
-        onLinkActivated: link => ExternalLinks.openModelUrl(link)
-
-        // Hover affordance only: Qt.NoButton lets the press fall through to
-        // the Text so link activation still fires.
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
-            cursorShape: blockText.hoveredLink !== ""
-                ? Qt.PointingHandCursor : Qt.ArrowCursor
-        }
-    }
-
     // One block of a message: markdown, or a fenced block shown as code. Only
     // the one in use is given the text, so a fence is never laid out twice.
     component ReplyBlock: Item {
@@ -127,12 +96,39 @@ Item {
         implicitHeight: replyBlock.code ? codeView.implicitHeight : blockText.implicitHeight
         height: implicitHeight
 
-        BodyBlock {
+        // The body, in the reading column's own type.
+        //
+        // Qt's markdown renderer owns the parts of the type scale we cannot
+        // reach from QML: heading sizes are hard-coded multiples of
+        // font.pixelSize (h1 2.0, h2 1.5, h3 1.2) and code spans take the
+        // system fixed font rather than Theme.fontFamilyMono. What is set here
+        // is therefore all that Text exposes; MarkdownCompat only rewrites what
+        // Qt drops or ignores (links wear the ghost's amber there, never
+        // Theme.accent — the inherited Omarchy accent is blue in most themes,
+        // and reading copy is not a web page).
+        Text {
             id: blockText
             visible: !replyBlock.code
             width: replyBlock.width
             text: replyBlock.code ? "" : root.plainBody ? replyBlock.text
                 : MarkdownCompat.normalize(replyBlock.text, Theme.ghostAmber, Theme.info)
+            textFormat: root.plainBody ? Text.PlainText : Text.MarkdownText
+            color: root.hookNotice ? Theme.foregroundDim
+                : (root.mine ? Theme.foregroundBright : Theme.foreground)
+            font.family: Theme.fontFamily
+            font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
+            lineHeight: Theme.lineHeight
+            wrapMode: Text.Wrap
+            onLinkActivated: link => ExternalLinks.openModelUrl(link)
+
+            // Hover affordance only: Qt.NoButton lets the press fall through
+            // to the Text so link activation still fires.
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                cursorShape: blockText.hoveredLink !== ""
+                    ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
         }
 
         Loader {
