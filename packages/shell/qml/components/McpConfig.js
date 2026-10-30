@@ -46,7 +46,7 @@ function parse(textValue, expectedType) {
     }
     if (!config || typeof config !== "object" || Array.isArray(config))
         return { ok: false, error: "Configuration must be a JSON object." };
-    if (expectedType && (config.type === undefined ? "stdio" : config.type) !== expectedType)
+    if ((config.type === undefined ? "stdio" : config.type) !== expectedType)
         return { ok: false, error: "The JSON type must match the selected transport." };
     return { ok: true, config: config, error: "" };
 }

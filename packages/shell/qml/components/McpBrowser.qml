@@ -610,6 +610,6 @@ Rectangle {
         busy: Ghostd.mcpMutating
         error: root.pendingDeleteName !== "" ? Ghostd.mcpError : ""
         onConfirmed: Ghostd.deleteMcpServer(root.pendingDeleteName)
-        onDismissed: if (!Ghostd.mcpMutating) root.pendingDeleteName = ""
+        onDismissed: root.pendingDeleteName = ""
     }
 }
