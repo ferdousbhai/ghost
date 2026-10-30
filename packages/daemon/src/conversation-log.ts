@@ -559,8 +559,7 @@ function resourceAccumulator() {
       pending = null;
       if (postReply) {
         if (adjacent && !adjacent.error) latest = entry;
-      } else if (entry.supplied === undefined
-        && (adjacent === null || Date.parse(entry.at) > Date.parse(adjacent.at))) {
+      } else if (adjacent === null || Date.parse(entry.at) > Date.parse(adjacent.at)) {
         pending = entry;
       }
     } else if (entry.type === "assistant" || entry.type === "handoff") {
