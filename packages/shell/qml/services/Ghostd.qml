@@ -96,12 +96,6 @@ Singleton {
         root.clearRemoteQr();
     }
 
-    function clearRemote(): void {
-        root.retireRemoteRequests();
-        root.remoteStatus = ({});
-        root.remoteError = "";
-    }
-
     function fetchRemoteQr(): void {
         const expectedUrl = root.remoteUrl;
         if (expectedUrl === "") {

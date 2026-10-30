@@ -43,15 +43,21 @@ TestCase {
         }, overrides || {});
     }
 
+    function clearRemote(): void {
+        Ghostd.retireRemoteRequests();
+        Ghostd.remoteStatus = ({});
+        Ghostd.remoteError = "";
+    }
+
     function init(): void {
-        Ghostd.clearRemote();
+        clearRemote();
         requests = [];
         Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/remote/);
         Ghostd.apiToken = "test-token";
     }
 
     function cleanup(): void {
-        Ghostd.clearRemote();
+        clearRemote();
         Ghostd.requestFactory = null;
     }
 
