@@ -137,7 +137,7 @@ Singleton {
      */
     function read(path: string): string {
         root.readOk = false;
-        if (path === "" || !path.startsWith("/")) return "";
+        if (!path.startsWith("/")) return "";
         probe.path = "";
         probe.path = path;
         return probe.text();

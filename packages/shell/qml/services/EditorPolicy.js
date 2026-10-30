@@ -90,9 +90,7 @@ function projectRoot(filePath, ghostHome, userHome, exists) {
  */
 function editorSetting(defaultsText) {
     var first = String(defaultsText || "").split("\n")[0].trim();
-    if (first === "") return "nvim";
-    var token = first.split(/\s+/u)[0];
-    return token === "" ? "nvim" : token;
+    return first === "" ? "nvim" : first.split(/\s+/u)[0];
 }
 
 function guiArgv(setting, root, filePath) {

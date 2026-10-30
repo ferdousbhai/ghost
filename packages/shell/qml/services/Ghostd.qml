@@ -1015,7 +1015,6 @@ Singleton {
         if (ghost === "" || harness === "") return;
         if (root.currentSessionId === "") root.newConversation();
         const id = root.currentSessionId;
-        if (id === "") return;
         const key = root.conversationKey(ghost, id);
         const before = root.pendingHarnesses[key];
         root.setPendingHarness(key, harness);
@@ -2070,7 +2069,6 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "" || !Attachments.isImageFile(localPath)) return;
         const sessionId = root.ensureSession(ghost);
-        if (sessionId === "") return;
         const id = "a" + (++root.attachmentSerial);
         root.attachments = root.attachments.concat([{
             id: id, ghost: ghost, sessionId: sessionId,
@@ -2133,7 +2131,7 @@ Singleton {
         const ghost = root.activeGhost;
         const sessionId = root.ensureSession(ghost);
         const state = root.ensureTurnState(ghost, sessionId);
-        if (!state || sessionId === "") return;
+        if (!state) return;
         root.ensureLocalSessionRow(ghost, sessionId, 1);
 
         root.beginTurnFor(state);
