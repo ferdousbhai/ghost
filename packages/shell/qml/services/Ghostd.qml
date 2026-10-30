@@ -954,9 +954,7 @@ Singleton {
     function fetchRunResources(): void {
         const ghost = root.activeGhost;
         const session = root.currentSessionId;
-        root.runResources = null;
-        root.resourcesError = "";
-        root.retire(root, "resourcesRequest");
+        root.clearRunResources();
         if (ghost === "" || session === "") return;
         root.request(root, "resourcesRequest", "GET", root.sessionPath(ghost, session) + "/transcript?limit=1", null, function (xhr, body) {
                 if (xhr.status === 200 && body) root.runResources = body.resources || null;
