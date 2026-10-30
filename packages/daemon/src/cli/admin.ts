@@ -25,13 +25,13 @@ export async function renameCommand(ctx: CliContext): Promise<number> {
 export async function characterCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
   const [action = "show", file] = parsed.positionals;
-  const name = await resolveGhost(ctx);
   if (action === "show") {
-    const body = await ctx.client.request<{ body: string }>("GET", ghostPath(name, "/character"));
+    const body = await ctx.client.request<{ body: string }>("GET", ghostPath(await resolveGhost(ctx), "/character"));
     emit(ctx, body, (result) => result.body);
     return 0;
   }
   if (action !== "set" || !file) throw new ArgsError("ghost character takes `show` or `set <file>`");
+  const name = await resolveGhost(ctx);
   const body = await ctx.client.request("PUT", ghostPath(name, "/character"), { body: readFileSync(file, "utf8") });
   emit(ctx, body, () => `Character replaced for ${name}.\n`);
   return 0;
@@ -101,9 +101,9 @@ function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
 export async function harnessCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
-  const name = await resolveGhost(ctx);
   const id = parsed.positionals[0];
   if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
+  const name = await resolveGhost(ctx);
   const body = id || flagBoolean(parsed, "none")
     ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
     : await ctx.client.request("GET", ghostPath(name, "/harness"));

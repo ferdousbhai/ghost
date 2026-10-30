@@ -21,38 +21,21 @@ function renderSnapshot(body: unknown): string {
 /** `ghost mcp [list|add|set|rm|enable|disable] ...` over the ghost's `mcp.json`. */
 export async function mcpCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
-  const [action = "list", name, file] = parsed.positionals;
-  const ghost = await resolveGhost(ctx);
-  const base = ghostPath(ghost, "/mcp");
-  const server = (): string => {
-    if (!name) throw new ArgsError(`ghost mcp ${action} needs a server name`);
-    return `${base}/${encodeURIComponent(name)}`;
-  };
-  const configFrom = (path: string | undefined): unknown => {
-    if (!path) throw new ArgsError(`ghost mcp ${action} needs a JSON config file path`);
-    return JSON.parse(readFileSync(path, "utf8"));
-  };
-  let body: unknown;
-  switch (action) {
-    case "list":
-      body = await ctx.client.request("GET", base);
-      break;
-    case "add":
-      body = await ctx.client.request("POST", base, { name: server() && name, config: configFrom(file) });
-      break;
-    case "set":
-      body = await ctx.client.request("PUT", server(), { config: configFrom(file) });
-      break;
-    case "rm":
-      body = await ctx.client.request("DELETE", server());
-      break;
-    case "enable":
-    case "disable":
-      body = await ctx.client.request("PUT", `${server()}/enabled`, { enabled: action === "enable" });
-      break;
-    default:
-      throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, or disable.`);
+  const [action = "list", name = "", file = ""] = parsed.positionals;
+  if (!["list", "add", "set", "rm", "enable", "disable"].includes(action)) {
+    throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, or disable.`);
   }
+  if (action !== "list" && !name) throw new ArgsError(`ghost mcp ${action} needs a server name`);
+  if ((action === "add" || action === "set") && !file) throw new ArgsError(`ghost mcp ${action} needs a JSON config file path`);
+  const base = ghostPath(await resolveGhost(ctx), "/mcp");
+  const server = `${base}/${encodeURIComponent(name)}`;
+  const config = (): unknown => JSON.parse(readFileSync(file, "utf8"));
+  let body: unknown;
+  if (action === "list") body = await ctx.client.request("GET", base);
+  else if (action === "add") body = await ctx.client.request("POST", base, { name, config: config() });
+  else if (action === "set") body = await ctx.client.request("PUT", server, { config: config() });
+  else if (action === "rm") body = await ctx.client.request("DELETE", server);
+  else body = await ctx.client.request("PUT", `${server}/enabled`, { enabled: action === "enable" });
   emit(ctx, body, renderSnapshot);
   return 0;
 }

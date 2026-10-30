@@ -92,15 +92,16 @@ export async function stopCommand(ctx: CliContext): Promise<number> {
  */
 export async function askCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
+  const clear = flagBoolean(parsed, "clear");
+  const [text, ...options] = parsed.positionals;
+  if (clear && text !== undefined) throw new ArgsError("ask --clear takes no question.");
+  if (!clear && text === undefined) throw new ArgsError("ask needs a question.");
   const { path, session } = await resolveTarget(ctx);
-  if (flagBoolean(parsed, "clear")) {
-    if (parsed.positionals.length > 0) throw new ArgsError("ask --clear takes no question.");
+  if (clear) {
     const body = await ctx.client.request("DELETE", `${path}/question`);
     emit(ctx, body, () => `cleared the question in ${session.id}\n`);
     return 0;
   }
-  const [text, ...options] = parsed.positionals;
-  if (text === undefined) throw new ArgsError("ask needs a question.");
   const body = await ctx.client.request("PUT", `${path}/question`, { text, options });
   emit(ctx, body, () => `asked in ${session.id}; the owner's next message there is the answer\n`);
   return 0;

@@ -218,6 +218,26 @@ describe("ghost help", () => {
     }
   });
 
+  it("refuses a malformed verb before asking the daemon anything", async () => {
+    const fetch: CliFetch = async (input) => {
+      throw new Error(`unexpected request to ${String(input)}`);
+    };
+    for (const argv of [
+      ["ask"],
+      ["ask", "--clear", "Ship it?"],
+      ["character", "edit"],
+      ["character", "set"],
+      ["harness", "claude", "--none"],
+      ["mcp", "bogus"],
+      ["mcp", "rm"],
+      ["mcp", "add", "github"],
+    ]) {
+      const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
+      expect(result.code, argv.join(" ")).toBe(2);
+      expect(result.stderr, argv.join(" ")).not.toContain("cannot reach ghostd");
+    }
+  });
+
   it("prints the embedded version and stable exit-code reference offline", async () => {
     const versionResult = await runCli(["--version"], {
       env: { GHOSTD_VERSION: "9.8.7" },
