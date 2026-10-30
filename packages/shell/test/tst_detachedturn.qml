@@ -42,7 +42,7 @@ TestCase {
     }
 
     function test_runningListingShowsTheTurnAndItsEndReloads(): void {
-        Ghostd.activeTurnState(true).toolActivities = [{ id: "t1", name: "bash", status: "complete" }];
+        Ghostd.ensureTurnState("casper", "c1").toolActivities = [{ id: "t1", name: "bash", status: "complete" }];
         list(true);
         verify(Ghostd.streaming);
         // No stream here, so nothing for the silence watchdog to expire, and

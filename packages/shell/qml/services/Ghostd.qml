@@ -1041,7 +1041,7 @@ Singleton {
      */
     function switchGhost(name: string): bool {
         if (name === "" || name === root.activeGhost) return false;
-        const previous = root.activeTurnState(false);
+        const previous = root.activeTurnState();
         if (previous) {
             root.captureActiveTurn(previous);
             root.cancelTranscriptLoad(previous);
@@ -1155,11 +1155,9 @@ Singleton {
         return state;
     }
 
-    function activeTurnState(create: bool): var {
+    function activeTurnState(): var {
         if (root.activeGhost === "" || root.currentSessionId === "") return null;
-        const key = root.conversationKey(root.activeGhost, root.currentSessionId);
-        return root.turnStates[key]
-            || (create ? root.ensureTurnState(root.activeGhost, root.currentSessionId) : null);
+        return root.turnStates[root.conversationKey(root.activeGhost, root.currentSessionId)] || null;
     }
 
     /**
@@ -1824,7 +1822,7 @@ Singleton {
 
     /** Make one conversation the ghost's active one, clearing everything the last one owned. */
     function adoptConversation(ghost: string, id: string): void {
-        const previous = root.activeTurnState(false);
+        const previous = root.activeTurnState();
         if (previous && previous.key !== root.conversationKey(ghost, id)) root.leaveConversation(previous);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
@@ -1900,7 +1898,7 @@ Singleton {
     }
 
     function refreshCurrentTranscript(): void {
-        root.loadConversationTranscript(root.activeTurnState(false), false);
+        root.loadConversationTranscript(root.activeTurnState(), false);
     }
 
     function transcriptLoadIsCurrent(state: var, load: var): bool {
@@ -2180,7 +2178,7 @@ Singleton {
 
     /** Stop the active conversation's turn in ghostd, which runs it regardless of this HUD's stream. */
     function cancel(): void {
-        const state = root.activeTurnState(false);
+        const state = root.activeTurnState();
         if (!state) return;
         root.request(state, "stopRequest", "POST", root.sessionPath(state.ghost, state.sessionId) + "/stop", {}, function () {});
         // Another client's turn still shows until the listing ends it, which
@@ -2652,7 +2650,7 @@ Singleton {
 
     /** Queue a follow-up for the running turn; the daemon runs it after the current pass. */
     function queueMessage(text: string): void {
-        const state = root.activeTurnState(false);
+        const state = root.activeTurnState();
         if (!state) return;
         root.queueFor(state, text.trim());
     }
