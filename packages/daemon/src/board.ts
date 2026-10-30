@@ -38,7 +38,7 @@ export interface Board {
 
 const CARD = /^[-*+]\s+(?:\[( |x|X)\]\s+)?(.*)$/u;
 
-/** Parse board Markdown into columns and cards; text before the first `##` is the title. */
+/** Parse board Markdown into columns and cards; a `#` heading before the first `##` is the title. */
 export function parseBoard(markdown: string): { title: string | null; columns: BoardColumn[]; truncated: boolean } {
   const columns: Array<{ title: string; cards: Array<{ text: string; done?: boolean; notes: string[] }> }> = [];
   let title: string | null = null;
