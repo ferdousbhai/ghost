@@ -56,6 +56,9 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   const followUp = flagBoolean(parsed, "follow-up");
   const startNew = flagBoolean(parsed, "new");
   if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
+  if (flagString(parsed, "message") !== undefined && parsed.positionals.length > 0) {
+    throw new ArgsError("say takes its text as arguments or -m, not both");
+  }
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
   const name = await resolveGhost(ctx);
