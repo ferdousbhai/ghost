@@ -33,7 +33,7 @@ Rectangle {
             : (button.danger ? Theme.danger
                 : (button.primary ? Theme.accent : Theme.foreground))
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall
+        font.pixelSize: Theme.fontSize
         font.weight: Font.Medium
     }
 

@@ -153,7 +153,7 @@ Rectangle {
                             + "\nLogs: journalctl --user -u " + card.modelData.service
                         color: Theme.foregroundDim
                         wrapMode: Text.WrapAnywhere
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                     }
                     RowLayout {
                         ActionButton {
@@ -284,7 +284,7 @@ Rectangle {
         textFormat: Text.PlainText
         color: Theme.foregroundDim
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall
+        font.pixelSize: Theme.fontSize
     }
 
     // A unit file or journal on the code well, in the info colour, so it
@@ -302,7 +302,7 @@ Rectangle {
             selectionColor: Theme.menuSelectedBackground
             selectedTextColor: Theme.menuSelectedText
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: TextEdit.Wrap
             padding: Theme.gap
             background: null

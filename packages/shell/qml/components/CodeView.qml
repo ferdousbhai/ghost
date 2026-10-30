@@ -48,7 +48,7 @@ Item {
     readonly property int lines: root.body === "" ? 1 : root.body.split("\n").length
 
     readonly property string family:
-        Highlighter.safeFontFamily(Theme.fontFamilyMono, "monospace")
+        Highlighter.safeFontFamily(Theme.fontFamily, "monospace")
 
     readonly property string markup:
         "<pre style=\"font-family:'" + root.family

@@ -156,7 +156,7 @@ Item {
                         text: "×"
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                     }
 
                     MouseArea {
@@ -188,7 +188,7 @@ Item {
         text: Dictation.failure
         color: Theme.danger
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall
+        font.pixelSize: Theme.fontSize
         wrapMode: Text.Wrap
         Accessible.role: Accessible.AlertMessage
         Accessible.name: text

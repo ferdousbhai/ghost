@@ -122,7 +122,7 @@ Rectangle {
                 text: root.trace
                 color: root.labelColor
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 font.weight: Font.Light
                 font.letterSpacing: 0.5
                 wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
@@ -159,8 +159,8 @@ Rectangle {
                 width: parent.width - Theme.gap
                 text: Highlighter.baseName(root.workbenchPath)
                 color: Theme.ghostAmber
-                font.family: Theme.fontFamilyMono
-                font.pixelSize: Theme.fontSizeSmall
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
                 elide: Text.ElideMiddle
             }
 
@@ -180,8 +180,8 @@ Rectangle {
             width: parent.width
             text: root.call().name
             color: root.detailColor
-            font.family: Theme.fontFamilyMono
-            font.pixelSize: Theme.fontSizeSmall
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.Wrap
         }
 
@@ -191,8 +191,8 @@ Rectangle {
             width: parent.width
             text: root.diagnosticOutput
             color: root.failed ? Theme.ghostRose : root.detailColor
-            font.family: Theme.fontFamilyMono
-            font.pixelSize: Theme.fontSizeSmall
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.Wrap
         }
     }

@@ -227,7 +227,7 @@ Item {
                 text: root.parentDir
                 color: Theme.foregroundFaint
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 elide: Text.ElideLeft
             }
         }
@@ -252,7 +252,7 @@ Item {
                 color: root.markdown && modeArea.containsMouse
                     ? Theme.ghostAmber : Theme.foregroundFaint
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
 
                 MouseArea {
                     id: modeArea
@@ -344,7 +344,7 @@ Item {
                 text: root.notice
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 elide: Text.ElideRight
             }
 
@@ -353,7 +353,7 @@ Item {
                 text: "keep mine"
                 color: keepArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
 
                 MouseArea {
                     id: keepArea
@@ -369,7 +369,7 @@ Item {
                 text: "take theirs"
                 color: takeArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
 
                 MouseArea {
                     id: takeArea
@@ -439,7 +439,7 @@ Item {
                 color: Theme.foreground
                 selectionColor: Theme.selection
                 selectedTextColor: Theme.foregroundBright
-                font.family: Theme.fontFamilyMono
+                font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
             }
         }

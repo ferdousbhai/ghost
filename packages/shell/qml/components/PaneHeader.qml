@@ -42,7 +42,7 @@ Item {
             textFormat: Text.PlainText
             color: root.subtitleColor
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             elide: root.subtitleElide
             wrapMode: root.subtitleElide === Text.ElideNone ? Text.WordWrap : Text.NoWrap
         }

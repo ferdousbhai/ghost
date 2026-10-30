@@ -157,7 +157,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 placeholder: field.placeholder
                 text: root.fields[field.name] || ""
-                font.family: field.mono ? Theme.fontFamilyMono : Theme.fontFamily
+                font.family: field.mono ? Theme.fontFamily : Theme.fontFamily
                 Accessible.name: field.label
 
                 onTextChanged: if (input.text !== (root.fields[field.name] || "")) root.setField(field.name, input.text)
@@ -246,7 +246,7 @@ Rectangle {
             textFormat: Text.PlainText
             color: Theme.danger
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.WordWrap
         }
     }
@@ -416,7 +416,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: Theme.fontSize
                     wrapMode: Text.WordWrap
                 }
 
@@ -426,8 +426,8 @@ Rectangle {
                     text: hookCard.modelData.fields.command
                     textFormat: Text.PlainText
                     color: Theme.foreground
-                    font.family: Theme.fontFamilyMono
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize
                     wrapMode: Text.WrapAnywhere
                 }
 
@@ -490,7 +490,7 @@ Rectangle {
                                     textFormat: Text.PlainText
                                     color: chip.chosen ? Theme.ghostAmberBright : Theme.foregroundDim
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.pixelSize: Theme.fontSize
                                 }
 
                                 MouseArea {
@@ -573,7 +573,7 @@ Rectangle {
         textFormat: Text.PlainText
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall
+        font.pixelSize: Theme.fontSize
         wrapMode: Text.WordWrap
     }
 }

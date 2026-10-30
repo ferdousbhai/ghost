@@ -80,7 +80,7 @@ Item {
     // that and the eye loses the line start on the way back.
     TextMetrics {
         id: column
-        font.family: root.reading ? Theme.fontFamily : Theme.fontFamilyMono
+        font.family: root.reading ? Theme.fontFamily : Theme.fontFamily
         font.pixelSize: Theme.fontSize
         text: "0".repeat(root.reading ? 68 : 72)
     }
@@ -122,7 +122,7 @@ Item {
             visible: !root.reading
             enabled: !root.reading
             color: Theme.foreground
-            font.family: Theme.fontFamilyMono
+            font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
             // No lineHeight here: QQuickTextEdit does not have one (it is a
             // QQuickText property), so the source view takes the font's own

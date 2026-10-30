@@ -98,7 +98,7 @@ Rectangle {
                 text: Ghostd.characterSaving ? "Saving…" : "Reading…"
                 color: Theme.ghostAmber
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
             }
 
             // The count against the daemon's own cap, shown once the daemon
@@ -110,7 +110,7 @@ Rectangle {
                 text: editor.text.length + " / " + Ghostd.characterLimit
                 color: root.overLimit ? Theme.ghostRose : Theme.foregroundDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
             }
 
             ActionButton {
@@ -150,7 +150,7 @@ Rectangle {
             text: Ghostd.characterError
             color: Theme.danger
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.WordWrap
         }
     }
@@ -177,7 +177,7 @@ Rectangle {
             color: Theme.foregroundBright
             selectionColor: Theme.selection
             selectedTextColor: Theme.foregroundBright
-            font.family: Theme.fontFamilyMono
+            font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
             activeFocusOnTab: true
             Accessible.name: "Character editor"

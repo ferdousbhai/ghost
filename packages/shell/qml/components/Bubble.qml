@@ -101,7 +101,7 @@ Item {
         // Qt's markdown renderer owns the parts of the type scale we cannot
         // reach from QML: heading sizes are hard-coded multiples of
         // font.pixelSize (h1 2.0, h2 1.5, h3 1.2) and code spans take the
-        // system fixed font rather than Theme.fontFamilyMono. What is set here
+        // system fixed font rather than Theme.fontFamily. What is set here
         // is therefore all that Text exposes; MarkdownCompat only rewrites what
         // Qt drops or ignores (links wear the ghost's amber there, never
         // Theme.accent — the inherited Omarchy accent is blue in most themes,
@@ -116,7 +116,7 @@ Item {
             color: root.hookNotice ? Theme.foregroundDim
                 : (root.mine ? Theme.foregroundBright : Theme.foreground)
             font.family: Theme.fontFamily
-            font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
+            font.pixelSize: root.hookNotice ? Theme.fontSize : Theme.fontSize
             lineHeight: Theme.lineHeight
             wrapMode: Text.Wrap
             onLinkActivated: link => ExternalLinks.openModelUrl(link)
@@ -363,7 +363,7 @@ Item {
                             text: "Photo unavailable"
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                         }
 
                         MouseArea {
@@ -473,7 +473,7 @@ Item {
                             : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")
                         color: trailArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                         font.letterSpacing: 0.5
                         Accessible.role: Accessible.Button
                         Accessible.name: root.toolsOpen
@@ -532,7 +532,7 @@ Item {
                     text: root.failure
                     color: Theme.ghostRose
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: Theme.fontSize
                     lineHeight: Theme.lineHeight
                     wrapMode: Text.Wrap
                 }

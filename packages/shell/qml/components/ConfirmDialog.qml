@@ -137,7 +137,7 @@ Item {
                 text: root.body
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 wrapMode: Text.Wrap
                 lineHeight: Theme.lineHeight
             }
@@ -168,7 +168,7 @@ Item {
                     enabled: !root.busy
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: Theme.fontSize
                     selectByMouse: true
                     selectionColor: Theme.selection
                     clip: true
@@ -189,7 +189,7 @@ Item {
                 text: root.error
                 color: Theme.danger
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 wrapMode: Text.Wrap
             }
 

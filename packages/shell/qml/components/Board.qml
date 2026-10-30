@@ -81,7 +81,7 @@ Rectangle {
             text: root.statusLine
             color: Ghostd.boardError !== "" ? Theme.danger : Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.WordWrap
         }
 
@@ -130,7 +130,7 @@ Rectangle {
                                 text: columnBox.modelData.title + " · " + columnBox.modelData.cards.length
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: Theme.fontSize
                                 font.weight: Font.DemiBold
                                 font.capitalization: Font.AllUppercase
                                 font.letterSpacing: 0.5
@@ -175,7 +175,7 @@ Rectangle {
                                                 color: cardBox.modelData.done === true
                                                     ? Theme.foregroundDim : Theme.foreground
                                                 font.family: Theme.fontFamily
-                                                font.pixelSize: Theme.fontSizeSmall
+                                                font.pixelSize: Theme.fontSize
                                                 font.strikeout: cardBox.modelData.done === true
                                                 wrapMode: Text.WordWrap
                                             }
@@ -191,7 +191,7 @@ Rectangle {
                                                 text: cardBox.modelData.notes.join("\n")
                                                 color: Theme.foregroundDim
                                                 font.family: Theme.fontFamily
-                                                font.pixelSize: Theme.fontSizeSmall
+                                                font.pixelSize: Theme.fontSize
                                                 wrapMode: Text.WordWrap
                                             }
                                         }

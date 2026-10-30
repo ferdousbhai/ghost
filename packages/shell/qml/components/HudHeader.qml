@@ -117,7 +117,7 @@ Item {
                 : "via " + Ghostd.currentHarness + (Ghostd.currentModel !== "" ? "  " + Ghostd.currentModel : "")) + " ▾"
             color: harnessArea.containsMouse || root.pickerOpen ? Theme.foreground : Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             Accessible.role: Accessible.Button
             Accessible.name: "Choose harness"
 
@@ -136,7 +136,7 @@ Item {
             text: "Shift+Esc to stop"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
         }
     }
 
@@ -194,7 +194,7 @@ Item {
                 text: "loading…"
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
             }
 
             Repeater {
@@ -232,7 +232,7 @@ Item {
                             text: (harnessRow.current ? "• " : "  ") + harnessRow.modelData.id
                             color: harnessRow.current ? Theme.ghostAmberBright : Theme.foreground
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                         }
 
                         // What is worth knowing before choosing it: held back
@@ -344,7 +344,7 @@ Item {
             x: Theme.gap
             y: Theme.gap
             spacing: Theme.pad
-            Text { text: "Resources"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            Text { text: "Resources"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize }
             PickerAction { objectName: "resourcesRefresh"; text: "Refresh"; onActivated: Ghostd.fetchRunResources() }
             PickerAction { objectName: "resourcesClose"; text: "Close"; onActivated: root.closePicker() }
         }
@@ -369,7 +369,7 @@ Item {
                 wrapMode: Text.Wrap
                 color: Theme.foreground
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
             }
         }
     }

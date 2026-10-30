@@ -164,7 +164,6 @@ Singleton {
     // text is still content (notes, descriptions, status), and 10px monospace
     // is a label size, not a reading size. A theme that pins a token still wins.
     readonly property int fontSizeCaption: root.fontSizeFor("body-small", 11 / 12)
-    readonly property int fontSizeSmall: root.fontSizeFor("body", 1)
     readonly property int fontSize: root.fontSizeFor("body", 1)
     readonly property int fontSizeSubtitle: root.fontSizeFor("subtitle", 13 / 12)
     readonly property int fontSizeTitle: root.fontSizeFor("title", 14 / 12)
@@ -343,7 +342,6 @@ Singleton {
     // Omarchy it resolves to whatever that machine calls monospace, which is
     // the right answer there too.
     readonly property string fontFamily: "monospace"
-    readonly property string fontFamilyMono: root.fontFamily
     /** Proportional line height for reading copy; chrome labels stay at 1.0. */
     readonly property real lineHeight: 1.4
 

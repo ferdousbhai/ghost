@@ -24,8 +24,8 @@ Rectangle {
         text: root.code
         textFormat: Text.PlainText
         color: Theme.info
-        font.family: Theme.fontFamilyMono
-        font.pixelSize: Theme.fontSizeSmall
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSize
         lineHeight: Theme.lineHeight
         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
     }

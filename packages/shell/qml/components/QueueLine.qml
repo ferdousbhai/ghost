@@ -27,7 +27,7 @@ ColumnLayout {
             text: "Then →"
             color: Theme.amber(0.70)
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
         }
 
         Repeater {
@@ -49,7 +49,7 @@ ColumnLayout {
                     text: chip.modelData
                     color: Theme.foreground
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: Theme.fontSize
                     elide: Text.ElideRight
                 }
             }
@@ -62,7 +62,7 @@ ColumnLayout {
         text: root.error
         color: Theme.ghostRose
         font.family: Theme.fontFamily
-        font.pixelSize: Theme.fontSizeSmall
+        font.pixelSize: Theme.fontSize
         wrapMode: Text.Wrap
     }
 }

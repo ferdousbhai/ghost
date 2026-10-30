@@ -118,14 +118,14 @@ Column {
                         text: String(answer.index + 1)
                         color: Theme.foregroundFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                     }
 
                     Text {
                         text: answer.modelData
                         color: answerArea.containsMouse ? Theme.menuSelectedText : Theme.menuText
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                     }
                 }
 

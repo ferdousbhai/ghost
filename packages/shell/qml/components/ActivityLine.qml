@@ -164,7 +164,7 @@ Item {
                         : Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
                 color: root.failing ? Theme.ghostRose : root.phraseColor
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
+                font.pixelSize: Theme.fontSize
                 font.weight: Font.Light
                 font.letterSpacing: 0.5
                 // Centre the first line on the orb without reading this

@@ -92,7 +92,7 @@ Rectangle {
             text: "Working…"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
         }
 
         Text {
@@ -101,7 +101,7 @@ Rectangle {
             text: Presence.failure
             color: Theme.ghostRose
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.Wrap
         }
 

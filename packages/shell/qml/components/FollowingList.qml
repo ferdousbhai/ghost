@@ -210,7 +210,7 @@ ListView {
             textFormat: Text.StyledText
             color: jumpArea.containsMouse ? Theme.foregroundBright : Theme.foreground
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
         }
 
         MouseArea {
