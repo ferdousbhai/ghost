@@ -3,7 +3,6 @@ import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { homedir } from "node:os";
 import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -19,7 +18,6 @@ import type {
 } from "./mcp-catalog.js";
 import { readCharacter, writeCharacter } from "./home.js";
 import { MAX_CHARACTER_BODY_LENGTH } from "./persona.js";
-import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { isRecord } from "./record.js";
 import type { GhostRegistry } from "./ghosts.js";
@@ -733,7 +731,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // document meant to be looked at, and it is read-only here. A guest is
     // shown no filesystem path.
     route("GET", "api/board", async (context) => {
-      const { path, ...board } = await readBoard(resolveDocumentsDirectory(process.env, homedir()));
+      const { path, ...board } = await readBoard(options.host.documentsDir());
       jsonResponse(context.response, 200, isGuest(context) ? board : { path, ...board });
     }),
     route("GET", "api/status", ownerOnly(({ response }) => {

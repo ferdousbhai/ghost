@@ -407,6 +407,11 @@ export class SessionHost {
    * sections. Rendered before every turn, so a character the ghost (or the
    * owner) rewrote is who it is on the next one.
    */
+  /** The owner's Documents folder, where board.md lives. */
+  documentsDir(): string {
+    return resolveDocumentsDirectory(this.env, this.ownerHome);
+  }
+
   async renderPersona(ghost: Ghost): Promise<string> {
     const character = await readCharacter(ghost.dir);
     return buildGhostSystemPrompt({
@@ -414,7 +419,7 @@ export class SessionHost {
       character,
       homeDir: ghost.dir,
       extraSections: stablePolicySections({
-        documents: resolveDocumentsDirectory(this.env, this.ownerHome),
+        documents: this.documentsDir(),
         // Checked each turn, like the character: installing Recall needs no restart.
         recall: which("recall", this.env) !== null,
         runningSource: this.runningSource,

@@ -103,7 +103,9 @@ export async function readBoard(documentsDir: string): Promise<Board> {
   } finally {
     await file.close();
   }
-  const parsed = parseBoard(head.subarray(0, bytes).toString("utf8"));
+  // Streaming, the decoder holds back a character the cut split instead of
+  // ending the board in U+FFFD.
+  const parsed = parseBoard(new TextDecoder().decode(head.subarray(0, bytes), { stream: true }));
   return {
     path,
     exists: true,

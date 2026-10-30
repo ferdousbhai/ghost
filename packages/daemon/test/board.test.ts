@@ -65,4 +65,13 @@ describe("board", () => {
     expect(board.truncated).toBe(true);
     expect(board.columns.map((column) => column.title)).toEqual(["Head"]);
   });
+
+  it("drops a character the bound splits rather than ending in U+FFFD", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ghost-board-"));
+    // An odd 11-byte prefix puts the even byte bound inside an "é".
+    writeFileSync(join(dir, "board.md"), `## Head\n- x${"é".repeat(BOARD_MAX_BYTES / 2)}\n`);
+    const card = (await readBoard(dir)).columns[0]?.cards[0];
+    expect(card).toBeDefined();
+    expect(JSON.stringify(card)).not.toContain("�");
+  });
 });
