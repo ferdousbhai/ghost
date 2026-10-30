@@ -1857,7 +1857,9 @@ Singleton {
 
     function finishOpenConversation(id: string): void {
         const ghost = root.activeGhost;
-        if (ghost === "" || id === "") return;
+        // A summon payload's id is outside input: one the daemon would refuse
+        // gets no turn state to open.
+        if (ghost === "" || !root.validConversationId(id)) return;
         root.adoptConversation(ghost, id);
         if (root.hudChatFocused) root.markConversationRead(ghost, id);
         const state = root.ensureTurnState(ghost, id);

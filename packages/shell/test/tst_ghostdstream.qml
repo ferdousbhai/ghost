@@ -446,4 +446,17 @@ TestCase {
         compare(turn.state.request, turn.xhr);
         compare(aborts.count, 0);
     }
+
+    // A summon payload is outside input: a conversation id the daemon would
+    // refuse opens nothing, rather than throwing out of the summon.
+    function test_aSummonNamingAnInvalidConversationOpensNothing(): void {
+        const sent = [];
+        Ghostd.requestFactory = FakeXhr.factory(sent, /./);
+
+        Ghostd.openConversationForGhost("casper", "../elsewhere");
+
+        compare(Ghostd.currentSessionId, "");
+        compare(Ghostd.sessionIds.casper, "");
+        compare(sent.length, 0);
+    }
 }
