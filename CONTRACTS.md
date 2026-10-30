@@ -464,8 +464,6 @@ Ghost only stores an attached image where the harness can open it.
 
 ### Background work and hooks
 
-There is no `ask` tool: a question to the owner is an ordinary reply.
-
 Background work is shell work: a ghost detaches a command into its own
 low-priority transient unit (`systemd-run --user --scope -p CPUWeight=20
 setsid -f`), so it yields to the owner's apps, outlives a daemon restart, and
