@@ -30,51 +30,6 @@ Rectangle {
         event.accepted = true;
     }
 
-    function copy(value: string): void {
-        if (value !== "") Quickshell.clipboardText = value;
-    }
-
-    component ClipboardButton: Rectangle {
-        id: copyButton
-
-        required property string value
-        property string accessibleName: "Copy"
-
-        width: Theme.controlHeight
-        height: Theme.controlHeight
-        radius: Theme.radius
-        color: copyArea.containsMouse ? Theme.film(0.09) : "transparent"
-        border.width: activeFocus ? 1 : 0
-        border.color: Theme.amber(0.55)
-        activeFocusOnTab: true
-
-        Accessible.role: Accessible.Button
-        Accessible.name: copyButton.accessibleName
-
-        CopyGlyph {
-            anchors.centerIn: parent
-            size: 16
-            tint: copyArea.containsMouse || copyButton.activeFocus
-                ? Theme.foreground : Theme.foregroundFaint
-        }
-
-        MouseArea {
-            id: copyArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.copy(copyButton.value)
-        }
-
-        Keys.onPressed: event => {
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                    || event.key === Qt.Key_Space) {
-                root.copy(copyButton.value);
-                event.accepted = true;
-            }
-        }
-    }
-
     // A read-only value in a film box with a copy button at its right edge.
     component CopyField: Rectangle {
         id: copyField
@@ -83,6 +38,10 @@ Rectangle {
         required property string label
         property string textName: ""
         property string copyName: ""
+
+        function copy(): void {
+            if (copyField.value !== "") Quickshell.clipboardText = copyField.value;
+        }
 
         width: parent.width
         height: Math.max(Theme.controlHeight, fieldText.implicitHeight + Theme.gap)
@@ -114,13 +73,44 @@ Rectangle {
             Accessible.description: "Select or copy this"
         }
 
-        ClipboardButton {
+        Rectangle {
             id: fieldCopy
             objectName: copyField.copyName
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            value: copyField.value
-            accessibleName: "Copy " + copyField.label.toLowerCase()
+            width: Theme.controlHeight
+            height: Theme.controlHeight
+            radius: Theme.radius
+            color: copyArea.containsMouse ? Theme.film(0.09) : "transparent"
+            border.width: fieldCopy.activeFocus ? 1 : 0
+            border.color: Theme.amber(0.55)
+            activeFocusOnTab: true
+
+            Accessible.role: Accessible.Button
+            Accessible.name: "Copy " + copyField.label.toLowerCase()
+
+            CopyGlyph {
+                anchors.centerIn: parent
+                size: 16
+                tint: copyArea.containsMouse || fieldCopy.activeFocus
+                    ? Theme.foreground : Theme.foregroundFaint
+            }
+
+            MouseArea {
+                id: copyArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: copyField.copy()
+            }
+
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                        || event.key === Qt.Key_Space) {
+                    copyField.copy();
+                    event.accepted = true;
+                }
+            }
         }
     }
 
