@@ -206,8 +206,10 @@ FloatingWindow {
     // Closing makes the host destroy the panel inside `shownChanged`, before
     // these Bindings re-evaluate, so what they wrote would outlive the window:
     // the edges would keep the menu's glow, and replies to its conversation
-    // would count as read and go unannounced.
+    // would count as read and go unannounced. A teardown while shown (a
+    // plugin disable) would also leave `status` reporting it shown.
     Component.onDestruction: {
+        Ghostd.hudVisible = false;
         Ghostd.hudForeground = false;
         Ghostd.hudChatFocused = false;
     }

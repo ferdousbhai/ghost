@@ -74,8 +74,10 @@ TestCase {
         panel.open('{"section":"home"}');
         Ghostd.hudForeground = true;
         Ghostd.hudChatFocused = true;
+        verify(Ghostd.hudVisible);
         panel.destroy();
         wait(0);
+        verify(!Ghostd.hudVisible);
         verify(!Ghostd.hudForeground);
         verify(!Ghostd.hudChatFocused);
     }
