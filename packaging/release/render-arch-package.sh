@@ -14,19 +14,7 @@ source_sha="${3:?usage: $usage}"
 runtime_sha="${4:?usage: $usage}"
 release_repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 
-if [[ "$version" =~ ^(0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})$ ]]; then
-  major="${BASH_REMATCH[1]}"
-  minor="${BASH_REMATCH[2]}"
-  patch="${BASH_REMATCH[3]}"
-else
-  printf 'invalid release version: %s\n' "$version" >&2
-  exit 1
-fi
-if (( 10#$major > 65535 || 10#$minor > 65535 || 10#$patch > 65535 ||
-      (10#$major == 0 && 10#$minor == 0 && 10#$patch == 0) )); then
-  printf 'invalid release version: %s\n' "$version" >&2
-  exit 1
-fi
+bash "$script_root/verify-release-version.sh" --valid "$version"
 [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
 [[ "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]
 [[ "$release_repository" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || {
