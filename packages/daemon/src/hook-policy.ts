@@ -103,12 +103,8 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-export function parseHooksDocument(parsed: unknown, path: string): { commands: CommandHook[] } {
+export function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  return { commands: parseCommandHooks(parsed, path) };
-}
-
-function parseCommandHooks(parsed: Record<string, unknown>, path: string): CommandHook[] {
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);

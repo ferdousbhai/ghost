@@ -907,7 +907,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
 describe("completion delivery", () => {
   function delivery(events: GhostHookEvent[], fail = false): GhostHookRunner {
     return new GhostHookRunner({
-      ...parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
+      commands: parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
       commandRunner: async (_hook, event) => {
         events.push(event);
         if (fail) throw new Error("delivery offline");
@@ -932,7 +932,7 @@ describe("completion delivery", () => {
   it("reports the turn id of the owner request the final pass answered", async () => {
     const seen: GhostHookEvent[] = [];
     const hooks = new GhostHookRunner({
-      ...parseHooksDocument({ hooks: {
+      commands: parseHooksDocument({ hooks: {
         before_prompt: [{ hooks: [{ type: "command", command: "record" }] }],
         turn_end: [{ hooks: [{ type: "command", command: "notify" }] }],
       } }, "test"),
@@ -956,7 +956,7 @@ describe("completion delivery", () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; }), notifications: GhostHookEvent[] = [];
     const hooks = new GhostHookRunner({
-      ...parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
+      commands: parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
       commandRunner: async (_hook, event) => {
         notifications.push(event); await held;
         return { exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };

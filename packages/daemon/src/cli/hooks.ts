@@ -26,7 +26,7 @@ export async function hooksCommand(ctx: CliContext): Promise<number> {
   emit(ctx, body, (result) => {
     if (action !== "status") return `${JSON.stringify(result, null, 2)}\n`;
     const { path, document } = result as GhostHookCommandConfig;
-    const hooks = parseHooksDocument(document, path).commands;
+    const hooks = parseHooksDocument(document, path);
     return hooks.length > 0
       ? `${table(hooks.map((hook) => [hook.eventName, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
       : "No hooks configured.\n";

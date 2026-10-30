@@ -90,7 +90,7 @@ export class GhostHookRunner {
     const document = readCommandHooksDocument(path);
     return new GhostHookRunner({
       ...options,
-      ...parseHooksDocument(document, path),
+      commands: parseHooksDocument(document, path),
       commandConfig: { path, document: document as Record<string, unknown> },
     });
   }
@@ -110,7 +110,7 @@ export class GhostHookRunner {
   async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
-    const { commands } = parseHooksDocument(document, config.path);
+    const commands = parseHooksDocument(document, config.path);
     const admitted = document as Record<string, unknown>;
     return serializeByKey(this.configWrites, config.path, async () => {
       await mkdir(dirname(config.path), { recursive: true });
