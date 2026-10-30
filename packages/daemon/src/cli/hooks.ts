@@ -12,6 +12,7 @@ export async function hooksCommand(ctx: CliContext): Promise<number> {
   switch (action) {
     case "status":
     case "show":
+      if (file) throw new ArgsError(`ghost hooks ${action} takes no further arguments`);
       body = await ctx.client.request("GET", "/api/hooks/config");
       break;
     case "set": {

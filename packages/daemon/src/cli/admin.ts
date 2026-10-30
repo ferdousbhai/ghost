@@ -26,6 +26,7 @@ export async function characterCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
   const [action = "show", file] = parsed.positionals;
   if (action === "show") {
+    if (file) throw new ArgsError("ghost character show takes no further arguments");
     const body = await ctx.client.request<{ body: string }>("GET", ghostPath(await resolveGhost(ctx), "/character"));
     emit(ctx, body, (result) => result.body);
     return 0;

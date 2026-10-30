@@ -234,6 +234,10 @@ describe("ghost help", () => {
       ["mcp", "bogus"],
       ["mcp", "rm"],
       ["mcp", "add", "github"],
+      ["mcp", "list", "github"],
+      ["mcp", "enable", "github", "slack"],
+      ["hooks", "show", "extra"],
+      ["character", "show", "extra"],
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);

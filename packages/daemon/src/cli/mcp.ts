@@ -27,6 +27,7 @@ export async function mcpCommand(ctx: CliContext): Promise<number> {
   if (action !== "list" && !name) throw new ArgsError(`ghost mcp ${action} needs a server name`);
   const takesFile = action === "add" || action === "set";
   if (takesFile && !file) throw new ArgsError(`ghost mcp ${action} needs a JSON config file path`);
+  if (parsed.positionals.length > (action === "list" ? 1 : takesFile ? 3 : 2)) throw new ArgsError(`ghost mcp ${action} takes no further arguments`);
   const config = takesFile ? readArgumentJson(file) : undefined;
   const base = ghostPath(await resolveGhost(ctx), "/mcp");
   const server = `${base}/${encodeURIComponent(name)}`;
