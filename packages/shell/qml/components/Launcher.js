@@ -69,7 +69,7 @@ function ordered(sessions) {
         return Date.parse(session.updatedAt || "") || 0;
     };
     return (sessions || []).filter(function (session) { return !!session; })
-        .slice().sort(function (a, b) { return rank(a) - rank(b) || time(b) - time(a); });
+        .sort(function (a, b) { return rank(a) - rank(b) || time(b) - time(a); });
 }
 
 /**

@@ -357,7 +357,7 @@ function tokenize(src, spec) {
             }
             at += 1;
         }
-        emit(STRING, index, Math.min(limit, length));
+        emit(STRING, index, limit);
     }
 
     while (index < length) {

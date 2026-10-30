@@ -99,10 +99,10 @@ function orb(ghostName, turnKey, grid) {
     ring.sort(function (a, b) { return a.angle - b.angle; });
 
     const motes = [];
-    const moteCount = ring.length === 0 ? 0 : Math.max(1, Math.round(between(slow, 1, 3)));
+    const moteCount = Math.round(between(slow, 1, 3));
     for (let i = 0; i < moteCount; i++) {
         motes.push({
-            step: Math.floor(between(fast, 0, ring.length)) % ring.length,
+            step: Math.floor(between(fast, 0, ring.length)),
             period: Math.round(between(fast, 110, 260)),
             clockwise: fast() < 0.5
         });
