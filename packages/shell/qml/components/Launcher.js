@@ -24,8 +24,8 @@ var PLACES = [
 
 /** The stored name, else the first message, else "New conversation". */
 function titleOf(session) {
-    if (session && typeof session.title === "string" && session.title !== "") return session.title;
-    if (session && typeof session.preview === "string" && session.preview !== "") return session.preview;
+    if (typeof session.title === "string" && session.title !== "") return session.title;
+    if (typeof session.preview === "string" && session.preview !== "") return session.preview;
     return "New conversation";
 }
 
