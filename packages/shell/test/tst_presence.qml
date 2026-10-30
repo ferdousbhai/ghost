@@ -95,6 +95,29 @@ TestCase {
         verify(JSON.parse(posts()[2].body).sessionId !== sessionId);
     }
 
+    // A follow-up whose ghost was banished while the prompt stood cannot
+    // continue that conversation: it starts a fresh one with the ghost now
+    // active, never lands in whatever conversation that ghost has open.
+    function test_aFollowUpToABanishedGhostStartsAfresh(): void {
+        Presence.summon();
+        Presence.send("first");
+        finish(posts()[0], "One.");
+        Presence.summon();
+        verify(Presence.continuing);
+
+        Ghostd.ghosts = [{ name: "nick" }];
+        Ghostd.forgetGhost("casper");
+        Ghostd.switchGhost("nick");
+        Ghostd.sessions = [{ id: "n1", title: "nick's", messageCount: 3 }];
+        Ghostd.adoptConversation("nick", "n1");
+        Presence.send("and then?");
+
+        const post = sent.filter(xhr => xhr.method === "POST" && /\/messages$/.test(xhr.url)).pop();
+        verify(/\/api\/ghosts\/nick\/messages$/.test(post.url));
+        verify(JSON.parse(post.body).sessionId !== "n1");
+        compare(Presence.ghost, "nick");
+    }
+
     function test_dismissKeepsTheTurnAndClearForgetsIt(): void {
         Presence.summon();
         Presence.send("long job");

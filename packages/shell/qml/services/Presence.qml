@@ -149,11 +149,9 @@ Singleton {
         const prompt = text.trim();
         if (prompt === "") return;
         Dictation.cancel();
-        if (root.continuing) {
-            if (!root.projected) Ghostd.openConversationForGhost(root.ghost, root.sessionId);
-        } else {
-            Ghostd.newConversation();
-        }
+        if (root.continuing && !root.projected) Ghostd.openConversationForGhost(root.ghost, root.sessionId);
+        // A ghost no longer listed cannot be continued: the send starts afresh.
+        if (!root.continuing || !root.projected) Ghostd.newConversation();
         Ghostd.send(prompt);
         root.ghost = Ghostd.activeGhost;
         root.sessionId = Ghostd.currentSessionId;
