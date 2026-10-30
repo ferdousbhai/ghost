@@ -1643,13 +1643,11 @@ Singleton {
      * blank draft, 1 for one just sent. A row already listed keeps its count.
      */
     function ensureLocalSessionRow(ghost: string, id: string, messageCount: int): void {
-        if (ghost !== root.activeGhost || id === "") return;
-        const existing = root.sessionRow(id);
-        if (existing) {
+        if (ghost !== root.activeGhost || !root.validConversationId(id)) return;
+        if (root.sessionRow(id)) {
             root.sessions = root.orderSessions(root.sessions);
             return;
         }
-        if (!root.validConversationId(id)) return;
         const now = new Date().toISOString();
         root.sessions = root.orderSessions(root.sessions.concat([{
             id: id,
