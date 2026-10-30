@@ -758,7 +758,8 @@ runtime preserves owner data.
   - **Hosting**: it runs inside Omarchy's own shell process, so Ghost ships no
     shell, unit, or tray helper, and its QML imports are relative paths
     (inside the host, `qs.` resolves to Omarchy's shell root). The bar widget
-    takes the host's injected `bar` facade: `barSize`, the tooltip API, the
+    takes the host's injected `bar` facade: `barSize`, `vertical`,
+    `position`, the tooltip API, the
     `shell` facade, and `triggerPress(button)` for the host's click
     forwarding. The package installs the plugin to `/usr/share/ghost/plugin`;
     the per-user link into `~/.config/omarchy/plugins/` belongs to the

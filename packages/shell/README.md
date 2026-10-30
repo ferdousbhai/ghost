@@ -96,8 +96,8 @@ publishes one, and `qml/services/Theme.qml` reads it out of the active theme
 copy at `~/.local/state/omarchy/current/theme/`:
 
 - `colors.toml` — the palette. `background` is the canvas, the same colour
-  Omarchy gives its bar and popups; `dark_background` recesses a well or a
-  rail and `lighter_background` raises a card. Dim text is walked from the
+  Omarchy gives its bar and popups, and `dark_background` recesses a well
+  such as a code block. Dim text is walked from the
   theme's own foreground toward its background rather than taken from
   `dark_foreground`, which is a decorative key free to sit at any contrast.
 - `shell.toml` — the rest of the system. `[font]` is a type scale rooted at
