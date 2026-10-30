@@ -22,7 +22,7 @@ export async function ghostsCommand(
 
   if (verb === "new") {
     const response = await ctx.client.request("POST", "/api/ghosts", { name: parsed.positionals[0] });
-    emit(ctx, response.body, () => `created ${parsed.positionals[0]}\n`);
+    emit(ctx, response, () => `created ${parsed.positionals[0]}\n`);
     return 0;
   }
 
@@ -47,7 +47,7 @@ export async function ghostsCommand(
     if (parsed.positionals.length > 0) throw new ArgsError("ghost rm -s does not take a ghost name positional");
     const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
     const response = await ctx.client.request("DELETE", path);
-    emit(ctx, response.body, () => `trashed ${session.id}\n`);
+    emit(ctx, response, () => `trashed ${session.id}\n`);
     return 0;
   }
   if (parsed.positionals.length !== 1) throw new ArgsError("ghost rm needs a ghost name or -s <id>");
@@ -56,6 +56,6 @@ export async function ghostsCommand(
     "DELETE",
     ghostPath(name, `?confirm=${encodeURIComponent(name)}`),
   );
-  emit(ctx, response.body, () => `trashed ${name}; \`gio trash --list\` shows it\n`);
+  emit(ctx, response, () => `trashed ${name}; \`gio trash --list\` shows it\n`);
   return 0;
 }

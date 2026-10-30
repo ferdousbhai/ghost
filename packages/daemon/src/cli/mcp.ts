@@ -34,20 +34,20 @@ export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promis
   let body: unknown;
   switch (action) {
     case "list":
-      body = (await ctx.client.request("GET", base)).body;
+      body = await ctx.client.request("GET", base);
       break;
     case "add":
-      body = (await ctx.client.request("POST", base, { name: server() && name, config: configFrom(file) })).body;
+      body = await ctx.client.request("POST", base, { name: server() && name, config: configFrom(file) });
       break;
     case "set":
-      body = (await ctx.client.request("PUT", server(), { config: configFrom(file) })).body;
+      body = await ctx.client.request("PUT", server(), { config: configFrom(file) });
       break;
     case "rm":
-      body = (await ctx.client.request("DELETE", server())).body;
+      body = await ctx.client.request("DELETE", server());
       break;
     case "enable":
     case "disable":
-      body = (await ctx.client.request("PUT", `${server()}/enabled`, { enabled: action === "enable" })).body;
+      body = await ctx.client.request("PUT", `${server()}/enabled`, { enabled: action === "enable" });
       break;
     default:
       throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, or disable.`);

@@ -70,7 +70,7 @@ export async function sayCommand(
     const path = sessionPath(name, session.id);
     try {
       const response = await ctx.client.request("POST", `${path}/queue`, { text });
-      emit(ctx, response.body);
+      emit(ctx, response);
       return 0;
     } catch (error) {
       // A follow-up to an idle conversation is its next turn: this is how a

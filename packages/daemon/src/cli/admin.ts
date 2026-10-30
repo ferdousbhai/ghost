@@ -15,7 +15,7 @@ export async function renameCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   const next = parsed.positionals[0];
   if (!next) throw new ArgsError("ghost rename needs the new name");
   const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const body = (await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next })).body;
+  const body = await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next });
   emit(ctx, body, () => `Renamed ${name} to ${next}.\n`);
   return 0;
 }
@@ -25,12 +25,12 @@ export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): 
   const [action = "show", file] = parsed.positionals;
   const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   if (action === "show") {
-    const body = (await ctx.client.request<{ body: string }>("GET", ghostPath(name, "/character"))).body;
-    emit(ctx, body, (result) => (result as { body: string }).body);
+    const body = await ctx.client.request<{ body: string }>("GET", ghostPath(name, "/character"));
+    emit(ctx, body, (result) => result.body);
     return 0;
   }
   if (action !== "set" || !file) throw new ArgsError("ghost character takes `show` or `set <file>`");
-  const body = (await ctx.client.request("PUT", ghostPath(name, "/character"), { body: readFileSync(file, "utf8") })).body;
+  const body = await ctx.client.request("PUT", ghostPath(name, "/character"), { body: readFileSync(file, "utf8") });
   emit(ctx, body, () => `Character replaced for ${name}.\n`);
   return 0;
 }
@@ -39,14 +39,14 @@ export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): 
 /** `ghost read -s <id>`: mark a conversation read, as opening it in the HUD does. */
 export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("PUT", `${path}/read`, {})).body;
+  const body = await ctx.client.request("PUT", `${path}/read`, {});
   emit(ctx, body, () => `Marked ${session.id} read.\n`);
   return 0;
 }
 
 /** `ghost board`: the owner's board, read through the daemon. */
 export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const body = (await ctx.client.request("GET", "/api/board")).body;
+  const body = await ctx.client.request("GET", "/api/board");
   emit(ctx, body, (result) => {
     const board = result as Board;
     if (!board.exists) return `no board yet: create ${board.path} with ## columns and - cards\n`;
@@ -69,9 +69,9 @@ export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Pro
 export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "status"] = parsed.positionals;
   let body: unknown;
-  if (action === "status") body = (await ctx.client.request("GET", "/api/remote")).body;
+  if (action === "status") body = await ctx.client.request("GET", "/api/remote");
   else if (action === "on" || action === "off") {
-    body = (await ctx.client.request("POST", "/api/remote", { enabled: action === "on" })).body;
+    body = await ctx.client.request("POST", "/api/remote", { enabled: action === "on" });
   } else throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
   emit(ctx, body, (result) => {
     const status = result as Pick<RemoteStatus, "enabled" | "url" | "problem">;
@@ -101,8 +101,8 @@ export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
   const id = parsed.positionals[0];
   if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
   const body = id || flagBoolean(parsed, "none")
-    ? (await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })).body
-    : (await ctx.client.request("GET", ghostPath(name, "/harness"))).body;
+    ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
+    : await ctx.client.request("GET", ghostPath(name, "/harness"));
   emit(ctx, body, (result) => harnessChoicesText(name, result as HarnessChoicesBody));
   return 0;
 }
@@ -117,7 +117,7 @@ export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   const path = requested
     ? sessionPath(name, requested)
     : sessionPath(name, (await resolveSession(ctx.client, name, undefined)).id);
-  const body = (await ctx.client.request("PUT", `${path}/harness`, { harness: id })).body as { id: string; harness: string };
+  const body = await ctx.client.request("PUT", `${path}/harness`, { harness: id }) as { id: string; harness: string };
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
 }
@@ -128,7 +128,7 @@ export async function eventCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   if (!source || !id || !instructions) throw new ArgsError("ghost event needs source, id, and --instructions");
   const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
   const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const result = (await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload })).body;
+  const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload });
   emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
   return 0;
 }
@@ -143,17 +143,17 @@ export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
   if (action === "list") {
-    const body = (await request<{ routines: Routine[] }>("GET", path)).body;
+    const body = await request<{ routines: Routine[] }>("GET", path);
     emit(ctx, body, () => body.routines.length ? body.routines.map((r) =>
       `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n");
   } else if (action === "logs") {
-    const result = (await request<{ text: string; truncated: boolean; sessions: string[] }>("GET", `${target}/logs`)).body;
+    const result = await request<{ text: string; truncated: boolean; sessions: string[] }>("GET", `${target}/logs`);
     emit(ctx, result, () => `${result.truncated ? "(older log text truncated)\n" : ""}${result.text}\n${result.sessions.map(id => `Conversation: ghost show -g ${ghost} -s ${id}`).join("\n")}\n`);
   } else if (action === "config") {
-    const result = (await request("GET", `${target}/config`)).body;
+    const result = await request("GET", `${target}/config`);
     emit(ctx, result, () => `${JSON.stringify(result, null, 2)}\n`);
   } else if (action === "recoveries") {
-    const { recoveries } = (await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path)).body, result = { recoveries };
+    const { recoveries } = await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path), result = { recoveries };
     emit(ctx, result, () => result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}`).join("\n") + "\n");
   } else {
     let result: unknown;
@@ -161,12 +161,12 @@ export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): P
       let config: unknown;
       try { config = JSON.parse(file === "-" ? await stdinText(ctx.runtime.stdin) : readFileSync(file as string, "utf8")); }
       catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
-      result = (await request("PUT", `${target}/config`, config)).body;
+      result = await request("PUT", `${target}/config`, config);
     } else if (action === "remove") {
-      const config = (await request<{ revision: string }>("GET", `${target}/config`)).body;
-      result = (await request("DELETE", `${target}?revision=${encodeURIComponent(config.revision)}`)).body;
+      const config = await request<{ revision: string }>("GET", `${target}/config`);
+      result = await request("DELETE", `${target}?revision=${encodeURIComponent(config.revision)}`);
     } else {
-      result = (await request("POST", action === "restore" ? `${path}/recoveries/${encodeURIComponent(slug as string)}/restore` : `${target}/${action}`, {})).body;
+      result = await request("POST", action === "restore" ? `${path}/recoveries/${encodeURIComponent(slug as string)}/restore` : `${target}/${action}`, {});
     }
     emit(ctx, result, () => `${ghost}/${slug}: ${action} accepted.${(result as { recovery?: string }).recovery ? ` Recovery: ${(result as { recovery: string }).recovery}` : ""}\n`);
   }

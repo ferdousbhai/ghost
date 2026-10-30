@@ -70,10 +70,10 @@ export async function showCommand(
   const suffix = query.size ? `?${query}` : "";
   const response = await ctx.client.request<Transcript>("GET", `${path}/transcript${suffix}`);
   if (flagBoolean(parsed, "resources")) {
-    emit(ctx, response.body.resources, (snapshot) => snapshot ? `${snapshot.summary}\n` : "No successful run resources available.\n");
+    emit(ctx, response.resources, (snapshot) => snapshot ? `${snapshot.summary}\n` : "No successful run resources available.\n");
     return 0;
   }
-  emit(ctx, response.body, (body) => {
+  emit(ctx, response, (body) => {
     const markdown = transcriptMarkdown(body, name);
     return markdown ? `${markdown}\n` : "";
   });
@@ -83,7 +83,7 @@ export async function showCommand(
 /** Stop a conversation's running turn, whichever client started it. */
 export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("POST", `${path}/stop`, {})).body;
+  const body = await ctx.client.request("POST", `${path}/stop`, {});
   emit(ctx, body, () => `stopped ${session.id}\n`);
   return 0;
 }
@@ -98,13 +98,13 @@ export async function askCommand(parsed: ParsedCliArgs, ctx: CliContext): Promis
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
   if (flagBoolean(parsed, "clear")) {
     if (parsed.positionals.length > 0) throw new ArgsError("ask --clear takes no question.");
-    const body = (await ctx.client.request("DELETE", `${path}/question`)).body;
+    const body = await ctx.client.request("DELETE", `${path}/question`);
     emit(ctx, body, () => `cleared the question in ${session.id}\n`);
     return 0;
   }
   const [text, ...options] = parsed.positionals;
   if (text === undefined) throw new ArgsError("ask needs a question.");
-  const body = (await ctx.client.request("PUT", `${path}/question`, { text, options })).body;
+  const body = await ctx.client.request("PUT", `${path}/question`, { text, options });
   emit(ctx, body, () => `asked in ${session.id}; the owner's next message there is the answer\n`);
   return 0;
 }
@@ -117,13 +117,13 @@ export async function sessionActionCommand(
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
   let body: unknown;
   if (verb === "title") {
-    body = (await ctx.client.request("PUT", `${path}/title`, {
+    body = await ctx.client.request("PUT", `${path}/title`, {
       title: parsed.positionals[0],
-    })).body;
+    });
   } else {
-    body = (await ctx.client.request("PUT", `${path}/pin`, {
+    body = await ctx.client.request("PUT", `${path}/pin`, {
       pinned: verb === "pin",
-    })).body;
+    });
   }
   emit(ctx, body, () => {
     if (verb === "title") return `${(body as { title?: string }).title ?? parsed.positionals[0]}\n`;

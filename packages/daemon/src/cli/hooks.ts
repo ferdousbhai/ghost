@@ -11,12 +11,12 @@ export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   switch (action) {
     case "status":
     case "show":
-      body = (await ctx.client.request("GET", "/api/hooks/config")).body;
+      body = await ctx.client.request("GET", "/api/hooks/config");
       break;
     case "set": {
       if (!file) throw new ArgsError("ghost hooks set needs a JSON file path");
       const document: unknown = JSON.parse(readFileSync(file, "utf8"));
-      body = (await ctx.client.request("PUT", "/api/hooks/config", document)).body;
+      body = await ctx.client.request("PUT", "/api/hooks/config", document);
       break;
     }
     default:

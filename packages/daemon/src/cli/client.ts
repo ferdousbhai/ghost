@@ -62,11 +62,6 @@ export function notFound(what: string): CliError {
   return new CliError(EXIT_CODE.notFound, `${what} was not found`);
 }
 
-export interface CliResponse<T = unknown> {
-  status: number;
-  body: T;
-}
-
 function networkError(error: unknown): CliError {
   const message = errorMessage(error);
   return new CliError(EXIT_CODE.unreachable, `cannot reach ghostd: ${message}`);
@@ -151,7 +146,7 @@ export class DaemonClient {
     path: string,
     body?: unknown,
     timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
-  ): Promise<CliResponse<T>> {
+  ): Promise<T> {
     const response = await this.#fetch(path, {
       method,
       ...(body === undefined ? {} : {
@@ -161,10 +156,10 @@ export class DaemonClient {
     }, true, timeoutMs);
     const parsed = await responseBody(response);
     if (!response.ok) throw statusError(response.status, parsed, this.tokenPath);
-    return { status: response.status, body: parsed as T };
+    return parsed as T;
   }
 
-  async optional<T = unknown>(method: string, path: string): Promise<CliResponse<T> | null> {
+  async optional<T = unknown>(method: string, path: string): Promise<T | null> {
     try {
       return await this.request<T>(method, path);
     } catch (error) {

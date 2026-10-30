@@ -19,13 +19,12 @@ export async function statusCommand(
   _parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
-  const [ghostsResponse, remote, daemon] = await Promise.all([
+  const [ghosts, remote, daemon] = await Promise.all([
     ctx.client.request<Ghost[]>("GET", "/api/ghosts"),
     ctx.client.optional<RemoteStatus>("GET", "/api/remote"),
     // A daemon older than this route 404s; the rest of status still prints.
     ctx.client.optional<DaemonStatus>("GET", "/api/status"),
   ]);
-  const ghosts = ghostsResponse.body;
   const defaultGhost = readDefaultGhost(ctx.runtime) ?? null;
   const result = {
     daemon: ctx.client.baseUrl,
@@ -38,13 +37,13 @@ export async function statusCommand(
     version: ctx.version,
     ...(daemon
       ? {
-        daemonVersion: daemon.body.version,
-        source: daemon.body.source ?? null,
-        daemonStartedAt: daemon.body.startedAt ?? null,
-        restartNeeded: daemon.body.restartNeeded === true,
+        daemonVersion: daemon.version,
+        source: daemon.source ?? null,
+        daemonStartedAt: daemon.startedAt ?? null,
+        restartNeeded: daemon.restartNeeded === true,
       }
       : {}),
-    ...(remote ? { remote: remote.body } : { remote: { state: "unavailable" } }),
+    remote: remote ?? { state: "unavailable" },
   };
   emit(ctx, result, () => {
     const lines = [
@@ -57,18 +56,18 @@ export async function statusCommand(
       `version        ${ctx.version}`,
     ];
     if (daemon) {
-      lines.push(`daemon version ${daemon.body.version ?? "unknown"}`);
-      lines.push(`daemon commit  ${daemon.body.source?.commit ?? "unknown"}`);
-      lines.push(`daemon source  ${daemon.body.source?.root ?? "packaged install"}`);
-      if (daemon.body.startedAt) lines.push(`daemon started ${daemon.body.startedAt}`);
+      lines.push(`daemon version ${daemon.version ?? "unknown"}`);
+      lines.push(`daemon commit  ${daemon.source?.commit ?? "unknown"}`);
+      lines.push(`daemon source  ${daemon.source?.root ?? "packaged install"}`);
+      if (daemon.startedAt) lines.push(`daemon started ${daemon.startedAt}`);
       // The code changed under a running daemon: what is on disk is not what answers.
-      if (daemon.body.restartNeeded === true)
+      if (daemon.restartNeeded === true)
         lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
     }
     if (remote) {
-      const url = remote.body.url ? ` ${remote.body.url}` : "";
-      const problem = remote.body.problem ? ` (${remote.body.problem.message})` : "";
-      lines.push(`remote         ${remote.body.state}${url}${problem}`);
+      const url = remote.url ? ` ${remote.url}` : "";
+      const problem = remote.problem ? ` (${remote.problem.message})` : "";
+      lines.push(`remote         ${remote.state}${url}${problem}`);
     } else lines.push("remote         unavailable");
     return { human: `${lines.join("\n")}\n`, quiet: "ok\n" };
   });

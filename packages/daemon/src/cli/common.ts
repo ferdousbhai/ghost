@@ -48,8 +48,8 @@ export async function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home"
   return path;
 }
 
-export async function listGhosts(client: DaemonClient): Promise<Ghost[]> {
-  return (await client.request<Ghost[]>("GET", "/api/ghosts")).body;
+export function listGhosts(client: DaemonClient): Promise<Ghost[]> {
+  return client.request<Ghost[]>("GET", "/api/ghosts");
 }
 
 /**
@@ -85,11 +85,7 @@ export async function resolveGhost(
 }
 
 export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {
-  const response = await client.request<{ sessions: SessionSummary[] }>(
-    "GET",
-    ghostPath(ghost, "/sessions"),
-  );
-  return response.body.sessions;
+  return (await client.request<{ sessions: SessionSummary[] }>("GET", ghostPath(ghost, "/sessions"))).sessions;
 }
 
 export function resolveSessionPrefix(rows: readonly SessionSummary[], requested: string): SessionSummary {
