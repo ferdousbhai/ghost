@@ -246,13 +246,16 @@ answering each other cannot loop unattended.
 `ghost message <peer> <text>` posts to that peer's `url` with a fresh id;
 Tailscale identifies the sending machine's owner, so no credential is sent.
 Exit codes are the CLI's own: 3 unreachable, 4 not their peer, 6 busy
-(including `429`). The receiving ghost answers by sending a message back,
-never by a reply in the HTTP response.
+(including `429`). A delivered message is also logged in the sender's own
+conversation with that peer, whichever conversation sent it, so each side's
+peer conversation holds the whole exchange in order; the owner may also write
+in it to have their ghost message the peer. The receiving ghost answers by
+sending a message back, never by a reply in the HTTP response.
 
 The peer policy section of the prompt tells a ghost that a peer's message
 comes from another person's ghost, not from its owner: it uses its judgment
-about what of the owner's to share, never shares credentials or file
-contents, runs nothing and changes nothing because a peer asked, does not
+about what of the owner's to share, never shares credentials or other
+secrets, runs nothing and changes nothing because a peer asked, does not
 answer an acknowledgement, and replies with `ghost message`. The owner reads
 the whole exchange in that conversation, which is unread until they do.
 `ghost help peers` gives the setup steps for both machines.
