@@ -66,8 +66,8 @@ Rectangle {
             color: Theme.foregroundBright
             selectionColor: Theme.selection
             selectedTextColor: Theme.foregroundBright
-            font.family: Theme.fontFamilyMono
-            font.pixelSize: Theme.fontSizeSmall
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
             wrapMode: TextEdit.WrapAnywhere
             Accessible.name: copyField.label
             Accessible.description: "Select or copy this"
@@ -208,7 +208,7 @@ Rectangle {
                                     ? Theme.warn
                                     : (root.remoteOn ? Theme.ok : Theme.foregroundDim)
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: Theme.fontSize
                                 elide: Text.ElideRight
                                 maximumLineCount: 1
                             }
@@ -259,7 +259,6 @@ Rectangle {
                             }
 
                             MouseArea {
-                                id: switchArea
                                 anchors.fill: parent
                                 enabled: remoteSwitch.enabled
                                 hoverEnabled: true
@@ -285,7 +284,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         color: Theme.foregroundFaint
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                     }
 
                     Column {
@@ -303,7 +302,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                             wrapMode: Text.WordWrap
                         }
 
@@ -378,7 +377,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                         }
                     }
 
@@ -392,7 +391,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             color: Theme.foregroundBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                             font.weight: Font.DemiBold
                         }
 
@@ -405,7 +404,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                             wrapMode: Text.WordWrap
                         }
                     }

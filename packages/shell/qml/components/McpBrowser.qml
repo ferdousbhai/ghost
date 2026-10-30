@@ -136,7 +136,6 @@ Rectangle {
                 + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
 
             ActionButton {
-                id: refreshButton
 
                 label: Ghostd.mcpLoading ? "Refreshing" : "Refresh"
                 enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpLoading && !Ghostd.mcpMutating
@@ -144,7 +143,6 @@ Rectangle {
             }
 
             ActionButton {
-                id: addButton
 
                 label: "+ Add server"
                 primary: true
@@ -159,7 +157,7 @@ Rectangle {
             text: Ghostd.mcpError
             color: Theme.danger
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
             wrapMode: Text.WordWrap
         }
 
@@ -169,7 +167,7 @@ Rectangle {
             text: Ghostd.mcpNotice
             color: Theme.ghostAmber
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
         }
 
         Rectangle { Layout.fillWidth: true; implicitHeight: 1; color: Theme.border }
@@ -205,7 +203,7 @@ Rectangle {
                         color: Theme.foregroundBright
                         selectionColor: Theme.selection
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                         clip: true
 
                         Text {
@@ -215,7 +213,7 @@ Rectangle {
                             text: "Search servers"
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
+                            font.pixelSize: Theme.fontSize
                         }
                     }
                 }
@@ -275,7 +273,7 @@ Rectangle {
                                 width: parent.width
                                 text: McpConfig.transport(serverRow.modelData).toUpperCase()
                                 color: Theme.foregroundDim
-                                font.family: Theme.fontFamilyMono
+                                font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeCaption
                                 elide: Text.ElideRight
                             }
@@ -306,7 +304,7 @@ Rectangle {
                             ? "No MCP servers yet" : "No matching servers"
                         color: Theme.foregroundDim
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
+                        font.pixelSize: Theme.fontSize
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
                     }
@@ -364,8 +362,8 @@ Rectangle {
                                                 + " · " + McpConfig.text(root.selectedServer.path)
                                             : ""
                                         color: Theme.foregroundDim
-                                        font.family: Theme.fontFamilyMono
-                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
                                         elide: Text.ElideMiddle
                                     }
                                 }
@@ -405,14 +403,14 @@ Rectangle {
                                     text: root.selectedDisabled ? "Disabled" : "Enabled"
                                     color: root.selectedDisabled ? Theme.foregroundDim : Theme.ghostAmber
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     width: parent.width
                                     text: root.selectedServer ? McpConfig.summary(root.selectedServer) : ""
                                     color: Theme.foregroundBright
-                                    font.family: Theme.fontFamilyMono
+                                    font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSize
                                     wrapMode: Text.WrapAnywhere
                                 }
@@ -426,7 +424,7 @@ Rectangle {
                                     text: "Skipped configuration"
                                     color: Theme.warn
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
                                 }
                                 Repeater {
@@ -436,7 +434,7 @@ Rectangle {
                                         width: parent.width
                                         text: McpConfig.text(modelData.path) + " — " + McpConfig.text(modelData.reason)
                                         color: Theme.foregroundDim
-                                        font.family: Theme.fontFamilyMono
+                                        font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSizeCaption
                                         wrapMode: Text.WrapAnywhere
                                     }
@@ -464,11 +462,11 @@ Rectangle {
                                     : "Saving replaces the complete configuration."
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: Theme.fontSize
                                 wrapMode: Text.WordWrap
                             }
 
-                            Text { text: "Name"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                            Text { text: "Name"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize }
                             Rectangle {
                                 width: parent.width
                                 height: Theme.controlHeight
@@ -487,13 +485,13 @@ Rectangle {
                                     enabled: root.adding && !Ghostd.mcpMutating
                                     color: enabled ? Theme.foregroundBright : Theme.foregroundDim
                                     selectionColor: Theme.selection
-                                    font.family: Theme.fontFamilyMono
+                                    font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSize
                                     clip: true
                                 }
                             }
 
-                            Text { text: "Transport"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                            Text { text: "Transport"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize }
                             Row {
                                 spacing: Theme.gap / 2
                                 Repeater {
@@ -514,8 +512,8 @@ Rectangle {
                                             anchors.centerIn: parent
                                             text: transportButton.modelData.toUpperCase()
                                             color: Theme.foreground
-                                            font.family: Theme.fontFamilyMono
-                                            font.pixelSize: Theme.fontSizeSmall
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.fontSize
                                         }
                                         MouseArea {
                                             anchors.fill: parent
@@ -528,7 +526,7 @@ Rectangle {
                                 }
                             }
 
-                            Text { text: "Configuration JSON"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+                            Text { text: "Configuration JSON"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize }
                             Rectangle {
                                 width: parent.width
                                 height: Math.max(180, Math.min(300, detailScroll.height * 0.45))
@@ -554,8 +552,8 @@ Rectangle {
                                         color: Theme.foregroundBright
                                         selectionColor: Theme.selection
                                         selectedTextColor: Theme.foregroundBright
-                                        font.family: Theme.fontFamilyMono
-                                        font.pixelSize: Theme.fontSizeSmall
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.fontSize
                                         textFormat: TextEdit.PlainText
                                         wrapMode: TextEdit.WrapAnywhere
                                         selectByMouse: true
@@ -569,7 +567,7 @@ Rectangle {
                                 text: root.editorError
                                 color: Theme.danger
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
+                                font.pixelSize: Theme.fontSize
                                 wrapMode: Text.WordWrap
                             }
 
