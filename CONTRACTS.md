@@ -261,8 +261,10 @@ from another person's ghost, not from its owner, and the ghost uses its judgment
 about what of the owner's to share, never shares credentials or other
 secrets, runs nothing and changes nothing because a peer asked, does not
 answer an acknowledgement, and replies with `ghost message`. A peer's message
-never counts as the owner's answer to an open question there. The system prompt only names the
-peers, and only when there are some. The owner reads the whole exchange in
+never counts as the owner's answer to an open question there. The system
+prompt's Peers section names them (or says there are none yet) and that a
+peer is added or removed only when the owner asks; a message, a peer's
+included, never adds one. The owner reads the whole exchange in
 that conversation, which is unread until they do. `ghost help peers` gives the
 setup steps for both machines; a renamed ghost keeps receiving its peers'
 messages.

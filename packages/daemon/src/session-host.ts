@@ -291,7 +291,7 @@ export function stablePolicySections(options: {
   recall: boolean;
   runningSource: RunningSource | null;
   firstMeeting: boolean;
-  /** The owner's peers by name; their section renders only when there are some. */
+  /** The owner's peers by name, which their section lists. */
   peers: readonly string[];
 }): string[] {
   return [
@@ -302,7 +302,7 @@ export function stablePolicySections(options: {
     renderOwnerContextPolicy(options.documents, options.recall),
     SCHEDULED_WORK_POLICY,
     renderSelfMaintenancePolicy(options.runningSource),
-    ...(options.peers.length > 0 ? [renderPeersPolicy(options.peers)] : []),
+    renderPeersPolicy(options.peers),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
   ];
 }

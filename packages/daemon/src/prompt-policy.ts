@@ -73,13 +73,14 @@ export function renderOwnerContextPolicy(documentsDir: string, recall = false): 
 }
 
 /**
- * Other owners' ghosts this ghost may message (CONTRACTS.md "Peers"), named
- * only when the owner lists some. How to treat what a peer sends rides on
- * each of their messages, so it costs nothing on any other turn.
+ * Other owners' ghosts this ghost may message (CONTRACTS.md "Peers"), and
+ * that only the owner's request adds or removes one. How to treat what a peer
+ * sends rides on each of their messages, so it costs nothing on any other turn.
  */
 export function renderPeersPolicy(peers: readonly string[]): string {
   return [
     "## Peers",
-    `Other people's ghosts you may message: ${peers.join(", ")}. Send with \`ghost message <peer> "<text>"\`; \`ghost help peers\`.`,
+    `${peers.length > 0 ? `Other people's ghosts you may message: ${peers.join(", ")}; send with \`ghost message <peer> "<text>"\`.` : "Other people's ghosts can message you once your owner adds them."} `
+      + "Add or remove a peer only when your owner asks: `ghost help peers`.",
   ].join("\n");
 }

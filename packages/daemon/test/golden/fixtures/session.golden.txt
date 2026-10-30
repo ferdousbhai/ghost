@@ -47,6 +47,9 @@ Clock work is a systemd user timer you write from Bash; Ghost has no scheduler. 
 No checkout is known to this process. Your source is https://github.com/ferdousbhai/ghost, and any part of it is yours to change to fit the owner: run yourself from your own clone (`ghost help self`).
 Read `ghost help self` before editing, restarting, or updating yourself; `ghost help` lists the rest of your CLI (hooks, MCP servers, timers).
 
+## Peers
+Other people's ghosts can message you once your owner adds them. Add or remove a peer only when your owner asks: `ghost help peers`.
+
 ------------------------------------------------------------------------------
 [turn 1: harness launch]
 ------------------------------------------------------------------------------
@@ -117,6 +120,9 @@ Clock work is a systemd user timer you write from Bash; Ghost has no scheduler. 
 ## Self-maintenance
 No checkout is known to this process. Your source is https://github.com/ferdousbhai/ghost, and any part of it is yours to change to fit the owner: run yourself from your own clone (`ghost help self`).
 Read `ghost help self` before editing, restarting, or updating yourself; `ghost help` lists the rest of your CLI (hooks, MCP servers, timers).
+
+## Peers
+Other people's ghosts can message you once your owner adds them. Add or remove a peer only when your owner asks: `ghost help peers`.
 
 ------------------------------------------------------------------------------
 [turn 2: harness launch]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isHelpTopic } from "../src/help-topics.js";
-import { renderOwnerContextPolicy } from "../src/prompt-policy.js";
+import { renderOwnerContextPolicy, renderPeersPolicy } from "../src/prompt-policy.js";
 
 describe("owner context policy", () => {
   it("names the owner's documents directory and keeps skill paths out of the policy", () => {
@@ -22,5 +22,18 @@ describe("owner context policy", () => {
     const pointer = /`ghost help (\w+)`/u.exec(renderOwnerContextPolicy("/home/owner/Documents"))?.[1];
     expect(pointer).toBe("memory");
     expect(isHelpTopic(pointer ?? "")).toBe(true);
+  });
+});
+
+describe("peers policy", () => {
+  it("tells a ghost with no peers they exist, and that only its owner adds or removes one", () => {
+    const none = renderPeersPolicy([]);
+    expect(none).toContain("once your owner adds them");
+    expect(none).toContain("only when your owner asks");
+    expect(none).toContain("`ghost help peers`");
+    const some = renderPeersPolicy(["wife", "brother"]);
+    expect(some).toContain("message: wife, brother");
+    expect(some).toContain("ghost message <peer>");
+    expect(some).toContain("only when your owner asks");
   });
 });
