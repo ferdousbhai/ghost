@@ -10,7 +10,6 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
 const TOKEN_FILE = /^([0-9a-f]{64})\n$/;
-export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * Constant-time comparison. A failed presentation is answered immediately, so

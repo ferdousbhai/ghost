@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { apiTokenCommand, apiTokenPath, ensureApiToken, readApiToken, TOKEN_PATTERN } from "../src/token-store.js";
+import { apiTokenCommand, apiTokenPath, ensureApiToken, readApiToken } from "../src/token-store.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,7 +30,7 @@ describe("the API token file", () => {
   it("is minted once, owner-only, and read back the same ever after", async () => {
     expect(readApiToken(path)).toBeUndefined();
     const first = ensureApiToken(path);
-    expect(first).toMatchObject({ created: true, token: expect.stringMatching(TOKEN_PATTERN) });
+    expect(first).toMatchObject({ created: true, token: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(ensureApiToken(path)).toEqual({ token: first.token, created: false });
     expect(readApiToken(path)).toBe(first.token);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
@@ -72,7 +72,7 @@ describe("ghostd api-token", () => {
   it("mints, prints, and says where it lives and how to replace it", () => {
     const { code, out } = run([]);
     expect(code).toBe(0);
-    expect(out.split("\n")[0]).toMatch(TOKEN_PATTERN);
+    expect(out.split("\n")[0]).toMatch(/^[0-9a-f]{64}$/);
     expect(out).toContain(path);
     expect(out).toContain("delete the file and restart ghostd");
   });
