@@ -415,3 +415,13 @@ its critical limit or fans at full speed, memory nearly exhausted, or a disk
 nearly full. Each becomes an event conversation naming the busiest programs;
 the ghost fixes what is its own or plainly broken, least drastic first, and
 asks you before touching anything else.
+
+## Crashes
+
+To have a ghost look into crashes before you ask, tell it: "look into crashes
+for me". It installs a minutely `crash-watch` routine (`ghost help crashes`).
+Each program that dumps core, at most once an hour, becomes an event
+conversation; the ghost works out why and proposes a fix, changing nothing
+until you say yes there. Unread findings fill the bar mark in the theme's
+magenta with a count. Tell the ghost to stop looking into a program and it
+adds that program to the watch's ignore list.

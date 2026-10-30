@@ -883,6 +883,30 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 404, { error: { message: "No such routine" } });
   }
 
+  // `ghost event` intake, settled at once: the conversation ghostd would
+  // run for it, holding a canned finding, unread — the bar mark's "found".
+  if (parts[3] === "events" && parts.length === 4 && req.method === "POST") {
+    const body = await readBody(req).catch(() => ({}));
+    const { source, id, instructions, payload = "" } = body ?? {};
+    if (![source, id, instructions].every((field) => typeof field === "string" && field.length > 0)) {
+      return json(res, 400, { error: { message: "source, id, and instructions are required", code: "invalid_event" } });
+    }
+    const sessionId = `event-${createHash("sha256").update(JSON.stringify([source, id])).digest("hex")}`;
+    const sessions = ghostSessions(name);
+    if (sessions.has(sessionId)) return json(res, 200, { sessionId, duplicate: true });
+    sessions.set(sessionId, seedSession({
+      id: sessionId,
+      title: `${source} ${id}`,
+      harness: turnHarness(name, sessionId, undefined),
+      updatedAt: new Date().toISOString(),
+    }, [
+      { role: "user", content: textParts(`${instructions}\n\n${payload}`) },
+      { role: "assistant", content: textParts(`Mock finding for **${source} ${id}**: the cause, its evidence, and a proposed fix would be here.`) },
+    ]));
+    publishConversationUpdated(name, sessionId, sessions.get(sessionId).updatedAt);
+    return json(res, 202, { sessionId, duplicate: false });
+  }
+
   if (parts[3] === "events" && parts.length === 4 && req.method === "GET") {
     res.writeHead(200, {
       "content-type": "text/event-stream",

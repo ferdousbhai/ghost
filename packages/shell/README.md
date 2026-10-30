@@ -61,7 +61,12 @@ files, and the external editor until it is resolved.
 conversation of the selected ghost, most urgent first: filled red while one
 holds an open question, filled amber while one runs, filled blue while one
 has an unread reply, a green outline otherwise, and a dim outline while
-ghostd is unreachable, in the theme's red, yellow, blue, and green. It fills
+ghostd is unreachable, in the theme's red, yellow, blue, and green. Ghost's
+own state sits between amber and blue: filled in the theme's magenta while a
+conversation the ghost started on its own (an `event-` conversation: a crash,
+a machine alert) holds an unread reply. A count badge on the mark's shoulder
+shows how many, `+` past nine, whenever there are any and ghostd is reachable,
+even while red or amber tints the mark; reading one lowers it. It fills
 the host's `bar.barSize` across the bar and its 27px icon slot along it, shows
 its tooltip through the host's `bar.showTooltip`/`hideTooltip`, and toggles
 the HUD on a left click through the host's drag-aware `triggerPress`.

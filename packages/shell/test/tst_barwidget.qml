@@ -86,6 +86,53 @@ TestCase {
         }
     }
 
+    // An unread conversation the ghost started on its own (`ghost event`) is
+    // a finding: its own tint over an ordinary unread reply, and a count that
+    // stays on the mark while a more urgent state tints it.
+    function test_findingsAreCountedOnTheMark(): void {
+        const widget = createTemporaryObject(widgetComponent, tc, { bar: horizontalBar });
+        const mark = findChild(widget, "barMark");
+        const badge = findChild(widget, "findingsBadge");
+        const count = findChild(widget, "findingsCount");
+        const was = { reachable: Ghostd.reachable, sessions: Ghostd.sessions };
+        const event = "event-" + "a".repeat(64);
+        const other = "event-" + "b".repeat(64);
+        try {
+            Ghostd.reachable = true;
+            Ghostd.sessions = [{ id: event }, { id: "a", unread: true }];
+            compare(widget.findings, 0);
+            compare(widget.agentState, "done");
+            verify(!badge.visible);
+
+            Ghostd.sessions = [{ id: event, unread: true }, { id: "a", unread: true }];
+            compare(widget.findings, 1);
+            compare(widget.agentState, "found");
+            compare(mark.tint, Theme.finding);
+            verify(mark.filled);
+            verify(badge.visible);
+            compare(count.text, "1");
+            compare(widget.status, "found something");
+
+            Ghostd.sessions = [{ id: event, unread: true }, { id: other, unread: true, running: true }];
+            compare(widget.findings, 2);
+            compare(widget.agentState, "working");
+            verify(badge.visible);
+            compare(count.text, "2");
+
+            Ghostd.sessions = [{ id: event, unread: true }, { id: other, unread: true }];
+            compare(widget.status, "found 2 things");
+
+            Ghostd.sessions = Array.from({ length: 12 }, (_, i) => ({ id: "event-" + i, unread: true }));
+            compare(count.text, "+");
+
+            Ghostd.reachable = false;
+            verify(!badge.visible);
+        } finally {
+            Ghostd.reachable = was.reachable;
+            Ghostd.sessions = was.sessions;
+        }
+    }
+
     function test_hostForwardedPressTogglesPanel(): void {
         const calls = [];
         const widget = createTemporaryObject(widgetComponent, tc, {

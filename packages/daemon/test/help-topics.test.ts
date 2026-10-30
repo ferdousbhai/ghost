@@ -5,7 +5,7 @@ const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", 
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "memory", "dictation", "events", "notifications", "peers"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });
@@ -63,6 +63,25 @@ describe("ghost help topics", () => {
     expect(text).toContain("ask before throttling or stopping it");
     expect(text).toContain("the command that undoes it");
     expect(text).toContain("~/.config/omarchy/hooks/battery-low.d/");
+  });
+
+  it("crashes: a minutely journal watch in the ghost's namespace, one event per program an hour, diagnosis without changes", () => {
+    const text = renderHelpTopic("crashes", INPUT);
+    expect(text).toContain("# ghost-timer-v1-4-aria-crash-watch.service");
+    expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/crash-watch.sh");
+    expect(text).toContain("StateDirectory=ghost/crash-watch");
+    expect(text).toContain("cursor_file=$STATE_DIRECTORY/cursor");
+    expect(text).toContain("OnCalendar=minutely");
+    expect(text).toContain("list-unit-files '*-crash-watch.timer'");
+    expect(text).toContain("MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1");
+    expect(text).toContain("journalctl -q -n 0 --cursor-file=");
+    expect(text).toContain("--after-cursor=\"$cursor\"");
+    expect(text).toContain("/usr/bin/ghost event crash \"$comm-$hour\" --ghost aria");
+    expect(text).toContain("(( status == 0 || status == 6 )) || { failed=1; break; }");
+    expect(text).toContain("ignore='^$'");
+    expect(text).toContain("Change, file, or send nothing.");
+    expect(text).toContain("the owner's yes in this conversation is what applies it");
+    expect(text).toContain("diagnose-crash");
   });
 
   it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {

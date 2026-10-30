@@ -8,7 +8,7 @@
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "memory", "dictation", "events", "notifications", "peers"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -181,6 +181,60 @@ function machine(input: HelpTopicInput): string[] {
   ];
 }
 
+function crashes(input: HelpTopicInput): string[] {
+  const unit = `${unitPrefix(input)}crash-watch`;
+  return [
+    "# Crashes",
+    "systemd-coredump records every crash in the journal: `coredumpctl list` shows them, the owner's and the system's.",
+    "The watch wakes you when a program dumps core, at most once per program an hour, so you can find out why before the owner asks. One ghost per machine runs it: when the owner wants crashes looked into and `systemctl --user list-unit-files '*-crash-watch.timer'` lists none, save this as ~/.config/ghost/crash-watch.sh and install the timer pair (`ghost help timers` for the rest):",
+    "```bash",
+    "#!/bin/bash",
+    "# Wakes a ghost when a program dumps core: one event per program an hour.",
+    "set -uo pipefail",
+    "# Programs the owner asked you not to look into: an extended regex over the crashed program's name.",
+    "ignore='^$'",
+    "# systemd makes the directory (StateDirectory= below).",
+    "cursor_file=$STATE_DIRECTORY/cursor",
+    "match=MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1",
+    "# The first run starts from now: crashes from before the watch are not news.",
+    "[[ -s $cursor_file ]] || { journalctl -q -n 0 --cursor-file=\"$cursor_file\"; exit; }",
+    "cursor=$(<\"$cursor_file\")",
+    "failed=0",
+    "while IFS= read -r entry; do",
+    "  comm=$(jq -r '.COREDUMP_COMM // \"unknown\"' <<< \"$entry\")",
+    "  if [[ ! $comm =~ $ignore ]]; then",
+    "    hour=$(jq -r '.__REALTIME_TIMESTAMP | tonumber / 1e6 | floor | strftime(\"%Y%m%d%H\")' <<< \"$entry\")",
+    "    jq -r '\"\\(.COREDUMP_COMM) (pid \\(.COREDUMP_PID), uid \\(.COREDUMP_UID)) died of \\(.COREDUMP_SIGNAL_NAME // .COREDUMP_SIGNAL) at \\(.__REALTIME_TIMESTAMP | tonumber / 1e6 | floor | todate)\",",
+    "      \"exe: \\(.COREDUMP_EXE // \"unknown\")\", \"unit: \\(.COREDUMP_USER_UNIT // .COREDUMP_UNIT // \"none\")\", \"\", (.MESSAGE | strings | .[:20000])' <<< \"$entry\" |",
+    `      ${input.cliPath} event crash "$comm-$hour" --ghost ${ghost(input)} --instructions 'A program crashed. Find out why and propose a fix as ghost help crashes says.' -`,
+    "    # 6: this program's crash this hour was already accepted.",
+    "    status=$?; (( status == 0 || status == 6 )) || { failed=1; break; }",
+    "  fi",
+    "  cursor=$(jq -r '.__CURSOR' <<< \"$entry\")",
+    "done < <(journalctl -q -o json --after-cursor=\"$cursor\" \"$match\")",
+    "# Only delivered crashes move the cursor, so the next run retries a refused one.",
+    "printf '%s\\n' \"$cursor\" > \"$cursor_file\"",
+    "exit \"$failed\"",
+    "```",
+    "```ini",
+    `# ${unit}.service`,
+    "[Service]",
+    "Type=oneshot",
+    "StateDirectory=ghost/crash-watch",
+    "ExecStart=/bin/bash %h/.config/ghost/crash-watch.sh",
+    "```",
+    "```ini",
+    `# ${unit}.timer`,
+    "[Timer]",
+    "OnCalendar=minutely",
+    "[Install]",
+    "WantedBy=timers.target",
+    "```",
+    "When woken, find the cause read-only: `coredumpctl info <pid>`, then Omarchy's diagnose-crash skill (/usr/share/omarchy/default/agents/skills/diagnose-crash/SKILL.md) for a symbolized backtrace. Change, file, or send nothing. Reply with the cause, its evidence, and the fix you propose as exact commands, each with its undo; the owner's yes in this conversation is what applies it. A crash they caused on purpose, or one you cannot explain, gets one short line.",
+    "When the owner says to stop looking into a program, add its name to `ignore` in the script; removing it resumes. `ghost routines pause crash-watch` stops the watch.",
+  ];
+}
+
 function memory(): string[] {
   return [
     "# Memory",
@@ -285,6 +339,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), memory, dictation, events: () => events(input), notifications, peers: () => peers(input) }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, peers: () => peers(input) }[topic]();
   return `${lines.join("\n")}\n`;
 }

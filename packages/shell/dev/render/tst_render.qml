@@ -316,7 +316,10 @@ TestCase {
     function test_barMark(): void {
         const states = [
             ["idle", [{ id: "a" }]], ["done", [{ id: "a", unread: true }]], ["working", [{ id: "a", running: true }]],
-            ["blocked", [{ id: "a", question: { text: "?", options: [] } }]]
+            ["blocked", [{ id: "a", question: { text: "?", options: [] } }]],
+            ["found", [{ id: "event-a", unread: true }, { id: "a", unread: true }]],
+            ["found-many", Array.from({ length: 12 }, (_, i) => ({ id: "event-" + i, unread: true }))],
+            ["working-found", [{ id: "event-a", unread: true }, { id: "event-b", unread: true }, { id: "a", running: true }]]
         ];
         const was = Ghostd.sessions;
         // Earlier panes' requests leave ghostd marked unreachable here.
