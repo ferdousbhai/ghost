@@ -69,7 +69,7 @@ export async function readTailscaleNode(run: CommandRunner = commandRunner("tail
   };
 }
 
-export type RemoteRole = "owner" | "guest";
+export type RemoteRole = "owner" | "peer" | "guest";
 
 export interface TailscaleIdentity {
   login: string;
@@ -81,6 +81,8 @@ export interface RemoteAccessOptions {
   owner?: string;
   /** What other tailnet members may do; default read-only. */
   guests?: "read-only" | "none";
+  /** Whether a login is one of the owner's peers, asked per request because the list changes. */
+  isPeer?: (login: string) => boolean;
   /** Test seam over `tailscale status`. */
   selfLogin?: () => Promise<string | null>;
 }
@@ -103,12 +105,14 @@ function header(request: IncomingMessage, name: string): string | undefined {
 export class RemoteAccess {
   private readonly selfLogin: () => Promise<string | null>;
   private readonly guests: "read-only" | "none";
+  private readonly isPeer: (login: string) => boolean;
   private readonly configuredOwner: string | undefined;
   private owner: string | undefined;
 
   constructor(options: RemoteAccessOptions = {}) {
     this.selfLogin = options.selfLogin ?? tailscaleSelfLogin;
     this.guests = options.guests ?? "read-only";
+    this.isPeer = options.isPeer ?? (() => false);
     this.configuredOwner = options.owner?.trim().toLowerCase() || undefined;
   }
 
@@ -116,7 +120,8 @@ export class RemoteAccess {
   async identify(request: IncomingMessage): Promise<TailscaleIdentity | null> {
     const login = header(request, "tailscale-user-login")?.toLowerCase();
     if (!login || !LOOPBACK_ADDRESSES.has(request.socket.remoteAddress ?? "")) return null;
-    const role: RemoteRole = (await this.ownerLogin()) === login ? "owner" : "guest";
+    // Owner, then peer, then guest: a peer is never also admitted as a guest.
+    const role: RemoteRole = (await this.ownerLogin()) === login ? "owner" : this.isPeer(login) ? "peer" : "guest";
     if (role === "guest" && this.guests === "none") return null;
     return { login, role };
   }

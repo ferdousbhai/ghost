@@ -7,6 +7,7 @@
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
 import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
+import { PeerRateLimit, peerConversationId, peerMessageHeader, peerMessagePrompt, type Peer, type PeerBook, type PeerMessage } from "./peers.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
@@ -32,6 +33,7 @@ import {
   requireConversationId,
   readTranscriptPage,
   unseenCommands,
+  unseenSent,
   type AssistantPart,
   type LogEntry,
   type TranscriptMessage,
@@ -55,6 +57,7 @@ import {
   HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   renderOwnerContextPolicy,
+  renderPeersPolicy,
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
@@ -126,6 +129,10 @@ export interface SessionHostOptions {
   env?: NodeJS.ProcessEnv;
   /** The skills Ghost ships (`skills/` of the checkout or package), linked into every conversation. */
   bundledSkills?: string | null;
+  /** The owner's peers (CONTRACTS.md "Peers"); omitted, there are none. */
+  peers?: PeerBook;
+  /** The peer inbox's hourly limit; a test supplies its own clock. */
+  peerRateLimit?: PeerRateLimit;
 }
 
 export interface RunTurnOptions {
@@ -211,8 +218,14 @@ export interface HarnessChoices {
   omarchyDefault: string | null;
 }
 
+/** The owner's own queued messages, which the HUD shows and hands back on a stop; a peer's are not theirs. */
+function ownerFollowUps(turn: LiveTurn): string[] {
+  return turn.followUps.filter((item) => item.origin === "follow_up").map((item) => item.text);
+}
+
 interface LiveTurn {
-  readonly followUps: string[];
+  /** The owner's queued messages and peers' arrivals, in order; a peer's is already logged. */
+  readonly followUps: { readonly text: string; readonly origin: "follow_up" | "peer" }[];
   /** The turn's own stream, which announces each change to `followUps`. */
   readonly emit: (event: TurnEvent) => void;
 }
@@ -278,6 +291,8 @@ export function stablePolicySections(options: {
   recall: boolean;
   runningSource: RunningSource | null;
   firstMeeting: boolean;
+  /** The owner's peers by name; their section renders only when there are some. */
+  peers: readonly string[];
 }): string[] {
   return [
     OMARCHY_COMPUTER_USE_POLICY,
@@ -287,6 +302,7 @@ export function stablePolicySections(options: {
     renderOwnerContextPolicy(options.documents, options.recall),
     SCHEDULED_WORK_POLICY,
     renderSelfMaintenancePolicy(options.runningSource),
+    ...(options.peers.length > 0 ? [renderPeersPolicy(options.peers)] : []),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
   ];
 }
@@ -317,6 +333,8 @@ export class SessionHost {
   private readonly scheduleVerifyRunner: CommandRunner | undefined;
   private readonly scheduleJournalRunner: CommandRunner | undefined;
   private readonly eventAdmissions = new Map<string, Promise<unknown>>();
+  private readonly peers: PeerBook | undefined;
+  private readonly peerRateLimit: PeerRateLimit;
   private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
@@ -352,6 +370,8 @@ export class SessionHost {
     this.viewerUrl = options.viewerUrl;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
+    this.peers = options.peers;
+    this.peerRateLimit = options.peerRateLimit ?? new PeerRateLimit();
     this.bundledSkills = options.bundledSkills ?? null;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
@@ -424,6 +444,7 @@ export class SessionHost {
         recall: which("recall", this.env) !== null,
         runningSource: this.runningSource,
         firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
+        peers: (this.peers?.list() ?? []).map((peer) => peer.name),
       }),
     });
   }
@@ -608,7 +629,7 @@ export class SessionHost {
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { promptRecorded?: boolean },
+    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { promptRecorded?: boolean; peer?: boolean },
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -636,7 +657,7 @@ export class SessionHost {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
-            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
+            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId, options.peer); }
             catch (error) {
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
@@ -677,6 +698,60 @@ export class SessionHost {
     }));
   }
 
+  /**
+   * A peer's message to the ghost that receives them, in their one
+   * conversation: logged on arrival (its deduplication record), then run as a
+   * turn, or as the next pass of the turn already running there.
+   */
+  async admitPeerMessage(peer: Peer, message: PeerMessage): Promise<{ sessionId: string; duplicate: boolean; admission: TurnAdmission | null }> {
+    const sessionId = peerConversationId(peer), prompt = peerMessagePrompt(peer, message);
+    const sameId = `${peerMessageHeader(peer, message.id).split(" from peer ")[0]} from peer `;
+    return this.withGhost(peer.ghost, () => serializeByKey(this.eventAdmissions, keyOf(peer.ghost, sessionId), async () => {
+      const ghost = this.registry.get(peer.ghost), { sessionDir } = ghostPaths(ghost.dir), key = keyOf(ghost.name, sessionId);
+      const entries = await readLog(sessionDir, sessionId);
+      const earlier = entries?.find((entry) => entry.type === "user" && entry.origin === "peer" && entry.text.startsWith(sameId));
+      if (earlier?.type === "user") {
+        if (earlier.text.slice(earlier.text.lastIndexOf("\n") + 1) !== JSON.stringify(message.text)) {
+          throw new GhostError("peer_conflict", "This message id was already used for different text.", 409);
+        }
+        return { sessionId, duplicate: true, admission: null };
+      }
+      this.peerRateLimit.take(peer.login);
+      // Checked and joined in one synchronous step: the running turn's loop
+      // takes its last follow-up and ends synchronously too, so a message is
+      // never queued behind a turn that has already finished.
+      const live = this.live.get(key);
+      live?.followUps.push({ text: prompt, origin: "peer" });
+      // Otherwise a turn of its own, admitted before logging, as an event is: a
+      // refusal (a `!command` running) logs nothing, so the sender's retry runs.
+      const admission = live ? null : await this.admitTurn(ghost.name, { sessionId, prompt, promptRecorded: true, peer: true });
+      try {
+        const at = new Date().toISOString();
+        await appendLog(sessionDir, sessionId, [
+          ...(entries === null ? [newConversationEntry(sessionId, new Date()), { type: "title" as const, at, title: peer.name }] : []),
+          { type: "user", at, text: prompt, origin: "peer" },
+        ]);
+      } catch (error) { if (admission) this.admissions.delete(key); throw error; }
+      this.announce(ghost.name, sessionId);
+      return { sessionId, duplicate: false, admission };
+    }));
+  }
+
+  /** A message delivered to a peer joins the conversation with them, whichever conversation sent it. */
+  async recordSentMessage(peer: Peer, text: string): Promise<void> {
+    const sessionId = peerConversationId(peer);
+    await this.withGhost(peer.ghost, () => serializeByKey(this.eventAdmissions, keyOf(peer.ghost, sessionId), async () => {
+      const ghost = this.registry.get(peer.ghost), { sessionDir } = ghostPaths(ghost.dir);
+      const at = new Date().toISOString();
+      const fresh = (await readLog(sessionDir, sessionId)) === null;
+      await appendLog(sessionDir, sessionId, [
+        ...(fresh ? [newConversationEntry(sessionId, new Date()), { type: "title" as const, at, title: peer.name }] : []),
+        { type: "sent", at, peer: peer.name, text },
+      ]);
+      this.announce(ghost.name, sessionId);
+    }));
+  }
+
   /** admitTurn then run, in one call, for tests. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     await (await this.admitTurn(ghostName, options)).run(options);
@@ -691,6 +766,7 @@ export class SessionHost {
     signal: AbortSignal,
     promptRecorded = false,
     initialTurnId: string,
+    peer = false,
   ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -709,18 +785,22 @@ export class SessionHost {
     // The id of the owner request the final pass answered, which `turn_end` reports.
     let turnId = initialTurnId;
     try {
-      type Pass = { text: string; origin?: "follow_up" | "hook" };
-      let next: Pass | undefined = { text: prompt };
+      type Pass = { text: string; origin?: "follow_up" | "hook" | "peer" };
+      let next: Pass | undefined = { text: prompt, ...(peer ? { origin: "peer" as const } : {}) };
+      const first = next;
       let ownerPrompt = prompt;
       while (next && !signal.aborted) {
         const { text, origin }: Pass = next;
-        if (origin === "follow_up") {
+        if (origin === "follow_up" || (origin === "peer" && next !== first)) {
           turnId = randomUUID();
           ownerPrompt = text;
         }
-        if (!promptRecorded || origin !== undefined) await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
-        // The owner's message answers what the ghost was waiting on.
-        if (origin !== "hook") await this.dropQuestion(ghost, id);
+        // A peer's message was logged when it arrived, as its deduplication record.
+        if (origin !== "peer" && (!promptRecorded || origin !== undefined)) {
+          await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
+        }
+        // The owner's message answers what the ghost was waiting on; a peer's does not.
+        if (origin !== "hook" && origin !== "peer") await this.dropQuestion(ghost, id);
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
@@ -746,11 +826,11 @@ export class SessionHost {
           continue;
         }
         const followUp = turn.followUps.shift();
-        if (followUp !== undefined) {
-          stream.emit({ type: "queue", followUp: [...turn.followUps] });
-          stream.emit({ type: "owner_message", text: followUp });
+        if (followUp?.origin === "follow_up") {
+          stream.emit({ type: "queue", followUp: ownerFollowUps(turn) });
+          stream.emit({ type: "owner_message", text: followUp.text });
         }
-        next = followUp === undefined ? undefined : { text: followUp, origin: "follow_up" };
+        next = followUp;
       }
       if (signal.aborted && terminal.type === "done") {
         terminal = { type: "error", reason: "aborted", errorMessage: "Turn aborted." };
@@ -805,9 +885,11 @@ export class SessionHost {
       const earlier = entries.slice(0, entries.findLastIndex((entry) => entry.type === "user"));
       const carried = fresh ? handoffContext(earlier) : null;
       const commands = fresh ? null : unseenCommands(entries);
+      const sent = fresh ? null : unseenSent(entries);
       const passPrompt = [
         ...(carried ? [`<conversation-so-far>\n${carried}\n</conversation-so-far>`] : []),
         ...(commands ? [`<owner-commands>\n${commands}\n</owner-commands>`] : []),
+        ...(sent ? [`<sent-messages>\n${sent}\n</sent-messages>`] : []),
         prompt,
       ].join("\n\n");
       stream.emit({ type: "harness", harness });
@@ -1088,7 +1170,7 @@ export class SessionHost {
   queuedMessages(ghostName: string, sessionId: string): QueuedMessages {
     this.registry.get(ghostName);
     const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId)));
-    return { streaming: turn !== undefined, followUp: [...(turn?.followUps ?? [])] };
+    return { streaming: turn !== undefined, followUp: turn ? ownerFollowUps(turn) : [] };
   }
 
   /** Abort the conversation's running turn or owner command; its stream ends `aborted`. */
@@ -1111,8 +1193,8 @@ export class SessionHost {
       if (this.admissions.has(key)) throw new GhostError("session_busy", "An owner command is running in this conversation; send this when it ends.", 409);
       throw new GhostError("session_not_streaming", "This conversation is not currently streaming; send a normal message instead.", 409);
     }
-    turn.followUps.push(text);
-    turn.emit({ type: "queue", followUp: [...turn.followUps] });
+    turn.followUps.push({ text, origin: "follow_up" });
+    turn.emit({ type: "queue", followUp: ownerFollowUps(turn) });
     return this.queuedMessages(ghostName, sessionId);
   }
 
@@ -1474,6 +1556,7 @@ export class SessionHost {
       await this.quiesce(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
       this.closeConversationEventStreams(ghost.name);
+      await this.peers?.renameGhost(ghost.name, renamed.name);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {

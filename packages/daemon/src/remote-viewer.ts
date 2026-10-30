@@ -246,6 +246,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     el.replaceChildren(renderMarkdown(value, document));
     return el;
   }
+  // A peer's words are another person's text: shown as written, never rendered.
+  function peerBubble(value) {
+    const el = document.createElement("div"); el.className = "msg assistant"; el.textContent = value;
+    return el;
+  }
   /**
    * A message's texts as the bubbles they show as: every text stays, and text
    * after a tool call is the next message (the HUD's TurnBlocks rule).
@@ -277,6 +282,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const texts = bubbles(m.content);
       if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\\n\\n")));
       else if (m.role === "assistant") for (const text of texts) log.append(assistantBubble(text));
+      else if (m.role === "peer") for (const text of texts) log.append(peerBubble(text));
     }
     if (!log.childElementCount) empty();
     log.scrollTop = stick ? log.scrollHeight : top;

@@ -306,7 +306,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
-| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote owner and guests) — optional; a missing file is fine, a malformed one is an error |
+| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote owner, guests, and peers — `ghost help peers`) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |

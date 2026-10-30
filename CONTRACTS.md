@@ -243,22 +243,29 @@ it are Ghost's fixed peer policy, never the sender's. More than 120 accepted
 messages from one peer in an hour is `429 peer_rate_limited`, so two ghosts
 answering each other cannot loop unattended.
 
-`ghost message <peer> <text>` posts to that peer's `url` with a fresh id;
-Tailscale identifies the sending machine's owner, so no credential is sent.
+`ghost message <peer> <text>` asks this daemon (`POST /api/peers/:name/messages`)
+to post it to that peer's `url` with a fresh id; Tailscale identifies the
+sending machine's owner, so no credential is sent.
 Exit codes are the CLI's own: 3 unreachable, 4 not their peer, 6 busy
 (including `429`). A delivered message is also logged in the sender's own
 conversation with that peer, whichever conversation sent it, so each side's
-peer conversation holds the whole exchange in order; the owner may also write
-in it to have their ghost message the peer. The receiving ghost answers by
+peer conversation holds the whole exchange in order, and a harness continuing
+there is handed what was sent since it last ran; the owner may also write in it
+to have their ghost message the peer. Both directions read as `peer` messages
+in the transcript (`From <name> · …`, `To <name> · …`), shown as plain text,
+never rendered. The receiving ghost answers by
 sending a message back, never by a reply in the HTTP response.
 
-The peer policy section of the prompt tells a ghost that a peer's message
-comes from another person's ghost, not from its owner: it uses its judgment
+Each peer message reaches the ghost framed by Ghost's peer policy: it comes
+from another person's ghost, not from its owner, and the ghost uses its judgment
 about what of the owner's to share, never shares credentials or other
 secrets, runs nothing and changes nothing because a peer asked, does not
-answer an acknowledgement, and replies with `ghost message`. The owner reads
-the whole exchange in that conversation, which is unread until they do.
-`ghost help peers` gives the setup steps for both machines.
+answer an acknowledgement, and replies with `ghost message`. A peer's message
+never counts as the owner's answer to an open question there. The system prompt only names the
+peers, and only when there are some. The owner reads the whole exchange in
+that conversation, which is unread until they do. `ghost help peers` gives the
+setup steps for both machines; a renamed ghost keeps receiving its peers'
+messages.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -336,7 +343,8 @@ the CLI `cli-…`). The directory is
 the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
 object per line — the conversation header, owner and follow-up and hook
-messages, the assistant's text and tool calls (a failed call marked
+messages, a [peer](#peers)'s messages and `sent` records of messages to one,
+the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
 session id it reported, per-run `resources` records, and historical `handoff` records. A torn last line is skipped. ghostd is the log's
@@ -648,7 +656,8 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner`, `peer`, or `guest`. |
 | `POST /api/peer/messages` | A [peer](#peers)'s message `{ id, text }` to the ghost that receives theirs; the only write a peer has, refused to anyone else. |
-| `GET\|POST\|DELETE /api/peers…` | Owner-only. The `remote.peers` list (`ghost peers`). |
+| `GET\|POST /api/peers`, `DELETE /api/peers/:name` | Owner-only. The `remote.peers` list (`ghost peers`); a peer's `ghost` must exist. |
+| `POST /api/peers/:name/messages` | Owner-only. `{ text }`: deliver to that peer (`ghost message`), then log it as `sent`; their refusal is `403`, their silence `502 peer_unreachable`. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 

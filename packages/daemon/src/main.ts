@@ -19,6 +19,7 @@ import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.j
 import { McpCatalog } from "./mcp-catalog.js";
 import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
+import { PeerBook } from "./peers.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
@@ -203,6 +204,7 @@ async function serveDaemon(
   registry.ensureRoot();
 
   const remoteServe = new RemoteServe(config.port, config.remote);
+  const peers = new PeerBook(config.configPath, config.remote.peers);
   const host = new SessionHost({
     registry,
     ownerHome,
@@ -212,6 +214,7 @@ async function serveDaemon(
     viewerUrl: async () => (await remoteServe.status()).url,
     logger,
     hooks,
+    peers,
   });
   const mcp = new McpCatalog({ registry });
 
@@ -226,8 +229,9 @@ async function serveDaemon(
       logger,
       port: config.port,
       address: config.host,
-      remote: new RemoteAccess(config.remote),
+      remote: new RemoteAccess({ ...config.remote, isPeer: (login) => peers.byLogin(login) !== undefined }),
       remoteServe,
+      peers,
     });
   } catch (error) {
     logger.error("could not bind", {

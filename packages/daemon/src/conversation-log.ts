@@ -11,6 +11,7 @@ import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import { GhostError } from "./errors.js";
+import { readPeerMessage } from "./peers.js";
 import { snapshotSummary, type RunResourceSnapshot } from "./run-resources.js";
 
 const LOG_VERSION = 1;
@@ -32,8 +33,10 @@ export type AssistantPart = { readonly type: "text"; readonly text: string } | T
 export type LogEntry =
   | ({ readonly type: "resources" } & RunResourceSnapshot)
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
-  /** `origin` is absent for an owner message; `auto` marks historical next-work prompts. */
-  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" }
+  /** `origin` is absent for an owner message; `auto` marks historical next-work prompts; `peer` is another owner's ghost. */
+  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" | "peer" }
+  /** A message delivered to a peer, logged in the conversation with them whichever conversation sent it. */
+  | { readonly type: "sent"; readonly at: string; readonly peer: string; readonly text: string }
   | {
     readonly type: "assistant";
     readonly at: string;
@@ -89,6 +92,7 @@ function bounded(text: string): string {
 function boundedEntry(entry: LogEntry): LogEntry {
   switch (entry.type) {
     case "user":
+    case "sent":
       return { ...entry, text: bounded(entry.text) };
     case "command":
       return { ...entry, output: bounded(entry.output) };
@@ -251,7 +255,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "handoff" | "auto";
+  role: "user" | "assistant" | "hook" | "handoff" | "auto" | "peer";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -272,6 +276,13 @@ function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
  * `entryId` names the entry, e<ordinal>.
  */
 function entryMessages(entry: LogEntry, entryId: string, skip: number, take: number): TranscriptMessage[] {
+  if (entry.type === "user" && entry.origin === "peer") {
+    const message = readPeerMessage(entry.text);
+    return [{ role: "peer", content: [{ type: "text", text: message ? `From ${message.name} · ${message.text}` : entry.text }], entryId }];
+  }
+  if (entry.type === "sent") {
+    return [{ role: "peer", content: [{ type: "text", text: `To ${entry.peer} · ${entry.text}` }], entryId }];
+  }
   if (entry.type === "user") {
     return [{
       role: entry.origin === "hook" || entry.origin === "auto" ? entry.origin : "user",
@@ -333,7 +344,9 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
     const entry = entries[index];
     if (!entry) continue;
     let line: string | null = null;
-    if (entry.type === "user") line = `${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`;
+    if (entry.type === "user") line = entry.origin === "peer" ? peerLine(entry.text)
+      : `${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`;
+    if (entry.type === "sent") line = sentLine(entry);
     if (entry.type === "assistant") {
       const text = assistantText(entry.content).trim();
       if (text) line = `You: ${text}`;
@@ -344,6 +357,25 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
     if (context.length > HANDOFF_CONTEXT_CHARS) return `…${context.slice(-HANDOFF_CONTEXT_CHARS)}`;
   }
   return context || null;
+}
+
+function peerLine(prompt: string): string {
+  const message = readPeerMessage(prompt);
+  return message ? `${message.name}'s ghost: ${message.text}` : prompt;
+}
+
+function sentLine(entry: Extract<LogEntry, { type: "sent" }>): string {
+  return `You messaged ${entry.peer}: ${entry.text}`;
+}
+
+/** Messages sent to a peer from another conversation since the harness here last ran. */
+export function unseenSent(entries: readonly LogEntry[]): string | null {
+  const sent: string[] = [];
+  for (const entry of entries) {
+    if (entry.type === "assistant") sent.length = 0;
+    if (entry.type === "sent") sent.push(sentLine(entry));
+  }
+  return sent.length > 0 ? sent.join("\n\n") : null;
 }
 
 /** Owner `!` commands since the harness last ran, which it has not seen. */
@@ -394,7 +426,7 @@ function sameFile(a: Stats, b: Stats): boolean {
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
-    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" ? 1 : 0;
+    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" || entry.type === "sent" ? 1 : 0;
 }
 function parseEntry(bytes: Buffer): LogEntry | null {
   try {

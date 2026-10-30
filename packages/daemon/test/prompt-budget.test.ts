@@ -45,9 +45,9 @@ function promptSection(heading: string): string {
   return section;
 }
 
-/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting, Recall installed). */
+/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting, Recall installed, a peer listed). */
 function renderStablePolicy(): Record<string, string> {
-  const sections = stablePolicySections({ documents: DOCUMENTS, recall: true, runningSource: RUNNING, firstMeeting: true });
+  const sections = stablePolicySections({ documents: DOCUMENTS, recall: true, runningSource: RUNNING, firstMeeting: true, peers: ["wife"] });
   return Object.fromEntries([promptSection("## Character file"), ...sections]
     .map((section) => [section.slice("## ".length, section.indexOf("\n")), section]));
 }
@@ -62,10 +62,11 @@ const CEILINGS: Record<string, number> = {
   "Owner context": 887,
   "Scheduled work": 221,
   "Self-maintenance": 427,
+  "Peers": 116,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 3518;
+const TOTAL_CEILING = 3634;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

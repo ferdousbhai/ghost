@@ -28,6 +28,7 @@ import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
+import { messageCommand, peersCommand } from "./peers.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
@@ -221,6 +222,22 @@ export const COMMANDS: readonly Command[] = [
     positionals: [2, 3],
     flags: { value: ["instructions"] },
     run: eventCommand,
+  },
+  {
+    verb: "peers",
+    usage: "peers [list|add <name> <login> <url>|rm <name>] [-g <name>] [--json] [-q]",
+    summary: "List, add, or remove the other owners whose ghosts may message this one's.",
+    example: "ghost peers add wife wife@example.com https://her-laptop.tail1234.ts.net -g casper",
+    positionals: [0, 4],
+    run: peersCommand,
+  },
+  {
+    verb: "message",
+    usage: "message <peer> <text> [--json] [-q]",
+    summary: "Send a peer's ghost a message; it joins the conversation with them.",
+    example: "ghost message wife \"Does Saturday dinner work?\"",
+    positionals: [2, 2],
+    run: messageCommand,
   },
   {
     verb: "remote",

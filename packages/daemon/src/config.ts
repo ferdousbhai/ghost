@@ -9,8 +9,9 @@ import { errorMessage } from "./errors.js";
 import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
+import { parsePeers, type Peer } from "./peers.js";
 
-export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests">;
+export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[] };
 
 export type RemoteConfigFile = Partial<RemoteConfig>;
 
@@ -21,7 +22,8 @@ export interface DaemonConfig {
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
-   * says what other tailnet members may do (default read-only).
+   * says what other tailnet members may do (default read-only), `peers` are
+   * other owners whose ghosts may message this owner's (CONTRACTS.md "Peers").
    */
   remote: RemoteConfig;
   /** The config file read; it need not exist. */
@@ -120,6 +122,7 @@ function readConfigFile(path: string): DaemonConfigFile | null {
       }
       remote.guests = raw.guests;
     }
+    if (raw.peers !== undefined) remote.peers = parsePeers(raw.peers, path);
     config.remote = remote;
   }
   return config;

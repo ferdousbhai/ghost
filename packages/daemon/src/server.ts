@@ -1,4 +1,5 @@
 import { parseExternalEvent } from "./external-events.js";
+import { deliverPeerMessage, newPeerMessageId, parsePeer, parsePeerMessage, type PeerBook, type PeerFetch } from "./peers.js";
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -65,6 +66,10 @@ export interface ServerOptions {
   remoteServe?: RemoteServe;
   /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
   streamCutBytes?: number;
+  /** The owner's peers (CONTRACTS.md "Peers"); omitted, there are none and their routes 404. */
+  peers?: PeerBook;
+  /** How a message reaches a peer's daemon; a test stands in for the tailnet. */
+  peerFetch?: PeerFetch;
 }
 
 export interface ListeningServer {
@@ -368,6 +373,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }
     if (identity?.role === "guest" && method !== "GET") {
       errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
+      return null;
+    }
+    // A peer may deliver a message and ask who it is; nothing else, reads included.
+    const path = segments.join("/");
+    if (identity?.role === "peer" && !(method === "POST" && path === "api/peer/messages") && !(method === "GET" && path === "api/remote/whoami")) {
+      errorResponse(response, 403, "peer_only", "A peer may only deliver messages.");
       return null;
     }
     if ((method === "POST" || method === "PUT") && !isPreflightedContentType(request.headers["content-type"])) {
@@ -685,6 +696,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     return handle(context);
   };
 
+  const requirePeers = (): PeerBook => {
+    if (!options.peers) throw new GhostError("not_found", "This daemon has no peers.", 404);
+    return options.peers;
+  };
+
   const routes: Route<RequestContext>[] = [
     route("GET", "", ({ response }) => {
       response.writeHead(200, {
@@ -706,6 +722,36 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/remote/whoami", ({ response, admission }) => {
       jsonResponse(response, 200, { role: admission.identity?.role ?? "owner" });
     }),
+    // A peer's message to whichever ghost receives theirs; the only write a peer has.
+    route("POST", "api/peer/messages", async ({ admission, body, response }) => {
+      const identity = admission.identity;
+      const peer = identity?.role === "peer" ? requirePeers().byLogin(identity.login) : undefined;
+      if (!peer) throw new GhostError("not_a_peer", "Only a listed peer may deliver a message here.", 403);
+      const accepted = await options.host.admitPeerMessage(peer, parsePeerMessage(await body()));
+      const turn = accepted.admission;
+      if (turn) startTurnLog(peer.ghost, accepted.sessionId, (emit) => turn.run({ emit }));
+      jsonResponse(response, accepted.duplicate ? 200 : 202, { duplicate: accepted.duplicate });
+    }),
+    route("GET", "api/peers", ownerOnly(({ response }) => {
+      jsonResponse(response, 200, { peers: requirePeers().list() });
+    })),
+    route("POST", "api/peers", ownerOnly(async ({ body, response }) => {
+      const peer = parsePeer(await body());
+      options.registry.get(peer.ghost);
+      jsonResponse(response, 200, { peers: await requirePeers().add(peer) });
+    })),
+    route("DELETE", "api/peers/:name", ownerOnly(async ({ params, response }) => {
+      jsonResponse(response, 200, { peers: await requirePeers().remove(params.name ?? "") });
+    })),
+    // This owner's ghost messaging a peer: delivered to their daemon, then
+    // logged in the conversation with them.
+    route("POST", "api/peers/:name/messages", ownerOnly(async ({ params, body, response }) => {
+      const peer = requirePeers().get(params.name ?? "");
+      const message = parsePeerMessage({ id: newPeerMessageId(), text: (await body()).text });
+      const delivered = await deliverPeerMessage(peer, message, options.peerFetch);
+      if (!delivered.duplicate) await options.host.recordSentMessage(peer, message.text);
+      jsonResponse(response, 200, { delivered: true, duplicate: delivered.duplicate });
+    })),
     route("GET", "api/remote/qr.svg", async ({ response }) => {
       const url = remoteServe ? (await remoteServe.status()).url : null;
       if (!remoteServe || !url) {

@@ -46,7 +46,8 @@ Item {
             ? String(raw).replace(/\r\n/gu, "\n").replace(/\n$/u, "")
             : raw;
     }
-    readonly property bool plainBody: root.mine || root.hookNotice
+    // A peer's words are another person's text, shown as written, not rendered.
+    readonly property bool plainBody: root.mine || root.hookNotice || root.speaker === "peer"
     readonly property int contentInset: root.mine ? 12 : 0
 
     /**
