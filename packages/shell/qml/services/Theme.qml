@@ -283,6 +283,9 @@ Singleton {
     function ember(alpha: real): color {
         return Qt.rgba(0.976, 0.451, 0.086, alpha);
     }
+    function spectralGlow(alpha: real): color {
+        return Qt.rgba(0.784, 0.863, 1, alpha);
+    }
     function rose(alpha: real): color {
         return Qt.rgba(0.984, 0.443, 0.522, alpha);
     }

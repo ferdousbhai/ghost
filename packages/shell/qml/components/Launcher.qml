@@ -321,6 +321,30 @@ FocusScope {
                 border.width: row.chosen ? 1 : 0
                 border.color: Theme.menuSelectedBorder
 
+                // The chosen row is lit from its leading edge, as a game menu
+                // lights its cursor: a short accent bar and a wash that fades
+                // out before the title ends.
+                Rectangle {
+                    visible: row.chosen
+                    anchors.fill: parent
+                    radius: parent.radius
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: Qt.rgba(Theme.menuSelectedText.r, Theme.menuSelectedText.g, Theme.menuSelectedText.b, 0.10) }
+                        GradientStop { position: 0.45; color: Qt.rgba(Theme.menuSelectedText.r, Theme.menuSelectedText.g, Theme.menuSelectedText.b, 0) }
+                    }
+                }
+                Rectangle {
+                    visible: row.chosen
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 2
+                    height: parent.height * 0.5
+                    radius: 1
+                    color: Theme.menuSelectedText
+                    opacity: 0.8
+                }
+
                 // The mark: a place's glyph, a running turn's orb, an unread
                 // dot, a pin, or the ghost's own mark for asking it.
                 Item {

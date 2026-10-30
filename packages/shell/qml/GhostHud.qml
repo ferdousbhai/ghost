@@ -25,6 +25,7 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import QtQuick
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import "services"
 import "components"
 import "services/DesktopKeys.js" as Desk
@@ -262,6 +263,25 @@ FloatingWindow {
         }
     }
 
+    // The card's aura: a wide, faint spectral bloom spilling onto the scrim,
+    // as a game menu floats over its world. It warms to amber while the
+    // ghost listens. Still, like every glow here: it follows the card's
+    // geometry and changes colour once, never on a loop.
+    RectangularGlow {
+        x: card.x
+        y: card.y
+        width: card.width
+        height: card.height
+        scale: card.scale
+        opacity: card.opacity
+        cornerRadius: card.radius + glowRadius
+        glowRadius: 72
+        spread: 0.05
+        color: Dictation.recording ? Theme.amber(Theme.light ? 0.14 : 0.12) : Theme.spectralGlow(Theme.light ? 0.14 : 0.10)
+
+        Behavior on color { enabled: !Theme.reducedMotion; ColorAnimation { duration: Theme.durSlow } }
+    }
+
     Rectangle {
         id: card
 
@@ -336,13 +356,13 @@ FloatingWindow {
             event.accepted = true;
         }
 
-        // Two still, cold blobs far under the reading surface. `z: -1` puts
-        // them over the card's own fill but beneath every layout child, and
-        // `enabled: false` keeps the layer out of the input chain. Alphas are
+        // Two still, cold blobs far under the reading surface. Declared
+        // first, the layer paints over the card's own fill but beneath every
+        // later child (a negative `z` would put it behind the fill, unseen),
+        // and `enabled: false` keeps it out of the input chain. Alphas are
         // held low enough that body text contrast is untouched.
         Item {
             anchors.fill: parent
-            z: -1
             enabled: false
 
             Glow {
@@ -361,6 +381,28 @@ FloatingWindow {
                 core: "#0a3b82f6"
                 mid: "#033b82f6"
                 midAt: 0.6
+            }
+
+            // Rim light: the top edge catches light from above, brightest at
+            // the middle and gone before the corners, with a faint wash
+            // falling into the card beneath it.
+            Rectangle {
+                width: parent.width
+                height: Theme.ch(6)
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.spectralGlow(0.035) }
+                    GradientStop { position: 1.0; color: Theme.spectralGlow(0) }
+                }
+            }
+            Rectangle {
+                width: parent.width
+                height: 1
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.1; color: Theme.spectralGlow(0) }
+                    GradientStop { position: 0.5; color: Theme.spectralGlow(Theme.light ? 0.5 : 0.35) }
+                    GradientStop { position: 0.9; color: Theme.spectralGlow(0) }
+                }
             }
         }
 
