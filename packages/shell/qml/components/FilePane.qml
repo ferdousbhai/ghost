@@ -382,11 +382,9 @@ Item {
         }
     }
 
-    //
     // All three bodies exist for the pane's lifetime and one is shown. A
     // Loader would hand back an untyped item, and the header and the save
     // policy both need the markdown editor's `dirty` and `buffer` by name.
-
     Item {
         id: body
 

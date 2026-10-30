@@ -1,10 +1,9 @@
 // RenameSession — the list-held half of an inline rename.
 //
-// Held beside the list rather than on the row, and it has to be: the roster
-// is replaced wholesale on every refresh, and a conversation ListView recreates
-// a delegate that scrolls out of its cache, either way underneath a half-typed
-// name. The row's InlineRename field reports
-// what happens; this object keeps the draft and the latch that survive the
+// Held beside the list rather than on the row, and it has to be: the
+// launcher's rows are replaced wholesale on every refresh, and its ListView
+// recreates a delegate that scrolls out of its cache, either way underneath a
+// half-typed name. The row's InlineRename field reports what happens; this object keeps the draft and the latch that survive the
 // rebuild, and decides what a commit, a cancel, and a lost keyboard mean.
 import QtQuick
 

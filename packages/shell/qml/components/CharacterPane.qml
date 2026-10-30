@@ -11,7 +11,7 @@ import "../services"
 Rectangle {
     id: root
 
-    /** The × was clicked or Esc pressed in the editor: back to chat. */
+    /** Esc was pressed in the editor: back to chat. */
     signal closed()
 
     /** The editor's draft, exposed for the save path and tests. */

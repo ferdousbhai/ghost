@@ -1,4 +1,4 @@
-// InlineRename — a name edited where it is read, in a sidebar row.
+// InlineRename — a name edited where it is read, in a launcher row.
 //
 // The rule it follows is the file manager's, because that is where the gesture
 // comes from: Enter keeps what you typed, Esc throws it away, and clicking
