@@ -5,8 +5,8 @@ pragma ComponentBehavior: Bound
 // question rather than an armed row — the ×-turns-into-"Delete" trick reads as
 // a stutter in the list and puts the answer under the pointer that just asked.
 //
-// Owned by whoever opens it (the HUD), not by the row that asked: a dialog
-// anchored inside a scrolling sidebar would scroll with it. The caller drives
+// Owned by whoever opens it (the HUD or a pane), not by the row that asked: a
+// dialog anchored inside a scrolling list would scroll with it. The caller drives
 // `open`, `busy` and `error`; this only renders them and reports the answer.
 import QtQuick
 import "../services"
