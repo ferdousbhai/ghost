@@ -167,7 +167,7 @@ Item {
         }
     }
 
-    // An empty document says so rather than showing a bare cursor in a white field.
+    // An empty document says so rather than showing a lone cursor.
     Text {
         anchors.centerIn: parent
         visible: field.text === ""
