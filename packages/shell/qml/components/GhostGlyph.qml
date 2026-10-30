@@ -19,12 +19,10 @@ Item {
     property string path: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"
     /**
      * Solid, the way a status dot fills in: the body takes `tint` and the
-     * eyes are cut back out in `knockout`, so a filled ghost is still a ghost.
-     * Only the mascot path has eyes where `eyesPath` draws them.
+     * eyes are cut back out in the background colour, so a filled ghost is
+     * still a ghost. Only the mascot path has eyes where the cut-out draws them.
      */
     property bool filled: false
-    property color knockout: Theme.background
-    property string eyesPath: "M9 10h.01M15 10h.01"
 
     implicitWidth: root.size
     implicitHeight: root.size
@@ -55,10 +53,10 @@ Item {
 
         ShapePath {
             fillColor: "transparent"
-            strokeColor: root.filled ? root.knockout : "transparent"
+            strokeColor: root.filled ? Theme.background : "transparent"
             strokeWidth: root.strokeWidth * 1.4
             capStyle: ShapePath.RoundCap
-            PathSvg { path: root.filled ? root.eyesPath : "" }
+            PathSvg { path: root.filled ? "M9 10h.01M15 10h.01" : "" }
         }
     }
 }
