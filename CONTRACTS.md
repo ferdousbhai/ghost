@@ -239,7 +239,7 @@ returns `202 { duplicate: false }`; the same id again returns
 different text is `409`. A message that arrives while that conversation's
 turn runs joins it as its next pass. The text is untrusted data, as event
 data is: it cannot become an owner `!command`, and the instructions framing
-it are Ghost's fixed peer policy, never the sender's. More than 30 accepted
+it are Ghost's fixed peer policy, never the sender's. More than 120 accepted
 messages from one peer in an hour is `429 peer_rate_limited`, so two ghosts
 answering each other cannot loop unattended.
 
