@@ -413,7 +413,6 @@ Singleton {
     // can emit hundreds a second). Buffer them and flush on a frame-ish timer;
     // the model only sees ~20 updates a second regardless of token rate.
     Timer {
-        id: flushTimer
         interval: 50
         repeat: true
         running: root.anyStreaming
@@ -424,7 +423,6 @@ Singleton {
     // particular response is no longer live even if Qt has not advanced the
     // XHR to DONE (a half-open socket otherwise leaves the HUD spinning forever).
     Timer {
-        id: streamWatchdog
         interval: 1000
         repeat: true
         running: root.anyStreaming

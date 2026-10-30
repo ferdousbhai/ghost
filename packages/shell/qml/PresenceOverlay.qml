@@ -123,7 +123,6 @@ Scope {
 
             // The ticker, then the card, where the prompt was.
             WlrLayershell {
-                id: cardWindow
                 screen: screenScope.modelData
                 visible: !Presence.composing && Presence.phase !== "" && screenScope.home
                 anchors.bottom: true // qmllint disable missing-property
