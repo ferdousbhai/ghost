@@ -366,6 +366,20 @@ describe("McpCatalog mutations", () => {
     expect(GhostError).toBeDefined();
   });
 
+  it("refuses to change an mcp.json it cannot read whole, and leaves it as it was", async () => {
+    const { catalog, home } = setup();
+    const path = join(home, "mcp.json");
+    for (const text of ["{ not json", '{"mcpServers":"abc"}']) {
+      writeFileSync(path, text, "utf8");
+      const refused = { code: "invalid_mcp_config", status: 409 };
+      await expect(catalog.addLeased("casper", "fresh", { type: "stdio", command: "x" })).rejects.toMatchObject(refused);
+      await expect(catalog.updateLeased("casper", "fresh", { type: "stdio", command: "x" })).rejects.toMatchObject(refused);
+      await expect(catalog.setEnabledLeased("casper", "fresh", true)).rejects.toMatchObject(refused);
+      await expect(catalog.removeLeased("casper", "fresh")).rejects.toMatchObject(refused);
+      expect(readFileSync(path, "utf8")).toBe(text);
+    }
+  });
+
   it("serializes concurrent canonical writes without losing siblings", async () => {
     const { catalog, home } = setup();
 

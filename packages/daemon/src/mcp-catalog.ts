@@ -141,8 +141,18 @@ export class McpCatalog {
     return { ...readMcpFile(home), path: join(home, MCP_FILE) };
   }
 
+  /** The file a mutation rewrites, refused while Ghost cannot read it whole. */
+  private async writable(ghostName: string): Promise<McpFileRead & { path: string }> {
+    const file = await this.read(ghostName);
+    const unusable = file.skipped.find((skip) => skip.path === MCP_FILE);
+    if (unusable) {
+      throw new GhostError("invalid_mcp_config", `Fix mcp.json before changing it: ${unusable.reason}`, 409);
+    }
+    return file;
+  }
+
   private async row(ghostName: string, name: string): Promise<{ row: McpServerRow; path: string }> {
-    const { rows, path } = await this.read(ghostName);
+    const { rows, path } = await this.writable(ghostName);
     const row = rows.find((candidate) => candidate.name === name);
     if (!row) throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
     return { row, path };
@@ -164,7 +174,7 @@ export class McpCatalog {
     // A new server costs context the moment it connects, so it starts off
     // unless the row says otherwise; `enable` is the deliberate step.
     const stored = "enabled" in config ? config : { ...config, enabled: false };
-    const { path } = await this.read(ghostName);
+    const { path } = await this.writable(ghostName);
     await this.writer.add(path, name, stored);
     return this.listLeased(ghostName);
   }
