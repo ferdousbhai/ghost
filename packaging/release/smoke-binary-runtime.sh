@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-# shellcheck source=offline-env.sh
-source "$script_dir/offline-env.sh"
+# Dead proxies make accidental network access fail while preserving the
+# caller's process and filesystem isolation.
+for proxy in ALL_PROXY FTP_PROXY GLOBAL_AGENT_HTTPS_PROXY HTTPS_PROXY HTTP_PROXY; do
+  export "$proxy=http://127.0.0.1:9" "${proxy,,}=http://127.0.0.1:9"
+done
 
 usage='smoke-binary-runtime.sh <ghostd-launcher> <ghost-launcher> <version> <scratch-root>'
 daemon_binary="${1:?usage: $usage}"
