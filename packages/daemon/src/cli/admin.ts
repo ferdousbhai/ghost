@@ -122,7 +122,7 @@ export async function switchCommand(ctx: CliContext): Promise<number> {
   const path = requested
     ? sessionPath(name, requested)
     : sessionPath(name, (await resolveSession(ctx.client, name, undefined)).id);
-  const body = await ctx.client.request("PUT", `${path}/harness`, { harness: id }) as { id: string; harness: string };
+  const body = await ctx.client.request<{ id: string; harness: string }>("PUT", `${path}/harness`, { harness: id });
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
 }

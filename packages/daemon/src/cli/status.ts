@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs";
-import type { Ghost } from "../ghosts.js";
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
-import { readDefaultGhost } from "./common.js";
+import { listGhosts, readDefaultGhost } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -16,7 +15,7 @@ interface DaemonStatus {
 
 export async function statusCommand(ctx: CliContext): Promise<number> {
   const [ghosts, remote, daemon] = await Promise.all([
-    ctx.client.request<Ghost[]>("GET", "/api/ghosts"),
+    listGhosts(ctx.client),
     ctx.client.optional<RemoteStatus>("GET", "/api/remote"),
     // A daemon older than this route 404s; the rest of status still prints.
     ctx.client.optional<DaemonStatus>("GET", "/api/status"),

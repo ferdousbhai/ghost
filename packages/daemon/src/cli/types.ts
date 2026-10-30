@@ -13,15 +13,6 @@ export type CliFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-export interface GhostCliOptions {
-  env?: NodeJS.ProcessEnv;
-  home?: string;
-  stdout?: CliWritable;
-  stderr?: CliWritable;
-  fetch?: CliFetch;
-  stdin?: CliStdin;
-}
-
 export interface CliRuntime {
   env: NodeJS.ProcessEnv;
   home: string;
@@ -30,6 +21,9 @@ export interface CliRuntime {
   fetch: CliFetch;
   stdin: CliStdin;
 }
+
+/** The runtime ghostCli is given; whatever is left out is the process's own. */
+export type GhostCliOptions = Partial<CliRuntime>;
 
 export interface CliContext {
   parsed: ParsedCliArgs;
