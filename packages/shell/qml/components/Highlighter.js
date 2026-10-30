@@ -307,7 +307,6 @@ const KEY_AT = /^([ \t]*(?:-[ \t]+)?)([A-Za-z_][\w.\- ]*?)[ \t]*(?=[:=])/u;
 const SECTION_AT = /^[ \t]*\[[^\]\n]*\]/u;
 
 function isWordChar(ch, spec) {
-    if (ch === "") return false;
     if (IDENT_BODY.test(ch)) return true;
     return Boolean(spec.wordChars) && spec.wordChars.indexOf(ch) >= 0;
 }
