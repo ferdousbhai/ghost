@@ -8,7 +8,7 @@ function text(value) {
 }
 
 function transport(server) {
-    const type = text(server && server.config ? server.config.type : "stdio").toLowerCase();
+    const type = text(server.config.type).toLowerCase();
     return type === "http" || type === "sse" ? type : "stdio";
 }
 
@@ -52,17 +52,15 @@ function parse(textValue, expectedType) {
 }
 
 function filtered(servers, query) {
-    const list = Array.isArray(servers) ? servers : [];
     const needle = text(query).trim().toLowerCase();
-    if (needle === "") return list;
-    return list.filter(function (server) {
-        return (text(server ? server.name : "") + " " + JSON.stringify(server ? server.config : {}))
-            .toLowerCase().indexOf(needle) >= 0;
+    if (needle === "") return servers;
+    return servers.filter(function (server) {
+        return (server.name + " " + JSON.stringify(server.config)).toLowerCase().indexOf(needle) >= 0;
     });
 }
 
 function summary(server) {
-    const config = server && server.config ? server.config : {};
+    const config = server.config;
     if (transport(server) === "stdio")
         return [text(config.command)].concat(Array.isArray(config.args) ? config.args.map(text) : []).join(" ");
     return text(config.url);

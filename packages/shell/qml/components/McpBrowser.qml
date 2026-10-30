@@ -20,8 +20,7 @@ Rectangle {
     property string editorError: ""
     property string pendingDeleteName: ""
 
-    readonly property var servers: Array.isArray(Ghostd.mcpServers)
-        ? Ghostd.mcpServers : []
+    readonly property var servers: Ghostd.mcpServers
     readonly property var filteredServers: McpConfig.filtered(root.servers, root.searchText)
     readonly property var selectedServer: root.findServer(root.selectedName)
     readonly property bool selectedDisabled: !!root.selectedServer && root.selectedServer.enabled === false
@@ -32,7 +31,7 @@ Rectangle {
     clip: true
 
     function findServer(name: string): var {
-        return root.servers.find(server => server && server.name === name) || null;
+        return root.servers.find(server => server.name === name) || null;
     }
 
     function ensureSelection(): void {
@@ -375,8 +374,7 @@ Rectangle {
                                     ActionButton {
                                         label: root.selectedDisabled ? "Enable" : "Disable"
                                         enabled: !Ghostd.mcpMutating
-                                        onClicked: if (root.selectedServer)
-                                            Ghostd.setMcpEnabled(root.selectedServer.name, root.selectedDisabled)
+                                        onClicked: Ghostd.setMcpEnabled(root.selectedServer.name, root.selectedDisabled)
                                     }
                                     ActionButton {
                                         label: "Edit"
@@ -387,8 +385,7 @@ Rectangle {
                                         label: "Delete"
                                         danger: true
                                         enabled: !Ghostd.mcpMutating
-                                        onClicked: if (root.selectedServer)
-                                            root.pendingDeleteName = root.selectedServer.name
+                                        onClicked: root.pendingDeleteName = root.selectedServer.name
                                     }
                                 }
                             }
