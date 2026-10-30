@@ -71,12 +71,8 @@ export function ghostSessionStopContinuation(
   result: GhostSessionStopResult | undefined,
 ): string | undefined {
   if (!result) return undefined;
-  const additional = typeof result.additionalContext === "string" && result.additionalContext.length > 0
-    ? result.additionalContext
-    : undefined;
-  const reason = typeof result.reason === "string" && result.reason.length > 0
-    ? result.reason
-    : undefined;
+  const additional = result.additionalContext || undefined;
+  const reason = result.reason || undefined;
   if (result.continue === true) return additional ?? reason;
   if (result.decision === "block") return reason ?? additional;
   return undefined;
