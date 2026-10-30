@@ -1971,7 +1971,7 @@ Singleton {
                 // page that overshoots what remains is inconsistent.
                 const expected = Math.min(root.transcriptPageLimit,
                     load.total - requestedOffset);
-                if (expected < 0 || body.messages.length > expected)
+                if (body.messages.length > expected)
                     throw new Error("inconsistent transcript page length");
                 const truncated = requestedOffset > 0
                     || requestedOffset + body.messages.length < load.total;
