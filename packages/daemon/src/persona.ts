@@ -35,10 +35,8 @@ export function isSeedText(name: string, text: string): boolean {
   return text === seed || text === seed.replace("\n## How you write\n", "\n## Voice\n");
 }
 
-export function isSeededCharacter(name: string, text: string | null | undefined): boolean {
-  if (text === null || text === undefined) return true;
-  if (text.trim() === "") return true;
-  return isSeedText(name, text);
+export function isSeededCharacter(name: string, text: string | null): boolean {
+  return !text?.trim() || isSeedText(name, text);
 }
 
 export const FIRST_MEETING_SECTION = [
@@ -84,13 +82,9 @@ function characterPolicySection(input: GhostSystemPromptInput): string[] {
 }
 
 export function buildGhostSystemPrompt(input: GhostSystemPromptInput): string {
-  const sections: string[] = [
+  return `${[
     characterSection(input),
     characterPolicySection(input).join("\n"),
-  ];
-  for (const extra of input.extraSections ?? []) {
-    const trimmed = extra.trim();
-    if (trimmed) sections.push(trimmed);
-  }
-  return `${sections.join("\n\n")}\n`;
+    ...input.extraSections ?? [],
+  ].join("\n\n")}\n`;
 }
