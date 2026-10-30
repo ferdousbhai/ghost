@@ -47,8 +47,8 @@ Rectangle {
     }
 
     Keys.onPressed: event => {
-        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                || event.key === Qt.Key_Space) && button.enabled) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                || event.key === Qt.Key_Space) {
             button.clicked();
             event.accepted = true;
         }

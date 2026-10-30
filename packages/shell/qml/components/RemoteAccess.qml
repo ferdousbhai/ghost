@@ -267,9 +267,8 @@ Rectangle {
                             }
 
                             Keys.onPressed: event => {
-                                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                                        || event.key === Qt.Key_Space)
-                                        && remoteSwitch.enabled) {
+                                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                                        || event.key === Qt.Key_Space) {
                                     remoteSwitch.activate();
                                     event.accepted = true;
                                 }
