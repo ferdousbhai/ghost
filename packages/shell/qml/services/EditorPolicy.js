@@ -37,8 +37,6 @@ function parentOf(path) {
 }
 
 function isUnder(path, dir) {
-    if (typeof path !== "string" || typeof dir !== "string") return false;
-    if (path === "" || dir === "") return false;
     if (path === dir) return true;
     var prefix = dir === "/" ? "/" : dir + "/";
     return path.slice(0, prefix.length) === prefix;

@@ -327,7 +327,7 @@ Singleton {
     property bool hudChatFocused: false
     /** The HUD is open and has the keyboard: Ghost is the foreground app. */
     property bool hudForeground: false
-    onHudChatFocusedChanged: if (root.hudChatFocused) root.markCurrentConversationRead()
+    onHudChatFocusedChanged: if (root.hudChatFocused) root.markConversationRead(root.activeGhost, root.currentSessionId)
 
     property alias transcript: transcriptModel
     property bool streaming: false
@@ -1886,11 +1886,6 @@ Singleton {
             });
     }
 
-    function markCurrentConversationRead(): void {
-        if (!root.hudChatFocused || root.activeGhost === "" || root.currentSessionId === "") return;
-        root.markConversationRead(root.activeGhost, root.currentSessionId);
-    }
-
     function refreshCurrentTranscript(): void {
         root.loadConversationTranscript(root.activeTurnState(), false);
     }
@@ -2310,7 +2305,6 @@ Singleton {
      * carried over to the next call.
      */
     function ingestTurn(state: var, chunk: string): void {
-        if (chunk === "") return;
         const parsed = root.sseFrames(state.frameBuffer, chunk);
         state.frameBuffer = parsed.rest;
         for (const payload of parsed.payloads) {
