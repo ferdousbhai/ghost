@@ -4,7 +4,7 @@ import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt
 import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
 import { GHOST_MCP_SERVER } from "../mcp-config-policy.js";
 import { classifyLimitMessage } from "../turn-events.js";
-import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
+import { flagBoolean, type ArgsSpec } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import { errorMessage } from "../errors.js";
@@ -111,7 +111,8 @@ export function withGhostTools(id: string, args: readonly string[], desktop: str
  * `ghost delegate <harness> -- <args>` runs an installed harness and returns
  * its status. Each attempt appends one receipt to the handoff log.
  */
-export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function delegateCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [id, ...args] = parsed.positionals as [string, ...string[]];
   const { env, home } = ctx.runtime;
   const started = Date.now();

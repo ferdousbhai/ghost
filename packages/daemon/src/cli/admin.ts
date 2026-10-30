@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -11,19 +11,21 @@ import type { HarnessChoices } from "../session-host.js";
 
 
 /** `ghost rename <new-name>`: move the whole ghost home under the new spelling. */
-export async function renameCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function renameCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const next = parsed.positionals[0];
   if (!next) throw new ArgsError("ghost rename needs the new name");
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx);
   const body = await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next });
   emit(ctx, body, () => `Renamed ${name} to ${next}.\n`);
   return 0;
 }
 
 /** `ghost character [set <file>]`: print or replace `character.md` through the daemon's validating writer. */
-export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function characterCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [action = "show", file] = parsed.positionals;
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx);
   if (action === "show") {
     const body = await ctx.client.request<{ body: string }>("GET", ghostPath(name, "/character"));
     emit(ctx, body, (result) => result.body);
@@ -37,15 +39,15 @@ export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): 
 
 
 /** `ghost read -s <id>`: mark a conversation read, as opening it in the HUD does. */
-export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+export async function readCommand(ctx: CliContext): Promise<number> {
+  const { path, session } = await resolveTarget(ctx);
   const body = await ctx.client.request("PUT", `${path}/read`, {});
   emit(ctx, body, () => `Marked ${session.id} read.\n`);
   return 0;
 }
 
 /** `ghost board`: the owner's board, read through the daemon. */
-export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function boardCommand(ctx: CliContext): Promise<number> {
   const body = await ctx.client.request("GET", "/api/board");
   emit(ctx, body, (result) => {
     const board = result as Board;
@@ -66,7 +68,8 @@ export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Pro
   return 0;
 }
 
-export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function remoteCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [action = "status"] = parsed.positionals;
   let body: unknown;
   if (action === "status") body = await ctx.client.request("GET", "/api/remote");
@@ -96,8 +99,9 @@ function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
 }
 
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
-export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+export async function harnessCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
+  const name = await resolveGhost(ctx);
   const id = parsed.positionals[0];
   if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
   const body = id || flagBoolean(parsed, "none")
@@ -108,12 +112,13 @@ export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
 }
 
 /** `ghost switch <id>`: run this conversation's next turn on another agent. */
-export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function switchCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const id = parsed.positionals[0];
   if (!id) throw new ArgsError("ghost switch needs the agent to switch to");
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx);
   // A conversation not listed yet (no message landed) is addressed as given.
-  const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const requested = preferredSessionId(ctx);
   const path = requested
     ? sessionPath(name, requested)
     : sessionPath(name, (await resolveSession(ctx.client, name, undefined)).id);
@@ -122,25 +127,27 @@ export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   return 0;
 }
 
-export async function eventCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function eventCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [source, id, input] = parsed.positionals;
   const instructions = flagString(parsed, "instructions");
   if (!source || !id || !instructions) throw new ArgsError("ghost event needs source, id, and --instructions");
   const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
-  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const ghost = await resolveGhost(ctx);
   const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload });
   emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
   return 0;
 }
 
-export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function routinesCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const request = <T = unknown>(method: string, path: string, body?: unknown) => ctx.client.request<T>(method, path, body, 120000);
   const [action = "list", slug, file] = parsed.positionals;
   const noArg = ["list", "recoveries"].includes(action), oneArg = ["pause", "resume", "run", "config", "logs", "remove", "restore"].includes(action);
   if ((noArg && slug) || (oneArg && (!slug || file)) || (action === "edit" && (!slug || !file)) || (!noArg && !oneArg && action !== "edit")) {
     throw new ArgsError("ghost routines takes list, pause/resume/run/config/logs/remove <slug>, edit <slug> <file>, recoveries, or restore <id>");
   }
-  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const ghost = await resolveGhost(ctx);
   const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
   if (action === "list") {
     const body = await request<{ routines: Routine[] }>("GET", path);

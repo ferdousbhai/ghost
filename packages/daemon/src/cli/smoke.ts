@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { freePort, waitUntilServing } from "../loopback.js";
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { EXIT_CODE } from "./client.js";
 import { ghostCli } from "./main.js";
 import { emit } from "./output.js";
@@ -99,10 +99,8 @@ function readSession(stdout: string, id: string): SmokeSession {
   return found;
 }
 
-export async function smokeCommand(
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
+export async function smokeCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const keep = flagBoolean(parsed, "keep");
   const scratch = mkdtempSync(join(tmpdir(), "ghost-smoke-"));
   const port = await freePort();

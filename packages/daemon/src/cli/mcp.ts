@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError } from "./args.js";
 import { ghostPath, resolveGhost } from "./common.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -19,9 +19,10 @@ function renderSnapshot(body: unknown): string {
 }
 
 /** `ghost mcp [list|add|set|rm|enable|disable] ...` over the ghost's `mcp.json`. */
-export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function mcpCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [action = "list", name, file] = parsed.positionals;
-  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const ghost = await resolveGhost(ctx);
   const base = ghostPath(ghost, "/mcp");
   const server = (): string => {
     if (!name) throw new ArgsError(`ghost mcp ${action} needs a server name`);

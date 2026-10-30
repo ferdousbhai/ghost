@@ -1,5 +1,4 @@
 import { readHarnessReport, type Harness } from "../harnesses.js";
-import type { ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { emit, relativeTime, table } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -14,7 +13,7 @@ function windows(harness: Harness): string {
 }
 
 /** Read locally, like `ghost help`: Omarchy's records, not the daemon, own this data. */
-export async function harnessesCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function harnessesCommand(ctx: CliContext): Promise<number> {
   let report: Awaited<ReturnType<typeof readHarnessReport>>;
   try {
     report = await readHarnessReport(ctx.runtime.env, ctx.runtime.home);

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
@@ -51,17 +51,15 @@ async function turnConversationId(
   return latestSession(sessions)?.id ?? newConversationId();
 }
 
-export async function sayCommand(
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
+export async function sayCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const followUp = flagBoolean(parsed, "follow-up");
   const startNew = flagBoolean(parsed, "new");
   if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const requestedSession = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const name = await resolveGhost(ctx);
+  const requestedSession = preferredSessionId(ctx);
 
   // The conversation an idle --follow-up turns into a fresh turn of.
   let idleFollowUp: string | undefined;

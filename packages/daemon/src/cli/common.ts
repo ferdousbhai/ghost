@@ -3,7 +3,7 @@ import { readPrivateFileText, writePrivateJsonAtomic } from "../private-file.js"
 import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
-import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagString } from "./args.js";
 import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
 import type { CliContext, CliRuntime, CliStdin } from "./types.js";
 import { errorMessage } from "../errors.js";
@@ -73,14 +73,10 @@ function soleGhostName(names: readonly string[]): string {
   throw new ArgsError(`Choose a ghost with -g/--ghost. Available: ${names.join(", ")}`);
 }
 
-export async function resolveGhost(
-  client: DaemonClient,
-  runtime: CliRuntime,
-  requested?: string,
-): Promise<string> {
-  const name = preferredGhostName(runtime, requested);
+export async function resolveGhost(ctx: Pick<CliContext, "client" | "runtime" | "parsed">): Promise<string> {
+  const name = preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost"));
   if (name) return name;
-  const ghosts = await listGhosts(client);
+  const ghosts = await listGhosts(ctx.client);
   return soleGhostName(ghosts.map((ghost) => ghost.name));
 }
 
@@ -105,20 +101,15 @@ export function latestSession(rows: readonly SessionSummary[]): SessionSummary |
 }
 
 /** `-s`, then `$GHOST_SESSION` (set in a ghost's own shell); undefined when neither names one. */
-export function preferredSessionId(
-  runtime: Pick<CliRuntime, "env">,
-  requested?: string,
-): string | undefined {
-  return requested?.trim() || runtime.env.GHOST_SESSION?.trim() || undefined;
+export function preferredSessionId(ctx: Pick<CliContext, "runtime" | "parsed">): string | undefined {
+  return flagString(ctx.parsed, "session")?.trim() || ctx.runtime.env.GHOST_SESSION?.trim() || undefined;
 }
 
 export async function resolveTarget(
-  client: DaemonClient,
-  ctx: Pick<CliContext, "runtime">,
-  parsed: ParsedCliArgs,
+  ctx: Pick<CliContext, "client" | "runtime" | "parsed">,
 ): Promise<{ name: string; session: SessionSummary; path: string }> {
-  const name = await resolveGhost(client, ctx.runtime, flagString(parsed, "ghost"));
-  const session = await resolveSession(client, name, preferredSessionId(ctx.runtime, flagString(parsed, "session")));
+  const name = await resolveGhost(ctx);
+  const session = await resolveSession(ctx.client, name, preferredSessionId(ctx));
   return { name, session, path: sessionPath(name, session.id) };
 }
 

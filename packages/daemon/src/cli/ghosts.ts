@@ -1,14 +1,11 @@
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { cliConfigPath, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
 import { notFound } from "./client.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
-export async function ghostsCommand(
-  verb: "list" | "new" | "rm" | "use",
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
+export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   if (verb === "list") {
     const ghosts = await listGhosts(ctx.client);
     emit(ctx, ghosts, () => ({
@@ -45,7 +42,7 @@ export async function ghostsCommand(
   const sessionId = flagString(parsed, "session");
   if (sessionId) {
     if (parsed.positionals.length > 0) throw new ArgsError("ghost rm -s does not take a ghost name positional");
-    const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+    const { path, session } = await resolveTarget(ctx);
     const response = await ctx.client.request("DELETE", path);
     emit(ctx, response, () => `trashed ${session.id}\n`);
     return 0;

@@ -8,7 +8,6 @@ import {
   flagString,
   parseArgs,
   type ArgsSpec,
-  type ParsedCliArgs,
 } from "./args.js";
 import {
   characterCommand,
@@ -48,7 +47,7 @@ interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
   /** Flags this verb alone accepts, on top of `CLI_ARGS`. */
   flags?: ArgsSpec;
-  run(parsed: ParsedCliArgs, ctx: CliContext): number | Promise<number>;
+  run(ctx: CliContext): number | Promise<number>;
 }
 
 const CLI_ARGS: ArgsSpec = {
@@ -80,7 +79,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "List ghosts and their home directories.",
     example: "ghost list --json",
     positionals: [0, 0],
-    run: (parsed, ctx) => ghostsCommand("list", parsed, ctx),
+    run: (ctx) => ghostsCommand("list", ctx),
   },
   {
     verb: "new",
@@ -88,7 +87,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Create a ghost through ghostd.",
     example: "ghost new sage",
     positionals: [1, 1],
-    run: (parsed, ctx) => ghostsCommand("new", parsed, ctx),
+    run: (ctx) => ghostsCommand("new", ctx),
   },
   {
     verb: "rm",
@@ -97,7 +96,7 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost rm sage --yes",
     positionals: [0, 1],
     flags: { boolean: ["yes"] },
-    run: (parsed, ctx) => ghostsCommand("rm", parsed, ctx),
+    run: (ctx) => ghostsCommand("rm", ctx),
   },
   {
     verb: "use",
@@ -105,7 +104,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Print or persist the private default ghost.",
     example: "ghost use sage",
     positionals: [0, 1],
-    run: (parsed, ctx) => ghostsCommand("use", parsed, ctx),
+    run: (ctx) => ghostsCommand("use", ctx),
   },
   {
     verb: "sessions",
@@ -131,7 +130,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Rename a conversation.",
     example: 'ghost title "Release notes" -s cli-abc',
     positionals: [1, 1],
-    run: (parsed, ctx) => sessionActionCommand("title", parsed, ctx),
+    run: (ctx) => sessionActionCommand("title", ctx),
   },
   {
     verb: "ask",
@@ -148,7 +147,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Pin a conversation.",
     example: "ghost pin -s cli-abc",
     positionals: [0, 0],
-    run: (parsed, ctx) => sessionActionCommand("pin", parsed, ctx),
+    run: (ctx) => sessionActionCommand("pin", ctx),
   },
   {
     verb: "unpin",
@@ -156,7 +155,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Unpin a conversation.",
     example: "ghost unpin -s cli-abc",
     positionals: [0, 0],
-    run: (parsed, ctx) => sessionActionCommand("unpin", parsed, ctx),
+    run: (ctx) => sessionActionCommand("unpin", ctx),
   },
   {
     verb: "mcp",
@@ -297,11 +296,11 @@ export const COMMANDS: readonly Command[] = [
     summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
     example: "ghost help timers",
     positionals: [0, 1],
-    run: (parsed, ctx) => {
-      const topic = parsed.positionals[0];
+    run: (ctx) => {
+      const topic = ctx.parsed.positionals[0];
       if (topic !== undefined && isHelpTopic(topic)) {
         // Rendered for the ghost the shell belongs to; no daemon needed.
-        const ghostName = preferredGhostName(ctx.runtime, flagString(parsed, "ghost")) ?? "<ghost>";
+        const ghostName = preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost")) ?? "<ghost>";
         ctx.runtime.stdout.write(renderHelpTopic(topic, {
           ghostName,
           unitDir: resolveScheduleUnitDirectory(ctx.runtime.home, ctx.runtime.env),
@@ -396,7 +395,7 @@ async function dispatch(argv: readonly string[], runtime: CliRuntime): Promise<n
       return client;
     },
   };
-  return await command.run(parsed, ctx);
+  return await command.run(ctx);
 }
 
 export async function ghostCli(argv: readonly string[], options: GhostCliOptions = {}): Promise<number> {

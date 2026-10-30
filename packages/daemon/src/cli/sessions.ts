@@ -1,15 +1,13 @@
 import { rankRecords } from "../recall.js";
 import type { Transcript } from "../session-host.js";
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
 import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
 
-export async function sessionsCommand(
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
-  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+export async function sessionsCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
+  const name = await resolveGhost(ctx);
   let sessions = await listSessions(ctx.client, name);
   const query = flagString(parsed, "semantic");
   let meaning = false;
@@ -57,11 +55,9 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
   }).join("\n\n");
 }
 
-export async function showCommand(
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
-  const { name, path } = await resolveTarget(ctx.client, ctx, parsed);
+export async function showCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
+  const { name, path } = await resolveTarget(ctx);
   const query = new URLSearchParams();
   const limit = flagString(parsed, "limit");
   const offset = flagString(parsed, "offset");
@@ -81,8 +77,8 @@ export async function showCommand(
 }
 
 /** Stop a conversation's running turn, whichever client started it. */
-export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+export async function stopCommand(ctx: CliContext): Promise<number> {
+  const { path, session } = await resolveTarget(ctx);
   const body = await ctx.client.request("POST", `${path}/stop`, {});
   emit(ctx, body, () => `stopped ${session.id}\n`);
   return 0;
@@ -94,8 +90,9 @@ export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promi
  * an open question unanswered. In a ghost's own shell `$GHOST_SESSION` names
  * the conversation.
  */
-export async function askCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+export async function askCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
+  const { path, session } = await resolveTarget(ctx);
   if (flagBoolean(parsed, "clear")) {
     if (parsed.positionals.length > 0) throw new ArgsError("ask --clear takes no question.");
     const body = await ctx.client.request("DELETE", `${path}/question`);
@@ -109,12 +106,9 @@ export async function askCommand(parsed: ParsedCliArgs, ctx: CliContext): Promis
   return 0;
 }
 
-export async function sessionActionCommand(
-  verb: "title" | "pin" | "unpin",
-  parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
-  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+export async function sessionActionCommand(verb: "title" | "pin" | "unpin", ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
+  const { path, session } = await resolveTarget(ctx);
   let body: unknown;
   if (verb === "title") {
     body = await ctx.client.request("PUT", `${path}/title`, {

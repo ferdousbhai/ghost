@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import type { Ghost } from "../ghosts.js";
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
-import type { ParsedCliArgs } from "./args.js";
 import { readDefaultGhost } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -15,10 +14,7 @@ interface DaemonStatus {
   restartNeeded?: boolean;
 }
 
-export async function statusCommand(
-  _parsed: ParsedCliArgs,
-  ctx: CliContext,
-): Promise<number> {
+export async function statusCommand(ctx: CliContext): Promise<number> {
   const [ghosts, remote, daemon] = await Promise.all([
     ctx.client.request<Ghost[]>("GET", "/api/ghosts"),
     ctx.client.optional<RemoteStatus>("GET", "/api/remote"),

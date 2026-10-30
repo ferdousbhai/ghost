@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { parseHooksDocument, type GhostHookCommandConfig } from "../hook-policy.js";
-import { ArgsError, type ParsedCliArgs } from "./args.js";
+import { ArgsError } from "./args.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
 /** `ghost hooks [status|show|set <file>]` over the daemon's `hooks.json`. */
-export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+export async function hooksCommand(ctx: CliContext): Promise<number> {
+  const { parsed } = ctx;
   const [action = "status", file] = parsed.positionals;
   let body: unknown;
   switch (action) {
