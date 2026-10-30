@@ -60,12 +60,14 @@ effect, so it never happens twice.
 
 ## Recall
 
-The installer asks before adding packages through `omarchy pkg add`; with no
-terminal, rerun it with `bash -s -- --yes` once the owner agrees. It also adds
-a Super+Ctrl+Shift+F binding to `~/.config/hypr/bindings.lua` (backed up;
-`RECALL_NO_KEYBINDING=1` skips it) and installs the `recall` skill. Nothing is
-indexed until the owner picks folders, which first downloads about 865 MB of
-models. Add index folders only when the owner asked for that scope.
+Run the installer from a terminal in the owner's desktop session: it runs
+`recall setup` as the owner there (with no session, the owner runs
+`recall setup` after logging in). Setup adds a Super+Ctrl+Shift+F binding to
+`~/.config/hypr/bindings.lua` (backed up; `sudo RECALL_NO_KEYBINDING=1 bash`
+skips it) and installs the `recall` skill. It selects `~/Documents` and
+`~/Pictures` when they exist, so indexing starts at once, first downloading
+about 865 MB of models: say so before installing. Add other folders only when
+the owner asked for that scope.
 
 ## wacli
 
