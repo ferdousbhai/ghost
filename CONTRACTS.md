@@ -717,8 +717,9 @@ runtime preserves owner data.
   [README](packages/shell/README.md); what others rely on:
   - **The summon payload**, sent by the host's toggle and summon, the `ghost`
     IPC, notifications, and the desktop entry: `{}` opens the presence prompt
-    (the HUD while no ghost is listed); `ghost` selects one first; `section`
-    opens the HUD there; `sessionId` with `ghost` opens that conversation;
+    (the HUD while no ghost is listed); `ghost` selects one first, if listed;
+    `section` opens the HUD there; `sessionId` with `ghost` opens that
+    conversation;
     `restore: true` puts the HUD back after a reload without igniting or
     listening. With nothing named, a prompt or HUD left open behind another
     app is refocused rather than closed or reopened.

@@ -1024,7 +1024,9 @@ Singleton {
         root.selectGhost(names[(names.indexOf(root.activeGhost) + 1) % names.length]);
     }
 
+    /** A summon or notification names its ghost as outside input: only a listed one is selected. */
     function selectGhost(name: string): void {
+        if (!root.ghosts.some(ghost => ghost && ghost.name === name)) return;
         if (root.switchGhost(name)) root.fetchSessions(name);
     }
 
@@ -1051,9 +1053,8 @@ Singleton {
 
     /** Open one conversation of any ghost; Panel's summon payload names both. */
     function openConversationForGhost(name: string, id: string): void {
-        if (name === "" || id === "") return;
         root.selectGhost(name);
-        root.finishOpenConversation(id);
+        if (root.activeGhost === name) root.finishOpenConversation(id);
     }
 
     function conversationKey(ghost: string, sessionId: string): string {

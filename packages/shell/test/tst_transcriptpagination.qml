@@ -282,7 +282,9 @@ TestCase {
         const stale = requests[0];
 
         Ghostd.sessionIds.other = "";
+        Ghostd.ghosts = [{ name: "casper" }, { name: "other" }];
         Ghostd.selectGhost("other");
+        Ghostd.ghosts = [];
         verify(stale.aborted);
         stale.complete(200, page(state, messages(0, 1), 1, false));
 

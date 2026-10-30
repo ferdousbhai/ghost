@@ -459,4 +459,21 @@ TestCase {
         compare(Ghostd.sessionIds.casper, "");
         compare(sent.length, 0);
     }
+
+    // A summon or a notification can name a ghost since banished or renamed:
+    // one the roster does not list is not selected, so the HUD neither shows
+    // it nor polls its missing event stream.
+    function test_aSummonNamingAnUnlistedGhostKeepsTheActiveOne(): void {
+        const sent = [];
+        Ghostd.requestFactory = FakeXhr.factory(sent, /./);
+        Ghostd.ghosts = [{ name: "casper" }];
+
+        Ghostd.openConversationForGhost("banished", "hud-gone");
+        Ghostd.selectGhost("banished");
+
+        compare(Ghostd.activeGhost, "casper");
+        compare(Ghostd.currentSessionId, "");
+        compare(sent.length, 0);
+        Ghostd.ghosts = [];
+    }
 }
