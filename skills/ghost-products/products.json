@@ -1,0 +1,96 @@
+{
+  "products": [
+    {
+      "need": "Mail: own domains, plus linked HEY, Gmail, iCloud Mail",
+      "name": "Cloudmail",
+      "source": "https://github.com/ferdousbhai/cloud-mail",
+      "cli": "cloudmail",
+      "skill": "cloudmail",
+      "install": "curl -fsSL https://ferdousbhai.com/cloudmail/install.sh | sudo bash"
+    },
+    {
+      "need": "Calendars: iCloud, Google, HEY",
+      "name": "Cloud Calendar",
+      "source": "https://github.com/ferdousbhai/cloud-calendar",
+      "cli": "cloud-calendar",
+      "skill": "cloud-calendar",
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh | sudo bash"
+    },
+    {
+      "need": "Contacts: iCloud and Google",
+      "name": "Cloud Contacts",
+      "source": "https://github.com/ferdousbhai/cloud-contacts",
+      "cli": "cloud-contacts",
+      "skill": "cloud-contacts",
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash"
+    },
+    {
+      "need": "Tasks: iCloud Reminders and Google Tasks",
+      "name": "Cloud Tasks",
+      "source": "https://github.com/ferdousbhai/cloud-tasks",
+      "cli": "cloud-tasks",
+      "skill": "cloud-tasks",
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh | sudo bash"
+    },
+    {
+      "need": "iCloud Notes, Photos, Find My",
+      "name": "iCloud for Omarchy",
+      "source": "https://github.com/ferdousbhai/icloud-for-omarchy",
+      "cli": "icloud-session",
+      "skill": "icloud",
+      "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
+      "note": "installs all three apps; name some (`sudo bash -s -- icloud-photos`) for only those"
+    },
+    {
+      "need": "Encrypted file/settings sync, versions, machine migration",
+      "name": "Omacloud",
+      "source": "https://github.com/ferdousbhai/omacloud",
+      "cli": "omacloud",
+      "skill": "omacloud",
+      "install": "curl -fsSL https://omacloud.computer/install.sh | sudo bash"
+    },
+    {
+      "need": "WhatsApp: chat history as folders, and requested sends",
+      "name": "wacli",
+      "source": "https://github.com/ferdousbhai/wacli",
+      "cli": "wacli",
+      "skill": "wacli",
+      "install": "curl -fsSL https://ferdousbhai.com/wacli/install.sh | sudo bash",
+      "section": "wacli"
+    },
+    {
+      "need": "Local search by meaning or exact text: documents, screenshots, photos, audio, video, code",
+      "name": "Recall for Omarchy",
+      "source": "https://github.com/ferdousbhai/recall-for-omarchy",
+      "cli": "recall",
+      "skill": "recall",
+      "install": "curl -fsSL https://ferdousbhai.com/recall/install.sh | sudo bash",
+      "section": "Recall"
+    },
+    {
+      "need": "Agents that keep working until the job is done (a stop-hook reviewer)",
+      "name": "keep-going",
+      "source": "https://github.com/ferdousbhai/keep-going",
+      "cli": "keep-going",
+      "install": "curl -fsSL https://ferdousbhai.com/keep-going/install.sh | sudo bash",
+      "section": "keep-going"
+    },
+    {
+      "need": "AirDrop with nearby Apple devices",
+      "name": "Omdrop",
+      "source": "https://github.com/brentkearney/omdrop-plugin",
+      "cli": "omdrop",
+      "skill": "omdrop",
+      "section": "Omdrop"
+    },
+    {
+      "need": "Google Drive, Docs, Sheets",
+      "name": "gws",
+      "source": "https://github.com/googleworkspace/cli",
+      "cli": "gws",
+      "skill": "gws-*",
+      "install": "npm install -g @googleworkspace/cli",
+      "section": "gws"
+    }
+  ]
+}
