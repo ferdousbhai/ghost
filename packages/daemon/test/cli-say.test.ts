@@ -220,6 +220,15 @@ describe("ghost say", () => {
     expect(result.stderr).toContain("ghost: broken");
   });
 
+  it("names the harness and the limit it reached on stderr", async () => {
+    const fake = await fakeDaemon([{ type: "start" }, { type: "limit_reached", harness: "codex", kind: "usage_limit" }, { type: "done", usage: {} }]);
+    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
+      env: fake.env,
+      home: "/tmp/ghost-cli-home",
+    });
+    expect(result.stderr).toContain("ghost: codex usage limit reached\n");
+  });
+
   it("keeps JSON error events machine-readable and reports the failure on stderr", async () => {
     const events = [{ type: "start" }, { type: "error", reason: "model", errorMessage: "broken", usage: {} }];
     const fake = await fakeDaemon(events);

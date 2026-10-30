@@ -108,9 +108,8 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
       if (event.type === "harness") harnessStarted = true;
       else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
       if (event.type === "limit_reached") {
-        const limit = event as unknown as { harness?: string; kind?: string };
-        const kind = String(limit.kind ?? "limit").replace("_", " ");
-        ctx.runtime.stderr.write(`ghost: ${limit.harness ?? "runtime"} ${kind} reached\n`);
+        const kind = String(event.kind ?? "limit").replace("_", " ");
+        ctx.runtime.stderr.write(`ghost: ${String(event.harness ?? "runtime")} ${kind} reached\n`);
       } else if (event.type === "error") {
         terminal = "error";
         ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);
