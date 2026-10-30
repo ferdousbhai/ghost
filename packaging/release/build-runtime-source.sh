@@ -8,6 +8,8 @@ arch="${4:?usage: build-runtime-source.sh <source-root> <output-dir> <version> <
 commit="${5:-}"
 
 source_root="$(realpath "$source_root")"
+# shellcheck source=runtime-manifest.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/runtime-manifest.sh"
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
@@ -56,13 +58,7 @@ epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commi
 }
 
 bun_build_version="$(bun --version)"
-bun_runtime_min="$(bun -e '
-  const p = await Bun.file(process.argv[1]).json();
-  const match = /^>=(\d+\.\d+\.\d+)$/.exec(p.engines?.bun ?? "");
-  if (!match) process.exit(1);
-  process.stdout.write(match[1]);
-' "$source_root/packages/daemon/package.json")"
-bundle_target=bun
+bun_runtime_min="$(bun_runtime_min "$source_root")"
 
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$output_dir/work}"
 mkdir -p "$work_parent"
@@ -87,26 +83,9 @@ mkdir -p "$runtime_root"
 # build-runtime.sh already set the payload's modes; cp -a keeps them.
 cp -a "$source_root/packages/daemon/dist/runtime/." "$runtime_root/"
 
-(
-  cd "$runtime_root"
-  find . -type f ! -name MANIFEST ! -name PAYLOAD.SHA256 -printf '%P\0' \
-    | LC_ALL=C sort -z \
-    | xargs -0 sha256sum > PAYLOAD.SHA256
-)
-
-cat > "$runtime_root/MANIFEST" <<EOF
-format=ghost-runtime-source/v3
-version=$version
-os=linux
-arch=$arch
-source_commit=$commit
-source_date_epoch=$epoch
-bun_build_version=$bun_build_version
-bun_runtime_min=$bun_runtime_min
-bundle_target=$bundle_target
-bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
-payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
-EOF
+payload_hashes "$runtime_root" > "$runtime_root/PAYLOAD.SHA256"
+runtime_manifest "$runtime_root" "$version" "$arch" "$commit" "$epoch" \
+  "$bun_build_version" "$bun_runtime_min" > "$runtime_root/MANIFEST"
 chmod 644 "$runtime_root"/{MANIFEST,PAYLOAD.SHA256}
 find "$runtime_root" -exec touch -h -d "@$epoch" {} +
 

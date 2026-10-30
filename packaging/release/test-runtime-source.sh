@@ -3,6 +3,8 @@ set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
+# shellcheck source=runtime-manifest.sh
+source "$script_dir/runtime-manifest.sh"
 test_parent="${TMPDIR:-/tmp}"
 mkdir -p "$test_parent"
 work="$(mktemp -d "$test_parent/ghost-runtime-source.XXXXXX")"
@@ -13,12 +15,7 @@ trap cleanup EXIT
 
 version="$(bun -e 'process.stdout.write((await Bun.file(process.argv[1]).json()).version)' "$source_root/package.json")"
 bun_build_version="$(bun --version)"
-bun_runtime_min="$(bun -e '
-  const manifest = await Bun.file(process.argv[1]).json();
-  const match = /^>=(\d+\.\d+\.\d+)$/.exec(manifest.engines?.bun ?? "");
-  if (!match) process.exit(1);
-  process.stdout.write(match[1]);
-' "$source_root/packages/daemon/package.json")"
+bun_runtime_min="$(bun_runtime_min "$source_root")"
 commit=0000000000000000000000000000000000000000
 epoch=1
 runtime_root="$work/runtime"
@@ -65,25 +62,9 @@ find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {}
 
 refresh_payload() {
   local root="$1"
-  (
-    cd "$root"
-    find . -type f ! -name MANIFEST ! -name PAYLOAD.SHA256 -printf '%P\0' \
-      | LC_ALL=C sort -z \
-      | xargs -0 sha256sum > PAYLOAD.SHA256
-  )
-  cat > "$root/MANIFEST" <<EOF
-format=ghost-runtime-source/v3
-version=$version
-os=linux
-arch=any
-source_commit=$commit
-source_date_epoch=$epoch
-bun_build_version=$bun_build_version
-bun_runtime_min=$bun_runtime_min
-bundle_target=bun
-bundled_license_manifest_sha256=$(sha256sum "$root/BUNDLED-LICENSES" | cut -d' ' -f1)
-payload_manifest_sha256=$(sha256sum "$root/PAYLOAD.SHA256" | cut -d' ' -f1)
-EOF
+  payload_hashes "$root" > "$root/PAYLOAD.SHA256"
+  runtime_manifest "$root" "$version" any "$commit" "$epoch" \
+    "$bun_build_version" "$bun_runtime_min" > "$root/MANIFEST"
   chmod 644 "$root/MANIFEST" "$root/PAYLOAD.SHA256"
 }
 refresh_payload "$runtime_root"

@@ -10,6 +10,8 @@ epoch="${6:?usage: verify-runtime-source.sh <runtime-root> <source-root> <versio
 
 runtime_root="$(realpath "$runtime_root")"
 source_root="$(realpath "$source_root")"
+# shellcheck source=runtime-manifest.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/runtime-manifest.sh"
 manifest="$runtime_root/MANIFEST"
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$(dirname "$runtime_root")}"
 mkdir -p "$work_parent"
@@ -104,12 +106,7 @@ bun_runtime_min="$(sed -n 's/^bun_runtime_min=//p' "$manifest")"
   printf 'runtime manifest has an invalid Bun version\n' >&2
   exit 1
 }
-declared_min="$(bun -e '
-  const p = await Bun.file(process.argv[1]).json();
-  const match = /^>=(\d+\.\d+\.\d+)$/.exec(p.engines?.bun ?? "");
-  if (!match) process.exit(1);
-  process.stdout.write(match[1]);
-' "$source_root/packages/daemon/package.json")"
+declared_min="$(bun_runtime_min "$source_root")"
 [[ "$bun_runtime_min" == "$declared_min" ]] || {
   printf 'runtime Bun minimum %s does not match package engine %s\n' \
     "$bun_runtime_min" "$declared_min" >&2
@@ -131,28 +128,12 @@ current_bun="$(bun --version)"
   exit 1
 }
 
-cat > "$temporary/MANIFEST.expected" <<EOF
-format=ghost-runtime-source/v3
-version=$version
-os=linux
-arch=$arch
-source_commit=$commit
-source_date_epoch=$epoch
-bun_build_version=$bun_build_version
-bun_runtime_min=$bun_runtime_min
-bundle_target=bun
-bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
-payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
-EOF
+runtime_manifest "$runtime_root" "$version" "$arch" "$commit" "$epoch" \
+  "$bun_build_version" "$bun_runtime_min" > "$temporary/MANIFEST.expected"
 require_identical "$temporary/MANIFEST.expected" "$manifest" \
   'runtime manifest does not match the expected v3 identity'
 
-(
-  cd "$runtime_root"
-  find . -type f ! -name MANIFEST ! -name PAYLOAD.SHA256 -printf '%P\0' \
-    | LC_ALL=C sort -z \
-    | xargs -0 sha256sum
-) > "$temporary/PAYLOAD.expected"
+payload_hashes "$runtime_root" > "$temporary/PAYLOAD.expected"
 require_identical "$temporary/PAYLOAD.expected" "$runtime_root/PAYLOAD.SHA256" \
   'runtime payload hashes or file closure do not match'
 
