@@ -28,10 +28,7 @@ const GHOST_SETTINGS_FILENAME = "settings.yml";
 const GHOST_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export function isValidGhostName(name: string): boolean {
-  if (!GHOST_NAME_PATTERN.test(name)) return false;
-  // The pattern already forbids a leading dot, but be explicit about the
-  // traversal shapes: a name is never allowed to mean "somewhere else".
-  return name !== "." && name !== ".." && !name.includes("/") && !name.includes("\\");
+  return GHOST_NAME_PATTERN.test(name);
 }
 
 export function assertValidGhostName(name: string): void {
@@ -102,7 +99,6 @@ export class GhostRegistry {
     }
     const ghosts: Ghost[] = [];
     for (const name of entries) {
-      if (name.startsWith(".")) continue;
       if (!isValidGhostName(name)) continue;
       const dir = join(this.root, name);
       if (!isGhostHome(dir)) continue;
