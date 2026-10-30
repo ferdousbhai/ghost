@@ -57,15 +57,10 @@ export function scheduleUnitPrefix(ghostName: string): string {
   return `${SCHEDULE_UNIT_PREFIX}${ghostName.length}-${ghostName}-`;
 }
 
-/** One routine's unit-name stem, refusing an invalid slug. */
-export function routineStem(ghost: string, slug: string): string {
-  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
-  return `${scheduleUnitPrefix(ghost)}${slug}`;
-}
-
-/** A routine's timer and same-name service, by name and by path in `unitDir`. */
+/** A routine's timer and same-name service, by name and by path in `unitDir`, refusing an invalid slug. */
 export function routineUnits(ghost: string, slug: string, unitDir: string) {
-  const stem = routineStem(ghost, slug);
+  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
+  const stem = `${scheduleUnitPrefix(ghost)}${slug}`;
   return { timer: `${stem}.timer`, service: `${stem}.service`,
     timerPath: join(unitDir, `${stem}.timer`), servicePath: join(unitDir, `${stem}.service`) };
 }
