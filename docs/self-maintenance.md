@@ -218,7 +218,8 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 ## Back to the package
 
 ```sh
-rm ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev ~/.local/bin/ghost
+rm -f ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev \
+  ~/.local/bin/ghost ~/.local/bin/ghost-desktop-dev
 systemctl --user daemon-reload
 ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
 ```
