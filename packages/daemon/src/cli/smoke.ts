@@ -59,14 +59,14 @@ async function stopProcess(child: ChildProcess): Promise<void> {
 async function runScratchCli(
   argv: string[],
   options: Omit<GhostCliOptions, "stdout" | "stderr">,
-): Promise<{ stdout: string; stderr: string }> {
+): Promise<string> {
   const stdout = new Sink();
   const stderr = new Sink();
   const code = await ghostCli(argv, { ...options, stdout, stderr });
   if (code !== EXIT_CODE.success) {
     throw new Error(stderr.value.trim() || `ghost ${argv[0]} exited ${code}`);
   }
-  return { stdout: stdout.value, stderr: stderr.value };
+  return stdout.value;
 }
 
 interface SmokeSession {
@@ -151,7 +151,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
       stdin: ctx.runtime.stdin,
     };
     const status = await runScratchCli(["status", "-q"], options);
-    report("daemon", true, status.stdout.trim());
+    report("daemon", true, status.trim());
     step = "new probe";
     await runScratchCli(["new", "probe", "-q"], options);
     report("new probe", true);
@@ -174,7 +174,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
         "probe",
         "Reply with the single word: pong",
       ], options);
-      const reply = turn.stdout.trim();
+      const reply = turn.trim();
       if (!reply) throw new Error("turn returned no text");
       report("turn", true, reply);
 
@@ -182,7 +182,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
       // session: the reply must show the conversation kept its context.
       step = "second turn";
       const sessionId = readSessionId(
-        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)).stdout,
+        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)),
       );
       const followUp = await runScratchCli([
         "say",
@@ -193,7 +193,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
         sessionId,
         "Repeat the word you just said, and nothing else.",
       ], options);
-      const second = followUp.stdout.trim();
+      const second = followUp.trim();
       if (!second) throw new Error("second turn returned no text");
       if (!/pong/i.test(second)) {
         throw new Error(`second turn lost the conversation's context: ${second}`);
@@ -202,7 +202,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
 
       step = "accounting";
       const listed = readSession(
-        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)).stdout,
+        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)),
         sessionId,
       );
       if (listed.messageCount < 4) {
