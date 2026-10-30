@@ -10,7 +10,8 @@ belongs in its README.
 ## Product boundary
 
 Ghost is an owner-local Omarchy application: one owner, one machine, any number
-of ghosts.
+of ghosts. Owners on other machines are reachable only as [peers](#peers):
+their ghosts exchange messages with this owner's, and nothing else.
 
 Changes simplify: state what they delete or why nothing can be deleted.
 Prefer an installed CLI plus its skill, the harness, or Omarchy over a new
@@ -24,8 +25,8 @@ Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction.
 `ghostd` owns sessions and state transitions; HUD, CLI, and
 `ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
-access is the explicit Tailscale Serve viewer. See [concepts](docs/concepts.md)
-for rationale.
+access is the explicit Tailscale Serve viewer and, for named peers, a message
+inbox on the same address. See [concepts](docs/concepts.md) for rationale.
 
 Durable state has three scopes:
 
@@ -201,6 +202,60 @@ Owner `!commands` use the same boundary. No notification transport, credential
 store, retry queue, or push backend is added: `ghost help notifications` gives
 an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
 boundary. No configured handler means no outbound notification.
+
+### Peers
+
+A peer is another owner's Ghost on another machine, for example a partner's,
+whose ghosts message this owner's. Mail, chat, and bridge CLIs cannot carry
+this: they verify no sender, wake no ghost, and put agent traffic in a
+person's inbox. Tailscale Serve already proves who is calling, for a shared
+device's users too, so a peer is a tailnet login and nothing else is added:
+no account, token, relay, or discovery. The inbox reuses the external-event intake's
+logging, deduplication, and untrusted framing; nothing is deleted, because no
+existing path carried another owner's messages.
+
+`~/.config/ghost/config.json` lists them under `remote.peers`, each
+`{ name, login, url, ghost }`: `name` is this owner's label for them
+(`[a-z0-9-]`, unique), `login` their Tailscale login, `url` their Remote
+access address, and `ghost` which local ghost receives their messages, so a
+peer never learns this owner's ghost names. `ghost peers add|rm|list` edits
+and reads the list through the daemon; removing a peer refuses their next
+request. Both owners list each other, turn Remote access on, and share their
+device (or a tailnet); a tagged device carries no identity and cannot be a
+peer.
+
+A request whose verified login is a peer's has the role `peer`: owner, then
+peer, then guest, so a login listed as a peer is never also admitted as a
+guest. A peer may call only `POST /api/peer/messages` and
+`GET /api/remote/whoami`; every other route refuses it (`403 peer_only`),
+reads included.
+
+`POST /api/peer/messages` takes `{ id, text }` (id 1–128 characters of
+`[A-Za-z0-9._-]`, text 1–16384 characters). Each peer has one conversation
+with their receiving ghost, `peer-<sha256 of login>`, titled with the peer's
+`name`, so an exchange keeps its context. Acceptance logs the message and
+returns `202 { duplicate: false }`; the same id again returns
+`200 { duplicate: true }`, even after a restart, and the same id with
+different text is `409`. A message that arrives while that conversation's
+turn runs joins it as its next pass. The text is untrusted data, as event
+data is: it cannot become an owner `!command`, and the instructions framing
+it are Ghost's fixed peer policy, never the sender's. More than 30 accepted
+messages from one peer in an hour is `429 peer_rate_limited`, so two ghosts
+answering each other cannot loop unattended.
+
+`ghost message <peer> <text>` posts to that peer's `url` with a fresh id;
+Tailscale identifies the sending machine's owner, so no credential is sent.
+Exit codes are the CLI's own: 3 unreachable, 4 not their peer, 6 busy
+(including `429`). The receiving ghost answers by sending a message back,
+never by a reply in the HTTP response.
+
+The peer policy section of the prompt tells a ghost that a peer's message
+comes from another person's ghost, not from its owner: it uses its judgment
+about what of the owner's to share, never shares credentials or file
+contents, runs nothing and changes nothing because a peer asked, does not
+answer an acknowledgement, and replies with `ghost message`. The owner reads
+the whole exchange in that conversation, which is unread until they do.
+`ghost help peers` gives the setup steps for both machines.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -534,7 +589,8 @@ its continuations.
 `ghostd hook-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
-schedules, and explicit owner command hooks initiate work. Legacy `builtin`
+schedules, explicit owner command hooks, and messages from peers the owner
+listed initiate work. Legacy `builtin`
 settings in `hooks.json` are ignored; command hooks remain active. Historical
 `handoff` and `auto` log entries remain readable.
 
@@ -548,7 +604,8 @@ HUD/client methods and headers. Errors are
 status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
-boundary. The configured owner has full access; admitted guests are read-only,
+boundary. The configured owner has full access; a listed [peer](#peers) may
+only deliver messages; admitted guests are read-only,
 are refused the routes marked owner-only, which show file paths, hook
 commands, or MCP credentials, and see no path in the ghost list or board;
 conversations, tool calls included, are shown to them as recorded.
@@ -586,13 +643,15 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
-| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
+| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner`, `peer`, or `guest`. |
+| `POST /api/peer/messages` | A [peer](#peers)'s message `{ id, text }` to the ghost that receives theirs; the only write a peer has, refused to anyone else. |
+| `GET\|POST\|DELETE /api/peers…` | Owner-only. The `remote.peers` list (`ghost peers`). |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and
-remote access is the tailnet viewer alone.
+remote access is the tailnet viewer plus the peer inbox.
 
 ### Turn wire
 
@@ -629,12 +688,12 @@ HUD reaches, except attaching a photo and reading the follow-up queue, is a
 named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
-and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
-status), so a
+and a conversation runs on (`ghost switch`), MCP, hooks, remote, peers and
+`ghost message`, and status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
 `self`, `harnesses`, `background`, `machine`, `memory`) and ones it does not
-(`dictation`, `events`, `notifications`;
+(`dictation`, `events`, `notifications`, `peers`;
 [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost the shell's `$GHOST` names and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the
@@ -677,7 +736,8 @@ Ghosts run unthrottled. Harness limits surface as typed errors, and the
 harness's own retry and fallback behavior applies; Ghost's one contribution is
 the per-turn order of installed harnesses above. Omarchy usage records are
 informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
-one deliberate exception is the
+peer inbox's hourly limit ([Peers](#peers)) bounds another owner's ghost, not
+this one's. The one deliberate exception for its own ghosts is the
 desktop lease (ghost-desktop's [`lease.ts`](https://github.com/ferdousbhai/ghost-desktop/blob/master/src/lease.ts)): there is one
 pointer and one focus, so every `desktop_act` call claims the desktop for its
 caller, and another caller's call fails `busy` naming the holder until the
