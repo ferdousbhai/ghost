@@ -696,6 +696,11 @@ Singleton {
             root.ghosts = Array.isArray(list) ? list : [];
             root.reachable = true;
             root.lastError = "";
+            // One banished elsewhere (the CLI, another shell) is gone; a
+            // rename in flight is still listed under its old name.
+            if (root.activeGhost !== "" && !root.renamingGhost
+                    && !root.ghosts.some(ghost => ghost && ghost.name === root.activeGhost))
+                root.forgetGhost(root.activeGhost);
             if (root.activeGhost === "" && root.ghosts.length > 0)
                 root.activeGhost = root.ghosts[0].name;
             if (root.activeGhost !== "") {

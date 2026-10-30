@@ -102,4 +102,21 @@ TestCase {
         compare(Ghostd.createGhostRequest, null);
         verify(Ghostd.lastError.indexOf("newer conflict") >= 0);
     }
+
+    // A ghost banished elsewhere (the CLI, another shell) leaves the listing:
+    // the HUD moves to a listed one rather than keep showing it and polling
+    // its missing event stream.
+    function test_aListingWithoutTheActiveGhostMovesToAListedOne(): void {
+        Ghostd.activeGhost = "banished";
+        Ghostd.sessionIds = ({ banished: "hud-gone" });
+        Ghostd.currentSessionId = "hud-gone";
+
+        Ghostd.refresh();
+        requests[0].complete(200, [{ name: "existing", dir: "/tmp/ghosts/existing" }]);
+
+        compare(Ghostd.activeGhost, "existing");
+        compare(Ghostd.currentSessionId, "");
+        verify(!("banished" in Ghostd.sessionIds));
+        Ghostd.activeGhost = "";
+    }
 }
