@@ -402,16 +402,16 @@ export class SessionHost {
 
   // ── Persona and harness configuration ─────────────────────────────────
 
-  /**
-   * The ghost's whole system prompt: its character and the stable policy
-   * sections. Rendered before every turn, so a character the ghost (or the
-   * owner) rewrote is who it is on the next one.
-   */
   /** The owner's Documents folder, where board.md lives. */
   documentsDir(): string {
     return resolveDocumentsDirectory(this.env, this.ownerHome);
   }
 
+  /**
+   * The ghost's whole system prompt: its character and the stable policy
+   * sections. Rendered before every turn, so a character the ghost (or the
+   * owner) rewrote is who it is on the next one.
+   */
   async renderPersona(ghost: Ghost): Promise<string> {
     const character = await readCharacter(ghost.dir);
     return buildGhostSystemPrompt({
