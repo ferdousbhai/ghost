@@ -148,13 +148,6 @@ Singleton {
         return root.readOk;
     }
 
-    function projectRoot(path: string): string {
-        const file = root.absolute(path);
-        if (file === "") return "";
-        return Editor.projectRoot(file, root.home, Quickshell.env("HOME") || "",
-            probed => root.exists(probed));
-    }
-
     /**
      * Open `path` in the user's editor with its project as the workspace.
      *
@@ -165,7 +158,8 @@ Singleton {
     function openInEditor(path: string): void {
         const file = root.absolute(path);
         if (file === "") return;
-        const project = root.projectRoot(file);
+        const project = Editor.projectRoot(file, root.home, Quickshell.env("HOME") || "",
+            probed => root.exists(probed));
         // Re-read per click rather than cached: the user can change their
         // editor from Omarchy's menu between one click and the next. The path
         // is $HOME-relative and not XDG_STATE_HOME-relative because that is
