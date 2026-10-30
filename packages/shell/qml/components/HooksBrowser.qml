@@ -175,7 +175,7 @@ Rectangle {
     }
 
 
-    Column {
+    PaneHeader {
         id: header
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
@@ -183,36 +183,30 @@ Rectangle {
         anchors.rightMargin: Theme.pad
         anchors.top: parent.top
         anchors.topMargin: Theme.pad
-        spacing: Theme.gap
+        title: "Hooks"
+        subtitle: root.busy ? "Saving…"
+            : Ghostd.activeHookCount === 0
+                ? "No lifecycle hooks are loaded."
+                : Ghostd.activeHookCount + (Ghostd.activeHookCount === 1
+                    ? " lifecycle hook is loaded."
+                    : " lifecycle hooks are loaded.")
+        subtitleColor: root.busy ? Theme.ghostAmber : Theme.foregroundDim
 
-        PaneHeader {
-            width: parent.width
-            title: "Hooks"
-            subtitle: root.busy ? "Saving…"
-                : Ghostd.activeHookCount === 0
-                    ? "No lifecycle hooks are loaded."
-                    : Ghostd.activeHookCount + (Ghostd.activeHookCount === 1
-                        ? " lifecycle hook is loaded."
-                        : " lifecycle hooks are loaded.")
-            subtitleColor: root.busy ? Theme.ghostAmber : Theme.foregroundDim
-
-            ActionButton {
-                objectName: "hooksNewButton"
-                label: "+ New"
-                primary: true
-                enabled: root.editable && !root.busy && !root.editing
-                Accessible.description: "Add a command hook to hooks.json"
-                onClicked: root.beginDraft()
-            }
-
-            ActionButton {
-                label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
-                enabled: !Ghostd.hookConfigLoading && !root.editing
-                Accessible.description: "Reload hooks.json"
-                onClicked: root.load(true)
-            }
+        ActionButton {
+            objectName: "hooksNewButton"
+            label: "+ New"
+            primary: true
+            enabled: root.editable && !root.busy && !root.editing
+            Accessible.description: "Add a command hook to hooks.json"
+            onClicked: root.beginDraft()
         }
 
+        ActionButton {
+            label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
+            enabled: !Ghostd.hookConfigLoading && !root.editing
+            Accessible.description: "Reload hooks.json"
+            onClicked: root.load(true)
+        }
     }
 
     Rectangle {
