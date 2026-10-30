@@ -13,8 +13,10 @@ pragma Singleton
 // prompt.
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Io
 import QtQuick
 import "DesktopKeys.js" as Desk
+import "DesktopContext.js" as DesktopContext
 
 Singleton {
     id: root
@@ -38,6 +40,10 @@ Singleton {
     property bool continuing: false
     /** Enter on an empty prompt while recording: send what Voxtype types. */
     property bool sendAfterDictation: false
+    /** The window this summon came from (DesktopContext.capture), sent with its prompt; null once sent. */
+    property var desktop: null
+    /** That window's terminal directory, once cwdProbe has read it. */
+    property string desktopCwd: ""
 
     /**
      * The edge glow's ignition: which screen, which edge, and where along it
@@ -91,6 +97,14 @@ Singleton {
             return;
         }
         root.screenName = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "";
+        // Before the prompt maps and takes the focus: the window the owner is in.
+        root.desktop = DesktopContext.capture(Hyprland.activeToplevel);
+        root.desktopCwd = "";
+        cwdProbe.running = false;
+        if (root.desktop && root.desktop.address !== "") {
+            cwdProbe.command = DesktopContext.cwdCommand(root.desktop.address);
+            cwdProbe.running = true;
+        }
         // A reply on screen, or a turn still running, is what a summon
         // follows up on; a fresh summon starts a fresh conversation.
         root.continuing = root.phase !== "" && root.ghost === Ghostd.activeGhost;
@@ -152,7 +166,10 @@ Singleton {
         if (root.continuing && !root.projected) Ghostd.openConversationForGhost(root.ghost, root.sessionId);
         // A ghost no longer listed cannot be continued: the send starts afresh.
         if (!root.continuing || !root.projected) Ghostd.newConversation();
-        Ghostd.send(prompt);
+        // The window goes with the summon's first prompt only.
+        Ghostd.send(prompt, DesktopContext.payload(root.desktop, root.desktopCwd));
+        root.desktop = null;
+        root.desktopCwd = "";
         root.ghost = Ghostd.activeGhost;
         root.sessionId = Ghostd.currentSessionId;
         root.answer = "";
@@ -174,6 +191,15 @@ Singleton {
 
     function mine(ghost: string, sessionId: string): bool {
         return root.phase !== "" && ghost === root.ghost && sessionId === root.sessionId;
+    }
+
+    Process {
+        id: cwdProbe
+        objectName: "desktopCwdProbe"
+        stdout: StdioCollector {
+            id: cwdOutput
+            onStreamFinished: if (root.desktop) root.desktopCwd = cwdOutput.text.trim()
+        }
     }
 
     Connections {

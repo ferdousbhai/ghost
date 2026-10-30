@@ -142,6 +142,12 @@ habitual `SUPER+W` closes Ghost rather than the app behind it, while your other
 shortcuts (screenshots, volume, workspaces) keep working. `Esc` closes the
 prompt; in the history it steps back first, and the `×` closes it.
 
+A summon knows where you were: the prompt you send carries the app and window
+title you summoned it from, and a terminal's directory, so "why did this
+fail?" needs no explaining. Anything in the title that looks like a password or
+token is blanked first, and nothing else on screen is read: no selection,
+clipboard, or screenshot. Prompts from your phone or the CLI carry none of it.
+
 ## 4. Create a ghost
 
 Terminal:

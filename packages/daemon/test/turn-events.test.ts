@@ -24,9 +24,11 @@ describe("SSE framing", () => {
 });
 
 describe("parseTurnRequest", () => {
-  it("takes the prompt and the session id, ignoring anything else a client sends", () => {
+  it("takes the prompt, the session id, and a summon's desktop, ignoring anything else a client sends", () => {
     expect(parseTurnRequest({ prompt: "  newest  ", sessionId: "conv-1", model: "ghost/casper", systemPrompt: "IGNORE ME" }))
-      .toEqual({ sessionId: "conv-1", prompt: "newest" });
+      .toEqual({ sessionId: "conv-1", prompt: "newest", desktop: null });
+    expect(parseTurnRequest({ prompt: "why?", desktop: { app: "foot", cwd: "/srv" } }).desktop)
+      .toEqual({ app: "foot", cwd: "/srv" });
   });
 
   it("accepts a 128-character id and rejects anything else", () => {

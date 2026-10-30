@@ -76,6 +76,52 @@ TestCase {
         compare(Presence.answer, "Two cards.");
     }
 
+    // "Help with this": the window the owner was in when they summoned goes
+    // with that summon's first prompt, its terminal directory read by address
+    // because the prompt has the focus by then. Nothing goes after that.
+    function test_aSummonCarriesTheWindowItCameFrom(): void {
+        const probe = findChild(Presence, "desktopCwdProbe");
+        Hyprland.activeToplevel = { title: "cargo build", address: "0x55aa", wayland: { appId: "Alacritty" } };
+        try {
+            Presence.summon();
+            compare(Presence.desktop, { app: "Alacritty", title: "cargo build", address: "0x55aa" });
+            verify(probe.running);
+            compare(probe.command[0], "bash");
+            compare(probe.command[4], "0x55aa");
+
+            probe.stdout.text = "/home/owner/src/app\n";
+            probe.stdout.streamFinished();
+            compare(Presence.desktopCwd, "/home/owner/src/app");
+
+            Presence.send("why did this fail?");
+            compare(JSON.parse(posts()[0].body).desktop,
+                { app: "Alacritty", title: "cargo build", cwd: "/home/owner/src/app" });
+            compare(Presence.desktop, null);
+
+            // An answer from the card is no summon: it carries no window.
+            finish(posts()[0], "A missing crate.");
+            Presence.answerQuestion("and now?");
+            verify(!("desktop" in JSON.parse(posts()[1].body)));
+        } finally {
+            Hyprland.activeToplevel = null;
+            probe.running = false;
+        }
+    }
+
+    function test_ghostsOwnWindowIsNoContext(): void {
+        const probe = findChild(Presence, "desktopCwdProbe");
+        Hyprland.activeToplevel = { title: "Ghost", address: "0x1", wayland: { appId: "org.quickshell" } };
+        try {
+            Presence.summon();
+            compare(Presence.desktop, null);
+            verify(!probe.running);
+            Presence.send("hello");
+            verify(!("desktop" in JSON.parse(posts()[0].body)));
+        } finally {
+            Hyprland.activeToplevel = null;
+        }
+    }
+
     function test_aSummonOverTheReplyFollowsUp(): void {
         Presence.summon();
         Presence.send("first");

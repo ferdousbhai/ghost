@@ -6,6 +6,7 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
+import { type DesktopContext, renderDesktopContext } from "./desktop-context.js";
 import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
 import { PeerRateLimit, peerCheckPrompt, peerConversationId, peerMailPrompt, peerMessageHeader, peerMessageRecord, type Peer, type PeerBook, type PeerMessage } from "./peers.js";
 import { randomUUID } from "node:crypto";
@@ -141,6 +142,8 @@ export interface SessionHostOptions {
 export interface RunTurnOptions {
   sessionId?: string | null;
   prompt: string;
+  /** The window a summon came from: hidden context for the first pass only. */
+  desktop?: DesktopContext | null;
   emit: (event: TurnEvent) => void;
 }
 
@@ -645,7 +648,7 @@ export class SessionHost {
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { promptRecorded?: boolean; peer?: boolean },
+    options: Pick<RunTurnOptions, "sessionId" | "prompt" | "desktop"> & { promptRecorded?: boolean; peer?: boolean },
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -673,7 +676,7 @@ export class SessionHost {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
-            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId, options.peer); }
+            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId, options.peer, options.desktop ?? null); }
             catch (error) {
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
@@ -811,6 +814,7 @@ export class SessionHost {
     promptRecorded = false,
     initialTurnId: string,
     peer = false,
+    desktop: DesktopContext | null = null,
   ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -851,6 +855,7 @@ export class SessionHost {
         // In a peer's conversation, every pass is handed the mail it has not seen.
         const mail = origin === "hook" ? null : await this.handPeerMail(ghost, id);
         if (mail) passPrompt = `${mail}\n\n${passPrompt}`;
+        if (desktop && next === first && origin === undefined) passPrompt = `${passPrompt}\n\n${renderDesktopContext(desktop)}`;
         if (origin !== "hook") {
           const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;

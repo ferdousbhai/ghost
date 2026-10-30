@@ -2119,7 +2119,8 @@ Singleton {
     }
 
     /** Start a turn with `text`, or queue it as a follow-up while one runs. */
-    function send(text: string): void {
+    /** `desktop`: the window a summon came from (DesktopContext.payload), or null. */
+    function send(text: string, desktop: var): void {
         if (root.streaming) {
             root.queueMessage(text);
             return;
@@ -2152,7 +2153,8 @@ Singleton {
         root.dispatch(xhr, "POST",
             root.ghostPath(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify({ prompt: prompt, sessionId: state.sessionId }), () => xhr === state.request);
+            JSON.stringify(Object.assign({ prompt: prompt, sessionId: state.sessionId }, desktop ? { desktop: desktop } : {})),
+            () => xhr === state.request);
     }
 
     /**

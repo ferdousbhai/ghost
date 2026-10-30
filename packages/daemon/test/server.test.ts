@@ -717,6 +717,37 @@ describe("POST /api/ghosts/:name/messages", () => {
     });
   });
 
+  it("hands a summon's window to the first pass only, and never logs it", async () => {
+    const base = await serve([...replies("Looking."), ...replies("Done.")]);
+    const desktop = { app: "Alacritty", title: "psql password=s3cret", cwd: "/srv/app" };
+    await postTurn(base, { ...TURN_BODY, prompt: "What's this error?", desktop });
+    await postTurn(base, { ...TURN_BODY, prompt: "And now?" });
+
+    const [first, second] = harness!.calls().map((call) => call.prompt);
+    expect(first).toContain("What's this error?\n\n<desktop-context>\n");
+    expect(first).toContain("app: Alacritty");
+    expect(first).toContain("title: psql password=[redacted]");
+    expect(first).toContain("terminal directory: /srv/app");
+    expect(first).not.toContain("s3cret");
+    expect(second).toBe("And now?");
+    const transcript = await (await fetch(`${base}/api/ghosts/casper/sessions/${TURN_BODY.sessionId}/transcript`)).text();
+    expect(transcript).toContain("What's this error?");
+    expect(transcript).not.toContain("desktop-context");
+    expect(transcript).not.toContain("Alacritty");
+  });
+
+  it("refuses a malformed desktop before the stream", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...TURN_BODY, desktop: { pid: 42 } }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    expect(harness!.calls()).toHaveLength(0);
+  });
+
   it("rejects a malformed turn body with a client error", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/messages`, {

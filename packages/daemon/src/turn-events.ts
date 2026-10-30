@@ -4,6 +4,7 @@
  * size. Clients ignore event types they do not know.
  */
 import { requireConversationId } from "./conversation-log.js";
+import { type DesktopContext, parseDesktopContext } from "./desktop-context.js";
 import { GhostError } from "./errors.js";
 import type { RunResourceSnapshot } from "./run-resources.js";
 
@@ -135,16 +136,19 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
 export interface TurnRequest {
   sessionId: string | null;
   prompt: string;
+  /** The window a summon came from, when the HUD sent one. */
+  desktop: DesktopContext | null;
 }
 
-/** Parse a turn request body, `{ prompt, sessionId? }`. */
+/** Parse a turn request body, `{ prompt, sessionId?, desktop? }`. */
 export function parseTurnRequest(body: Record<string, unknown>): TurnRequest {
-  const { prompt, sessionId } = body;
+  const { prompt, sessionId, desktop } = body;
   if (typeof prompt !== "string" || prompt.trim() === "") {
     throw new GhostError("invalid_request", "\"prompt\" must be non-empty text.", 400);
   }
   return {
     sessionId: typeof sessionId === "string" && sessionId ? requireConversationId(sessionId) : null,
     prompt: prompt.trim(),
+    desktop: parseDesktopContext(desktop),
   };
 }

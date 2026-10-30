@@ -23,7 +23,11 @@ dismisses it. Sending starts a new conversation, or continues the presence's
 while its ticker or reply card is up, unless the owner chose `new ×`. The
 prompt then closes, the glow thins to a shimmer, and a ticker that takes no
 keyboard unclicked shows the turn's activity, then its reply or error as a
-card, until dismissed or opened in the HUD. The `Presence` singleton holds
+card, until dismissed or opened in the HUD. A summon records the window it
+came from before the prompt takes the focus (`DesktopContext.js`: app id,
+title, and, by window address, a terminal shell's directory) and sends it as
+the first prompt's `desktop`; the daemon redacts and hides it (CONTRACTS.md).
+The `Presence` singleton holds
 that state and `PresenceOverlay` (mounted by the always-loaded service, since
 the host unloads the panel whenever it hides) draws it.
 
