@@ -179,22 +179,26 @@ the owner about everything else. Low battery reaches a ghost through Omarchy's
 
 ### Crash watch
 
-Ghost adds no crash-monitoring code either: systemd-coredump records every
-crash in the journal, and `ghost help crashes` gives the opt-in watch, a
-minutely routine with slug `crash-watch` running a Bash script the ghost saves.
-It reads coredump entries after a journal cursor kept in the service's
-`StateDirectory=ghost/crash-watch` (a leaf, so systemd never changes the mode
-of `ghost/`, which holds the token), advanced only past delivered crashes and
-started at the journal's end, so crashes from before the watch are not
-replayed. Each
-crash is a `ghost event crash <program>-<YYYYMMDDHH>` (the crash's UTC hour),
-so at most one per program an hour; exit 6 counts as delivered. The payload is
-the entry's program, pid, uid, signal, time, executable, unit, and stack
-trace. One ghost per machine installs it, only when the owner asks; the
-routines view pauses, inspects, and removes it, and an `ignore` regex in the
-script excludes programs the owner names. The woken ghost diagnoses read-only
-and proposes a fix with its undo; it changes, files, or sends nothing until the
-owner says yes in that conversation.
+Ghost adds no crash- or failure-monitoring code either: the journal records
+every core dump (systemd-coredump) and every failed unit, and `ghost help
+crashes` gives the opt-in watch, a minutely routine with slug `crash-watch`
+running a Bash script the ghost saves. It reads both kinds of entry after a
+journal cursor kept in the service's `StateDirectory=ghost/crash-watch` (a
+leaf, so systemd never changes the mode of `ghost/`, which holds the token),
+advanced only past delivered events and started at the journal's end, so what
+failed before the watch is not replayed. A crash is a `ghost event crash
+<program>-<YYYYMMDDHH>`, at most one per program an hour; a failed service,
+system or user, is a `ghost event unit <unit>-<YYYYMMDD>`, at most one per
+service a day, since failing services tend to repeat. Units that are not
+services, failures whose result is `core-dump` (already a crash event), and
+the watch's own unit are skipped; times are UTC; exit 6 counts as delivered.
+A crash's payload is its program, pid, uid, signal, executable, unit, and
+stack trace; a service's is its result and that run's last 40 log lines. One
+ghost per machine installs it, only when the owner asks; the routines view
+pauses, inspects, and removes it, and an `ignore` regex in the script excludes
+programs and services the owner names. The woken ghost diagnoses read-only and
+proposes a fix with its undo; it changes, files, restarts, or sends nothing
+until the owner says yes in that conversation.
 
 The HUD counts unread `event-` conversations, which only intake creates, as
 the ghost's findings (see the shell README's bar mark), so that id prefix is

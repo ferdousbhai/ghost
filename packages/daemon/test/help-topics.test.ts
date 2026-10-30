@@ -65,7 +65,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("~/.config/omarchy/hooks/battery-low.d/");
   });
 
-  it("crashes: a minutely journal watch in the ghost's namespace, one event per program an hour, diagnosis without changes", () => {
+  it("crashes: a minutely journal watch in the ghost's namespace, crashes hourly and failed services daily, diagnosis without changes", () => {
     const text = renderHelpTopic("crashes", INPUT);
     expect(text).toContain("# ghost-timer-v1-4-aria-crash-watch.service");
     expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/crash-watch.sh");
@@ -73,13 +73,18 @@ describe("ghost help topics", () => {
     expect(text).toContain("cursor_file=$STATE_DIRECTORY/cursor");
     expect(text).toContain("OnCalendar=minutely");
     expect(text).toContain("list-unit-files '*-crash-watch.timer'");
-    expect(text).toContain("MESSAGE_ID=fc2e22bc6ee647b6b90729ab34a250b1");
+    expect(text).toContain("crash=fc2e22bc6ee647b6b90729ab34a250b1 failure=d9b373ed55a64feb8242e02dbe79a49c");
     expect(text).toContain("journalctl -q -n 0 --cursor-file=");
-    expect(text).toContain("--after-cursor=\"$cursor\"");
-    expect(text).toContain("/usr/bin/ghost event crash \"$comm-$hour\" --ghost aria");
+    expect(text).toContain("--after-cursor=\"$cursor\" MESSAGE_ID=\"$crash\" MESSAGE_ID=\"$failure\"");
+    expect(text).toContain("+%Y%m%d%H");
+    expect(text).toContain("+%Y%m%d)");
+    expect(text).toContain("$name == *.service && $name != *-crash-watch.service");
+    expect(text).toContain("!= core-dump");
+    expect(text).toContain("_SYSTEMD_INVOCATION_ID=\"$run\" + USER_INVOCATION_ID=\"$run\"");
+    expect(text).toContain("/usr/bin/ghost event \"$source\" \"$name-$id\" --ghost aria");
     expect(text).toContain("(( status == 0 || status == 6 )) || { failed=1; break; }");
     expect(text).toContain("ignore='^$'");
-    expect(text).toContain("Change, file, or send nothing.");
+    expect(text).toContain("Change, file, restart, or send nothing.");
     expect(text).toContain("the owner's yes in this conversation is what applies it");
     expect(text).toContain("diagnose-crash");
   });
