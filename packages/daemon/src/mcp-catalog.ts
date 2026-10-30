@@ -1,14 +1,10 @@
-import { isAbsolute, join, resolve } from "node:path";
-import { GhostError } from "./errors.js";
+import { join, resolve } from "node:path";
+import { errorMessage, GhostError } from "./errors.js";
 import type { GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer } from "./mcp-config.js";
-import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
+import { mcpServerValidationErrors, type MCPServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
+import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
-import { errorMessage } from "./errors.js";
-import { mcpServerValidationErrors } from "./mcp-config-policy.js";
-import {
-  readPrivateFileText,
-} from "./private-file.js";
 
 export interface McpServerView {
   name: string;
@@ -71,7 +67,7 @@ export function normalizeMcpStdioCwd(
   const cwd = stdio.cwd;
   return {
     ...stdio,
-    cwd: cwd === undefined ? sourceRoot : isAbsolute(cwd) ? resolve(cwd) : resolve(sourceRoot, cwd),
+    cwd: cwd === undefined ? sourceRoot : resolve(sourceRoot, cwd),
   };
 }
 
