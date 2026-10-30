@@ -135,14 +135,12 @@ Rectangle {
                 + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
 
             ActionButton {
-
                 label: Ghostd.mcpLoading ? "Refreshing" : "Refresh"
                 enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpLoading && !Ghostd.mcpMutating
                 onClicked: Ghostd.fetchMcp(true)
             }
 
             ActionButton {
-
                 label: "+ Add server"
                 primary: true
                 enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpMutating

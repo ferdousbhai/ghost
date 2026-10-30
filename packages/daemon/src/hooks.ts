@@ -9,8 +9,7 @@ import {
   type GhostSessionStopResult, type GhostTurnEndEvent,
 } from "./hook-policy.js";
 import { runHarness } from "./harness-process.js";
-import type { Logger } from "./log.js";
-import { silentLogger } from "./log.js";
+import { type Logger, silentLogger } from "./log.js";
 import { readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import { errorMessage } from "./errors.js";

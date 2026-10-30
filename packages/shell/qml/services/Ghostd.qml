@@ -58,7 +58,7 @@ Singleton {
     property string ghostDeleteError: ""
     /** Why the last ghost rename was refused, or "". Presentable as-is. Kept
         apart from `ghostDeleteError`: that one renders inside the banish
-        modal, and a rename is typed in the roster row itself. */
+        modal, and a rename is typed in the launcher row itself. */
     property string ghostRenameError: ""
 
     // Remote access is daemon-global rather than ghost- or conversation-scoped,
