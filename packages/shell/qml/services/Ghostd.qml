@@ -480,9 +480,8 @@ Singleton {
 
     function reloadToken(): string {
         apiTokenFile.reload();
-        const text = apiTokenFile.text();
-        root.apiToken = text ? text.trim() : "";
-        return root.apiToken;
+        root.apiToken = "";
+        return root.token();
     }
 
     /**
@@ -757,7 +756,6 @@ Singleton {
                     root.ghostDeleteError = root.refusal(xhr, "DELETE ghost");
                     return;
                 }
-                root.ghostDeleteError = "";
                 root.forgetGhost(name);
                 // activeGhost is "" now if this was the active one, so the
                 // listing picks the next ghost the way the first one does.
@@ -2153,9 +2151,7 @@ Singleton {
                 root.joinRunningTurn(state, prompt);
                 return;
             }
-            root.readTurnStream(xhr, state.key,
-                "POST /api/ghosts/" + ghost + "/messages",
-                "the stream ended mid-turn");
+            root.readTurnStream(xhr, state.key, "POST /api/ghosts/" + ghost + "/messages");
         };
         root.dispatch(xhr, "POST",
             root.ghostPath(ghost) + "/messages",
@@ -2248,8 +2244,7 @@ Singleton {
     }
 
     /** Consume the cumulative Qt XHR body and settle every readyState-4 path. */
-    function readTurnStream(xhr: var, key: string, requestName: string,
-            missingTerminal: string): void {
+    function readTurnStream(xhr: var, key: string, requestName: string): void {
         const state = root.turnStates[key];
         if (!state || xhr !== state.request) return;
         if (xhr.readyState >= 3 && xhr.status === 200) {
@@ -2274,7 +2269,7 @@ Singleton {
             root.resumeTurnStream(state);
             return;
         } else if (state.streaming) {
-            root.endTurnState(state, missingTerminal);
+            root.endTurnState(state, "the stream ended mid-turn");
         }
         if (xhr === state.request) state.request = null;
         root.projectTurnFields(state);
@@ -2290,7 +2285,7 @@ Singleton {
         const xhr = root.newRequest();
         state.request = xhr;
         xhr.onreadystatechange = function () {
-            root.readTurnStream(xhr, state.key, "GET " + path, "the stream ended mid-turn");
+            root.readTurnStream(xhr, state.key, "GET " + path);
         };
         root.dispatch(xhr, "GET", path, ({ "Accept": "text/event-stream" }), null,
             () => xhr === state.request);

@@ -46,7 +46,7 @@ TestCase {
         turn.xhr.responseText = "data: {\"type\":\"start\"}\n\n"
             + "data: {\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"Hel\"}\n\n"
             + "data: {\"type\":\"resume\",\"turn\":\"t1\",\"from\":2}\n\n";
-        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn", "missing terminal");
+        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn");
         return turn;
     }
 
@@ -213,10 +213,10 @@ TestCase {
         turn.xhr.readyState = 4;
         turn.xhr.responseText = "data: {\"type\":\"start\"}\n\n";
 
-        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn", "missing terminal");
+        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn");
 
         verifyInteractionSettled(turn.state);
-        compare(turn.state.lastError, "missing terminal");
+        compare(turn.state.lastError, "the stream ended mid-turn");
         verify(!turn.state.rows[1].pending);
         compare(turn.state.request, null);
     }
@@ -392,7 +392,7 @@ TestCase {
             abort: function () {
                 aborts += 1;
                 xhr.readyState = 4;
-                Ghostd.readTurnStream(xhr, state.key, "turn", "missing terminal");
+                Ghostd.readTurnStream(xhr, state.key, "turn");
             }
         };
         state.request = xhr;

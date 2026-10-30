@@ -47,8 +47,7 @@ Item {
         root.state.request = root.xhr;
         root.xhr.onreadystatechange = function () {
             if (root.xhr.readyState === 3) root.loadingCallbacks += 1;
-            Ghostd.readTurnStream(root.xhr, root.state.key,
-                "byte-split SSE probe", "missing terminal event");
+            Ghostd.readTurnStream(root.xhr, root.state.key, "byte-split SSE probe");
             if (root.xhr.readyState === 4) Qt.callLater(root.verifyResult);
         };
         root.xhr.open("GET", url);

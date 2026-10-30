@@ -64,7 +64,7 @@ TestCase {
 
     function push(turn: var, event: var): void {
         turn.xhr.responseText += "data: " + JSON.stringify(event) + "\n\n";
-        Ghostd.readTurnStream(turn.xhr, turn.state.key, "test turn", "missing terminal");
+        Ghostd.readTurnStream(turn.xhr, turn.state.key, "test turn");
     }
 
     function test_twoConversationsStreamAndSettleIndependently(): void {
