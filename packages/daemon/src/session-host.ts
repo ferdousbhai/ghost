@@ -1432,11 +1432,7 @@ export class SessionHost {
   /** Release what the daemon holds under a home that is about to move. */
   private async quiesce(ghost: Ghost, outcome: "deleted" | "renamed"): Promise<void> {
     try {
-      await sweepGhostSchedules(ghost.name, {
-        unitDir: this.scheduleUnitDir,
-        ...(this.scheduleCommandRunner ? { run: this.scheduleCommandRunner } : {}),
-        logger: this.logger,
-      });
+      await sweepGhostSchedules(ghost.name, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner, logger: this.logger });
       await discardRoutineRecoveries(ghost.name, { unitDir: this.scheduleUnitDir });
     } catch (error) {
       this.logger.error(`could not clean up a ghost's schedules before it was ${outcome}`, { ghost: ghost.name, error: errorMessage(error) });
