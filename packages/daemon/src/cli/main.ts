@@ -331,7 +331,7 @@ const EVERY_ARG = argsWith({
   value: COMMANDS.flatMap((command) => command.flags?.value ?? []),
 });
 
-export const USAGE = renderUsage(COMMANDS);
+const USAGE = renderUsage(COMMANDS);
 const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
 
 function commandHelp(verb: string): string {
@@ -339,7 +339,7 @@ function commandHelp(verb: string): string {
   return command ? renderCommandHelp(command) : USAGE;
 }
 
-export function version(runtime: Pick<CliRuntime, "env">): string {
+function version(runtime: Pick<CliRuntime, "env">): string {
   // The injected env is consulted first so the test seam still overrides the
   // build-time define and the checkout's package.json behind DAEMON_VERSION.
   return runtime.env.GHOSTD_VERSION?.trim() || DAEMON_VERSION;
