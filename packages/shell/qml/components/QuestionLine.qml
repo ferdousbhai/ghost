@@ -14,6 +14,7 @@ Column {
 
     /** `{ text, options, askedAt }` from the conversation's listing row, or null. */
     property var question: null
+    readonly property var options: root.question && root.question.options ? root.question.options : []
 
     /** An answer was chosen; the caller sends it as the owner's message. */
     signal answered(string text)
@@ -21,9 +22,8 @@ Column {
 
     /** Answer with suggestion `index` (from 0), as the number keys do. */
     function choose(index: int): bool {
-        const options = root.question && root.question.options ? root.question.options : [];
-        if (index < 0 || index >= options.length) return false;
-        root.answered(options[index]);
+        if (index < 0 || index >= root.options.length) return false;
+        root.answered(root.options[index]);
         return true;
     }
 
@@ -87,11 +87,10 @@ Column {
     Flow {
         width: root.width
         spacing: Theme.gap
-        visible: root.question !== null && root.question !== undefined
-            && (root.question.options || []).length > 0
+        visible: root.options.length > 0
 
         Repeater {
-            model: root.question && root.question.options ? root.question.options : []
+            model: root.options
 
             Rectangle {
                 id: answer
