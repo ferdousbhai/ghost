@@ -4,7 +4,7 @@ import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt
 import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
 import { GHOST_MCP_SERVER } from "../mcp-config-policy.js";
 import { classifyLimitMessage } from "../turn-events.js";
-import { flagBoolean, type ArgsSpec } from "./args.js";
+import { flagBoolean } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import { errorMessage } from "../errors.js";
@@ -75,8 +75,6 @@ function run(id: string, args: string[], ctx: CliContext): Promise<RunResult> {
     child.on("close", (exit, signal) => settle({ exit, signal, tail }));
   });
 }
-
-export const DELEGATE_ARGS: ArgsSpec = { boolean: ["owner-named"], value: [] };
 
 /**
  * The harness's arguments plus `ghost-desktop` (the `desktop` command) as its

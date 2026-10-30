@@ -21,7 +21,7 @@ import {
   switchCommand,
 } from "./admin.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
-import { DELEGATE_ARGS, delegateCommand } from "./delegate.js";
+import { delegateCommand } from "./delegate.js";
 import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
@@ -277,7 +277,7 @@ export const COMMANDS: readonly Command[] = [
     usage: "delegate [--owner-named] <harness> -- <args...>",
     summary: "Run an installed harness here and record the handoff; claude and codex runs get the ghost's desktop tools.",
     example: "cd ~/code/app && ghost delegate claude -- -p \"Fix the failing test\"",
-    flags: DELEGATE_ARGS,
+    flags: { boolean: ["owner-named"] },
     positionals: [1, Number.POSITIVE_INFINITY],
     run: delegateCommand,
   },
