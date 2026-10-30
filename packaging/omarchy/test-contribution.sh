@@ -27,6 +27,23 @@ for mask in 022 077; do
 done
 diff -ru "$work/022/ghost" "$work/077/ghost"
 
+# The renderer refuses a nonempty output, leaving it intact, and a version
+# verify-release-version.sh would refuse.
+guard="$work/nonempty"
+mkdir -p -- "$guard"
+printf 'preserve\n' > "$guard/sentinel"
+if bash "$script_root/render-contribution.sh" \
+    "$guard" "$version" "$source_sha" "$runtime_sha" >/dev/null 2>&1; then
+  printf 'renderer accepted a nonempty output directory\n' >&2
+  exit 1
+fi
+grep -Fxq preserve "$guard/sentinel"
+if bash "$script_root/render-contribution.sh" \
+    "$work/invalid" 01.2.3 "$source_sha" "$runtime_sha" >/dev/null 2>&1; then
+  printf 'renderer accepted an invalid version\n' >&2
+  exit 1
+fi
+
 contribution="$work/077/ghost"
 mapfile -t inventory < <(
   find "$contribution" -mindepth 1 -printf '%P\n' | LC_ALL=C sort

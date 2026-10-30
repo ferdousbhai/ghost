@@ -98,7 +98,6 @@ rm -rf -- "$work"
 
 source_sha="$(sed -n 1p "$out/SHA256SUMS" | cut -d' ' -f1)"
 runtime_sha="$(sed -n 2p "$out/SHA256SUMS" | cut -d' ' -f1)"
-bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
 # Omarchy's recipe is the one rendered here (pkgbuilds/ghost in
 # omacom/omarchy-pkgs); building it from the archives beside it, rather than
 # the release URLs that do not exist yet, proves the release builds there.

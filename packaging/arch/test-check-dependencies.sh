@@ -105,6 +105,7 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
   0.0.1 \
   0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
+[[ "$(stat -c '%a' "$work/ghost/.SRCINFO")" == 644 ]]
 # The stable recipe needs what the development one does at run and check
 # time; only the development build itself needs git and pnpm.
 dependencies() {
