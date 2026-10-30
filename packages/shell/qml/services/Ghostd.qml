@@ -499,7 +499,7 @@ Singleton {
         const inner = xhr.onreadystatechange;
         let retried = false;
         xhr.onreadystatechange = function () {
-            if (typeof stillCurrent === "function" && !stillCurrent()) return;
+            if (!stillCurrent()) return;
             if (xhr.readyState === 4 && xhr.status === 401 && !retried) {
                 retried = true;
                 const before = root.apiToken;
@@ -507,7 +507,7 @@ Singleton {
                     Qt.callLater(function () {
                         // DONE requests cannot be aborted. Re-check ownership here
                         // so closing/switching a flow retires a deferred replay too.
-                        if (typeof stillCurrent === "function" && !stillCurrent()) return;
+                        if (!stillCurrent()) return;
                         root.deliver(xhr, method, url, headers, body);
                     });
                     return;
@@ -1998,7 +1998,7 @@ Singleton {
                     root.completeTranscriptLoad(state, load);
                     return;
                 }
-                if (body.messages.length === 0 || load.nextOffset <= requestedOffset)
+                if (body.messages.length === 0)
                     throw new Error("transcript page made no progress");
                 root.requestTranscriptPage(state, load);
             } catch (error) {
