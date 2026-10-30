@@ -56,4 +56,13 @@ describe("board", () => {
     writeFileSync(join(dir, "board.md"), `## Big\n${"- x\n".repeat(BOARD_MAX_BYTES / 4)}`);
     expect((await readBoard(dir)).truncated).toBe(true);
   });
+
+  it("reads no further than the byte bound, whatever the characters", async () => {
+    dir = mkdtempSync(join(tmpdir(), "ghost-board-"));
+    // Half as many characters as bytes: a character-count cut would keep the tail.
+    writeFileSync(join(dir, "board.md"), `## Head\n${"é".repeat(BOARD_MAX_BYTES / 2)}\n## Beyond\n- late\n`);
+    const board = await readBoard(dir);
+    expect(board.truncated).toBe(true);
+    expect(board.columns.map((column) => column.title)).toEqual(["Head"]);
+  });
 });

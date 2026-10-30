@@ -7,7 +7,7 @@
  * module only parses it so the HUD, the tailnet viewer, and `ghost board` can
  * show it. Moving a card is moving its line; there is no API for that.
  */
-import { readFile, stat } from "node:fs/promises";
+import { open, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 const BOARD_FILE_NAME = "board.md";
@@ -83,29 +83,33 @@ export function parseBoard(markdown: string): { title: string | null; columns: B
 
 export async function readBoard(documentsDir: string): Promise<Board> {
   const path = join(documentsDir, BOARD_FILE_NAME);
-  let modified: string | null = null;
-  let size = 0;
+  const absent: Board = { path, exists: false, modified: null, title: null, columns: [], truncated: false };
+  let modified: string;
+  let size: number;
   try {
     const info = await stat(path);
-    if (!info.isFile()) return { path, exists: false, modified: null, title: null, columns: [], truncated: false };
+    if (!info.isFile()) return absent;
     modified = info.mtime.toISOString();
     size = info.size;
   } catch {
-    return { path, exists: false, modified: null, title: null, columns: [], truncated: false };
+    return absent;
   }
-  let text = await readFile(path, "utf8");
-  let truncated = false;
-  if (size > BOARD_MAX_BYTES) {
-    text = text.slice(0, BOARD_MAX_BYTES);
-    truncated = true;
+  // Only the bounded head is read, however large the file has grown.
+  const head = Buffer.alloc(Math.min(size, BOARD_MAX_BYTES));
+  const file = await open(path, "r");
+  let bytes: number;
+  try {
+    ({ bytesRead: bytes } = await file.read(head, 0, head.length, 0));
+  } finally {
+    await file.close();
   }
-  const parsed = parseBoard(text);
+  const parsed = parseBoard(head.subarray(0, bytes).toString("utf8"));
   return {
     path,
     exists: true,
     modified,
     title: parsed.title,
     columns: parsed.columns,
-    truncated: truncated || parsed.truncated,
+    truncated: size > BOARD_MAX_BYTES || parsed.truncated,
   };
 }
