@@ -1856,8 +1856,6 @@ Singleton {
      * cleared rather than erroring — the conversation is simply blank.
      */
     function openConversation(id: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || id === "") return;
         // Clicking the selected title of a running turn changes nothing: it
         // is already shown. A summon payload (openConversationForGhost) does
         // reopen it, so a running turn's queue is read again.
