@@ -1189,7 +1189,7 @@ export class SessionHost {
   /**
    * Record what the ghost asks the owner in a conversation, replacing an
    * earlier open question there. It stays until the owner's next message to
-   * that conversation (`clearAnsweredQuestion`) or until dismissed.
+   * that conversation (`dropQuestion`) or until dismissed.
    */
   async setQuestion(ghostName: string, sessionId: string, text: string, options: readonly string[]): Promise<OwnerQuestion> {
     const question = validQuestion(text, options);
