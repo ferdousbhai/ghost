@@ -76,11 +76,11 @@ Item {
     implicitHeight: 240
 
     // The reading column, measured rather than guessed: ~72 columns of
-    // source, ~68 of rendered prose, each in its own font token. Wider than
-    // that and the eye loses the line start on the way back.
+    // source, ~68 of rendered prose. Wider than that and the eye loses the
+    // line start on the way back.
     TextMetrics {
         id: column
-        font.family: root.reading ? Theme.fontFamily : Theme.fontFamily
+        font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSize
         text: "0".repeat(root.reading ? 68 : 72)
     }

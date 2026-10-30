@@ -124,7 +124,6 @@ Rectangle {
         property string label
         property string name
         property string placeholder
-        property bool mono: false
         property bool takeFocus: false
 
         width: parent.width
@@ -157,7 +156,6 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 placeholder: field.placeholder
                 text: root.fields[field.name] || ""
-                font.family: field.mono ? Theme.fontFamily : Theme.fontFamily
                 Accessible.name: field.label
 
                 onTextChanged: if (input.text !== (root.fields[field.name] || "")) root.setField(field.name, input.text)
@@ -506,7 +504,6 @@ Rectangle {
                         label: "Command"
                         name: "command"
                         placeholder: "/absolute/path/to/hook --flag"
-                        mono: true
                         takeFocus: true
                     }
 

@@ -116,7 +116,7 @@ Item {
             color: root.hookNotice ? Theme.foregroundDim
                 : (root.mine ? Theme.foregroundBright : Theme.foreground)
             font.family: Theme.fontFamily
-            font.pixelSize: root.hookNotice ? Theme.fontSize : Theme.fontSize
+            font.pixelSize: Theme.fontSize
             lineHeight: Theme.lineHeight
             wrapMode: Text.Wrap
             onLinkActivated: link => ExternalLinks.openModelUrl(link)
