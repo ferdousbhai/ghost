@@ -59,7 +59,6 @@ export interface GhostHookCommandConfig {
 }
 
 export interface CommandHook {
-  type: "command";
   eventName: GhostHookEvent["type"];
   command: string;
   name: string;
@@ -141,7 +140,6 @@ export function parseHooksDocument(parsed: unknown, path: string): CommandHook[]
           240,
         );
         result.push({
-          type: "command",
           eventName,
           command: raw.command,
           name,
