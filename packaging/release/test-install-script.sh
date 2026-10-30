@@ -65,21 +65,21 @@ run() {
 run "" "0.10.0-1"
 [[ $result == 0 ]]
 grep -Fxq 'pacman -S --needed --noconfirm ghost ghost-runtime' "$work/actions"
-! grep -q '^makepkg' "$work/actions"
+! grep -q '^makepkg' "$work/actions" || exit 1
 grep -Fxq menu "$work/actions"
 
 # The repository is behind: build Omarchy's recipe for the release.
 run "0.8.1-1" "0.8.1-1"
 [[ $result == 0 ]]
 grep -Fxq 'makepkg --syncdeps --install --noconfirm --needed --nocheck' "$work/actions"
-! grep -q '^pacman' "$work/actions"
+! grep -q '^pacman' "$work/actions" || exit 1
 grep -Fxq menu "$work/actions"
 grep -Fq 'building 0.10.0 from its release' "$work/output"
 
 # Already the latest: install nothing, still finish the menu's steps.
 run "0.10.0-1" "0.8.1-1"
 [[ $result == 0 ]]
-! grep -qE '^(pacman|makepkg)' "$work/actions"
+! grep -qE '^(pacman|makepkg)' "$work/actions" || exit 1
 grep -Fxq menu "$work/actions"
 
 # Checkout packages are the checkout's to update.
