@@ -66,6 +66,20 @@ TestCase {
         verify(Presence.clickedAt === null);
     }
 
+    // Closing destroys the panel before the HUD's Bindings re-evaluate: what
+    // they wrote while it had the focus must not outlive it.
+    function test_aDestroyedHudLeavesNothingFocused(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = panelComponent.createObject(this);
+        panel.open('{"section":"home"}');
+        Ghostd.hudForeground = true;
+        Ghostd.hudChatFocused = true;
+        panel.destroy();
+        wait(0);
+        verify(!Ghostd.hudForeground);
+        verify(!Ghostd.hudChatFocused);
+    }
+
     function test_aPlainSummonRefocusesAnOpenWindow(): void {
         Ghostd.activeGhost = "dous";
         const panel = createTemporaryObject(panelComponent, this);

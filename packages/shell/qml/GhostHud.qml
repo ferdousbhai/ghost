@@ -203,6 +203,15 @@ FloatingWindow {
         if (hud.pendingGhost !== "") Ghostd.ghostDeleteError = "";
     }
 
+    // Closing makes the host destroy the panel inside `shownChanged`, before
+    // these Bindings re-evaluate, so what they wrote would outlive the window:
+    // the edges would keep the menu's glow, and replies to its conversation
+    // would count as read and go unannounced.
+    Component.onDestruction: {
+        Ghostd.hudForeground = false;
+        Ghostd.hudChatFocused = false;
+    }
+
     Binding {
         target: Ghostd
         property: "hudForeground"
