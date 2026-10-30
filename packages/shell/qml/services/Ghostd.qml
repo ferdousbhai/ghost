@@ -1029,9 +1029,13 @@ Singleton {
         root.selectGhost(names[(names.indexOf(root.activeGhost) + 1) % names.length]);
     }
 
-    /** A summon or notification names its ghost as outside input: only a listed one is selected. */
+    /**
+     * A summon or notification names its ghost as outside input: once a
+     * roster has loaded, only a listed one is selected. Before it, a summon
+     * at startup still lands; the first listing drops the name if unlisted.
+     */
     function selectGhost(name: string): void {
-        if (!root.ghosts.some(ghost => ghost && ghost.name === name)) return;
+        if (root.ghosts.length > 0 && !root.ghosts.some(ghost => ghost && ghost.name === name)) return;
         if (root.switchGhost(name)) root.fetchSessions(name);
     }
 

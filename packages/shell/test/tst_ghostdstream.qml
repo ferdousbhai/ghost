@@ -476,4 +476,12 @@ TestCase {
         compare(sent.length, 0);
         Ghostd.ghosts = [];
     }
+
+    // A summon racing the first listing at startup is not dropped.
+    function test_aSummonBeforeTheFirstListingSelectsItsGhost(): void {
+        Ghostd.requestFactory = FakeXhr.factory([], /./);
+        Ghostd.ghosts = [];
+        Ghostd.selectGhost("moaning-myrtle");
+        compare(Ghostd.activeGhost, "moaning-myrtle");
+    }
 }
