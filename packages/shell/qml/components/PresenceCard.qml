@@ -122,7 +122,6 @@ Rectangle {
                 text: MarkdownCompat.normalize(Presence.answer, Theme.ghostAmber, Theme.info)
                 textFormat: Text.MarkdownText
                 color: Theme.foregroundBright
-                linkColor: Theme.ghostAmber
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
                 lineHeight: Theme.lineHeight
