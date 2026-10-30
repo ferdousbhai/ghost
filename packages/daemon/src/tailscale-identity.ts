@@ -45,6 +45,8 @@ export interface TailscaleNode {
   hostname: string | null;
   /** Whether the tailnet has HTTPS certificates enabled. */
   certs: boolean;
+  /** When this machine must sign in again (ISO), or null when key expiry is disabled. */
+  keyExpiry: string | null;
 }
 
 /** `tailscale status --json`, reduced to what Ghost asks of it; rejects when tailscale is missing or does not answer. */
@@ -56,7 +58,7 @@ export async function readTailscaleNode(run: CommandRunner = commandRunner("tail
   const status = JSON.parse(result.stdout) as {
     BackendState?: unknown;
     CertDomains?: unknown;
-    Self?: { DNSName?: unknown; UserID?: unknown };
+    Self?: { DNSName?: unknown; UserID?: unknown; KeyExpiry?: unknown };
     User?: Record<string, { LoginName?: unknown }>;
   };
   const login = status.User?.[String(status.Self?.UserID)]?.LoginName;
@@ -66,6 +68,8 @@ export async function readTailscaleNode(run: CommandRunner = commandRunner("tail
     login: typeof login === "string" && login.trim() ? login.trim() : null,
     hostname: typeof dnsName === "string" ? dnsName.trim().replace(/\.$/, "") || null : null,
     certs: Array.isArray(status.CertDomains) && status.CertDomains.some((domain) => typeof domain === "string" && domain !== ""),
+    // Absent, or Go's zero time, when the owner disabled expiry for this machine.
+    keyExpiry: typeof status.Self?.KeyExpiry === "string" && !status.Self.KeyExpiry.startsWith("0001-") ? status.Self.KeyExpiry : null,
   };
 }
 
@@ -116,18 +120,22 @@ export class RemoteAccess {
     this.configuredOwner = options.owner?.trim().toLowerCase() || undefined;
   }
 
-  /** The tailnet identity a proxied request carries, or null when it carries none Ghost admits. */
-  async identify(request: IncomingMessage): Promise<TailscaleIdentity | null> {
+  /**
+   * The tailnet identity a proxied request carries, or null when it carries
+   * none Ghost admits. `anyLogin` admits a guest even with guests "none": the
+   * peer pairing route, which a one-time code guards instead.
+   */
+  async identify(request: IncomingMessage, anyLogin = false): Promise<TailscaleIdentity | null> {
     const login = header(request, "tailscale-user-login")?.toLowerCase();
     if (!login || !LOOPBACK_ADDRESSES.has(request.socket.remoteAddress ?? "")) return null;
     // Owner, then peer, then guest: a peer is never also admitted as a guest.
     const role: RemoteRole = (await this.ownerLogin()) === login ? "owner" : this.isPeer(login) ? "peer" : "guest";
-    if (role === "guest" && this.guests === "none") return null;
+    if (role === "guest" && this.guests === "none" && !anyLogin) return null;
     return { login, role };
   }
 
-  /** Resolved once it is known; an unanswered `tailscale status` is asked again next time. */
-  private async ownerLogin(): Promise<string | undefined> {
+  /** The owner's login; resolved once it is known, an unanswered `tailscale status` is asked again next time. */
+  async ownerLogin(): Promise<string | undefined> {
     if (this.configuredOwner) return this.configuredOwner;
     this.owner ??= (await this.selfLogin())?.toLowerCase();
     return this.owner;

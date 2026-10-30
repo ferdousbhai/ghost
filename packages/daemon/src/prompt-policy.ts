@@ -77,10 +77,13 @@ export function renderOwnerContextPolicy(documentsDir: string, recall = false): 
  * that only the owner's request adds or removes one. How to treat what a peer
  * sends rides on each of their messages, so it costs nothing on any other turn.
  */
-export function renderPeersPolicy(peers: readonly string[]): string {
+export function renderPeersPolicy(peers: readonly string[], keyExpiresOn: string | null = null): string {
   return [
     "## Peers",
     `${peers.length > 0 ? `Other people's ghosts you may message: ${peers.join(", ")}; send with \`ghost message <peer> "<text>"\`.` : "Other people's ghosts can message you once your owner adds them."} `
       + "Add or remove a peer only when your owner asks: `ghost help peers`.",
+    ...(keyExpiresOn
+      ? [`This machine's Tailscale key expires ${keyExpiresOn}, which cuts off its peers: tell your owner to sign in again or disable its key expiry.`]
+      : []),
   ].join("\n");
 }

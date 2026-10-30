@@ -7,7 +7,7 @@
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
 import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
-import { PeerRateLimit, peerConversationId, peerMessageHeader, peerMessagePrompt, type Peer, type PeerBook, type PeerMessage } from "./peers.js";
+import { PeerRateLimit, peerCheckPrompt, peerConversationId, peerMailPrompt, peerMessageHeader, peerMessageRecord, type Peer, type PeerBook, type PeerMessage } from "./peers.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
@@ -33,6 +33,7 @@ import {
   requireConversationId,
   readTranscriptPage,
   unseenCommands,
+  unhandedPeerMessages,
   unseenSent,
   type AssistantPart,
   type LogEntry,
@@ -133,6 +134,8 @@ export interface SessionHostOptions {
   peers?: PeerBook;
   /** The peer inbox's hourly limit; a test supplies its own clock. */
   peerRateLimit?: PeerRateLimit;
+  /** When this machine's Tailscale key expires (ISO), or null; the Peers section warns two weeks ahead. */
+  keyExpiry?: () => Promise<string | null>;
 }
 
 export interface RunTurnOptions {
@@ -293,6 +296,8 @@ export function stablePolicySections(options: {
   firstMeeting: boolean;
   /** The owner's peers by name, which their section lists. */
   peers: readonly string[];
+  /** This machine's Tailscale key expiry date, set only when peers would soon lose it. */
+  keyExpiresOn?: string | null;
 }): string[] {
   return [
     OMARCHY_COMPUTER_USE_POLICY,
@@ -302,7 +307,7 @@ export function stablePolicySections(options: {
     renderOwnerContextPolicy(options.documents, options.recall),
     SCHEDULED_WORK_POLICY,
     renderSelfMaintenancePolicy(options.runningSource),
-    renderPeersPolicy(options.peers),
+    renderPeersPolicy(options.peers, options.keyExpiresOn ?? null),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
   ];
 }
@@ -334,6 +339,7 @@ export class SessionHost {
   private readonly scheduleJournalRunner: CommandRunner | undefined;
   private readonly eventAdmissions = new Map<string, Promise<unknown>>();
   private readonly peers: PeerBook | undefined;
+  private readonly keyExpiry: (() => Promise<string | null>) | undefined;
   private readonly peerRateLimit: PeerRateLimit;
   private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
@@ -371,6 +377,7 @@ export class SessionHost {
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
     this.peers = options.peers;
+    this.keyExpiry = options.keyExpiry;
     this.peerRateLimit = options.peerRateLimit ?? new PeerRateLimit();
     this.bundledSkills = options.bundledSkills ?? null;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
@@ -445,8 +452,17 @@ export class SessionHost {
         runningSource: this.runningSource,
         firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
         peers: (this.peers?.list() ?? []).map((peer) => peer.name),
+        keyExpiresOn: await this.keyExpiresSoon(),
       }),
     });
+  }
+
+  /** The key's expiry date when peers are listed and it lapses within two weeks, else null. */
+  private async keyExpiresSoon(): Promise<string | null> {
+    if (!this.peers?.list().length || !this.keyExpiry) return null;
+    const expiry = await this.keyExpiry();
+    if (!expiry || Date.parse(expiry) - Date.now() > 14 * 24 * 3_600_000) return null;
+    return expiry.slice(0, 10);
   }
 
   /** The MCP servers a turn loads: `ghost-desktop` when installed, then the ghost's enabled `mcp.json` rows. */
@@ -699,42 +715,70 @@ export class SessionHost {
   }
 
   /**
-   * A peer's message to the ghost that receives them, in their one
-   * conversation: logged on arrival (its deduplication record), then run as a
-   * turn, or as the next pass of the turn already running there.
+   * A peer's message, logged unread in their one conversation with the ghost
+   * that receives them; it wakes no ghost (a check does). The log is its
+   * deduplication record: the same id again is a duplicate, with other text a
+   * conflict.
    */
-  async admitPeerMessage(peer: Peer, message: PeerMessage): Promise<{ sessionId: string; duplicate: boolean; admission: TurnAdmission | null }> {
-    const sessionId = peerConversationId(peer), prompt = peerMessagePrompt(peer, message);
+  async receivePeerMessage(peer: Peer, message: PeerMessage): Promise<{ duplicate: boolean }> {
+    const sessionId = peerConversationId(peer);
     const sameId = `${peerMessageHeader(peer, message.id).split(" from peer ")[0]} from peer `;
     return this.withGhost(peer.ghost, () => serializeByKey(this.eventAdmissions, keyOf(peer.ghost, sessionId), async () => {
-      const ghost = this.registry.get(peer.ghost), { sessionDir } = ghostPaths(ghost.dir), key = keyOf(ghost.name, sessionId);
+      const ghost = this.registry.get(peer.ghost), { sessionDir } = ghostPaths(ghost.dir);
       const entries = await readLog(sessionDir, sessionId);
       const earlier = entries?.find((entry) => entry.type === "user" && entry.origin === "peer" && entry.text.startsWith(sameId));
       if (earlier?.type === "user") {
         if (earlier.text.slice(earlier.text.lastIndexOf("\n") + 1) !== JSON.stringify(message.text)) {
           throw new GhostError("peer_conflict", "This message id was already used for different text.", 409);
         }
-        return { sessionId, duplicate: true, admission: null };
+        return { duplicate: true };
       }
       this.peerRateLimit.take(peer.login);
-      // Checked and joined in one synchronous step: the running turn's loop
-      // takes its last follow-up and ends synchronously too, so a message is
-      // never queued behind a turn that has already finished.
-      const live = this.live.get(key);
-      live?.followUps.push({ text: prompt, origin: "peer" });
-      // Otherwise a turn of its own, admitted before logging, as an event is: a
-      // refusal (a `!command` running) logs nothing, so the sender's retry runs.
-      const admission = live ? null : await this.admitTurn(ghost.name, { sessionId, prompt, promptRecorded: true, peer: true });
-      try {
-        const at = new Date().toISOString();
-        await appendLog(sessionDir, sessionId, [
-          ...(entries === null ? [newConversationEntry(sessionId, new Date()), { type: "title" as const, at, title: peer.name }] : []),
-          { type: "user", at, text: prompt, origin: "peer" },
-        ]);
-      } catch (error) { if (admission) this.admissions.delete(key); throw error; }
+      const at = new Date().toISOString();
+      await appendLog(sessionDir, sessionId, [
+        ...(entries === null ? [newConversationEntry(sessionId, new Date()), { type: "title" as const, at, title: peer.name }] : []),
+        { type: "user", at, text: peerMessageRecord(peer, message), origin: "peer" },
+      ]);
       this.announce(ghost.name, sessionId);
-      return { sessionId, duplicate: false, admission };
+      return { duplicate: false };
     }));
+  }
+
+  /**
+   * A check's turn in a peer's conversation, when it holds messages the ghost
+   * has not been handed: a turn of its own, or the next pass of the one
+   * running there. Null when there is nothing new.
+   */
+  async peerTurn(peer: Peer): Promise<{ admission: TurnAdmission | null; joined: boolean } | null> {
+    const sessionId = peerConversationId(peer), prompt = peerCheckPrompt(peer.name);
+    return this.withGhost(peer.ghost, () => serializeByKey(this.eventAdmissions, keyOf(peer.ghost, sessionId), async () => {
+      const ghost = this.registry.get(peer.ghost), { sessionDir } = ghostPaths(ghost.dir), key = keyOf(ghost.name, sessionId);
+      if (unhandedPeerMessages((await readLog(sessionDir, sessionId)) ?? []).length === 0) return null;
+      // Checked and joined in one synchronous step: the running turn's loop
+      // takes its last follow-up and ends synchronously too, so this is never
+      // queued behind a turn that has already finished.
+      const live = this.live.get(key);
+      if (live) {
+        live.followUps.push({ text: prompt, origin: "peer" });
+        return { admission: null, joined: true };
+      }
+      return { admission: await this.admitTurn(ghost.name, { sessionId, prompt, promptRecorded: true, peer: true }), joined: false };
+    }));
+  }
+
+  /**
+   * The peer's messages this conversation's ghost has not been handed, framed,
+   * marked handed as they are given; null in any other conversation, or when
+   * there are none.
+   */
+  private async handPeerMail(ghost: Ghost, id: string): Promise<string | null> {
+    if (!id.startsWith("peer-")) return null;
+    const { sessionDir } = ghostPaths(ghost.dir);
+    const mail = unhandedPeerMessages((await readLog(sessionDir, id)) ?? []);
+    const last = mail.at(-1);
+    if (!last) return null;
+    await appendLog(sessionDir, id, [{ type: "handed", at: new Date().toISOString(), id: last.id }]);
+    return `<peer-messages>\n${peerMailPrompt(last.name, mail.map((message) => message.text))}\n</peer-messages>`;
   }
 
   /** A message delivered to a peer joins the conversation with them, whichever conversation sent it. */
@@ -804,6 +848,9 @@ export class SessionHost {
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
+        // In a peer's conversation, every pass is handed the mail it has not seen.
+        const mail = origin === "hook" ? null : await this.handPeerMail(ghost, id);
+        if (mail) passPrompt = `${mail}\n\n${passPrompt}`;
         if (origin !== "hook") {
           const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;

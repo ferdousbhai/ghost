@@ -225,10 +225,11 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "peers",
-    usage: "peers [list|add <name> <login> <url>|rm <name>] [-g <name>] [--json] [-q]",
-    summary: "List, add, or remove the other owners whose ghosts may message this one's.",
-    example: "ghost peers add wife wife@example.com https://her-laptop.tail1234.ts.net -g casper",
+    usage: "peers [list|invite <name> --share <link> [--from <name>]|accept <invite> [--name <label>]|check|add <name> <login> <url>|rm <name>] [-g <name>] [--json] [-q]",
+    summary: "Pair with other owners' ghosts by invite, check for their messages, or list and remove them.",
+    example: "ghost peers invite wife --share https://login.tailscale.com/admin/invite/… -g casper",
     positionals: [0, 4],
+    flags: { value: ["share", "from", "name"] },
     run: peersCommand,
   },
   {

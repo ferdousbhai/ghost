@@ -2,9 +2,10 @@
 import { apiTokenCommand } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { RemoteAccess } from "./tailscale-identity.js";
+import { readTailscaleNode, RemoteAccess } from "./tailscale-identity.js";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 import {
   loadConfig,
   type DaemonConfig,
@@ -204,7 +205,15 @@ async function serveDaemon(
   registry.ensureRoot();
 
   const remoteServe = new RemoteServe(config.port, config.remote);
-  const peers = new PeerBook(config.configPath, config.remote.peers);
+  const peers = new PeerBook(config.configPath, config.remote.peers ?? [], join(xdgBaseDir(process.env, "XDG_STATE_HOME", ownerHome), "ghost"));
+  // `tailscale status` is a subprocess: asked at most hourly for the key's expiry.
+  let keyCache: { at: number; value: Promise<string | null> } | null = null;
+  const keyExpiry = (): Promise<string | null> => {
+    if (!keyCache || Date.now() - keyCache.at > 3_600_000) {
+      keyCache = { at: Date.now(), value: readTailscaleNode().then((node) => node.keyExpiry, () => null) };
+    }
+    return keyCache.value;
+  };
   const host = new SessionHost({
     registry,
     ownerHome,
@@ -215,6 +224,7 @@ async function serveDaemon(
     logger,
     hooks,
     peers,
+    keyExpiry,
   });
   const mcp = new McpCatalog({ registry });
 
@@ -232,6 +242,7 @@ async function serveDaemon(
       remote: new RemoteAccess({ ...config.remote, isPeer: (login) => peers.byLogin(login) !== undefined }),
       remoteServe,
       peers,
+      keyExpiry,
     });
   } catch (error) {
     logger.error("could not bind", {

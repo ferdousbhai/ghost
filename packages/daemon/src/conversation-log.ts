@@ -35,8 +35,10 @@ export type LogEntry =
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
   /** `origin` is absent for an owner message; `auto` marks historical next-work prompts; `peer` is another owner's ghost. */
   | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" | "peer" }
-  /** A message delivered to a peer, logged in the conversation with them whichever conversation sent it. */
+  /** A message to a peer, logged when queued in the conversation with them, whichever conversation sent it. */
   | { readonly type: "sent"; readonly at: string; readonly peer: string; readonly text: string }
+  /** The ghost was handed the peer's messages through the one with this id. */
+  | { readonly type: "handed"; readonly at: string; readonly id: string }
   | {
     readonly type: "assistant";
     readonly at: string;
@@ -207,7 +209,7 @@ function logStateAccumulator() {
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources") activeAt = entry.at;
+    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources" && entry.type !== "handed") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -366,6 +368,20 @@ function peerLine(prompt: string): string {
 
 function sentLine(entry: Extract<LogEntry, { type: "sent" }>): string {
   return `You messaged ${entry.peer}: ${entry.text}`;
+}
+
+/** A peer's messages the ghost has not been handed yet: those after the last `handed` one. */
+export function unhandedPeerMessages(entries: readonly LogEntry[]): { id: string; name: string; text: string }[] {
+  const handed = entries.findLast((entry) => entry.type === "handed");
+  let start = 0;
+  if (handed?.type === "handed") {
+    const through = entries.findIndex((entry) => entry.type === "user" && entry.origin === "peer" && readPeerMessage(entry.text)?.id === handed.id);
+    start = through + 1;
+  }
+  return entries.slice(start).flatMap((entry) => {
+    const message = entry.type === "user" && entry.origin === "peer" ? readPeerMessage(entry.text) : null;
+    return message ? [message] : [];
+  });
 }
 
 /** Messages sent to a peer from another conversation since the harness here last ran. */
