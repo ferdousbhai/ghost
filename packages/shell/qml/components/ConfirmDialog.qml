@@ -91,8 +91,6 @@ Item {
     }
 
     Rectangle {
-        id: dialog
-
         anchors.centerIn: parent
         width: Math.min(root.width - Theme.pad * 4, 380)
         height: content.implicitHeight + Theme.pad * 2

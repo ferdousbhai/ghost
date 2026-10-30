@@ -459,7 +459,6 @@ Item {
                     // all. A count rather than a glyph: it is the only thing
                     // here that has to say how much it is hiding.
                     Text {
-                        id: trailToggle
                         objectName: "trailToggle"
 
                         visible: root.quietToolCount > 0

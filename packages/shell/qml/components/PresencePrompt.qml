@@ -143,7 +143,6 @@ Rectangle {
             }
 
             ListeningLight {
-                id: listening
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 input: field

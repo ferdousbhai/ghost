@@ -288,7 +288,6 @@ Rectangle {
                     }
 
                     Column {
-                        id: problemAction
                         objectName: "remoteProblemAction"
                         width: parent.width
                         visible: root.problem !== null
@@ -317,7 +316,6 @@ Rectangle {
             }
 
             Rectangle {
-                id: connectionCard
                 width: parent.width
                 height: remoteContent.implicitHeight + Theme.pad * 2
                 visible: root.remoteOn
@@ -355,7 +353,6 @@ Rectangle {
                         height: 230
 
                         Image {
-                            id: remoteQrImage
                             objectName: "remoteQrImage"
                             anchors.centerIn: parent
                             width: 220

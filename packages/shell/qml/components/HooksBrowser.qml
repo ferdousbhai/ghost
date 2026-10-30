@@ -250,7 +250,6 @@ Rectangle {
     }
 
     Text {
-        id: initialState
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad * 2
         anchors.right: parent.right
@@ -271,7 +270,6 @@ Rectangle {
     }
 
     Text {
-        id: emptyState
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad * 2
         anchors.right: parent.right
@@ -291,7 +289,6 @@ Rectangle {
     }
 
     ListView {
-        id: hookList
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
         anchors.right: parent.right

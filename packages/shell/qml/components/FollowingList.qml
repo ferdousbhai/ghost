@@ -184,7 +184,6 @@ ListView {
     }
 
     Rectangle {
-        id: jump
         objectName: "jumpToLatest"
 
         Component.onCompleted: parent = root

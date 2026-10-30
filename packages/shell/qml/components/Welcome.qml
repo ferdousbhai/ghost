@@ -39,8 +39,6 @@ Column {
     }
 
     Item {
-        id: plinth
-
         anchors.horizontalCenter: parent.horizontalCenter
         width: 72
         height: 72

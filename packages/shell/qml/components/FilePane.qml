@@ -243,8 +243,6 @@ Item {
             // For markdown this is the view switch; for anything else it just
             // names what you are looking at.
             Text {
-                id: mode
-
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.markdown
                     ? (editor.reading ? "reading" : "source")
@@ -386,8 +384,6 @@ Item {
     // Loader would hand back an untyped item, and the header and the save
     // policy both need the markdown editor's `dirty` and `buffer` by name.
     Item {
-        id: body
-
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: noticeLine.bottom

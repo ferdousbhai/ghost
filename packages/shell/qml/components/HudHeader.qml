@@ -109,7 +109,6 @@ Item {
         // The harness the open conversation runs on, and the way to change it.
         // Quiet text until clicked; the picker below holds the choices.
         Text {
-            id: harnessLabel
             objectName: "harnessLabel"
             anchors.verticalCenter: parent.verticalCenter
             visible: Ghostd.activeGhost !== ""
