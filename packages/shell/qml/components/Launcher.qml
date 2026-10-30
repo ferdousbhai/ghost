@@ -94,12 +94,6 @@ FocusScope {
         list.positionViewAtIndex(root.selected, ListView.Contain);
     }
 
-    function nextGhost(): void {
-        const names = Ghostd.ghosts.map(g => g.name);
-        if (names.length < 2) return;
-        Ghostd.selectGhost(names[(names.indexOf(Ghostd.activeGhost) + 1) % names.length]);
-    }
-
     /** Enter stopped the recording: ask with the transcript once it has stopped arriving. */
     property bool askAfterDictation: false
 
@@ -198,7 +192,7 @@ FocusScope {
                     root.askAfterDictation = true;
                     Dictation.toggle();
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.activate(root.current);
-                else if (event.key === Qt.Key_Tab && !root.ghostMode) root.nextGhost();
+                else if (event.key === Qt.Key_Tab && !root.ghostMode) Ghostd.selectNextGhost();
                 else if (ctrl && event.key === Qt.Key_N && !root.ghostMode) root.activated({ kind: "new", id: "new" });
                 else if (ctrl && event.key === Qt.Key_P && root.current && root.current.kind === "session")
                     Ghostd.pinConversation(root.current.id, !root.current.pinned);
@@ -236,14 +230,14 @@ FocusScope {
             text: Ghostd.activeGhost + (Ghostd.ghosts.length > 1 ? "  ⇥" : "")
             color: chipArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
+            font.pixelSize: Theme.fontSize
 
             MouseArea {
                 id: chipArea
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.nextGhost()
+                onClicked: Ghostd.selectNextGhost()
             }
         }
 
@@ -446,7 +440,7 @@ FocusScope {
                     text: row.modelData.detail || ""
                     color: Theme.foregroundFaint
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    font.pixelSize: Theme.fontSize
                 }
 
                 Text {

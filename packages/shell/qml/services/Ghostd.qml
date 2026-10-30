@@ -1027,6 +1027,13 @@ Singleton {
             });
     }
 
+    /** Tab's step to the next ghost in the roster; one ghost has nowhere to go. */
+    function selectNextGhost(): void {
+        const names = root.ghosts.map(g => g.name);
+        if (names.length < 2) return;
+        root.selectGhost(names[(names.indexOf(root.activeGhost) + 1) % names.length]);
+    }
+
     function selectGhost(name: string): void {
         if (root.switchGhost(name)) root.fetchSessions(name);
     }
@@ -2158,8 +2165,8 @@ Singleton {
     }
 
     /**
-     * ghostd was already running a turn here this HUD had not heard of (a
-     * another client started a turn): the prompt becomes its follow-up, and the
+     * ghostd was already running a turn here this HUD had not heard of
+     * (another client started a turn): the prompt becomes its follow-up, and the
      * listing says what runs.
      */
     function joinRunningTurn(state: var, prompt: string): void {

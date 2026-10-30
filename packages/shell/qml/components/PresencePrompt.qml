@@ -28,12 +28,6 @@ Rectangle {
         Qt.callLater(() => field.forceActiveFocus());
     }
 
-    function nextGhost(): void {
-        const names = Ghostd.ghosts.map(g => g.name);
-        if (Presence.continuing || names.length < 2) return;
-        Ghostd.selectGhost(names[(names.indexOf(Ghostd.activeGhost) + 1) % names.length]);
-    }
-
     // How to leave, in sight; Super+W does the same while Ghost holds the keyboard.
     Text {
         anchors.right: parent.right
@@ -122,7 +116,7 @@ Rectangle {
                         Presence.dismiss();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Tab) {
-                        root.nextGhost();
+                        if (!Presence.continuing) Ghostd.selectNextGhost();
                         event.accepted = true;
                     } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                             && !(event.modifiers & Qt.ShiftModifier)) {
