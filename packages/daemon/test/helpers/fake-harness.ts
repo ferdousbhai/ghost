@@ -62,6 +62,8 @@ for (const event of turn.events ?? []) {
   if (!process.stdout.write(JSON.stringify(event) + "\\n")) await once(process.stdout, "drain");
 }
 if (turn.stderr) process.stderr.write(turn.stderr);
+// process.exit drops whatever the pipes have not taken yet: let both flush first.
+await Promise.all([process.stdout, process.stderr].map((pipe) => new Promise((r) => pipe.write("", r))));
 process.exit(turn.exit ?? 0);
 `;
 
