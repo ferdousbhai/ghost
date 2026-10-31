@@ -43,7 +43,6 @@ Item {
             yScale: root.size / 24
         }
 
-        // The filled body, its eyes cut out by the even-odd rule.
         ShapePath {
             fillColor: root.filled ? root.tint : "transparent"
             fillRule: ShapePath.OddEvenFill

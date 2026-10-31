@@ -1,7 +1,6 @@
 import QtQuick
 import QtTest
 import "../qml/components"
-import "../qml/services"
 
 // The bar can be translucent over the wallpaper, so a filled ghost's eyes have
 // to be holes in the body, not dots painted in some guess at the colour behind.
@@ -24,7 +23,7 @@ TestCase {
     }
 
     function test_aFilledGhostKeepsItsEyesOverAnyBackground(): void {
-        const glyph = createTemporaryObject(glyphC, tc, { x: 10, y: 10 });
+        const glyph = createTemporaryObject(glyphC, tc);
         waitForRendering(glyph);
         // Idle first, then filled: the bar's mark changes state in place.
         glyph.filled = true;
