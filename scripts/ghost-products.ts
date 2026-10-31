@@ -1,9 +1,11 @@
 // The ghost-products skill's product table is rendered from products.json,
-// the one catalog of recommended products. `bun scripts/ghost-products.ts`
+// a copy of ferdousbhai.com's content/products.json, the one catalog of
+// recommended products. `bun scripts/ghost-products.ts`
 // rewrites the table; the test fails while the two differ.
 import { readFileSync, writeFileSync } from "node:fs";
 
 export type Product = {
+  id: string;
   need: string;
   name: string;
   source: string;
@@ -12,6 +14,10 @@ export type Product = {
   install?: string;
   note?: string;
   section?: string;
+  /** Ghost itself: the table lists what Ghost's agents install, so it leaves this out. */
+  host?: boolean;
+  site?: string;
+  third_party?: boolean;
 };
 
 const dir = new URL("../skills/ghost-products/", import.meta.url);
@@ -28,7 +34,7 @@ export function loadCatalog(): Product[] {
 const code = (s: string) => `\`${s.replaceAll("|", "\\|")}\``;
 
 export function renderTable(products: Product[]): string {
-  const rows = products.map((p) => {
+  const rows = products.filter((p) => !p.host).map((p) => {
     const ids = p.skill && p.skill !== p.cli ? `${code(p.cli)}, skill ${code(p.skill)}` : code(p.cli);
     const install = [
       p.install ? code(p.install) : "",

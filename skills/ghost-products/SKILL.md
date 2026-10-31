@@ -27,15 +27,15 @@ that command in their terminal.
 <!-- products: generated from products.json by scripts/ghost-products.ts -->
 | Need | Product (`<cli>`, skill) | Install the product |
 | --- | --- | --- |
-| Mail: own domains, plus linked HEY, Gmail, iCloud Mail | [Cloudmail](https://github.com/ferdousbhai/cloud-mail) (`cloudmail`) | `curl -fsSL https://ferdousbhai.com/cloudmail/install.sh \| sudo bash` |
-| Calendars: iCloud, Google, HEY | [Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) (`cloud-calendar`) | `curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh \| sudo bash` |
-| Contacts: iCloud and Google | [Cloud Contacts](https://github.com/ferdousbhai/cloud-contacts) (`cloud-contacts`) | `curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh \| sudo bash` |
-| Tasks: iCloud Reminders and Google Tasks | [Cloud Tasks](https://github.com/ferdousbhai/cloud-tasks) (`cloud-tasks`) | `curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh \| sudo bash` |
-| iCloud Notes, Photos, Find My | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) (`icloud-session`, skill `icloud`) | `curl -fsSL https://ferdousbhai.com/icloud/install.sh \| sudo bash`; installs all three apps; name some (`sudo bash -s -- icloud-photos`) for only those |
-| Encrypted file/settings sync, versions, machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) (`omacloud`) | `curl -fsSL https://omacloud.computer/install.sh \| sudo bash` |
-| WhatsApp: chat history as folders, and requested sends | [wacli](https://github.com/ferdousbhai/wacli) (`wacli`) | `curl -fsSL https://ferdousbhai.com/wacli/install.sh \| sudo bash`; see [wacli](#wacli) |
-| Local search by meaning or exact text: documents, screenshots, photos, audio, video, code | [Recall for Omarchy](https://github.com/ferdousbhai/recall-for-omarchy) (`recall`) | `curl -fsSL https://ferdousbhai.com/recall/install.sh \| sudo bash`; see [Recall](#recall) |
-| Agents that keep working until the job is done (a stop-hook reviewer) | [keep-going](https://github.com/ferdousbhai/keep-going) (`keep-going`) | `curl -fsSL https://ferdousbhai.com/keep-going/install.sh \| sudo bash`; see [keep-going](#keep-going) |
+| Email on your own domains, with Gmail, iCloud Mail and HEY alongside | [Cloudmail](https://github.com/ferdousbhai/cloud-mail) (`cloudmail`) | `curl -fsSL https://ferdousbhai.com/cloudmail/install.sh \| sudo bash` |
+| iCloud, Google and HEY calendars together, with event notifications | [Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) (`cloud-calendar`) | `curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh \| sudo bash` |
+| iCloud and Google contacts in one address book | [Cloud Contacts](https://github.com/ferdousbhai/cloud-contacts) (`cloud-contacts`) | `curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh \| sudo bash` |
+| iCloud Reminders and Google Tasks together | [Cloud Tasks](https://github.com/ferdousbhai/cloud-tasks) (`cloud-tasks`) | `curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh \| sudo bash` |
+| Apple Notes, Photos and Find My as native apps, on one iCloud sign in | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) (`icloud-session`, skill `icloud`) | `curl -fsSL https://ferdousbhai.com/icloud/install.sh \| sudo bash` |
+| Your files and settings on every Omarchy computer, end to end encrypted, with versions and machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) (`omacloud`) | `curl -fsSL https://omacloud.computer/install.sh \| sudo bash` |
+| Your WhatsApp chats kept as folders on your computer, and messages sent when you ask | [wacli](https://github.com/ferdousbhai/wacli) (`wacli`) | `curl -fsSL https://ferdousbhai.com/wacli/install.sh \| sudo bash`; see [wacli](#wacli) |
+| Search your documents, screenshots, photos, recordings and code by meaning, locally | [Recall](https://github.com/ferdousbhai/recall-for-omarchy) (`recall`) | `curl -fsSL https://ferdousbhai.com/recall/install.sh \| sudo bash`; see [Recall](#recall) |
+| Keeps your coding agents working until the job is done | [keep-going](https://github.com/ferdousbhai/keep-going) (`keep-going`) | `curl -fsSL https://ferdousbhai.com/keep-going/install.sh \| sudo bash`; see [keep-going](#keep-going) |
 | AirDrop with nearby Apple devices | [Omdrop](https://github.com/brentkearney/omdrop-plugin) (`omdrop`) | see [Omdrop](#omdrop) |
 | Google Drive, Docs, Sheets | [gws](https://github.com/googleworkspace/cli) (`gws`, skill `gws-*`) | `npm install -g @googleworkspace/cli`; see [gws](#gws) |
 <!-- /products -->
