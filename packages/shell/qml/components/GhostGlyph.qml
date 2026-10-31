@@ -14,13 +14,14 @@ Item {
     property real size: 16
     property color tint: Theme.ghostAmber
     property real strokeWidth: 2
-    // Body, scalloped hem, and two near-zero eye segments the round cap
+    // Body and scalloped hem, then two near-zero eye segments the round cap
     // renders as dots.
-    property string path: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"
+    readonly property string mascotBody: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"
+    property string path: root.mascotBody + "M9 10h.01M15 10h.01"
     /**
      * Solid, the way a status dot fills in: the body takes `tint` and the
-     * eyes are cut back out in the background colour, so a filled ghost is
-     * still a ghost. Only the mascot path has eyes where the cut-out draws them.
+     * eyes are holes punched through it, so a filled ghost is still a ghost
+     * over any bar, translucent ones included. Only the mascot fills.
      */
     property bool filled: false
 
@@ -42,21 +43,25 @@ Item {
             yScale: root.size / 24
         }
 
+        // The filled body, its eyes cut out by the even-odd rule.
         ShapePath {
             fillColor: root.filled ? root.tint : "transparent"
-            strokeColor: root.tint
-            strokeWidth: root.strokeWidth
-            capStyle: ShapePath.RoundCap
-            joinStyle: ShapePath.RoundJoin
-            PathSvg { path: root.path }
+            fillRule: ShapePath.OddEvenFill
+            strokeColor: "transparent"
+            PathSvg {
+                path: root.mascotBody
+                    + "M7.5 10a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0z"
+                    + "M13.5 10a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0z"
+            }
         }
 
         ShapePath {
             fillColor: "transparent"
-            strokeColor: root.filled ? Theme.background : "transparent"
-            strokeWidth: root.strokeWidth * 1.4
+            strokeColor: root.tint
+            strokeWidth: root.strokeWidth
             capStyle: ShapePath.RoundCap
-            PathSvg { path: root.filled ? "M9 10h.01M15 10h.01" : "" }
+            joinStyle: ShapePath.RoundJoin
+            PathSvg { path: root.filled ? root.mascotBody : root.path }
         }
     }
 }
