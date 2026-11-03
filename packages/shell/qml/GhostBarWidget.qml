@@ -16,7 +16,7 @@
 // amber while a turn runs (working), filled blue when a reply is unread
 // (done), filled red when the ghost is waiting on the owner's answer
 // (blocked), and a dim outline while ghostd is unreachable. One state is
-// Ghost's own: filled magenta, with a count, while conversations the
+// Ghost's own: filled magenta while conversations the
 // ghost started on its own (`ghost event`: a crash, a machine alert) hold
 // replies nobody has read (found). The state covers every conversation of the
 // selected ghost, not just the one on screen.
@@ -118,54 +118,21 @@ Item {
     implicitWidth: root.vertical ? root.thickness : root.slotLength
     implicitHeight: root.vertical ? root.slotLength : root.thickness
 
-    Item {
+    GhostGlyph {
+        objectName: "barMark"
         anchors.centerIn: parent
-        width: 16
-        height: 16
+        size: 14
+        tint: root.markTint
+        filled: root.agentState !== "idle" && root.agentState !== "offline"
+        // A hairline heavier than the HUD's: at 14px in a bar the
+        // stroke has to survive the panel's own contrast.
+        strokeWidth: 2.2
 
-        GhostGlyph {
-            objectName: "barMark"
-            anchors.centerIn: parent
-            size: 14
-            tint: root.markTint
-            filled: root.agentState !== "idle" && root.agentState !== "offline"
-            // A hairline heavier than the HUD's: at 14px in a bar the
-            // stroke has to survive the panel's own contrast.
-            strokeWidth: 2.2
-
-            // Offline is a state to notice, not to shout about: the mascot
-            // dims rather than blinking.
-            opacity: Ghostd.reachable ? 1 : 0.72
-            Behavior on opacity {
-                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
-            }
-        }
-
-        // The count of findings, on the mark's shoulder: shown whenever
-        // there are any, even while a more urgent state tints the mark.
-        Rectangle {
-            objectName: "findingsBadge"
-            visible: root.findings > 0 && Ghostd.reachable
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.rightMargin: -4
-            anchors.topMargin: -3
-            height: 9
-            width: Math.max(height, badgeText.implicitWidth + 3)
-            radius: height / 2
-            color: Theme.finding
-            border.width: 1
-            border.color: Theme.background
-
-            Text {
-                id: badgeText
-                objectName: "findingsCount"
-                anchors.centerIn: parent
-                text: root.findings > 9 ? "+" : String(root.findings)
-                color: Theme.background
-                font.pixelSize: 7
-                font.bold: true
-            }
+        // Offline is a state to notice, not to shout about: the mascot
+        // dims rather than blinking.
+        opacity: Ghostd.reachable ? 1 : 0.72
+        Behavior on opacity {
+            NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
         }
     }
 

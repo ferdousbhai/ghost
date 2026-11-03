@@ -430,5 +430,5 @@ crashes`). Each program that dumps core (at most once an hour) and each
 service that fails, yours or the system's (at most once a day), becomes an
 event conversation; the ghost works out why and proposes a fix, changing
 nothing until you say yes there. Unread findings fill the bar mark in the theme's
-magenta with a count. Tell the ghost to stop looking into a program or
+magenta. Tell the ghost to stop looking into a program or
 service and it adds it to the watch's ignore list.
