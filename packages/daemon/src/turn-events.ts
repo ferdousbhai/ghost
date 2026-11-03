@@ -91,6 +91,14 @@ export function classifyLimitMessage(text: string): LimitReachedEvent["kind"] | 
   return null;
 }
 
+/** Words harnesses use when the model's server could not be reached at all: DNS, a refused, reset, or timed-out connection, no route. */
+const UNREACHABLE = /\b(?:EAI_AGAIN|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b|can'?t reach|cannot reach|unable to connect|connection (?:error|refused|reset|timed out)|getaddrinfo|network is unreachable|fetch failed|error sending request/iu;
+
+/** Whether a runtime's error text says the model could not be reached, a failure that passes when the network returns. */
+export function isUnreachableMessage(text: string): boolean {
+  return UNREACHABLE.test(text);
+}
+
 /** A date, with an optional time, after words that announce a return: "regain access on 2026-11-01 at 00:00 UTC". */
 const STATED_DATE = /(?:regain access|access (?:returns|resumes)|resets?|available again|try again|retry)\D{0,24}?(\d{4}-\d{2}-\d{2})(?:(?:\s+at\s+|T)(\d{1,2}):(\d{2}))?/iu;
 /** A span: "try again in 30 minutes", "retry after 120 seconds", "resets in 2 hours". */

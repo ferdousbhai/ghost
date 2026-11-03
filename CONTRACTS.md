@@ -143,8 +143,16 @@ separate conversations; a repeated busy event is acknowledged without queuing
 another turn. Event data is explicitly untrusted and cannot become an owner
 `!command`. Source and id remain visible in its prompt/title; ordinary history,
 stop, failure reporting, and navigation apply to the event conversation.
-There is no automatic replay of an accepted event after a crash: inspect its
-conversation and explicitly continue it. Deleting the conversation removes its
+An event turn that fails because its model could not be reached (DNS, a
+refused, reset, or timed-out connection: `isUnreachableMessage` in
+`turn-events.ts`) runs again with the same prompt after 1, 2, 4, 8, 16, 32,
+60, and 60 minutes, until a run ends any other way; a rerun is skipped once
+the owner has added to the conversation (a message or `!command`) or while a
+turn runs there. The waits are in memory, so a daemon restart drops them.
+Meanwhile the conversation is an unread finding whose reply is the failure;
+the rerun's answer follows it in the transcript.
+There is no other automatic replay of an accepted event, nor any after a
+crash: inspect its conversation and explicitly continue it. Deleting the conversation removes its
 deduplication evidence, so a later replay may run again.
 
 Provider catch-up belongs to the installed service/CLI. `ghost help events`
@@ -857,8 +865,9 @@ enter logs; the only API response that carries them is the owner's own MCP
 configuration.
 
 Ghosts run unthrottled. Harness limits surface as typed errors, and the
-harness's own retry and fallback behavior applies; Ghost's one contribution is
-the per-turn order of installed harnesses above. Omarchy usage records are
+harness's own retry and fallback behavior applies; Ghost's contributions are
+the per-turn order of installed harnesses above and rerunning an event turn
+that could not reach its model ([External events](#external-events)). Omarchy usage records are
 informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
 peer inbox's hourly limit and outbox bound ([Peers](#peers)) bound another
 owner's ghost, not this one's. The one deliberate exception for its own ghosts is the

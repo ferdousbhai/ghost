@@ -63,7 +63,7 @@ import {
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
-import { classifyLimitMessage, statedReturn, type TurnEvent } from "./turn-events.js";
+import { classifyLimitMessage, isUnreachableMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
@@ -102,6 +102,12 @@ const MAX_CONVERSATION_TITLE_LENGTH = 120;
  */
 const REST_AFTER_LIMIT_MS = 60 * 60_000;
 const REST_AFTER_FAILURE_MS = 15 * 60_000;
+/**
+ * The waits before each rerun of an event turn that could not reach its
+ * model: soon for a network still coming up at boot, then up to hourly for a
+ * machine offline longer, about three hours in all.
+ */
+const EVENT_RETRY_DELAYS_MS = [1, 2, 4, 8, 16, 32, 60, 60].map((minutes) => minutes * 60_000);
 const MAX_QUESTION_LENGTH = 2_000;
 const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
@@ -137,6 +143,8 @@ export interface SessionHostOptions {
   peerRateLimit?: PeerRateLimit;
   /** When this machine's Tailscale key expires (ISO), or null; the Peers section warns two weeks ahead. */
   keyExpiry?: () => Promise<string | null>;
+  /** The waits before rerunning an event turn that could not reach its model; a test supplies short ones. */
+  eventRetryDelays?: readonly number[];
 }
 
 export interface RunTurnOptions {
@@ -366,6 +374,8 @@ export class SessionHost {
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private reportCache?: { at: number; report: Promise<HarnessReport> };
   private shuttingDown = false;
+  private readonly eventRetryDelays: readonly number[];
+  private readonly eventRetries = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(options: SessionHostOptions) {
     this.registry = options.registry;
@@ -387,6 +397,7 @@ export class SessionHost {
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
     this.rowOf = options.harnessRows ?? harnessRow;
+    this.eventRetryDelays = options.eventRetryDelays ?? EVENT_RETRY_DELAYS_MS;
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -713,7 +724,55 @@ export class SessionHost {
         ]);
       } catch (error) { this.admissions.delete(keyOf(ghostName, sessionId)); throw error; }
       this.announce(ghostName, sessionId);
-      return { sessionId, admission };
+      return { sessionId, admission: this.retriedWhenUnreachable(ghostName, sessionId, admission, 0) };
+    }));
+  }
+
+  /**
+   * An event turn that ends unable to reach its model runs again after the
+   * next delay, unattended as the first one was (CONTRACTS.md "External events").
+   */
+  private retriedWhenUnreachable(ghostName: string, sessionId: string, admission: TurnAdmission, attempt: number): TurnAdmission {
+    return {
+      sessionId,
+      run: async (options) => {
+        let failure: string | null = null;
+        await admission.run({
+          emit: (event) => {
+            if (event.type === "error" && event.reason === "error") failure = event.errorMessage ?? "";
+            options.emit(event);
+          },
+        });
+        const delay = this.eventRetryDelays[attempt];
+        if (failure === null || !isUnreachableMessage(failure) || delay === undefined || this.shuttingDown) return;
+        this.logger.warn("event turn could not reach its model; retrying", { ghost: ghostName, conversation: sessionId, retry: attempt + 1, delayMs: delay });
+        const timer = setTimeout(() => {
+          this.eventRetries.delete(timer);
+          void this.retryEvent(ghostName, sessionId, attempt + 1)
+            .then((next) => next?.run({ emit: () => {} }))
+            .catch((error: unknown) => this.logger.warn("event retry not started", { ghost: ghostName, conversation: sessionId, error: errorMessage(error) }));
+        }, delay);
+        timer.unref();
+        this.eventRetries.add(timer);
+      },
+    };
+  }
+
+  /**
+   * The event's turn again, while the conversation still ends at the reply
+   * that could not reach its model; null once anything else happened there.
+   */
+  private async retryEvent(ghostName: string, sessionId: string, attempt: number): Promise<TurnAdmission | null> {
+    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
+      const key = keyOf(ghostName, sessionId);
+      const entries = (await readLog(ghostPaths(this.registry.get(ghostName).dir).sessionDir, sessionId)) ?? [];
+      const prompts = entries.filter((entry) => entry.type === "user");
+      const last = entries.findLast((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "command");
+      const prompt = prompts[0];
+      if (prompts.length !== 1 || prompt?.type !== "user" || last?.type !== "assistant" || !last.error || !isUnreachableMessage(last.error)) return null;
+      if (this.admissions.has(key) || this.reservedSessions.has(key)) return null;
+      const admission = await this.admitTurn(ghostName, { sessionId, prompt: prompt.text, promptRecorded: true });
+      return this.retriedWhenUnreachable(ghostName, sessionId, admission, attempt);
     }));
   }
 
@@ -1621,6 +1680,8 @@ export class SessionHost {
 
   async disposeAll(): Promise<void> {
     this.shuttingDown = true;
+    for (const timer of this.eventRetries) clearTimeout(timer);
+    this.eventRetries.clear();
     for (const controller of this.admissions.values()) controller.abort();
     for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
   }

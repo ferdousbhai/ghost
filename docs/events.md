@@ -29,7 +29,10 @@ Acceptance is logged before the caller is acknowledged. Delivery returns before
 the harness finishes; inspect the conversation for the reply or failure. After
 a crash, an accepted event may have an unanswered prompt: Ghost does not replay
 it automatically. Inspect and explicitly continue that conversation if needed.
-A failed turn is also not automatically retried by repeated delivery. Deleting
+A failed turn is also not automatically retried by repeated delivery. The one
+exception is a turn that could not reach its model (the network was down):
+Ghost runs it again on its own after 1, 2, 4, … minutes, for about three hours,
+until it answers or the owner continues the conversation. Deleting
 its conversation removes the deduplication evidence and permits later replay.
 
 ## GitHub with the installed CLI

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyLimitMessage,
   encodeSseEvent,
+  isUnreachableMessage,
   parseTurnRequest,
   statedReturn,
   type TurnEvent,
@@ -58,6 +59,17 @@ describe("classifyLimitMessage", () => {
     expect(classifyLimitMessage("The upstream model is overloaded (529)")).toBe("overloaded");
     expect(classifyLimitMessage("Your credit balance is too low")).toBe("billing");
     expect(classifyLimitMessage("ECONNRESET while reading the response")).toBeNull();
+  });
+});
+
+describe("isUnreachableMessage", () => {
+  it("recognises a model that could not be reached, not a refusal or an ordinary failure", () => {
+    expect(isUnreachableMessage("API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)")).toBe(true);
+    expect(isUnreachableMessage("Connection error.")).toBe(true);
+    expect(isUnreachableMessage("getaddrinfo ENOTFOUND api.openai.com")).toBe(true);
+    expect(isUnreachableMessage("stream disconnected before completion: error sending request for url")).toBe(true);
+    expect(isUnreachableMessage("429 Too Many Requests")).toBe(false);
+    expect(isUnreachableMessage("The model refused to answer.")).toBe(false);
   });
 });
 
