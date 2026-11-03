@@ -427,8 +427,8 @@ asks you before touching anything else.
 To have a ghost look into crashes and failures before you ask, tell it: "look
 into crashes for me". It installs a minutely `crash-watch` routine (`ghost help
 crashes`). Each program that dumps core (at most once an hour) and each
-service that fails, yours or the system's (at most once a day), becomes an
-event conversation; the ghost works out why and proposes a fix, changing
-nothing until you say yes there. Unread findings fill the bar mark in the theme's
-magenta. Tell the ghost to stop looking into a program or
-service and it adds it to the watch's ignore list.
+service that fails, yours or the system's (at most once a day; not an
+unnamed `systemd-run` job), becomes an event conversation; the ghost works out
+why and proposes a fix, changing nothing until you say yes there. Unread
+findings fill the bar mark in the theme's magenta. Tell the ghost to stop
+looking into a program or service and it adds it to the watch's ignore list.

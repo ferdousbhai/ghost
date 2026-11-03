@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../src/help-topics.js";
 
@@ -87,6 +91,43 @@ describe("ghost help topics", () => {
     expect(text).toContain("Change, file, restart, or send nothing.");
     expect(text).toContain("the owner's yes in this conversation is what applies it");
     expect(text).toContain("diagnose-crash");
+  });
+
+  it("crashes: the watch skips systemd-run's generated units but not named services or their core dumps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghost-crash-watch-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(dir, "cursor"), "start\n");
+      const crash = "fc2e22bc6ee647b6b90729ab34a250b1";
+      const failure = "d9b373ed55a64feb8242e02dbe79a49c";
+      const failed = (unit: string, cursor: string) => ({ MESSAGE_ID: failure, USER_UNIT: unit, UNIT_RESULT: "oom-kill", __REALTIME_TIMESTAMP: "1793664000000000", __CURSOR: cursor });
+      const entries = [
+        failed("run-p303424-i315724.service", "c1"),
+        failed("run-u42.service", "c2"),
+        failed("run-backup.service", "c3"),
+        failed("syncthing.service", "c4"),
+        { MESSAGE_ID: crash, COREDUMP_COMM: "node", COREDUMP_PID: "7", COREDUMP_UID: "1000", COREDUMP_SIGNAL_NAME: "SIGSEGV", COREDUMP_USER_UNIT: "run-p1-i2.service", MESSAGE: "trace", __REALTIME_TIMESTAMP: "1793664000000000", __CURSOR: "c5" },
+      ];
+      writeFileSync(join(dir, "journal.json"), entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+      writeFileSync(join(bin, "journalctl"), `#!/bin/bash\n[[ " $* " == *" -o json "* ]] && cat ${JSON.stringify(join(dir, "journal.json"))}\nexit 0\n`, { mode: 0o755 });
+      const cli = join(bin, "ghost");
+      writeFileSync(cli, `#!/bin/bash\ncat > /dev/null\nprintf '%s %s\\n' "$2" "$3" >> ${JSON.stringify(join(dir, "events"))}\n`, { mode: 0o755 });
+      const text = renderHelpTopic("crashes", { ...INPUT, cliPath: cli });
+      const script = text.slice(text.indexOf("```bash\n") + 8, text.indexOf("\n```", text.indexOf("```bash\n")));
+      writeFileSync(join(dir, "crash-watch.sh"), script);
+      const run = spawnSync("/bin/bash", [join(dir, "crash-watch.sh")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, STATE_DIRECTORY: dir }, encoding: "utf8" });
+      expect(run.stderr).toBe("");
+      expect(run.status).toBe(0);
+      expect(readFileSync(join(dir, "events"), "utf8").trim().split("\n")).toEqual([
+        "unit run-backup.service-20261103",
+        "unit syncthing.service-20261103",
+        "crash node-2026110300",
+      ]);
+      expect(readFileSync(join(dir, "cursor"), "utf8")).toBe("c5\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {

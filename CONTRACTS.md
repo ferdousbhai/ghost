@@ -190,7 +190,9 @@ failed before the watch is not replayed. A crash is a `ghost event crash
 <program>-<YYYYMMDDHH>`, at most one per program an hour; a failed service,
 system or user, is a `ghost event unit <unit>-<YYYYMMDD>`, at most one per
 service a day, since failing services tend to repeat. Units that are not
-services, failures whose result is `core-dump` (already a crash event), and
+services, failures whose result is `core-dump` (already a crash event),
+`systemd-run`'s generated `run-u<N>`/`run-p<pid>-i<N>` services (someone's
+ad-hoc job; one named with `--unit`, or its core dump, is reported), and
 the watch's own unit are skipped; times are UTC; exit 6 counts as delivered.
 A crash's payload is its program, pid, uid, signal, executable, unit, and
 stack trace; a service's is its result and that run's last 40 log lines. One
