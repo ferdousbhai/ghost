@@ -813,9 +813,15 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         throw new GhostError("not_a_peer", "Pairing comes from another owner's machine over Tailscale.", 403);
       }
       const code = (await body()).code;
-      const invite = typeof code === "string" ? await requirePeers().invites.spend(code) : null;
-      if (!invite) throw new GhostError("invalid_invite", "This invite is wrong, already used, or expired.", 403);
-      await requirePeers().add({ name: invite.name, login: identity.login, ghost: invite.ghost });
+      const book = requirePeers(), invalid = new GhostError("invalid_invite", "This invite is wrong, already used, or expired.", 403);
+      const invite = typeof code === "string" ? book.invites.find(code) : null;
+      if (typeof code !== "string" || !invite) throw invalid;
+      // Listed first: a name or login already taken refuses this without spending the code.
+      await book.add({ name: invite.name, login: identity.login, ghost: invite.ghost });
+      if (!await book.invites.spend(code)) {
+        await book.remove(invite.name);
+        throw invalid;
+      }
       jsonResponse(response, 200, { login: (await remote?.ownerLogin()) ?? null });
     }),
     route("GET", "api/peers", ownerOnly(async ({ response }) => {
@@ -861,7 +867,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       }
       const login = isRecord(answer.body) && typeof answer.body.login === "string" ? answer.body.login : null;
       if (!login) throw new GhostError("peer_failed", `${name}'s Ghost paired but did not say who it is.`, 502);
-      jsonResponse(response, 200, { peers: await book.add({ name, login: login.toLowerCase(), url: invite.url, ghost }) });
+      const paired = login.toLowerCase();
+      jsonResponse(response, 200, {
+        peers: book.byLogin(paired) ? await book.relist(paired, invite.url, ghost) : await book.add({ name, login: paired, url: invite.url, ghost }),
+      });
     })),
     route("POST", "api/peers/check", ownerOnly(async ({ response }) => {
       const results = [];

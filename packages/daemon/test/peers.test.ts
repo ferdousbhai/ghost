@@ -298,6 +298,27 @@ describe("pairing by invite", () => {
     expect((await asTailnet(mine, "stranger@example.com", "GET", "/api/ghosts")).status).toBe(401);
   });
 
+  it("leaves the code unspent when the inviter cannot list the caller", async () => {
+    const mine = await machine(OWNER, []);
+    const invited = await owner(mine, "POST", "/api/peers/invites", { name: "wife", share: SHARE, from: "husband", ghost: "casper" });
+    const { invite } = await invited.json() as { invite: string };
+    const { code } = decodeInvite(invite);
+    await mine.peers.add({ name: "wife", login: "someone@example.com", ghost: "casper" });
+    const refused = await asTailnet(mine, WIFE, "POST", "/api/peer/pair", { code });
+    expect(refused.status).toBe(409);
+    expect(mine.peers.byLogin(WIFE)).toBeUndefined();
+    expect(mine.peers.invites.list()).toHaveLength(1);
+  });
+
+  it("keeps one entry when a login already listed pairs again", async () => {
+    const mine = await machine(OWNER, []);
+    const hers = await machine(WIFE, []);
+    await hers.peers.add({ name: "old-label", login: OWNER, ghost: "casper" });
+    await pair(mine, hers);
+    expect(hers.peers.list()).toEqual([{ name: "old-label", login: OWNER, url: mine.base, ghost: "casper" }]);
+    expect(mine.peers.byLogin(WIFE)).toMatchObject({ name: "wife" });
+  });
+
   it("refuses a share link that is not https, and revokes a pending invite by name", async () => {
     const mine = await machine(OWNER, []);
     expect((await owner(mine, "POST", "/api/peers/invites", { name: "wife", share: "http://not-https", ghost: "casper" })).status).toBe(400);

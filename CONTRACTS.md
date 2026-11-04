@@ -295,8 +295,10 @@ with guests `none`; a valid, unexpired, unused code lists the caller's
 verified login as the peer `name`, with no `url`, receiving into the invite's
 ghost, spends the code, and answers `{ login }`, its owner's login. The
 accepting daemon then lists the inviter under `--name` (default the invite's
-`from`) with the invite's `url`. A wrong, spent, or expired code is `403`
-and changes nothing.
+`from`) with the invite's `url`; a login it already lists keeps its name and
+takes the new `url` and ghost. A wrong, spent, or expired code is `403` and
+changes nothing; a name or login the inviter already lists is `409` and leaves
+the code unspent.
 
 A pairing does not expire: each side lists the other until an owner removes
 them, and an accepted Tailscale share stays. What lapses unseen is Tailscale's

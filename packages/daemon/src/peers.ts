@@ -274,6 +274,12 @@ export class PeerInvites {
     });
   }
 
+  /** The invite a code opens, left in place; null for a wrong, spent, or expired code. */
+  find(code: string): PendingInvite | null {
+    const hash = codeHash(code);
+    return this.list().find((invite) => invite.hash === hash) ?? null;
+  }
+
   /** The invite a code opens, removed so it opens nothing again; null for a wrong, spent, or expired code. */
   spend(code: string): Promise<PendingInvite | null> {
     const hash = codeHash(code);
@@ -363,6 +369,11 @@ export class PeerBook {
       }
       return [...peers, peer];
     });
+  }
+
+  /** A login paired again: it keeps its name here and takes the new address and receiving ghost. */
+  async relist(login: string, url: string, ghost: string): Promise<readonly Peer[]> {
+    return this.change((peers) => peers.map((peer) => peer.login === login ? { ...peer, url, ghost } : peer));
   }
 
   /** A listed peer, or a pending invite of that name. */
