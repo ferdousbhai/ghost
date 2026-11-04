@@ -5,8 +5,8 @@ Enable the existing Tailscale viewer with `ghost remote on`; open the URL from
 awake, logged in, and connected. A missing host cannot run work or deliver alerts.
 
 The conversation tools menu contains resources and routines.
-Owners can edit, pause/resume, run, remove, and recover routines. Guests retain
-read-only conversation access and cannot access routine controls or
+Owners can edit, pause/resume, run, remove, and recover routines. Guests, only
+when `remote.guests` is `"read-only"`, can read conversations and cannot access routine controls or
 machine-local tool routes. See `CONTRACTS.md` for the wire contract.
 
 ## Completion alerts

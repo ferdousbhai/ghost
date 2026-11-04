@@ -737,7 +737,8 @@ status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary. The configured owner has full access; a listed [peer](#peers) may
-only deliver messages; admitted guests are read-only,
+only deliver messages; any other login is refused unless `remote.guests` in
+the config is `"read-only"` (the default is `"none"`). Admitted guests are read-only,
 are refused the routes marked owner-only, which show file paths, hook
 commands, or MCP credentials, and see no path in the ghost list or board;
 conversations, tool calls included, are shown to them as recorded.

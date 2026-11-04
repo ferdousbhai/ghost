@@ -39,7 +39,7 @@ async function serve(
     host,
     port: 0,
     apiToken: TOKEN,
-    remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", ...remote }),
+    remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", guests: "read-only", ...remote }),
     ...(remoteServe ? { remoteServe: remoteServe(temp.root) } : {}),
     ...(runningSource ? { runningSource } : {}),
   });

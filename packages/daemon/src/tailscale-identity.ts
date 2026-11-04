@@ -83,7 +83,7 @@ export interface TailscaleIdentity {
 export interface RemoteAccessOptions {
   /** The login that owns the ghosts; default: the login this node is signed in as. */
   owner?: string;
-  /** What other tailnet members may do; default read-only. */
+  /** What other tailnet members may do; default nothing. */
   guests?: "read-only" | "none";
   /** Whether a login is one of the owner's peers, asked per request because the list changes. */
   isPeer?: (login: string) => boolean;
@@ -115,7 +115,7 @@ export class RemoteAccess {
 
   constructor(options: RemoteAccessOptions = {}) {
     this.selfLogin = options.selfLogin ?? tailscaleSelfLogin;
-    this.guests = options.guests ?? "read-only";
+    this.guests = options.guests ?? "none";
     this.isPeer = options.isPeer ?? (() => false);
     this.configuredOwner = options.owner?.trim().toLowerCase() || undefined;
   }

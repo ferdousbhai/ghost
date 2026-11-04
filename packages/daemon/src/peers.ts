@@ -422,7 +422,9 @@ export async function callPeer(name: string, url: string, method: string, path: 
   const parsed: unknown = await response.json().catch(() => null);
   if (response.ok) return { status: response.status, body: parsed };
   const said = isRecord(parsed) && isRecord(parsed.error) && typeof parsed.error.message === "string" ? parsed.error.message : response.statusText;
-  if (response.status === 401 || response.status === 403) {
+  // With guests off, a login they no longer list is simply unknown to them.
+  if (response.status === 401) throw new GhostError("peer_refused", `${name}'s Ghost no longer lists you.`, 403);
+  if (response.status === 403) {
     throw new GhostError("peer_refused", `${name}'s Ghost refused this: ${said}`, 403);
   }
   if (response.status === 429) throw new GhostError("peer_rate_limited", `${name}'s Ghost is taking no more messages this hour.`, 429);

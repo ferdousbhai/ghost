@@ -159,7 +159,7 @@ describe("systemd routine inspection and controls", () => {
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
       scheduleCommandRunner: manager(calls), scheduleVerifyRunner: async () => ok, scheduleJournalRunner: async () => ({ ...ok, stdout: "Finished routine" }), env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" } });
     server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token",
-      remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }) });
+      remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
     const path = `http://127.0.0.1:${server.port}/api/ghosts/casper/routines`;
     const owner = { "tailscale-user-login": "owner@example.com", "content-type": "application/json" };
     expect(await (await fetch(path, { headers: owner })).json()).toMatchObject({ routines: [{ slug: "daily" }] });

@@ -137,7 +137,7 @@ function remoteSnapshot() {
     hostname: loggedIn ? REMOTE_HOSTNAME : null,
     url: available && remoteEnabled ? `https://${REMOTE_HOSTNAME}` : null,
     tailscale,
-    guests: "read-only",
+    guests: "none",
     owner: loggedIn ? "owner@example.com" : null,
     problem,
   };

@@ -22,7 +22,7 @@ export interface DaemonConfig {
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
-   * says what other tailnet members may do (default read-only), `peers` are
+   * says what other tailnet members may do (default "none"), `peers` are
    * other owners whose ghosts may message this owner's (CONTRACTS.md "Peers").
    */
   remote: RemoteConfig;

@@ -115,7 +115,7 @@ export class RemoteServe {
     this.qrRun = options.qrRun ?? commandRunner("qrencode");
     // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
     this.owner = options.owner?.trim().toLowerCase() || null;
-    this.guests = options.guests ?? "read-only";
+    this.guests = options.guests ?? "none";
   }
 
   async status(): Promise<RemoteStatus> {

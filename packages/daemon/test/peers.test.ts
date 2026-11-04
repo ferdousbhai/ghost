@@ -151,6 +151,7 @@ describe("peer records", () => {
   it("names a peer's refusal and silence the way the CLI's exit codes read them", async () => {
     const answer = (status: number) => async () => new Response(JSON.stringify({ error: { code: "x", message: "no" } }), { status });
     await expect(callPeer("wife", "https://her", "POST", "/x", {}, answer(403))).rejects.toMatchObject({ code: "peer_refused", status: 403 });
+    await expect(callPeer("wife", "https://her", "POST", "/x", {}, answer(401))).rejects.toMatchObject({ code: "peer_refused", message: "wife's Ghost no longer lists you." });
     await expect(callPeer("wife", "https://her", "POST", "/x", {}, answer(429))).rejects.toMatchObject({ code: "peer_rate_limited", status: 429 });
     await expect(callPeer("wife", "https://her", "POST", "/x", {}, async () => { throw new Error("offline"); }))
       .rejects.toMatchObject({ code: "peer_unreachable", status: 502 });
@@ -506,10 +507,15 @@ describe("what a peer may reach", () => {
       expect(response.status, `${method} ${path}`).toBe(403);
       expect(await response.json()).toMatchObject({ error: { code: "peer_only" } });
     }
-    expect((await asTailnet(mine, "stranger@example.com", "GET", "/api/peer/outbox")).status).toBe(403);
+    // By default a login that is neither owner nor peer reads nothing.
+    for (const path of ["/api/peer/outbox", "/api/ghosts", "/api/remote/whoami"]) {
+      expect((await asTailnet(mine, "stranger@example.com", "GET", path)).status, path).toBe(401);
+    }
     expect((await owner(mine, "POST", "/api/peer/messages", { id: "a", text: "hi" })).status).toBe(403);
+    // Removing a peer takes everything away, not just messaging.
     await mine.peers.remove("wife");
-    expect(await (await asTailnet(mine, WIFE, "GET", "/api/remote/whoami")).json()).toEqual({ role: "guest" });
+    expect((await asTailnet(mine, WIFE, "GET", "/api/remote/whoami")).status).toBe(401);
+    expect((await asTailnet(mine, WIFE, "GET", "/api/ghosts")).status).toBe(401);
   });
 });
 

@@ -344,7 +344,9 @@ and any skill you installed untouched.
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** `ghost remote` (or the HUD's Remote access pane)
-  controls the opt-in Tailscale Serve viewer. Guests are read-only. On a
+  controls the opt-in Tailscale Serve viewer. Only your own login gets in;
+  to let other tailnet members read along, set `remote.guests` to
+  `"read-only"` in the config. On a
   phone, `+` starts a conversation and the camera attaches photos; dictate
   with the keyboard's own mic.
 
@@ -384,7 +386,7 @@ last service start, and latest service result when available. Pause disables
 future triggers and leaves running work alone. Resume enables the timer;
 persistent timers may catch up. Run now queues the service without changing the
 timer and returns before the work finishes. Refresh to inspect its state.
-Guests cannot inspect routines or control them.
+Guests, when admitted at all, cannot inspect routines or control them.
 
 Use **Edit sources** in the HUD or **Edit** on the phone to change the timer and
 service together. Saves verify the units, detect source conflicts, reload
