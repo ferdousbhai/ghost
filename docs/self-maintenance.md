@@ -143,7 +143,8 @@ the turn that needs them.
 A plain restart kills a ghost's own parent. `ghost help self` schedules the
 restart in a transient `systemd-run --user` unit that survives the daemon;
 its description carries the reason. Finish the turn and tell the owner first:
-a restart aborts every running turn. Restarting never sends a model prompt.
+a restart aborts every running turn. The only model prompts it sends rerun the
+event turns it cut off.
 
 The daemon's `TimeoutStopSec` is the shutdown deadline. Read `git log`, the
 journal, and the conversation before retrying a failed change. Use a dedicated

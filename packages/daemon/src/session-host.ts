@@ -108,6 +108,8 @@ const REST_AFTER_FAILURE_MS = 15 * 60_000;
  * machine offline longer, about three hours in all.
  */
 const EVENT_RETRY_DELAYS_MS = [1, 2, 4, 8, 16, 32, 60, 60].map((minutes) => minutes * 60_000);
+/** How long after its acceptance a daemon start still reruns an unfinished event: past this, its news is stale. */
+const EVENT_RESUME_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_QUESTION_LENGTH = 2_000;
 const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
@@ -257,6 +259,18 @@ interface PassResult {
 }
 
 type TerminalError = Extract<TurnEvent, { type: "error" }>;
+
+function endedUnreachable(last: LogEntry | undefined): boolean {
+  return last?.type === "assistant" && !!last.error && isUnreachableMessage(last.error);
+}
+
+/** Whether the daemon's last run left this event's only prompt unanswered: no reply (a crash), its model unreachable, or cut off by a stop. */
+function leftUnfinished(entries: readonly LogEntry[], last: LogEntry | undefined): boolean {
+  if (last?.type === "user" || endedUnreachable(last)) return true;
+  // Once only, so a turn whose own work restarts the daemon cannot loop.
+  return last?.type === "assistant" && last.interrupted === true
+    && entries.filter((entry) => entry.type === "assistant" && entry.interrupted).length === 1;
+}
 
 function clamp(value: number | undefined, fallback: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -655,6 +669,24 @@ export class SessionHost {
     }
   }
 
+  /** At daemon start, rerun the event turns the last run left unfinished (CONTRACTS.md "External events"). */
+  async resumeEventTurns(): Promise<void> {
+    for (const { name } of this.registry.list()) {
+      const { sessionDir } = ghostPaths(this.registry.get(name).dir);
+      for (const id of await this.conversationIds(sessionDir)) {
+        if (!id.startsWith("event-")) continue;
+        try {
+          const admission = await this.retryEvent(name, id, 0, true);
+          if (!admission) continue;
+          this.logger.info("rerunning an unfinished event turn", { ghost: name, conversation: id });
+          void admission.run({ emit: () => {} }).catch((error: unknown) => this.logger.warn("event rerun failed", { ghost: name, conversation: id, error: errorMessage(error) }));
+        } catch (error) {
+          this.logger.warn("event rerun not started", { ghost: name, conversation: id, error: errorMessage(error) });
+        }
+      }
+    }
+  }
+
   // ── Turns ─────────────────────────────────────────────────────────────
 
   async admitTurn(
@@ -760,16 +792,21 @@ export class SessionHost {
 
   /**
    * The event's turn again, while the conversation still ends at the reply
-   * that could not reach its model; null once anything else happened there.
+   * that could not reach its model, or when `resuming`, as the last run left
+   * it unfinished; null once anything else happened there.
    */
-  private async retryEvent(ghostName: string, sessionId: string, attempt: number): Promise<TurnAdmission | null> {
+  private async retryEvent(ghostName: string, sessionId: string, attempt: number, resuming = false): Promise<TurnAdmission | null> {
     return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
       const key = keyOf(ghostName, sessionId);
       const entries = (await readLog(ghostPaths(this.registry.get(ghostName).dir).sessionDir, sessionId)) ?? [];
       const prompts = entries.filter((entry) => entry.type === "user");
       const last = entries.findLast((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "command");
       const prompt = prompts[0];
-      if (prompts.length !== 1 || prompt?.type !== "user" || last?.type !== "assistant" || !last.error || !isUnreachableMessage(last.error)) return null;
+      if (prompts.length !== 1 || prompt?.type !== "user") return null;
+      const due = resuming
+        ? leftUnfinished(entries, last) && Date.now() - Date.parse(prompt.at) <= EVENT_RESUME_WINDOW_MS
+        : endedUnreachable(last);
+      if (!due) return null;
       if (this.admissions.has(key) || this.reservedSessions.has(key)) return null;
       const admission = await this.admitTurn(ghostName, { sessionId, prompt: prompt.text, promptRecorded: true });
       return this.retriedWhenUnreachable(ghostName, sessionId, admission, attempt);
@@ -1017,6 +1054,7 @@ export class SessionHost {
           harness,
           content: result.content,
           ...(result.error ? { error: result.error } : {}),
+          ...(result.aborted && this.shuttingDown ? { interrupted: true as const } : {}),
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
           ...(result.model?.effort ?? row.effort ? { effort: result.model?.effort ?? row.effort } : {}),

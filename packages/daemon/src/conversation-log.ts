@@ -45,6 +45,8 @@ export type LogEntry =
     readonly harness: string;
     readonly content: readonly AssistantPart[];
     readonly error?: string;
+    /** A daemon stop cut this turn off; an owner's stop leaves it unset. */
+    readonly interrupted?: true;
     /** The model, its provider, and the reasoning effort, as far as the harness said. */
     readonly model?: string;
     readonly provider?: string;

@@ -26,13 +26,13 @@ it cannot become a shell `!command`. A bridge must use fixed owner instructions,
 not copy that field from incoming third-party data. Guests cannot submit events.
 
 Acceptance is logged before the caller is acknowledged. Delivery returns before
-the harness finishes; inspect the conversation for the reply or failure. After
-a crash, an accepted event may have an unanswered prompt: Ghost does not replay
-it automatically. Inspect and explicitly continue that conversation if needed.
-A failed turn is also not automatically retried by repeated delivery. The one
-exception is a turn that could not reach its model (the network was down):
-Ghost runs it again on its own after 1, 2, 4, … minutes, for about three hours,
-until it answers or the owner continues the conversation. Deleting
+the harness finishes; inspect the conversation for the reply or failure. A
+failed turn is not automatically retried by repeated delivery. There are two
+exceptions. A turn that could not reach its model (the network was down) runs
+again on its own after 1, 2, 4, … minutes, for about three hours, until it
+answers or the owner continues the conversation. And when the daemon starts, it
+reruns an event from the last 24 hours that a crash, shutdown, or restart left
+unfinished, once for a stop; a turn you stopped yourself stays stopped. Deleting
 its conversation removes the deduplication evidence and permits later replay.
 
 ## GitHub with the installed CLI

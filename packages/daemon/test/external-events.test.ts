@@ -7,7 +7,7 @@ import { renderHelpTopic } from "../src/help-topics.js";
 import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteAccess } from "../src/tailscale-identity.js";
-import { readLog } from "../src/conversation-log.js";
+import { appendLog, newConversationEntry, readLog } from "../src/conversation-log.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
@@ -97,6 +97,71 @@ describe("external event admission", () => {
     await host!.runTurn("casper", { sessionId: id, prompt: "Look again later.", emit: () => {} });
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(harness!.calls()).toHaveLength(2);
+  });
+  it("reruns at start a turn a daemon stop cut off, once, but not one the owner stopped", async () => {
+    const base = await serve();
+    const hold = harness!.gate("held");
+    harness!.setTurns([{ gate: hold.path, events: [] }, { gate: hold.path, events: [] }, ...replies("unused")]);
+    expect((await post(base)).status).toBe(202);
+    const id = eventConversationId(event);
+    const started = async (calls: number) => {
+      for (let attempt = 0; attempt < 300 && harness!.calls().length < calls; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+      expect(harness!.calls()).toHaveLength(calls);
+    };
+    await started(1);
+    await server!.close(); await host!.disposeAll();
+    await settled(id);
+    let rows = (await readLog(join(temp.root, "casper", "sessions"), id))!;
+    expect(rows.findLast(row => row.type === "assistant")).toMatchObject({ error: "Turn aborted.", interrupted: true });
+
+    // The rerun is cut off too: that is the one rerun spent.
+    await restart();
+    await host!.resumeEventTurns();
+    await started(2);
+    await server!.close(); await host!.disposeAll();
+    await settled(id, 2);
+    await restart();
+    await host!.resumeEventTurns();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(harness!.calls()).toHaveLength(2);
+    rows = (await readLog(join(temp.root, "casper", "sessions"), id))!;
+    expect(rows.filter(row => row.type === "user")).toHaveLength(1);
+
+    const stopped = { ...event, id: "stopped" }, stoppedId = eventConversationId(stopped);
+    harness!.setTurns([{ gate: hold.path, events: [] }]);
+    expect((await post(`http://127.0.0.1:${server!.port}/api/ghosts/casper`, stopped)).status).toBe(202);
+    await started(3);
+    host!.stopTurn("casper", stoppedId);
+    await settled(stoppedId);
+    await server!.close(); await host!.disposeAll();
+    await restart();
+    await host!.resumeEventTurns();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(harness!.calls()).toHaveLength(3);
+  });
+  it("reruns at start an event with no reply or an unreachable one, within a day of its acceptance", async () => {
+    const offline: FakeTurn = { events: [{ type: "error", message: "Connection error." }], exit: 1 };
+    const base = await serve([offline, ...replies("Diagnosed")], [60_000]);
+    expect((await post(base)).status).toBe(202);
+    const unreachable = eventConversationId(event);
+    await settled(unreachable);
+    await server!.close(); await host!.disposeAll();
+    // A crash leaves only the prompt: one recent, one too old.
+    const sessions = join(temp.root, "casper", "sessions");
+    const seedPrompt = async (id: string, at: string) => {
+      await appendLog(sessions, id, [newConversationEntry(id, new Date(at)), { type: "user", at, text: "Look into this." }]);
+    };
+    const crashed = eventConversationId({ ...event, id: "crashed" }), stale = eventConversationId({ ...event, id: "stale" });
+    await seedPrompt(crashed, new Date().toISOString());
+    await seedPrompt(stale, new Date(Date.now() - 25 * 60 * 60_000).toISOString());
+    harness!.setTurns([...replies("One"), ...replies("Two")]);
+    await restart();
+    await host!.resumeEventTurns();
+    await settled(unreachable, 2);
+    await settled(crashed);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect((await readLog(sessions, stale))!.some(row => row.type === "assistant")).toBe(false);
+    expect(harness!.calls()).toHaveLength(3);
   });
   it("refuses guests and malformed or oversized envelopes", async () => {
     const base = await serve();
