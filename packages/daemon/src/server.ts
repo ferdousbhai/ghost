@@ -723,37 +723,50 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
    */
   const checkPeer = async (peer: Peer) => {
     const book = requirePeers();
-    const result: { name: string; sent: number; received: number; turn: boolean; unreachable?: true; refused?: true } = { name: peer.name, sent: 0, received: 0, turn: false };
-    if (peer.url) {
-      const call = (method: string, path: string, body?: unknown) => callPeer(peer.name, peer.url ?? "", method, path, body, options.peerFetch);
-      try {
-        for (const queued of book.outbox.list(peer.login)) {
-          await call("POST", "/api/peer/messages", { id: queued.id, text: queued.text });
-          await book.outbox.remove(peer.login, queued.id);
-          result.sent += 1;
-        }
-        const waiting = (await call("GET", "/api/peer/outbox")).body;
-        for (const item of isRecord(waiting) && Array.isArray(waiting.messages) ? waiting.messages : []) {
-          const message = parsePeerMessage(isRecord(item) ? item : {});
-          try {
-            if (!(await options.host.receivePeerMessage(peer, message)).duplicate) result.received += 1;
-          } catch (error) {
-            // Past the hour's limit the rest wait in their outbox for the next check.
-            if (error instanceof GhostError && error.code === "peer_rate_limited") break;
-            if (!(error instanceof GhostError && error.code === "peer_conflict")) throw error;
+    const result: { name: string; sent: number; received: number; turn: boolean; unreachable?: true; refused?: true; error?: string } = { name: peer.name, sent: 0, received: 0, turn: false };
+    try {
+      if (peer.url) {
+        const call = (method: string, path: string, body?: unknown) => callPeer(peer.name, peer.url ?? "", method, path, body, options.peerFetch);
+        try {
+          for (const queued of book.outbox.list(peer.login)) {
+            try {
+              await call("POST", "/api/peer/messages", { id: queued.id, text: queued.text });
+            } catch (error) {
+              // Past their hour's limit the rest wait here for the next check; theirs can still be collected.
+              if (error instanceof GhostError && error.code === "peer_rate_limited") break;
+              throw error;
+            }
+            await book.outbox.remove(peer.login, queued.id);
+            result.sent += 1;
           }
-          await call("DELETE", `/api/peer/outbox/${encodeURIComponent(message.id)}`);
+          const waiting = (await call("GET", "/api/peer/outbox")).body;
+          for (const item of isRecord(waiting) && Array.isArray(waiting.messages) ? waiting.messages : []) {
+            const message = parsePeerMessage(isRecord(item) ? item : {});
+            try {
+              if (!(await options.host.receivePeerMessage(peer, message)).duplicate) result.received += 1;
+            } catch (error) {
+              // Past the hour's limit the rest wait in their outbox for the next check.
+              if (error instanceof GhostError && error.code === "peer_rate_limited") break;
+              if (!(error instanceof GhostError && error.code === "peer_conflict")) throw error;
+            }
+            await call("DELETE", `/api/peer/outbox/${encodeURIComponent(message.id)}`);
+          }
+        } catch (error) {
+          // `peer_failed`: their machine answered, their Ghost did not (down, or Remote access off).
+          if (error instanceof GhostError && (error.code === "peer_unreachable" || error.code === "peer_failed")) result.unreachable = true;
+          else if (error instanceof GhostError && error.code === "peer_refused") result.refused = true;
+          else throw error;
         }
-      } catch (error) {
-        if (error instanceof GhostError && error.code === "peer_unreachable") result.unreachable = true;
-        else if (error instanceof GhostError && error.code === "peer_refused") result.refused = true;
-        else throw error;
       }
+      const turn = await options.host.peerTurn(peer);
+      const admission = turn?.admission;
+      if (admission) startTurnLog(peer.ghost, peerConversationId(peer), (emit) => admission.run({ emit }));
+      result.turn = turn !== null;
+    } catch (error) {
+      // Theirs alone: the other peers are still checked, and what this one already did is still reported.
+      result.error = errorMessage(error);
+      options.logger?.warn("peer check failed", { peer: peer.name, error: result.error });
     }
-    const turn = await options.host.peerTurn(peer);
-    const admission = turn?.admission;
-    if (admission) startTurnLog(peer.ghost, peerConversationId(peer), (emit) => admission.run({ emit }));
-    result.turn = turn !== null;
     return result;
   };
 

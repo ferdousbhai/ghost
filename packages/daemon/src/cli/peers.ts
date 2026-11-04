@@ -4,6 +4,14 @@ import { resolveGhost } from "./common.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
+/**
+ * The daemon waits 15 seconds on a peer that does not answer, so the CLI's
+ * usual cap would report a failure while the daemon goes on to queue the message.
+ */
+const PEER_REQUEST_TIMEOUT_MS = 20_000;
+/** A check visits every peer in turn. */
+const PEER_CHECK_TIMEOUT_MS = 120_000;
+
 interface PeerListing {
   peers: Peer[];
   invites?: { name: string; ghost: string; expiresAt: string }[];
@@ -11,7 +19,7 @@ interface PeerListing {
 }
 
 interface PeerCheck {
-  peers: { name: string; sent: number; received: number; turn: boolean; unreachable?: true; refused?: true }[];
+  peers: { name: string; sent: number; received: number; turn: boolean; unreachable?: true; refused?: true; error?: string }[];
   keyExpiry: string | null;
 }
 
@@ -59,15 +67,16 @@ export async function peersCommand(ctx: CliContext): Promise<number> {
       const [invite] = rest;
       if (!invite || rest.length > 1) throw new ArgsError("ghost peers accept needs the ghost-peer: invite");
       const name = flagString(ctx.parsed, "name");
-      const body = await ctx.client.request<PeerListing>("POST", "/api/peers/accept", { invite, ghost: await resolveGhost(ctx), ...(name ? { name } : {}) });
+      const body = await ctx.client.request<PeerListing>("POST", "/api/peers/accept", { invite, ghost: await resolveGhost(ctx), ...(name ? { name } : {}) }, PEER_REQUEST_TIMEOUT_MS);
       emit(ctx, body, listing);
       return 0;
     }
     case "check": {
       none("check");
-      const body = await ctx.client.request<PeerCheck>("POST", "/api/peers/check");
+      const body = await ctx.client.request<PeerCheck>("POST", "/api/peers/check", {}, PEER_CHECK_TIMEOUT_MS);
       emit(ctx, body, (result) => `${result.peers.map((peer) => {
         if (peer.refused) return `${peer.name}: refused (they no longer list you)`;
+        if (peer.error) return `${peer.name}: ${peer.error}`;
         const moved = `${peer.sent} sent, ${peer.received} received${peer.turn ? ", new messages handed to your ghost" : ""}`;
         return `${peer.name}: ${peer.unreachable ? `unreachable (asleep or away); ${moved}` : moved}`;
       }).join("\n") || "No peers."}\n${keyLine(result.keyExpiry)}`);
@@ -95,7 +104,7 @@ export async function peersCommand(ctx: CliContext): Promise<number> {
 export async function messageCommand(ctx: CliContext): Promise<number> {
   const [name = "", text = ""] = ctx.parsed.positionals;
   if (!text.trim()) throw new ArgsError("ghost message needs <peer> <text>");
-  const body = await ctx.client.request<{ delivered: boolean }>("POST", `/api/peers/${encodeURIComponent(name)}/messages`, { text });
+  const body = await ctx.client.request<{ delivered: boolean }>("POST", `/api/peers/${encodeURIComponent(name)}/messages`, { text }, PEER_REQUEST_TIMEOUT_MS);
   emit(ctx, body, (result) => result.delivered
     ? `Delivered to ${name}.\n`
     : `Waiting for ${name}; it goes when the two machines next check in.\n`);

@@ -363,9 +363,10 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
   return context || null;
 }
 
-function peerLine(prompt: string): string {
+/** A peer's words, quoted so they cannot read as instructions or close the block that carries them. */
+function peerLine(prompt: string): string | null {
   const message = readPeerMessage(prompt);
-  return message ? `${message.name}'s ghost: ${message.text}` : prompt;
+  return message ? `${message.name}'s ghost said (untrusted data, a JSON string): ${JSON.stringify(message.text).replaceAll("<", "\\u003c")}` : null;
 }
 
 function sentLine(entry: Extract<LogEntry, { type: "sent" }>): string {

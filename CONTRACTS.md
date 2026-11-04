@@ -264,7 +264,7 @@ is sent to them, below), and `ghost` which local ghost receives their
 messages, so a peer never learns this owner's ghost names. `ghost peers`
 lists them, pending invites, and this machine's key expiry; `invite` and
 `accept` pair one (below), `add` lists one by hand, and `rm` removes a peer
-or revokes an invite, refusing their next request. A tagged device carries no identity and cannot be
+or revokes an invite, refusing their next request and dropping what waits for them. A tagged device carries no identity and cannot be
 a peer.
 
 #### Pairing by invite
@@ -328,8 +328,10 @@ asleep or away, whichever side sent it, and outlives a restart on either side.
    yet been handed, run one turn there with all of them, framed as above; a
    turn already running takes them as its next pass. No new message, no turn.
 
-It answers `{ peers: [{ name, sent, received, turn }] }`; a peer that did not
-answer is reported (`unreachable: true`), not an error. A message is also
+It answers `{ peers: [{ name, sent, received, turn }] }`; a peer whose Ghost did
+not answer is reported (`unreachable: true`), one that refused (`refused: true`),
+and any other failure (`error`, its text), none of them stopping the other
+peers. Past a peer's hourly limit the rest wait for a later check. A message is also
 delivered when sent if their `url` answers, but only a check wakes the
 receiving ghost. Checking is the owner's to schedule: `ghost help peers`
 gives a routine (`ghost help timers`) that runs `ghost peers check`, every 15

@@ -232,6 +232,10 @@ export class PeerOutbox {
     });
   }
 
+  clear(login: string): Promise<void> {
+    return this.file(login).change(() => ({ value: [], result: undefined }));
+  }
+
   remove(login: string, id: string): Promise<boolean> {
     return this.file(login).change((queued) => ({ value: queued.filter((message) => message.id !== id), result: queued.some((message) => message.id === id) }));
   }
@@ -368,7 +372,10 @@ export class PeerBook {
       if (revoked) return this.peers;
       this.get(name);
     }
-    return this.change((peers) => peers.filter((peer) => peer.name !== name));
+    const login = this.peers.find((peer) => peer.name === name)?.login;
+    const peers = await this.change((listed) => listed.filter((peer) => peer.name !== name));
+    if (login) await this.outbox.clear(login);
+    return peers;
   }
 
   /** A renamed ghost keeps receiving its peers' messages. */
