@@ -127,8 +127,8 @@ Scope {
                 visible: !Presence.composing && Presence.phase !== "" && screenScope.home
                 anchors.bottom: true // qmllint disable missing-property
                 margins.bottom: screenScope.modelData.height * 0.12
-                implicitWidth: card.width
-                implicitHeight: card.height
+                implicitWidth: Math.ceil(card.width)
+                implicitHeight: Math.ceil(card.height)
                 color: "transparent"
                 exclusionMode: ExclusionMode.Ignore
                 namespace: "ghost-presence-card"
