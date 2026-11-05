@@ -183,17 +183,22 @@ Ghost adds no machine-monitoring code: a ghost reads strain with installed
 tools (`omarchy system stats`, batch `systemd-cgtop`, `/proc/pressure`,
 `sensors -j`, `df`), and `ghost help machine` gives the opt-in watch, a minutely
 routine with slug `machine-watch` running a Bash script the ghost saves. It wakes
-the ghost only near harm, never for ordinary load: a temperature within 5 °C of
-its sensor's critical limit or a fan at 95% of its maximum, available memory
+the ghost while the machine heats up, with fans above half speed for three
+checks in a row, and near harm, never for ordinary load: a kernel thermal warning,
+a temperature within 5 °C of its sensor's critical limit or a fan at 95% of its
+maximum, available memory
 under 5%, swap over 85% used (systemd-oomd acts at 90%), or memory full-stall
 avg60 of 20% or more, or `/` or `$HOME` 97% full. Each condition is a `ghost
 event machine <kind>-<YYYYMMDDHH> --thread <kind>` (heat, memory, disk), so at
-most one per kind an hour, each kind one conversation; exit 6 (an id already accepted with older data) counts as delivered.
-The payload is the tools' own output, naming the busiest units and processes.
+most one per kind an hour, each kind one conversation; `heating-<YYYYMMDDHH>`
+shares the heat thread, so a later heat event still arrives; exit 6 (an id already accepted with older data) counts as delivered.
+The payload is the tools' own output, naming the busiest units and processes and the agents behind them, from the
+environment a detached job keeps from its agent.
 One ghost per machine installs it, only when the owner asks; the routines view
 pauses, inspects, and removes it. The recipe has the ghost fix only its own or
-plainly broken units, least drastic first (CPU weight, freeze, stop), and ask
-the owner about everything else. Low battery reaches a ghost through Omarchy's
+plainly broken units, least drastic first (CPU weight, freeze, stop), instruct
+an agent behind the load through the agent's own channel, and ask the owner about
+everything else. Low battery reaches a ghost through Omarchy's
 `battery-low` hook calling `ghost event`.
 
 ### Crash watch

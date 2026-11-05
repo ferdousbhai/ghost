@@ -418,11 +418,13 @@ through `ghost help events` and [the external event guide](events.md).
 To have a ghost woken before the machine gets into trouble, ask it: "watch my
 machine". It installs a minutely `machine-watch` routine (`ghost help machine`),
 visible and pausable under Routines like any other. The routine stays quiet
-under ordinary load and wakes the ghost only near harm: a temperature close to
-its critical limit or fans at full speed, memory nearly exhausted, or a disk
-nearly full. Each becomes an event conversation naming the busiest programs;
-the ghost fixes what is its own or plainly broken, least drastic first, and
-asks you before touching anything else.
+under ordinary load and wakes the ghost when fans stay above half speed, or near
+harm: a kernel thermal warning, a temperature close to its critical limit or fans
+at full speed, memory nearly exhausted, or a disk nearly full. Each becomes an
+event conversation naming the busiest programs and the agents behind them. The
+ghost tells a Claude session or one of its own conversations to slow down, fixes
+what is its own or plainly broken, least drastic first, and asks you before
+touching anything else.
 
 ## Crashes and failed services
 

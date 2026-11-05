@@ -50,13 +50,13 @@ describe("ghost help topics", () => {
     expect(text).toContain("end when this turn's headless run does");
   });
 
-  it("machine: a minutely script in the ghost's namespace that wakes it only near harm, fixes least drastic first", () => {
+  it("machine: a minutely script in the ghost's namespace that wakes it while heating and near harm, instructs agents, fixes least drastic first", () => {
     const text = renderHelpTopic("machine", INPUT);
     expect(text).toContain("# ghost-timer-v1-4-aria-machine-watch.service");
     expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh");
     expect(text).toContain("OnCalendar=minutely");
     expect(text).toContain("list-unit-files '*-machine-watch.timer'");
-    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"$kind\" --ghost aria");
+    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"${kind/heating/heat}\" --ghost aria");
     expect(text).toContain("(( status == 0 || status == 6 ))");
     expect(text).toContain("$t >= $c - 5");
     expect(text).toContain("$fan >= 0.95 * $max");
@@ -67,6 +67,70 @@ describe("ghost help topics", () => {
     expect(text).toContain("ask before throttling or stopping it");
     expect(text).toContain("the command that undoes it");
     expect(text).toContain("~/.config/omarchy/hooks/battery-low.d/");
+    expect(text).toContain("instruct that agent now, before anything is throttled");
+    expect(text).toContain("--tools SendMessage,ToolSearch");
+    expect(text).toContain("ghost say --follow-up -s <id>");
+  });
+
+  describe("machine watch script", () => {
+    /** Runs the recipe's script with every outside tool stubbed, and returns the events it would send. */
+    function watch(home: string, { fan, kernel = "" }: { fan: number; kernel?: string }): { thread: string; id: string; payload: string }[] {
+      const bin = join(home, "bin");
+      mkdirSync(bin, { recursive: true });
+      const events = join(home, "events");
+      rmSync(events, { force: true });
+      const stub = (name: string, body: string) => writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+      stub("sensors", `echo '${JSON.stringify({ chip: { "Fan 1": { fan1_input: fan, fan1_max: 1000 }, Heat: { temp1_input: 40 } } })}'`);
+      stub("journalctl", `printf '%s' ${JSON.stringify(kernel)}`);
+      stub("systemd-cgtop", "true");
+      stub("fake-ghost", `printf '%s\\t%s\\t%s\\n' "$5" "$3" "\${10}" >>"${events}"`);
+      const text = renderHelpTopic("machine", { ...INPUT, cliPath: join(bin, "fake-ghost") });
+      const script = /\`\`\`bash\n([\s\S]*?)\`\`\`/.exec(text)?.[1] ?? "";
+      const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_RUNTIME_DIR: home } });
+      expect(run.status, run.stderr).toBe(0);
+      let sent = "";
+      try { sent = readFileSync(events, "utf8"); } catch { return []; }
+      return sent.trim().split("\n").filter((line) => /^[a-z]+\t/.test(line)).map((line) => {
+        const [thread = "", id = "", payload = ""] = line.split("\t");
+        return { thread, id, payload };
+      });
+    }
+
+    it("wakes only after fans stay above half speed, and a cool check resets the count", () => {
+      const home = mkdtempSync(join(tmpdir(), "machine-watch-"));
+      try {
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        expect(watch(home, { fan: 300 })).toEqual([]);
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        const [event] = watch(home, { fan: 600 });
+        expect(event?.thread).toBe("heat");
+        expect(event?.id).toMatch(/^heating-\d{10}$/);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("wakes on the first kernel thermal warning, as heat rather than heating", () => {
+      const home = mkdtempSync(join(tmpdir(), "machine-watch-"));
+      try {
+        const [event] = watch(home, { fan: 200, kernel: "smc: SMC Thermal pressure initiated Sleep" });
+        expect(event?.thread).toBe("heat");
+        expect(event?.id).toMatch(/^heat-\d{10}$/);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("stays quiet with ordinary fans and a quiet kernel", () => {
+      const home = mkdtempSync(join(tmpdir(), "machine-watch-"));
+      try {
+        for (let check = 0; check < 4; check += 1) expect(watch(home, { fan: 400 })).toEqual([]);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
   });
 
   it("crashes: a minutely journal watch in the ghost's namespace, crashes hourly and failed services daily, diagnosis without changes", () => {
