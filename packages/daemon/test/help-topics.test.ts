@@ -56,7 +56,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh");
     expect(text).toContain("OnCalendar=minutely");
     expect(text).toContain("list-unit-files '*-machine-watch.timer'");
-    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"${kind/heating/heat}\" --ghost aria");
+    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"$thread\" --ghost aria");
     expect(text).toContain("(( status == 0 || status == 6 ))");
     expect(text).toContain("$t >= $c - 5");
     expect(text).toContain("$fan >= 0.95 * $max");
