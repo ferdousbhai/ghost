@@ -5,7 +5,8 @@ pragma ComponentBehavior: Bound
 // so Ghost reads as part of the machine rather than an app on it.
 //
 // Typing filters; Up/Down move; Enter opens the row, or asks the ghost what
-// was typed when nothing matches. Tab moves to the next ghost. On a
+// was typed when nothing matches, and unfolds or folds the Events row. Tab
+// moves to the next ghost. On a
 // conversation, Ctrl+R renames it where it is read, Ctrl+P pins it, and
 // Delete (with the cursor at the end of the filter) asks to trash it. Esc is
 // the HUD's: it closes.
@@ -31,12 +32,15 @@ FocusScope {
     property string mode: "home"
     readonly property bool ghostMode: root.mode === "ghosts"
 
+    /** Whether the Events row shows its conversations; kept across opens, for reading through several. */
+    property bool eventsOpen: false
+
     property real maxListHeight: 480
     property real now: Date.now()
 
     readonly property var rows: root.ghostMode
         ? Launcher.ghostRows(filter.text, Ghostd.ghosts, Ghostd.activeGhost)
-        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount)
+        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount, root.eventsOpen)
     property int selected: Launcher.first(root.rows)
     readonly property var current: root.selected >= 0 && root.selected < root.rows.length
         ? root.rows[root.selected] : null
@@ -124,7 +128,12 @@ FocusScope {
     }
 
     function activate(row: var): void {
-        if (row && row.kind !== "header") root.activated(row);
+        if (row && row.kind === "events") {
+            root.eventsOpen = !root.eventsOpen;
+            // The rows just changed under the selection: it stays on this one.
+            root.selected = root.rows.findIndex(candidate => candidate.kind === "events");
+            list.positionViewAtIndex(root.selected, ListView.Contain);
+        } else if (row && row.kind !== "header") root.activated(row);
     }
 
     // The desktop's menu refreshes ages each time it opens; so does this.
@@ -285,6 +294,7 @@ FocusScope {
             required property int index
             readonly property bool header: row.modelData.kind === "header"
             readonly property bool chosen: row.index === root.selected
+            readonly property bool conversational: row.modelData.kind === "session" || row.modelData.kind === "events"
             readonly property var renaming: root.renameFor(row.modelData)
             readonly property bool editing: row.renaming !== null && row.renaming.editingKey === row.modelData.id
 
@@ -344,14 +354,14 @@ FocusScope {
                 Item {
                     id: mark
                     anchors.left: parent.left
-                    anchors.leftMargin: root.markInset
+                    anchors.leftMargin: root.markInset + (row.modelData.nested === true ? Theme.pad : 0)
                     anchors.verticalCenter: parent.verticalCenter
                     width: root.markWidth
                     height: width
 
                     GhostGlyph {
                         anchors.centerIn: parent
-                        visible: row.modelData.kind !== "session"
+                        visible: !row.conversational
                         size: Theme.fontSize + 2
                         path: row.modelData.kind === "place" ? row.modelData.icon
                             : row.modelData.kind === "summon" ? "M12 5v14M5 12h14"
@@ -364,7 +374,7 @@ FocusScope {
 
                     SpectralOrb {
                         anchors.centerIn: parent
-                        visible: row.modelData.kind === "session" && row.modelData.running === true
+                        visible: row.conversational && row.modelData.running === true
                         diameter: Theme.fontSize
                         turnKey: row.modelData.id
                     }
@@ -382,7 +392,7 @@ FocusScope {
 
                     Rectangle {
                         anchors.centerIn: parent
-                        visible: row.modelData.kind === "session" && row.modelData.running !== true
+                        visible: row.conversational && row.modelData.running !== true
                             && row.modelData.asking !== true && row.modelData.unread === true
                         width: 6
                         height: 6
@@ -500,6 +510,8 @@ FocusScope {
                 ? "a name is letters, digits, . _ or -, up to 64, starting with a letter or digit"
             : root.current && root.current.kind === "session"
                 ? "↵ open   ^R rename   ^P pin   del trash   ⇥ ghost   esc close"
+            : root.current && root.current.kind === "events"
+                ? (root.eventsOpen ? "↵ fold" : "↵ unfold") + "   ⇥ ghost   esc close"
             : root.current && root.current.kind === "ghost"
                 ? "↵ switch   ^R rename   del banish   esc back"
             : root.ghostMode ? "↵ summon   esc back"

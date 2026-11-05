@@ -50,7 +50,10 @@ behind it, while every other binding (screenshots, volume, workspaces) keeps
 working, and a compositor close is a dismissal. It opens on the `Launcher`, a
 filter over conversations and places at a fixed height on screen: pinned
 conversations first, then those holding an open question, then unread
-replies, then the rest, newest first. Enter on a row grows the card into that
+replies, then the rest, newest first. Two or more `event-` conversations fold
+into one Events row, placed as its first one would be, saying how many are
+unread; Enter unfolds it and folds it again, and a filter searches them all
+(pinned or asking ones stay out in the list). Enter on a row grows the card into that
 view, and Enter with nothing matching asks the ghost. Opened on its list, it
 listens as the prompt does: Voxtype types into the filter, Enter while
 listening asks the ghost what was said, and arrowing to a row or leaving the

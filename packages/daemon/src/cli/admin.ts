@@ -136,7 +136,8 @@ export async function eventCommand(ctx: CliContext): Promise<number> {
   if (!source || !id || !instructions) throw new ArgsError("ghost event needs source, id, and --instructions");
   const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
   const ghost = await resolveGhost(ctx);
-  const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload });
+  const thread = flagString(parsed, "thread");
+  const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, ...(thread === undefined ? {} : { thread }), instructions, payload });
   emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
   return 0;
 }

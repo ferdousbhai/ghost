@@ -56,7 +56,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh");
     expect(text).toContain("OnCalendar=minutely");
     expect(text).toContain("list-unit-files '*-machine-watch.timer'");
-    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --ghost aria");
+    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"$kind\" --ghost aria");
     expect(text).toContain("(( status == 0 || status == 6 ))");
     expect(text).toContain("$t >= $c - 5");
     expect(text).toContain("$fan >= 0.95 * $max");
@@ -85,7 +85,9 @@ describe("ghost help topics", () => {
     expect(text).toContain("$name == *.service && $name != *-crash-watch.service");
     expect(text).toContain("!= core-dump");
     expect(text).toContain("_SYSTEMD_INVOCATION_ID=\"$run\" + USER_INVOCATION_ID=\"$run\"");
-    expect(text).toContain("/usr/bin/ghost event \"$source\" \"$name-$id\" --ghost aria");
+    expect(text).toContain("/usr/bin/ghost event \"$source\" \"$name-$id\" --thread \"$name\" --ghost aria");
+    expect(text).toContain("[[ $name == cmTC_* ]] && name=\"\"");
+    expect(text).toContain("it titles the conversation");
     expect(text).toContain("(( status == 0 || status == 6 )) || { failed=1; break; }");
     expect(text).toContain("ignore='^$'");
     expect(text).toContain("Change, file, restart, or send nothing.");

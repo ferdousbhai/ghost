@@ -42,6 +42,34 @@ TestCase {
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 
+    // Event conversations fold into one row where the first would be, saying
+    // how many are unread; what the owner must see stays out, a filter finds
+    // them all, and one alone stays a plain row.
+    function test_eventConversationsFoldIntoOneRow(): void {
+        const listed = [
+            { id: "event-old", title: "Old finding", updatedAt: "2026-10-20T10:00:00Z" },
+            { id: "talk", title: "Taxes", updatedAt: "2026-10-28T10:00:00Z" },
+            { id: "event-new", title: "New finding", unread: true, updatedAt: "2026-10-28T11:00:00Z" },
+            { id: "event-pinned", title: "Pinned finding", pinned: true, updatedAt: "2026-10-01T10:00:00Z" },
+            { id: "event-asking", title: "Asking", question: { text: "Apply it?" }, updatedAt: "2026-10-01T11:00:00Z" }
+        ];
+        const conversations = rows => kinds(rows).filter(row => /^(session|events):/.test(row));
+        const folded = Launcher.rows("", listed, "casper", now, 0);
+        compare(conversations(folded), ["session:event-pinned", "session:event-asking", "events:events", "session:talk"]);
+        const row = folded.find(candidate => candidate.kind === "events");
+        compare(row.detail, "1 unread");
+        verify(row.unread);
+        compare(row.meta, "1h");
+        const open = Launcher.rows("", listed, "casper", now, 0, true);
+        compare(conversations(open), ["session:event-pinned", "session:event-asking", "events:events",
+            "session:event-new", "session:event-old", "session:talk"]);
+        verify(open.find(candidate => candidate.id === "event-new").nested);
+        compare(conversations(Launcher.rows("finding", listed, "casper", now, 0)),
+            ["session:event-pinned", "session:event-new", "session:event-old"]);
+        compare(conversations(Launcher.rows("", [listed[0], listed[1]], "casper", now, 0)),
+            ["session:talk", "session:event-old"]);
+    }
+
     // Like a messenger: pinned, then unread replies, each newest first.
     function test_unreadRepliesComeBeforeNewerReadOnes(): void {
         const rows = Launcher.rows("", [

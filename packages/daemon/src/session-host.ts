@@ -7,7 +7,7 @@
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
 import { type DesktopContext, renderDesktopContext } from "./desktop-context.js";
-import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
+import { eventConversationId, eventPrompt, eventPromptLead, type ExternalEvent } from "./external-events.js";
 import { PeerRateLimit, peerCheckPrompt, peerConversationId, peerMailPrompt, peerMessageHeader, peerMessageRecord, type Peer, type PeerBook, type PeerMessage } from "./peers.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -36,6 +36,7 @@ import {
   unseenCommands,
   unhandedPeerMessages,
   unseenSent,
+  isEventPrompt,
   type AssistantPart,
   type LogEntry,
   type TranscriptMessage,
@@ -264,7 +265,7 @@ function endedUnreachable(last: LogEntry | undefined): boolean {
   return last?.type === "assistant" && !!last.error && isUnreachableMessage(last.error);
 }
 
-/** Whether the daemon's last run left this event's only prompt unanswered: no reply (a crash), its model unreachable, or cut off by a stop. */
+/** Whether the daemon's last run left this event's prompt, which `entries` start at, unanswered: no reply (a crash), its model unreachable, or cut off by a stop. */
 function leftUnfinished(entries: readonly LogEntry[], last: LogEntry | undefined): boolean {
   if (last?.type === "user" || endedUnreachable(last)) return true;
   // Once only, so a turn whose own work restarts the daemon cannot loop.
@@ -739,15 +740,24 @@ export class SessionHost {
   }
 
   async admitEvent(ghostName: string, event: ExternalEvent): Promise<{ sessionId: string; admission: TurnAdmission | null }> {
-    const sessionId = eventConversationId(event), prompt = eventPrompt(event);
-    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
+    const alone = eventConversationId(event), prompt = eventPrompt(event), lead = eventPromptLead(event);
+    const thread = event.thread === undefined ? alone : eventConversationId({ source: event.source, id: event.thread });
+    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, alone), async () => {
       const ghost = this.registry.get(ghostName), { sessionDir } = ghostPaths(ghost.dir);
-      const entries = await readLog(sessionDir, sessionId);
-      const firstPrompt = entries?.find((entry) => entry.type === "user");
-      if (firstPrompt?.type === "user") {
-        if (firstPrompt.text !== prompt) throw new GhostError("event_conflict", "This source/id already has different instructions or data.", 409);
-        return { sessionId, admission: null };
+      const logs = new Map<string, readonly LogEntry[] | null>();
+      for (const id of [thread, alone]) {
+        if (logs.has(id)) continue;
+        const log = await readLog(sessionDir, id);
+        logs.set(id, log);
+        const earlier = log?.find((entry) => entry.type === "user" && entry.origin === undefined && entry.text.startsWith(lead));
+        if (earlier?.type !== "user") continue;
+        if (earlier.text !== prompt) throw new GhostError("event_conflict", "This source/id already has different instructions or data.", 409);
+        return { sessionId: id, admission: null };
       }
+      // A busy thread holds up nothing: the event takes its own conversation.
+      const threadKey = keyOf(ghostName, thread);
+      const sessionId = this.admissions.has(threadKey) || this.reservedSessions.has(threadKey) ? alone : thread;
+      const entries = logs.get(sessionId) ?? null;
       const admission = await this.admitTurn(ghostName, { sessionId, prompt, promptRecorded: true });
       try {
         await appendLog(sessionDir, sessionId, [
@@ -799,12 +809,12 @@ export class SessionHost {
     return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
       const key = keyOf(ghostName, sessionId);
       const entries = (await readLog(ghostPaths(this.registry.get(ghostName).dir).sessionDir, sessionId)) ?? [];
-      const prompts = entries.filter((entry) => entry.type === "user");
       const last = entries.findLast((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "command");
-      const prompt = prompts[0];
-      if (prompts.length !== 1 || prompt?.type !== "user") return null;
+      const prompt = entries.findLast((entry) => entry.type === "user");
+      // The owner's message after it answers for itself.
+      if (prompt?.type !== "user" || prompt.origin !== undefined || !isEventPrompt(prompt.text)) return null;
       const due = resuming
-        ? leftUnfinished(entries, last) && Date.now() - Date.parse(prompt.at) <= EVENT_RESUME_WINDOW_MS
+        ? leftUnfinished(entries.slice(entries.indexOf(prompt)), last) && Date.now() - Date.parse(prompt.at) <= EVENT_RESUME_WINDOW_MS
         : endedUnreachable(last);
       if (!due) return null;
       if (this.admissions.has(key) || this.reservedSessions.has(key)) return null;

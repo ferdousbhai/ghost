@@ -216,11 +216,11 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "event",
-    usage: "event <source> <id> --instructions <text> [payload|-] [-g <name>] [--json] [-q]",
-    summary: "Accept an external event once into its own conversation.",
+    usage: "event <source> <id> --instructions <text> [--thread <key>] [payload|-] [-g <name>] [--json] [-q]",
+    summary: "Accept an external event once, into its own conversation or its --thread's.",
     example: "ghost event github issue-42 --instructions 'Summarize this issue' -",
     positionals: [2, 3],
-    flags: { value: ["instructions"] },
+    flags: { value: ["instructions", "thread"] },
     run: eventCommand,
   },
   {

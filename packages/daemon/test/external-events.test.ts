@@ -7,7 +7,7 @@ import { renderHelpTopic } from "../src/help-topics.js";
 import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteAccess } from "../src/tailscale-identity.js";
-import { appendLog, newConversationEntry, readLog } from "../src/conversation-log.js";
+import { appendLog, logState, newConversationEntry, readLog, type LogEntry } from "../src/conversation-log.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
@@ -88,6 +88,57 @@ describe("external event admission", () => {
     await new Promise(resolve => setTimeout(resolve, 200));
     expect(harness!.calls()).toHaveLength(8);
   });
+  it("keeps a thread's events in one conversation, each once, and a busy thread holds up none", async () => {
+    const base = await serve([...replies("Same failure as before."), ...replies("Different this time.")]);
+    const first = { ...event, id: "bt-agent-1", thread: "bt-agent" }, second = { ...event, id: "bt-agent-2", thread: "bt-agent" };
+    const sessionId = eventConversationId({ source: event.source, id: "bt-agent" });
+    expect(await (await post(base, first)).json()).toEqual({ sessionId, duplicate: false });
+    await settled(sessionId);
+    expect(await (await post(base, first)).json()).toEqual({ sessionId, duplicate: true });
+    expect((await post(base, { ...first, payload: "changed" })).status).toBe(409);
+    expect(await (await post(base, second)).json()).toEqual({ sessionId, duplicate: false });
+    const rows = await settled(sessionId, 2);
+    expect(rows.filter(row => row.type === "user")).toHaveLength(2);
+    expect(logState(rows).title).toBe("Different this time.");
+
+    const gate = harness!.gate("thread");
+    harness!.setTurns([{ gate: gate.path, ...replies("Third.")[0]! }, ...replies("Fourth.")]);
+    const third = { ...event, id: "bt-agent-3", thread: "bt-agent" }, fourth = { ...event, id: "bt-agent-4", thread: "bt-agent" };
+    try {
+      expect((await post(base, third)).status).toBe(202);
+      // The first turn holds the thread, so this one runs beside it, and is still accepted once.
+      const alone = eventConversationId(fourth);
+      expect(await (await post(base, fourth)).json()).toEqual({ sessionId: alone, duplicate: false });
+      expect(await (await post(base, fourth)).json()).toEqual({ sessionId: alone, duplicate: true });
+      await settled(alone);
+    } finally { gate.release(); }
+    await settled(sessionId, 3);
+    expect(await (await post(base, fourth)).json()).toEqual({ sessionId: eventConversationId(fourth), duplicate: true });
+  });
+  it("reruns a thread's latest event when it could not reach its model, unless the owner spoke after it", async () => {
+    const offline: FakeTurn = { events: [{ type: "error", message: "Connection error." }], exit: 1 };
+    const base = await serve([...replies("Earlier finding."), offline, ...replies("Back online.")], [50]);
+    const sessionId = eventConversationId({ source: event.source, id: "unit" });
+    await post(base, { ...event, id: "one", thread: "unit" });
+    await settled(sessionId);
+    await post(base, { ...event, id: "two", thread: "unit" });
+    const rows = await settled(sessionId, 3);
+    expect(harness!.calls()).toHaveLength(3);
+    expect(harness!.calls()[2]?.prompt).toContain('"two"');
+    expect(logState(rows).title).toBe("Back online.");
+  });
+  it("titles an event by source and id, then by what its reply found, and the owner's name wins", () => {
+    const at = "2026-11-05T00:00:00.000Z", prompt = eventPrompt({ source: "unit", id: "bt-agent.service-20261104", instructions: "Look.", payload: "" });
+    const reply = (text: string, extra: object = {}): LogEntry => ({ type: "assistant", at, harness: "fake", content: [{ type: "text", text: "Let me check the journal." }, { type: "text", text }], ...extra });
+    const asked: LogEntry = { type: "user", at, text: prompt };
+    expect(logState([asked]).title).toBe("unit: bt-agent.service-20261104");
+    expect(logState([asked, reply("API Error: no route", { error: "no route" })]).title).toBe("unit: bt-agent.service-20261104");
+    expect(logState([asked, reply("**Why it failed:** `bt-agent.service` found no adapter. The rest is detail.\n\nMore.")]).title).toBe("Why it failed: bt-agent.service found no adapter.");
+    expect(logState([asked, reply("x".repeat(200))]).title).toBe(`${"x".repeat(90)}…`);
+    // The owner's follow-up neither retitles it nor does the answer to it.
+    expect(logState([asked, reply("Found it."), { type: "user", at, text: "Why was that?" }, reply("Because.")]).title).toBe("Found it.");
+    expect(logState([asked, reply("Found it."), { type: "title", at, title: "Mine" }]).title).toBe("Mine");
+  });
   it("does not rerun an unreachable event turn once the owner has continued it", async () => {
     const offline: FakeTurn = { events: [{ type: "error", message: "Connection error." }], exit: 1 };
     const base = await serve([offline, ...replies("Owner answered")], [150]);
@@ -149,7 +200,7 @@ describe("external event admission", () => {
     // A crash leaves only the prompt: one recent, one too old.
     const sessions = join(temp.root, "casper", "sessions");
     const seedPrompt = async (id: string, at: string) => {
-      await appendLog(sessions, id, [newConversationEntry(id, new Date(at)), { type: "user", at, text: "Look into this." }]);
+      await appendLog(sessions, id, [newConversationEntry(id, new Date(at)), { type: "user", at, text: eventPrompt({ ...event, id }) }]);
     };
     const crashed = eventConversationId({ ...event, id: "crashed" }), stale = eventConversationId({ ...event, id: "stale" });
     await seedPrompt(crashed, new Date().toISOString());
@@ -170,6 +221,18 @@ describe("external event admission", () => {
     for (const invalid of [{ ...event, id: "" }, { ...event, instructions: 1 }, { ...event, payload: "x".repeat(131073) }]) expect((await post(base, invalid)).status).toBe(400);
     expect(harness!.calls()).toHaveLength(0);
     expect(() => eventPrompt(parseExternalEvent({ ...event, payload: "\u0001".repeat(131072) }))).toThrow("text limit");
+  });
+  it("CLI passes a thread only when given one", async () => {
+    let body: unknown;
+    const result = await runCli(["event", "unit", "a-1", "--thread", "a", "--instructions", "Look", "data"], {
+      env: { GHOST: "casper", GHOSTD_PORT: "17718" }, home: "/tmp/ghost-event-cli",
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ sessionId: "event-abc", duplicate: false }), { status: 202 });
+      },
+    });
+    expect(result.code).toBe(0);
+    expect(body).toEqual({ source: "unit", id: "a-1", thread: "a", instructions: "Look", payload: "data" });
   });
   it("CLI delivers stdin and prints the accepted conversation for inspection", async () => {
     const calls: Array<{ path: string; body: unknown }> = [];
@@ -197,7 +260,7 @@ describe("external event admission", () => {
     const env = { ...process.env, PATH: `${bin}:/usr/bin`, TMPDIR: scratch, NOTIFICATIONS: fixture, CALLS: calls, PAYLOADS: payload };
     const result = spawnSync("/bin/bash", ["-c", recipe], { env, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(calls, "utf8")).toContain("event\ngithub:OWNER/REPO\n42:2026-10-22\n--ghost\ncasper");
+    expect(readFileSync(calls, "utf8")).toContain("event\ngithub:OWNER/REPO\n42:2026-10-22\n--thread\n42\n--ghost\ncasper");
     expect(readFileSync(payload, "utf8")).toContain('"title":"test"');
     expect(readFileSync(payload, "utf8")).not.toContain("ignore");
     expect(readdirSync(scratch)).toEqual([]);

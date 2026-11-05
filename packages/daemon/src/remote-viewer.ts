@@ -434,10 +434,20 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const list = draft ? [{ id: draft, title: "New conversation" }, ...sessions] : sessions;
     const select = $("session");
     select.textContent = "";
-    for (const s of list) {
+    const option = (s) => {
       const o = document.createElement("option");
       o.value = s.id; o.textContent = (s.unread ? "● " : "") + (s.title || s.preview || s.id);
-      select.append(o);
+      return o;
+    };
+    // As the HUD folds them: what intake started, unless the owner must see it, under one group.
+    const folds = (s) => s.id.startsWith("event-") && !s.pinned && !s.question;
+    for (const s of list.filter((s) => !folds(s))) select.append(option(s));
+    const events = list.filter(folds);
+    if (events.length) {
+      const group = document.createElement("optgroup");
+      group.label = "Events";
+      group.append(...events.map(option));
+      select.append(group);
     }
     if (!missing && !list.some((s) => s.id === session)) session = list[0]?.id || null;
     selectedUnread = sessions.find(s => s.id === session)?.unread === true;

@@ -72,9 +72,27 @@ function ordered(sessions) {
         .sort(function (a, b) { return rank(a) - rank(b) || time(b) - time(a); });
 }
 
+/** Folds into the Events row: what intake started, unless the owner must see it. */
+function foldsIntoEvents(session) {
+    return String(session.id).indexOf("event-") === 0 && session.pinned !== true && !session.question;
+}
+
+/** The one row of two or more event conversations; `open` shows them under it. */
+function eventsRow(events, now, open) {
+    var unread = events.filter(function (session) { return session.unread === true; }).length;
+    var newest = events.reduce(function (latest, session) {
+        return Math.max(latest, Date.parse(session.updatedAt || "") || 0);
+    }, 0);
+    return { kind: "events", id: "events", label: "Events " + (open ? "▾" : "▸"),
+        detail: unread > 0 ? unread + " unread" : "", meta: newest ? age(new Date(newest).toISOString(), now) : "",
+        unread: unread > 0, running: events.some(function (session) { return session.running === true; }) };
+}
+
 /**
  * The rows for `query` over `sessions`, in `ordered` order. Headers are rows too, but never selectable. `hookCount`, the
- * owner's loaded hooks, is the Hooks row's detail when there are any.
+ * owner's loaded hooks, is the Hooks row's detail when there are any. With an
+ * empty query, event conversations fold into one row, unfolded by `eventsOpen`;
+ * a query searches them with the rest.
  *
  * Empty query: the conversations, then the places. The filter is also where
  * a new conversation starts, so no row repeats it (Ctrl+N opens a blank one).
@@ -82,18 +100,17 @@ function ordered(sessions) {
  * row when nothing matches and the last when something does, so Enter opens
  * what was searched for and still asks when there was nothing to find.
  */
-function rows(query, sessions, ghost, now, hookCount) {
+function rows(query, sessions, ghost, now, hookCount, eventsOpen) {
     var q = String(query || "").trim().toLowerCase();
     var out = [];
     var conversations = [];
     var listed = ordered(sessions);
-    for (var i = 0; i < listed.length; i++) {
-        var session = listed[i];
+    var events = q === "" ? listed.filter(foldsIntoEvents) : [];
+    var folding = events.length > 1;
+    var sessionRow = function (session, nested) {
         var title = titleOf(session);
-        if (q !== "" && !contains(title, q) && !contains(session.preview, q)
-            && !(session.question && contains(session.question.text, q))) continue;
-        conversations.push({
-            kind: "session", id: session.id, label: title,
+        return {
+            kind: "session", id: session.id, label: title, nested: nested,
             title: typeof session.title === "string" ? session.title : "",
             // A question is what the owner most needs to read in the row.
             // At rest a row is its title, as the desktop's menu shows one; a
@@ -105,7 +122,21 @@ function rows(query, sessions, ghost, now, hookCount) {
             asking: !!session.question,
             meta: age(session.updatedAt, now), pinned: session.pinned === true,
             unread: session.unread === true, running: session.running === true
-        });
+        };
+    };
+    for (var i = 0; i < listed.length; i++) {
+        var session = listed[i];
+        if (folding && foldsIntoEvents(session)) {
+            if (session !== events[0]) continue;
+            conversations.push(eventsRow(events, now, eventsOpen === true));
+            if (eventsOpen === true) {
+                conversations = conversations.concat(events.map(function (event) { return sessionRow(event, true); }));
+            }
+            continue;
+        }
+        if (q !== "" && !contains(titleOf(session), q) && !contains(session.preview, q)
+            && !(session.question && contains(session.question.text, q))) continue;
+        conversations.push(sessionRow(session, false));
     }
     var places = [];
     for (var j = 0; j < PLACES.length; j++) {

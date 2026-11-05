@@ -128,28 +128,35 @@ scheduler or job history.
 ### External events
 
 An installed authenticated CLI/service selects events and calls
-`ghost event <source> <id> --instructions <owner-instructions> [payload|-]`.
-`POST /api/ghosts/:ghost/events` accepts `{ source, id, instructions, payload }`
-(strings; source 1–128, id 1–512, instructions 1–16384, payload at most 131072
+`ghost event <source> <id> --instructions <owner-instructions> [--thread <key>] [payload|-]`.
+`POST /api/ghosts/:ghost/events` accepts `{ source, id, thread?, instructions, payload }`
+(strings; source 1–128, id and thread 1–512, instructions 1–16384, payload at most 131072
 characters; the rendered prompt must also fit the 200000-character log bound).
 This owner-only intake reuses conversations because `ghost say`
 has no atomic deduplication; it adds no public listener or provider credential
-store. Each source/id hashes to one `event-<sha256>` conversation. Acceptance
+store. Each source/id hashes to one `event-<sha256>` conversation; with a
+`thread`, source/thread hashes to the one its events share, so a ghost sees what
+it said about that subject before. An event whose thread is running a turn takes
+its own source/id conversation instead, so nothing waits. Acceptance
 logs its prompt before returning `202 { sessionId, duplicate: false }`; the turn
 runs independently of the HTTP caller. Repeated matching delivery returns
 `200 { sessionId, duplicate: true }`, even after failure or daemon restart.
-Reusing an id with changed instructions/data is 409. Different events run in
-separate conversations; a repeated busy event is acknowledged without queuing
-another turn. Event data is explicitly untrusted and cannot become an owner
-`!command`. Source and id remain visible in its prompt/title; ordinary history,
-stop, failure reporting, and navigation apply to the event conversation.
+Reusing an id with changed instructions/data is 409. Different events without
+a shared thread run in separate conversations; a repeated busy event is
+acknowledged without queuing another turn. Event data is explicitly untrusted
+and cannot become an owner `!command`. Source and id remain visible in its
+prompt. The title, unless the owner set one, is the first sentence of the last
+text of the latest event's reply, or `<source>: <id>` until one arrives, derived
+on read with no model. Ordinary history, stop, failure reporting, and navigation
+apply to the event conversation.
 An event turn that fails because its model could not be reached (DNS, a
 refused, reset, or timed-out connection: `isUnreachableMessage` in
 `turn-events.ts`) runs again with the same prompt after 1, 2, 4, 8, 16, 32,
 60, and 60 minutes, until a run ends any other way; a rerun is skipped once
-the owner has added to the conversation (a message or `!command`) or while a
-turn runs there. The waits are in memory. Instead, each daemon start reruns,
-within 24 hours of its acceptance, an event whose one prompt the last run left
+the owner or a later event has added to the conversation (a message or
+`!command`) or while a turn runs there. The waits are in memory. Instead, each
+daemon start reruns, within 24 hours of its acceptance, an event whose prompt,
+the conversation's latest, the last run left
 unfinished: no reply (a crash), a reply that could not reach its model, or one
 a daemon stop cut off (the assistant log entry's `interrupted`; once only, so
 a turn that restarts the daemon cannot loop). The owner's stop is not rerun.
@@ -180,8 +187,8 @@ the ghost only near harm, never for ordinary load: a temperature within 5 °C of
 its sensor's critical limit or a fan at 95% of its maximum, available memory
 under 5%, swap over 85% used (systemd-oomd acts at 90%), or memory full-stall
 avg60 of 20% or more, or `/` or `$HOME` 97% full. Each condition is a `ghost
-event machine <kind>-<YYYYMMDDHH>` (heat, memory, disk), so at most one per kind
-an hour; exit 6 (an id already accepted with older data) counts as delivered.
+event machine <kind>-<YYYYMMDDHH> --thread <kind>` (heat, memory, disk), so at
+most one per kind an hour, each kind one conversation; exit 6 (an id already accepted with older data) counts as delivered.
 The payload is the tools' own output, naming the busiest units and processes.
 One ghost per machine installs it, only when the owner asks; the routines view
 pauses, inspects, and removes it. The recipe has the ghost fix only its own or
@@ -201,7 +208,9 @@ advanced only past delivered events and started at the journal's end, so what
 failed before the watch is not replayed. A crash is a `ghost event crash
 <program>-<YYYYMMDDHH>`, at most one per program an hour; a failed service,
 system or user, is a `ghost event unit <unit>-<YYYYMMDD>`, at most one per
-service a day, since failing services tend to repeat. Units that are not
+service a day, since failing services tend to repeat. Each names its program or
+unit as `--thread`, so its repeats share a conversation. CMake's feature probes
+(`cmTC_<hash>`, which crash on purpose), units that are not
 services, failures whose result is `core-dump` (already a crash event),
 `systemd-run`'s generated `run-u<N>`/`run-p<pid>-i<N>` services (someone's
 ad-hoc job; one named with `--unit`, or its core dump, is reported), and
@@ -215,8 +224,9 @@ proposes a fix with its undo; it changes, files, restarts, or sends nothing
 until the owner says yes in that conversation.
 
 The HUD counts unread `event-` conversations, which only intake creates, as
-the ghost's findings (see the shell README's bar mark), so that id prefix is
-contract.
+the ghost's findings (see the shell README's bar mark), and it and the phone
+viewer list them apart from the rest under one Events group (a pinned one or one
+holding a question stays with the rest), so that id prefix is contract.
 
 ### Mobile links and completion delivery
 

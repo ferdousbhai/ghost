@@ -12,13 +12,19 @@ printf '%s' '{"issue":42,"title":"Review requested"}' |
 ```
 
 The response names a normal conversation. Open it in the HUD or phone history,
-or use `ghost show -g casper -s event-…`. Each source/id maps to one conversation;
+or use `ghost show -g casper -s event-…`. Each source/id is accepted once;
 concurrent delivery, provider retries, and daemon restart do not start another
 turn. Use an identity that includes the provider account/repository and a stable
 update/event id. A changed payload or owner instruction under an existing id is
 refused. Each distinct event has its own conversation, so another busy
 conversation does not delay it. A repeated busy event is acknowledged without
 queuing additional work.
+
+Pass `--thread <key>` to keep events about one subject (a unit, an issue) in one
+conversation, so the ghost sees what it said last time. An event whose thread is
+busy takes its own conversation instead of waiting. The first sentence of a
+reply titles the conversation until the owner renames it; the HUD and phone list
+event conversations under one Events group.
 
 The owner supplies instructions separately from the untrusted event payload.
 The payload is data, including any instructions embedded in third-party text;

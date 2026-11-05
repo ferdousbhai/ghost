@@ -90,6 +90,26 @@ describe("remote viewer invalidations", () => {
 });
 
 describe("remote viewer deep links", () => {
+  test("the picker groups event conversations, leaving out what the owner must see", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function loadSessions\(changed\) \{[\s\S]*?\n {2}\}/)?.[0];
+    type Item = { value?: string; textContent?: string; label?: string; kids: Item[]; append: (...items: Item[]) => void };
+    const make = (): Item => {
+      const item: Item = { kids: [], append: (...items) => { item.kids.push(...items); } };
+      return item;
+    };
+    const select = make();
+    const context = {
+      ghost: "casper", session: "c1", draft: null, owner: true, requestedSession: null, selectedUnread: false,
+      api: async () => ({ sessions: [{ id: "c1", title: "Talk" }, { id: "event-a", title: "Found", unread: true }, { id: "event-b", title: "Pinned", pinned: true }] }),
+      seg: encodeURIComponent, mint: () => "draft", $: () => select, document: { createElement: make },
+      syncUrl() {}, loadTranscript: async () => {}, render() {},
+    };
+    const page = new Function(...Object.keys(context), `${source}; return { loadSessions };`)(...Object.values(context));
+    await page.loadSessions();
+    expect(select.kids.map(kid => kid.value ?? kid.label)).toEqual(["c1", "event-b", "Events"]);
+    expect(select.kids[2]!.kids.map(kid => kid.textContent)).toEqual(["● Found"]);
+  });
+
   test("a deleted linked conversation opens nothing else but leaves the picker usable", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function loadSessions\(changed\) \{[\s\S]*?\n {2}\}/)?.[0];
     const options: Array<{ value: string; textContent: string }> = [];
