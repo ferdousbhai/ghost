@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,7 +56,8 @@ describe("ghost help topics", () => {
     expect(text).toContain("ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh");
     expect(text).toContain("OnCalendar=minutely");
     expect(text).toContain("list-unit-files '*-machine-watch.timer'");
-    expect(text).toContain("/usr/bin/ghost event machine \"$kind-$(date +%Y%m%d%H)\" --thread \"$thread\" --ghost aria");
+    expect(text).toContain("/usr/bin/ghost event machine \"$id\" --thread \"$thread\" --ghost aria");
+    expect(text).toContain("id=$kind-$(date +%Y%m%d%H)");
     expect(text).toContain("(( status == 0 || status == 6 ))");
     expect(text).toContain("$t >= $c - 5");
     expect(text).toContain("$fan >= 0.95 * $max");
@@ -83,7 +84,7 @@ describe("ghost help topics", () => {
       stub("sensors", `echo '${JSON.stringify({ chip: { "Fan 1": { fan1_input: fan, fan1_max: 1000 }, Heat: { temp1_input: 40 } } })}'`);
       stub("journalctl", `printf '%s' ${JSON.stringify(kernel)}`);
       stub("systemd-cgtop", "true");
-      stub("fake-ghost", `printf '%s\\t%s\\t%s\\n' "$5" "$3" "\${10}" >>"${events}"`);
+      stub("fake-ghost", `printf '%s\\t%s\\t%s\\n' "$5" "$3" "\${10//$'\\n'/ | }" >>"${events}"`);
       const text = renderHelpTopic("machine", { ...INPUT, cliPath: join(bin, "fake-ghost") });
       const script = /\`\`\`bash\n([\s\S]*?)\`\`\`/.exec(text)?.[1] ?? "";
       const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_RUNTIME_DIR: home } });
@@ -106,8 +107,27 @@ describe("ghost help topics", () => {
         expect(watch(home, { fan: 600 })).toEqual([]);
         const [event] = watch(home, { fan: 600 });
         expect(event?.thread).toBe("heat");
-        expect(event?.id).toMatch(/^heating-\d{10}$/);
+        expect(event?.id).toMatch(/^heating-\d{10}(-[0-3])?$/);
       } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("still names an agent whose burst ended before the alert", () => {
+      const home = mkdtempSync(join(tmpdir(), "machine-watch-"));
+      mkdirSync(join(home, ".claude/sessions"), { recursive: true });
+      writeFileSync(join(home, ".claude/sessions/1.json"), JSON.stringify({ sessionId: "burst-id", name: "burst-agent" }));
+      const burst = spawn("bash", ["-c", "while :; do :; done"], { env: { ...process.env, CLAUDE_CODE_SESSION_ID: "burst-id" }, stdio: "ignore" });
+      try {
+        spawnSync("sleep", ["0.3"]);
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        burst.kill("SIGKILL");
+        spawnSync("sleep", ["0.1"]);
+        expect(watch(home, { fan: 600 })).toEqual([]);
+        const [event] = watch(home, { fan: 600 });
+        expect(event?.payload).toContain("claude session burst-agent:");
+      } finally {
+        burst.kill("SIGKILL");
         rmSync(home, { recursive: true, force: true });
       }
     });

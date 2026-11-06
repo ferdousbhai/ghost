@@ -191,9 +191,12 @@ under 5%, swap over 85% used (systemd-oomd acts at 90%), or memory full-stall
 avg60 of 20% or more, or `/` or `$HOME` 97% full. Each condition is a `ghost
 event machine <kind>-<YYYYMMDDHH> --thread <kind>` (heat, memory, disk), so at
 most one per kind an hour, each kind one conversation; `heating-<YYYYMMDDHH>`
-shares the heat thread, so a later heat event still arrives; exit 6 (an id already accepted with older data) counts as delivered.
+shares the heat thread, so a later heat event still arrives, and repeats each
+quarter hour (`-<0-3>`) while load is at least half the cores, so idle heat such
+as fast charging stays hourly; exit 6 (an id already accepted with older data) counts as delivered.
 The payload is the tools' own output, naming the busiest units and processes and the agents behind them, from the
-environment a detached job keeps from its agent.
+environment a detached job keeps from its agent, including processes above half
+a core earlier in this heating, since a burst may exit before the ghost looks.
 One ghost per machine installs it, only when the owner asks; the routines view
 pauses, inspects, and removes it. The recipe has the ghost fix only its own or
 plainly broken units, least drastic first (CPU weight, freeze, stop), instruct
