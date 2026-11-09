@@ -1218,9 +1218,17 @@ Singleton {
         else state.handedBack = state.handedBack === "" ? text : state.handedBack + "\n\n" + text;
     }
 
+    // In place: a reload that passed through an empty model would rebuild every
+    // delegate and lose the view's place in the transcript.
     function projectTurnRows(state: var): void {
-        transcriptModel.clear();
-        for (const row of state.rows) transcriptModel.append(root.cloneTranscriptRow(row));
+        const rows = state.rows;
+        const surplus = transcriptModel.count - rows.length;
+        if (surplus > 0) transcriptModel.remove(rows.length, surplus);
+        rows.forEach((row, index) => {
+            const copy = root.cloneTranscriptRow(row);
+            if (index < transcriptModel.count) transcriptModel.set(index, copy);
+            else transcriptModel.append(copy);
+        });
     }
 
     function appendTurnRow(state: var, row: var): void {

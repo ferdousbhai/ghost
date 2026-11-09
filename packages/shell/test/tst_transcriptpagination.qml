@@ -134,6 +134,27 @@ TestCase {
             "bounded text\n\n[Saved message truncated]");
     }
 
+    function test_aReloadUpdatesRowsWithoutEmptyingTheModel(): void {
+        const state = activeState("in-place");
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, messages(0, 3), 3, false));
+        compare(Ghostd.transcript.count, 3);
+
+        const counts = [];
+        const watch = () => counts.push(Ghostd.transcript.count);
+        Ghostd.transcript.countChanged.connect(watch);
+        Ghostd.loadConversationTranscript(state, false);
+        const grown = messages(0, 4);
+        grown[1].content = [{ type: "text", text: "as stored" }];
+        requests[1].complete(200, page(state, grown, 4, false));
+        Ghostd.loadConversationTranscript(state, false);
+        requests[2].complete(200, page(state, messages(0, 2), 2, false));
+        Ghostd.transcript.countChanged.disconnect(watch);
+
+        compare(counts, [4, 2]);
+        compare(Ghostd.transcript.get(1).text, "message-1");
+    }
+
     function test_emptyPageCompletesAndClearsOldRows(): void {
         const state = activeState("empty");
         state.rows = [{
