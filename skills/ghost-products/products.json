@@ -98,6 +98,7 @@
       "cli": "recall",
       "skill": "recall",
       "install": "curl -fsSL https://ferdousbhai.com/recall/install.sh | sudo bash",
+      "checklist": "Adds search by meaning to the apps above, and to your files (about 865 MB of models)",
       "section": "Recall",
       "site": "/recall"
     },
