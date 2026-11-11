@@ -8,6 +8,7 @@
       "site": "/ghost",
       "cli": "ghost",
       "install": "omarchy pkg add ghost",
+      "checklist": false,
       "host": true,
       "note": "then [turn it on for your login](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md)"
     },
@@ -85,6 +86,7 @@
       "cli": "wacli",
       "skill": "wacli",
       "install": "curl -fsSL https://ferdousbhai.com/wacli/install.sh | sudo bash",
+      "checklist": false,
       "section": "wacli"
     },
     {
