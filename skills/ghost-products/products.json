@@ -19,7 +19,9 @@
       "cli": "cloudmail",
       "skill": "cloudmail",
       "install": "curl -fsSL https://ferdousbhai.com/cloudmail/install.sh | sudo bash",
-      "site": "/cloudmail"
+      "site": "/cloudmail",
+      "replaces": "Mail",
+      "setup": "cloudmail init"
     },
     {
       "id": "cloud-calendar",
@@ -28,7 +30,9 @@
       "source": "https://github.com/ferdousbhai/cloud-calendar",
       "cli": "cloud-calendar",
       "skill": "cloud-calendar",
-      "install": "curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh | sudo bash"
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh | sudo bash",
+      "replaces": "Calendar",
+      "icloud": "cloud-calendar account add icloud"
     },
     {
       "id": "cloud-contacts",
@@ -37,7 +41,9 @@
       "source": "https://github.com/ferdousbhai/cloud-contacts",
       "cli": "cloud-contacts",
       "skill": "cloud-contacts",
-      "install": "curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash"
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash",
+      "replaces": "Contacts",
+      "icloud": "cloud-contacts account add icloud"
     },
     {
       "id": "cloud-tasks",
@@ -46,7 +52,9 @@
       "source": "https://github.com/ferdousbhai/cloud-tasks",
       "cli": "cloud-tasks",
       "skill": "cloud-tasks",
-      "install": "curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh | sudo bash"
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh | sudo bash",
+      "replaces": "Reminders",
+      "icloud": "cloud-tasks account add icloud"
     },
     {
       "id": "icloud",
@@ -56,7 +64,8 @@
       "cli": "icloud-session",
       "skill": "icloud",
       "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
-      "site": "/icloud"
+      "site": "/icloud",
+      "replaces": "Notes, Photos and Find My"
     },
     {
       "id": "omacloud",
@@ -96,6 +105,7 @@
       "source": "https://github.com/ferdousbhai/keep-going",
       "cli": "keep-going",
       "install": "curl -fsSL https://ferdousbhai.com/keep-going/install.sh | sudo bash",
+      "checklist": false,
       "section": "keep-going"
     },
     {
@@ -106,7 +116,8 @@
       "cli": "omdrop",
       "skill": "omdrop",
       "section": "Omdrop",
-      "third_party": true
+      "third_party": true,
+      "replaces": "AirDrop"
     },
     {
       "id": "gws",
