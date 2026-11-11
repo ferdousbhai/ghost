@@ -59,14 +59,14 @@
     },
     {
       "id": "icloud",
-      "need": "Apple Notes, Photos and Find My as native apps, on one iCloud sign in",
+      "need": "Apple Notes, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in",
       "name": "iCloud for Omarchy",
       "source": "https://github.com/ferdousbhai/icloud-for-omarchy",
       "cli": "icloud-session",
       "skill": "icloud",
       "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
       "site": "/icloud",
-      "replaces": "Notes, Photos and Find My",
+      "replaces": "Notes, Photos, Find My and iCloud Drive",
       "note": "it also installs Cloudmail, Cloud Calendar, Cloud Contacts and Cloud Tasks, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
       "script": "https://github.com/ferdousbhai/icloud-for-omarchy/releases/latest/download/install.sh"
     },
