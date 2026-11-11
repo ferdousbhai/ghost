@@ -76,6 +76,7 @@
       "cli": "omacloud",
       "skill": "omacloud",
       "install": "curl -fsSL https://omacloud.computer/install.sh | sudo bash",
+      "checklist": false,
       "site": "https://omacloud.computer"
     },
     {
