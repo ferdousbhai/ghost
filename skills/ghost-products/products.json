@@ -8,7 +8,6 @@
       "site": "/ghost",
       "cli": "ghost",
       "install": "omarchy pkg add ghost",
-      "checklist": false,
       "host": true,
       "note": "then [turn it on for your login](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md)"
     },
@@ -22,7 +21,8 @@
       "install": "curl -fsSL https://ferdousbhai.com/cloudmail/install.sh | sudo bash",
       "site": "/cloudmail",
       "replaces": "Mail",
-      "setup": "cloudmail init"
+      "icloud": "cloudmail account add icloud",
+      "hint": "Cloudmail: Gmail, HEY and mail on your own domains are added with: cloudmail init"
     },
     {
       "id": "cloud-calendar",
@@ -66,7 +66,9 @@
       "skill": "icloud",
       "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
       "site": "/icloud",
-      "replaces": "Notes, Photos and Find My"
+      "replaces": "Notes, Photos and Find My",
+      "note": "it also installs Cloudmail, Cloud Calendar, Cloud Contacts and Cloud Tasks, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
+      "script": "https://github.com/ferdousbhai/icloud-for-omarchy/releases/latest/download/install.sh"
     },
     {
       "id": "omacloud",
@@ -76,7 +78,6 @@
       "cli": "omacloud",
       "skill": "omacloud",
       "install": "curl -fsSL https://omacloud.computer/install.sh | sudo bash",
-      "checklist": false,
       "site": "https://omacloud.computer"
     },
     {
@@ -87,7 +88,6 @@
       "cli": "wacli",
       "skill": "wacli",
       "install": "curl -fsSL https://ferdousbhai.com/wacli/install.sh | sudo bash",
-      "checklist": false,
       "section": "wacli"
     },
     {
@@ -98,9 +98,9 @@
       "cli": "recall",
       "skill": "recall",
       "install": "curl -fsSL https://ferdousbhai.com/recall/install.sh | sudo bash",
-      "checklist": "Adds search by meaning to the apps above, and to your files (about 865 MB of models)",
       "section": "Recall",
-      "site": "/recall"
+      "site": "/recall",
+      "offer": "Add Recall? It adds search by meaning to these apps and to your files (about 865 MB of models)."
     },
     {
       "id": "keep-going",
@@ -109,7 +109,6 @@
       "source": "https://github.com/ferdousbhai/keep-going",
       "cli": "keep-going",
       "install": "curl -fsSL https://ferdousbhai.com/keep-going/install.sh | sudo bash",
-      "checklist": false,
       "section": "keep-going"
     },
     {
