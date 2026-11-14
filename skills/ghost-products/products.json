@@ -36,38 +36,16 @@
       "icloud": "cloud-calendar account add icloud"
     },
     {
-      "id": "cloud-contacts",
-      "need": "iCloud and Google contacts in one address book",
-      "name": "Cloud Contacts",
-      "source": "https://github.com/ferdousbhai/cloud-contacts",
-      "cli": "cloud-contacts",
-      "skill": "cloud-contacts",
-      "install": "curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash",
-      "replaces": "Contacts",
-      "icloud": "cloud-contacts account add icloud"
-    },
-    {
-      "id": "cloud-tasks",
-      "need": "iCloud Reminders and Google Tasks together",
-      "name": "Cloud Tasks",
-      "source": "https://github.com/ferdousbhai/cloud-tasks",
-      "cli": "cloud-tasks",
-      "skill": "cloud-tasks",
-      "install": "curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh | sudo bash",
-      "replaces": "Reminders",
-      "icloud": "cloud-tasks account add icloud"
-    },
-    {
       "id": "icloud",
-      "need": "Apple Notes, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in",
+      "need": "Apple Notes, Reminders, Contacts, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in",
       "name": "iCloud for Omarchy",
       "source": "https://github.com/ferdousbhai/icloud-for-omarchy",
       "cli": "icloud-session",
       "skill": "icloud",
       "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
       "site": "/icloud",
-      "replaces": "Notes, Photos, Find My and iCloud Drive",
-      "note": "it also installs Cloudmail, Cloud Calendar, Cloud Contacts and Cloud Tasks, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
+      "replaces": "Notes, Reminders, Contacts, Photos, Find My and iCloud Drive",
+      "note": "it also installs Cloudmail and Cloud Calendar, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
       "script": "https://github.com/ferdousbhai/icloud-for-omarchy/releases/latest/download/install.sh"
     },
     {

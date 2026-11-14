@@ -29,9 +29,7 @@ that command in their terminal.
 | --- | --- | --- |
 | Email on your own domains, with Gmail, iCloud Mail and HEY alongside | [Cloudmail](https://github.com/ferdousbhai/cloud-mail) (`cloudmail`) | `curl -fsSL https://ferdousbhai.com/cloudmail/install.sh \| sudo bash` |
 | iCloud, Google and HEY calendars together, with event notifications | [Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) (`cloud-calendar`) | `curl -fsSL https://ferdousbhai.com/cloud-calendar/install.sh \| sudo bash` |
-| iCloud and Google contacts in one address book | [Cloud Contacts](https://github.com/ferdousbhai/cloud-contacts) (`cloud-contacts`) | `curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh \| sudo bash` |
-| iCloud Reminders and Google Tasks together | [Cloud Tasks](https://github.com/ferdousbhai/cloud-tasks) (`cloud-tasks`) | `curl -fsSL https://ferdousbhai.com/cloud-tasks/install.sh \| sudo bash` |
-| Apple Notes, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) (`icloud-session`, skill `icloud`) | `curl -fsSL https://ferdousbhai.com/icloud/install.sh \| sudo bash`; it also installs Cloudmail, Cloud Calendar, Cloud Contacts and Cloud Tasks, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes) |
+| Apple Notes, Reminders, Contacts, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) (`icloud-session`, skill `icloud`) | `curl -fsSL https://ferdousbhai.com/icloud/install.sh \| sudo bash`; it also installs Cloudmail and Cloud Calendar, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes) |
 | Your files and settings on every Omarchy computer, end to end encrypted, with versions and machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) (`omacloud`) | `curl -fsSL https://omacloud.computer/install.sh \| sudo bash` |
 | Your WhatsApp chats kept as folders on your computer, and messages sent when you ask | [wacli](https://github.com/ferdousbhai/wacli) (`wacli`) | `curl -fsSL https://ferdousbhai.com/wacli/install.sh \| sudo bash`; see [wacli](#wacli) |
 | Search your documents, screenshots, photos, recordings and code by meaning, locally | [Recall](https://github.com/ferdousbhai/recall-for-omarchy) (`recall`) | `curl -fsSL https://ferdousbhai.com/recall/install.sh \| sudo bash`; see [Recall](#recall) |
@@ -43,9 +41,10 @@ that command in their terminal.
 ## Routing
 
 Use the unified products even when another tool could reach the same service:
-Gmail through Cloudmail, Google/iCloud calendars through Cloud Calendar,
-contacts through Cloud Contacts, reminders/tasks through Cloud Tasks. Use the
-gws skills only for Drive, Docs, and Sheets. Provider CLIs (`gws`, `hey`,
+Gmail through Cloudmail, Google/iCloud calendars through Cloud Calendar.
+Contacts and reminders are iCloud's, through `icloud-contacts` and
+`icloud-reminders` (the `icloud` skill). Use the gws skills only for Drive,
+Docs, and Sheets. Provider CLIs (`gws`, `hey`,
 `icloud-session`) are dependencies those products manage.
 
 ## When a product fails
