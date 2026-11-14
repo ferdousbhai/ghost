@@ -52,7 +52,7 @@ Rectangle {
             subtitle: root.hasBoard
                 ? root.board.path + (root.board.modified !== ""
                     ? " · " + Qt.formatDateTime(new Date(root.board.modified), "ddd HH:mm") : "")
-                : "Columns are ## headings, cards are - items, notes are indented lines."
+                : ""
             subtitleElide: Text.ElideMiddle
 
             ActionButton {

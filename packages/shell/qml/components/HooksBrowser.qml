@@ -507,7 +507,7 @@ Rectangle {
                     Field {
                         label: "Name"
                         name: "name"
-                        placeholder: "Shown here; the daemon names it if blank"
+                        placeholder: "The daemon names it if blank"
                     }
 
                     Field {
@@ -563,7 +563,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Theme.pad
         visible: root.rows.length > 0
-        text: "Command hooks are yours, in " + Ghostd.hookConfigPath + ". Model context stays private."
+        text: "Command hooks are yours, in " + Ghostd.hookConfigPath + "."
         textFormat: Text.PlainText
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily
