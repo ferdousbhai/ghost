@@ -56,7 +56,7 @@ export type HarnessEvent =
   /** The harness retries after the error it reported, so that error no longer ends the pass. */
   | { readonly type: "retry" }
   /** The harness compacted its own context: `auto` near its limit, `manual` when asked, pi's `overflow` after a refusal for size. */
-  | { readonly type: "compacted"; readonly trigger: string; readonly preTokens?: number };
+  | { readonly type: "compacted"; readonly trigger: string; readonly preTokens?: number; readonly at?: string };
 
 export interface HarnessRow {
   readonly id: string;
@@ -66,7 +66,7 @@ export interface HarnessRow {
    * Display-only facts missing from stdout, read from the harness's own
    * session record (see CONTRACTS.md, "Harnesses").
    */
-  inspectSession?(session: string, env: Readonly<Record<string, string | undefined>>, startedAt?: string): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>>;
+  inspectSession?(session: string, env: Readonly<Record<string, string | undefined>>, startedAt?: string): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" | "compacted" }>>>;
   launch(input: HarnessTurnInput): HarnessLaunch;
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
@@ -396,16 +396,17 @@ async function codexRollout(root: string, session: string): Promise<string | nul
 }
 
 /**
- * The model/effort and rendered skill catalog of Codex's latest turn, from its rollout
- * file (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec
- * --json` names neither. A resumed session keeps its first day's file, so the
+ * The model/effort and rendered skill catalog of Codex's latest turn, and the
+ * compactions since `startedAt`, from its rollout file
+ * (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec --json`
+ * reports none of them. A resumed session keeps its first day's file, so the
  * date directories are searched newest first.
  */
 async function codexSessionFacts(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
   startedAt?: string,
-): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>> {
+): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" | "compacted" }>>> {
   const rollout = await codexRollout(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions"), session);
   if (!rollout) return [];
   // A long session's rollout runs to a hundred megabytes: `session_meta` is its
@@ -424,6 +425,10 @@ async function codexSessionFacts(
     let sawSkills = false;
     let currentTurn = false;
     let skillSearchBytes = 0;
+    // Newest first; each one's size is the input of the `token_count` just before it.
+    const compactions: Array<{ type: "compacted"; trigger: string; at: string; preTokens?: number }> = [];
+    let awaitingTokens = false;
+    let passedStart = startedAt === undefined;
     while (end > 0) {
       const start = Math.max(0, end - 1024 * 1024);
       const chunk = Buffer.alloc(end - start);
@@ -434,6 +439,26 @@ async function codexSessionFacts(
       const lines = window.subarray(first).toString("utf8").split("\n");
       for (let index = lines.length - 1; index >= 0; index -= 1) {
         const line = lines[index] ?? "";
+        if (!passedStart) {
+          const at = /^\{"timestamp":"([^"]+)"/u.exec(line)?.[1];
+          if (at !== undefined && Date.parse(at) < Date.parse(startedAt as string)) passedStart = true;
+        }
+        if (!passedStart && line.includes('"type":"compacted"')) {
+          const entry = json(line);
+          if (entry?.type === "compacted" && typeof entry.timestamp === "string") {
+            // `exec` never compacts on request, so every one is Codex's own.
+            compactions.push({ type: "compacted", trigger: "auto", at: entry.timestamp });
+            awaitingTokens = true;
+          }
+          continue;
+        }
+        if (awaitingTokens && line.includes('"token_count"')) {
+          const tokens = record(record(record(json(line)?.payload).info).last_token_usage).input_tokens;
+          const latest = compactions.at(-1);
+          if (latest && typeof tokens === "number") latest.preTokens = tokens;
+          awaitingTokens = false;
+          continue;
+        }
         if (!line.includes('"turn_context"') && !line.includes('"world_state"')) continue;
         const entry = json(line);
         const payload = record(entry?.payload);
@@ -454,13 +479,14 @@ async function codexSessionFacts(
         }
       }
       if (model !== null) skillSearchBytes += chunk.length;
-      if (model !== null && (sawSkills || !currentTurn || skillSearchBytes >= 8 * 1024 * 1024)) break;
+      if (model !== null && passedStart && (sawSkills || !currentTurn || skillSearchBytes >= 8 * 1024 * 1024)) break;
       carry = window.subarray(0, first);
       end = start;
     }
     return [
       ...(model ? [model] : []),
       ...(currentTurn && sawSkills ? [{ type: "resources" as const, resources: { ...unreportedResources(), skills } }] : []),
+      ...compactions.reverse(),
     ];
   } finally {
     await file.close();

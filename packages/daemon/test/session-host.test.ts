@@ -630,6 +630,17 @@ describe("owner commands and hooks", () => {
     expect(messages.map((message) => message.role)).toEqual(["user", "compacted", "assistant"]);
   });
 
+  it("logs a compaction found in the harness's own session record ahead of the reply, without streaming it", async () => {
+    const fake = harness([{ events: [{ type: "session", id: "thread-c" }, { type: "text", block: "reply", delta: "done" }] }]);
+    const inspected = { ...fake, row: { ...fake.row, inspectSession: async () => [{ type: "compacted" as const, trigger: "auto", preTokens: 372416, at: "2026-11-16T08:03:02.000Z" }] } };
+    const sessions = host({ harnesses: [inspected] });
+    const events = await turn(sessions, "go on");
+    expect(events.some((event) => event.type === "compacted")).toBe(false);
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.map((message) => message.role)).toEqual(["user", "compacted", "assistant"]);
+    expect(messages[1]?.content).toEqual([{ type: "text", text: "auto · 372k tokens" }]);
+  });
+
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });

@@ -490,7 +490,8 @@ the assistant's text and tool calls (a failed call marked
 records, `harness` records naming the harness that took over and the
 session id it reported, per-run `resources` records, `compacted` records of a
 harness compacting its own context (its `trigger` and `preTokens`, as far as it
-says; Claude Code's `compact_boundary` and pi's `compaction_end` report one), and historical `handoff` records. A torn last line is skipped. ghostd is the log's
+says: Claude Code's `compact_boundary` and pi's `compaction_end` stream one, and a
+Codex compaction is read from its rollout after the pass), and historical `handoff` records. A torn last line is skipped. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never
@@ -586,7 +587,10 @@ per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. The one deliberate exception: display-only facts absent from stdout are read
 after the pass from the session record the harness wrote, found by a session id
 reported by this pass (`inspectSession`: Codex's rollout file, OpenCode's
-database). This reads the model/provider/effort, and Codex's own rendered
+database). This reads the model/provider/effort, Codex's compactions (each
+`compacted` rollout entry timestamped at or after this pass started, sized by
+the `token_count` before it; logged ahead of the reply and not streamed, since
+the reply has already streamed), and Codex's own rendered
 `world_state.state.host_skills.body` catalog. Codex inventory is accepted only
 when the latest `turn_context` is timestamped at or after this pass started;
 otherwise a failed resume must not borrow an older run's inventory. Catalog
@@ -822,7 +826,7 @@ emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `resources` (a successful pass's final resource snapshot, display-only), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `before_prompt` or `session_stop` command hook
-running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context; the transcript keeps it as a `compacted` message) events, and exactly one
+running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context, as far as its stream says; the transcript keeps it as a `compacted` message) events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id; a start names the

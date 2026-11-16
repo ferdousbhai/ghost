@@ -190,6 +190,35 @@ describe("parsers over recorded output", () => {
   });
 
   // Lines trimmed from a 2026-10-04 codex-cli 0.160.0 rollout file.
+  // Shapes from a 2026-10-22 codex 0.169 rollout: `exec --json` says nothing of a compaction, the rollout does.
+  it("codex: compactions since the pass started, sized by the token count before each", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ghost-codex-home-"));
+    try {
+      mkdirSync(join(home, "sessions", "2026/11/16"), { recursive: true });
+      const tokens = (input: number) => ({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { input_tokens: input } } } });
+      writeFileSync(join(home, "sessions", "2026/11/16", "rollout-2026-11-16T08-00-00-thread-c.jsonl"), [
+        { timestamp: "2026-11-16T07:00:00.000Z", type: "session_meta", payload: { id: "thread-c", model_provider: "openai" } },
+        { timestamp: "2026-11-16T07:59:00.000Z", ...tokens(250000) },
+        { timestamp: "2026-11-16T07:59:01.000Z", type: "compacted", payload: { replacement_history: [] } },
+        { timestamp: "2026-11-16T08:00:01.000Z", type: "turn_context", payload: { model: "gpt-6.1-sol", effort: "low" } },
+        { timestamp: "2026-11-16T08:03:00.000Z", ...tokens(372416) },
+        { timestamp: "2026-11-16T08:03:01.000Z", type: "token_usage_record", payload: {} },
+        { timestamp: "2026-11-16T08:03:02.000Z", type: "compacted", payload: { replacement_history: [] } },
+        { timestamp: "2026-11-16T08:03:03.000Z", type: "turn_context", payload: { model: "gpt-6.1-sol", effort: "low" } },
+        { timestamp: "2026-11-16T08:04:00.000Z", type: "compacted", payload: { replacement_history: [] } },
+      ].map((line) => JSON.stringify(line)).join("\n"));
+      const facts = await harnessRow("codex")?.inspectSession?.("thread-c", { CODEX_HOME: home }, "2026-11-16T08:00:00.000Z");
+      expect(facts?.filter((fact) => fact.type === "compacted")).toEqual([
+        { type: "compacted", trigger: "auto", at: "2026-11-16T08:03:02.000Z", preTokens: 372416 },
+        { type: "compacted", trigger: "auto", at: "2026-11-16T08:04:00.000Z" },
+      ]);
+      // Without a start, no compaction can be told apart from an earlier pass's.
+      expect((await harnessRow("codex")?.inspectSession?.("thread-c", { CODEX_HOME: home }))?.some((fact) => fact.type === "compacted")).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("codex: the model, provider, and effort from the session's rollout file, newest day first", async () => {
     const home = mkdtempSync(join(tmpdir(), "ghost-codex-home-"));
     try {

@@ -1126,6 +1126,9 @@ export class SessionHost {
       stream.emit({ type: "text_end", contentIndex: open.index, content: open.text });
       open = null;
     };
+    const logCompaction = (event: Extract<HarnessEvent, { type: "compacted" }>): void => {
+      writes.push(appendLog(sessionDir, id, [{ type: "compacted", at: event.at ?? new Date().toISOString(), harness: row.id, trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) }]));
+    };
     const onEvent = (event: HarnessEvent): void => {
       switch (event.type) {
         case "thinking":
@@ -1181,7 +1184,7 @@ export class SessionHost {
           error = null;
           return;
         case "compacted":
-          writes.push(appendLog(sessionDir, id, [{ type: "compacted", at: new Date().toISOString(), harness: row.id, trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) }]));
+          logCompaction(event);
           stream.emit({ type: "compacted", trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) });
           return;
       }
@@ -1201,8 +1204,11 @@ export class SessionHost {
     await Promise.all(writes);
     if (reported !== null && row.inspectSession && !exit.spawnError && !signal.aborted) {
       for (const fact of await row.inspectSession(reported, env, at).catch(() => [])) {
-        if (fact.type === "resources" || model === null) onEvent(fact);
+        // Found after the reply streamed: logged ahead of it, shown when the client reloads the transcript.
+        if (fact.type === "compacted") logCompaction(fact);
+        else if (fact.type === "resources" || model === null) onEvent(fact);
       }
+      await Promise.all(writes);
     }
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
     if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
