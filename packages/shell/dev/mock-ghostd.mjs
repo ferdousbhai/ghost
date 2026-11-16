@@ -52,6 +52,8 @@ const TOOL_ERROR = flag("--tool-error");
 const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576);
 /** How long a session_stop hook decides after each reply; 0 runs none. */
 const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
+/** Each scripted pass begins with the harness compacting its context, as Claude Code reports. */
+const COMPACT = flag("--compact");
 /**
  * The agent CLIs the mock pretends are installed, in Omarchy's order; codex
  * reports a full usage window, which is informational. A turn runs on the conversation's chosen
@@ -295,6 +297,8 @@ function ghostSessions(name) {
       { role: "user", content: textParts("hello, who lives here?") },
       { role: "assistant", content: [{ type: "text", text: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.` }] },
       { role: "user", content: textParts("open the current project brief and tell me what's left") },
+      // Claude Code compacted its context as this turn began (CONTRACTS.md, "Turn wire").
+      { role: "compacted", content: textParts("auto · 288k tokens") },
       {
         role: "assistant",
         content: [
@@ -522,6 +526,7 @@ function* ownerCommand(command) {
 function* script(name, prompt) {
   let contentIndex = 0;
   yield { type: "start" };
+  if (COMPACT) yield { type: "compacted", trigger: "auto", preTokens: 287_944 };
   // The preamble a real model emits before reaching for a tool: it stays as its
   // own message, and the reply after the call is the next one
   // (qml/services/TurnBlocks.js).
@@ -690,6 +695,7 @@ async function streamTurn(res, name, body) {
         ? `\`\`\`\nmock output of ${command}\n\`\`\``
         : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
     } else {
+      if (COMPACT) append(existing, { role: "compacted", content: textParts("auto · 288k tokens") });
       let reply = await pump(log, script(name, prompt));
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
