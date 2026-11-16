@@ -1180,6 +1180,10 @@ export class SessionHost {
         case "retry":
           error = null;
           return;
+        case "compacted":
+          writes.push(appendLog(sessionDir, id, [{ type: "compacted", at: new Date().toISOString(), harness: row.id, trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) }]));
+          stream.emit({ type: "compacted", trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) });
+          return;
       }
     };
 

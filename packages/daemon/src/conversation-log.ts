@@ -60,6 +60,8 @@ export type LogEntry =
    */
   | { readonly type: "harness"; readonly at: string; readonly harness: string; readonly session: string | null; readonly dir?: string }
   | { readonly type: "title"; readonly at: string; readonly title: string | null }
+  /** The harness compacted its own context during a pass. */
+  | { readonly type: "compacted"; readonly at: string; readonly harness: string; readonly trigger: string; readonly preTokens?: number }
   /** Historical: an idle-handoff reply, or why it failed. Read, never written. */
   | { readonly type: "handoff"; readonly at: string; readonly harness: string; readonly text: string; readonly error?: string };
 
@@ -235,7 +237,7 @@ function logStateAccumulator() {
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources" && entry.type !== "handed") activeAt = entry.at;
+    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -295,7 +297,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "handoff" | "auto" | "peer";
+  role: "user" | "assistant" | "hook" | "handoff" | "auto" | "peer" | "compacted";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -346,6 +348,9 @@ function entryMessages(entry: LogEntry, entryId: string, skip: number, take: num
       entryId,
     }];
   }
+  if (entry.type === "compacted") {
+    return [{ role: "compacted", content: [{ type: "text", text: compactedText(entry) }], entryId }];
+  }
   if (entry.type === "command" && !entry.excluded) {
     // The owner's `!command`, then its output, as the live turn showed them.
     const messages: TranscriptMessage[] = [];
@@ -354,6 +359,11 @@ function entryMessages(entry: LogEntry, entryId: string, skip: number, take: num
     return messages;
   }
   return [];
+}
+
+/** What a compaction notice says after "Context compacted": `auto · 288k tokens`. */
+export function compactedText(event: { readonly trigger: string; readonly preTokens?: number }): string {
+  return event.preTokens === undefined ? event.trigger : `${event.trigger} · ${Math.round(event.preTokens / 1000)}k tokens`;
 }
 
 /** The renderable messages, in order; harness and title records are not messages. */
@@ -481,7 +491,7 @@ function sameFile(a: Stats, b: Stats): boolean {
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
-    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" || entry.type === "sent" ? 1 : 0;
+    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" || entry.type === "sent" || entry.type === "compacted" ? 1 : 0;
 }
 function parseEntry(bytes: Buffer): LogEntry | null {
   try {

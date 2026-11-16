@@ -54,7 +54,9 @@ export type HarnessEvent =
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
   | { readonly type: "error"; readonly message: string }
   /** The harness retries after the error it reported, so that error no longer ends the pass. */
-  | { readonly type: "retry" };
+  | { readonly type: "retry" }
+  /** The harness compacted its own context: `auto` near its limit, `manual` when asked. */
+  | { readonly type: "compacted"; readonly trigger: string; readonly preTokens?: number };
 
 export interface HarnessRow {
   readonly id: string;
@@ -180,6 +182,11 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
           mcpServers: loadedNames(event.mcp_servers, "name", "status", "connected"),
         } });
       }
+    }
+    if (event.type === "system" && event.subtype === "compact_boundary") {
+      const meta = record(event.compact_metadata);
+      out.push({ type: "compacted", trigger: str(meta.trigger) || "auto", ...(typeof meta.pre_tokens === "number" ? { preTokens: meta.pre_tokens } : {}) });
+      return out;
     }
     if (event.type === "stream_event") {
       const inner = record(event.event);

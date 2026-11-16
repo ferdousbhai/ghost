@@ -619,6 +619,17 @@ describe("owner commands and hooks", () => {
     expect(messages).toEqual([]);
   });
 
+  it("streams and logs a compaction where the harness reports it", async () => {
+    const sessions = host({ harnesses: [harness([{ events: [
+      { type: "compacted", trigger: "auto", preTokens: 287944 },
+      { type: "text", block: "reply", delta: "picked up" },
+    ] }])] });
+    const events = await turn(sessions, "go on");
+    expect(events).toContainEqual({ type: "compacted", trigger: "auto", preTokens: 287944 });
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.map((message) => message.role)).toEqual(["user", "compacted", "assistant"]);
+  });
+
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });

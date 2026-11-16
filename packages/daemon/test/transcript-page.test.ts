@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { transcriptPage, type LogEntry } from "../src/conversation-log.js";
+import { logState, transcriptPage, type LogEntry } from "../src/conversation-log.js";
 
 const command: LogEntry = { type: "command", at: "now", command: "pwd", output: "```\n/tmp", exitCode: 1, excluded: false };
 
@@ -21,6 +21,19 @@ describe("transcript pages", () => {
         expect(transcriptPage(entries, offset, limit)).toEqual({ messages: all.messages.slice(offset, offset + limit), total: 5 });
       }
     }
+  });
+
+  it("shows a compaction as its own notice, without the owner or ghost having added anything", () => {
+    const entries: LogEntry[] = [
+      { type: "user", at: "2026-11-16T00:00:00.000Z", text: "hello" },
+      { type: "compacted", at: "2026-11-16T00:00:05.000Z", harness: "claude", trigger: "auto", preTokens: 287944 },
+      { type: "compacted", at: "2026-11-16T00:00:06.000Z", harness: "claude", trigger: "manual" },
+    ];
+    expect(transcriptPage(entries).messages.slice(1)).toEqual([
+      { role: "compacted", content: [{ type: "text", text: "auto · 288k tokens" }], entryId: "e1" },
+      { role: "compacted", content: [{ type: "text", text: "manual" }], entryId: "e2" },
+    ]);
+    expect(logState(entries).activeAt).toBe("2026-11-16T00:00:00.000Z");
   });
 
   it("does not format command output outside the requested page", () => {

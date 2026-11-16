@@ -193,6 +193,20 @@ TestCase {
         compare(Ghostd.transcript.get(2).role, "hook");
     }
 
+    function test_compactionInsertsNoticeRowBetweenSegments(): void {
+        const turn = openTurn("compacted", null);
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "text_end", contentIndex: 0, content: "Reading the log." });
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "compacted", trigger: "auto", preTokens: 287944 });
+
+        compare(turn.state.rows.length, 4);
+        compare(turn.state.rows[2].role, "compacted");
+        compare(turn.state.rows[2].text, "auto · 288k tokens");
+        compare(turn.state.rows[3].role, "assistant");
+        verify(turn.state.rows[3].pending);
+    }
+
     function test_consecutiveFollowUpsDoNotCreateEmptyAssistantRows(): void {
         const turn = openTurn("follow-up-batch", null);
 

@@ -2401,6 +2401,11 @@ Singleton {
         case "session_stop_continued":
             root.insertTurnBreakFor(state, "hook", event.reason);
             break;
+        case "compacted":
+            // The same words the transcript's `compacted` message carries.
+            root.insertTurnBreakFor(state, "compacted", typeof event.preTokens === "number"
+                ? event.trigger + " · " + Math.round(event.preTokens / 1000) + "k tokens" : event.trigger);
+            break;
         case "thinking":
             // Reasoning stays out of the transcript; the activity line reads
             // its newest line, so only a tail is kept.

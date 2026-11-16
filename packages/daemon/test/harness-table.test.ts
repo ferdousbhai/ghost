@@ -141,6 +141,16 @@ describe("parsers over recorded output", () => {
     expect(events).toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null, tools: ["Bash", "Read"] } });
   });
 
+  // Trimmed from a 2026-11-16 `claude -p --resume <id> /compact --output-format stream-json` probe.
+  it("claude: a compact boundary is a compaction, with its trigger and size", () => {
+    const parse = harnessRow("claude")!.parser();
+    expect(parse(JSON.stringify({ type: "system", subtype: "compact_boundary", session_id: "s1",
+      compact_metadata: { trigger: "manual", pre_tokens: 24265, post_tokens: 7527, duration_ms: 8681 } })))
+      .toEqual([{ type: "compacted", trigger: "manual", preTokens: 24265 }]);
+    expect(parse(JSON.stringify({ type: "system", subtype: "compact_boundary", session_id: "s1" })))
+      .toEqual([{ type: "compacted", trigger: "auto" }]);
+  });
+
   // Lines trimmed from 2026-10-04 probes; the recorded fixtures predate the fields.
   it("claude and pi: the model, with pi's provider and thinking level", () => {
     const claude = (harnessRow("claude") ?? { parser: () => () => [] }).parser();

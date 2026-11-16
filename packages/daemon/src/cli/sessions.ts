@@ -47,6 +47,7 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
       : message.role === "hook" ? "Stop hook"
       : message.role === "handoff" ? "Handoff"
       : message.role === "auto" ? "Auto"
+      : message.role === "compacted" ? "Context compacted"
       : ghost;
     const lines = message.content.map((part) => part.type === "toolCall"
       ? `> ⚙ ${part.name}(${truncate(JSON.stringify(part.arguments ?? {}), 120)})`

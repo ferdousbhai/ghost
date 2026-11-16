@@ -488,7 +488,9 @@ and `handed` records of how far its ghost has been handed theirs,
 the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
-session id it reported, per-run `resources` records, and historical `handoff` records. A torn last line is skipped. ghostd is the log's
+session id it reported, per-run `resources` records, `compacted` records of a
+harness compacting its own context (its `trigger` and `preTokens`, as far as it
+says; only Claude Code's `compact_boundary` reports one), and historical `handoff` records. A torn last line is skipped. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never
@@ -790,7 +792,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; A `compacted` message marks where the harness compacted its context; historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
@@ -820,7 +822,7 @@ emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `resources` (a successful pass's final resource snapshot, display-only), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `before_prompt` or `session_stop` command hook
-running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), and `session_stop_continued` events, and exactly one
+running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context; the transcript keeps it as a `compacted` message) events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id; a start names the

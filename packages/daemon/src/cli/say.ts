@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { compactedText } from "../conversation-log.js";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, sessionPath, stdinIsTty, stdinText } from "./common.js";
@@ -132,6 +133,8 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
           human = `${event.text}\n`;
         } else if (event.type === "session_stop_continued" && typeof event.reason === "string") {
           human = `Stop hook · ${event.reason}\n`;
+        } else if (event.type === "compacted" && typeof event.trigger === "string") {
+          human = `Context compacted · ${compactedText({ trigger: event.trigger, ...(typeof event.preTokens === "number" ? { preTokens: event.preTokens } : {}) })}\n`;
         } else if (event.type === "tool_execution_end" && ownerCommand && typeof event.summary === "string") {
           human = quiet = `${event.summary}\n`;
         } else if (event.type === "done") {

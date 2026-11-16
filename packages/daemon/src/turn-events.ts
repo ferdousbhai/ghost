@@ -26,6 +26,8 @@ export type TurnEvent =
   /** An owner command hook running; a `session_stop` one runs after the reply is complete. */
   | { type: "hook_start"; name: string; event: "before_prompt" | "session_stop" }
   | { type: "hook_end"; name: string; event: "before_prompt" | "session_stop" }
+  /** The harness compacted its context mid-turn; the transcript keeps it as a `compacted` message. */
+  | { type: "compacted"; trigger: string; preTokens?: number }
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
