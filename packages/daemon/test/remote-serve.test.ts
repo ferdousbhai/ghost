@@ -19,8 +19,19 @@ describe("RemoteServe status", () => {
       tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
       guests: "none",
       owner: "owner@example.com",
+      app: null,
       problem: null,
     });
+  });
+
+  it("links the first app to this machine only once Serve is on HTTPS", async () => {
+    const apps = ["https://summonghost.com", "https://lab.summonghost.com"];
+    expect((await new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps }).status()).app)
+      .toEqual({ origin: "https://summonghost.com", url: "https://summonghost.com/#add=ghostbox.example.ts.net" });
+    for (const scheme of ["http", null] as const) {
+      expect((await new RemoteServe(7717, { run: fakeTailscale({ certs: scheme === null, scheme }).run, apps }).status()).app)
+        .toEqual({ origin: "https://summonghost.com", url: null });
+    }
   });
 
   it("uses plain HTTP on port 80 when the tailnet has no certificates", async () => {
@@ -45,6 +56,21 @@ describe("RemoteServe status", () => {
       tailscale: { installed: false },
       problem: { code: "tailscale_missing", action: "omarchy-install-service-tailscale" },
     });
+  });
+});
+
+describe("RemoteServe machines", () => {
+  it("lists the owner's other untagged nodes, online or not", async () => {
+    expect(await new RemoteServe(7717, { run: fakeTailscale().run }).machines()).toEqual([
+      { hostname: "laptop.example.ts.net", online: true },
+      { hostname: "phone.example.ts.net", online: false },
+    ]);
+    expect(await new RemoteServe(7717, { run: fakeTailscale().run, owner: "Partner@Example.com" }).machines())
+      .toEqual([{ hostname: "partner.example.ts.net", online: true }]);
+  });
+
+  it("is a 503 when Tailscale does not answer", async () => {
+    await expect(new RemoteServe(7717, { run: missingBinary() }).machines()).rejects.toMatchObject({ code: "tailscale_unavailable", status: 503 });
   });
 });
 

@@ -62,7 +62,7 @@ describe("peer records", () => {
       await book.renameGhost("casper", "wisp");
       const config = loadConfig({ configPath: path, env: {}, home: dir.path });
       expect(config.port).toBe(7799);
-      expect(config.remote).toEqual({ guests: "none", peers: [{ name: "wife", login: WIFE, url: "https://her.ts.net", ghost: "wisp" }] });
+      expect(config.remote).toEqual({ guests: "none", apps: ["https://summonghost.com"], peers: [{ name: "wife", login: WIFE, url: "https://her.ts.net", ghost: "wisp" }] });
       await expect(book.add(parsePeer({ name: "wife2", login: WIFE, ghost: "wisp" }))).rejects.toThrow("already listed");
       await book.remove("wife");
       expect(JSON.parse(readFileSync(path, "utf8")).remote).toEqual({ guests: "none", peers: [] });

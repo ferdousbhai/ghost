@@ -10,6 +10,7 @@ import type { RunningSource } from "../src/running-source.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
+import { fakeTailscale, missingBinary } from "./helpers/fake-tailscale.js";
 
 const TOKEN = "t".repeat(64);
 
@@ -29,6 +30,7 @@ async function serve(
   remote: RemoteAccessOptions | null = {},
   remoteServe?: (root: string) => RemoteServe,
   runningSource?: RunningSource,
+  remoteApps?: readonly string[],
 ): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -42,6 +44,7 @@ async function serve(
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", guests: "read-only", ...remote }),
     ...(remoteServe ? { remoteServe: remoteServe(temp.root) } : {}),
     ...(runningSource ? { runningSource } : {}),
+    ...(remoteApps ? { remoteApps } : {}),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -67,6 +70,7 @@ function remoteStatus(enabled: boolean): RemoteStatus {
     },
     guests: "read-only",
     owner: "owner@example.com",
+    app: null,
     problem: null,
   };
 }
@@ -303,3 +307,98 @@ describe("remote management", () => {
   });
 });
 
+
+const APP = "https://summonghost.com";
+
+describe("a web app in remote.apps", () => {
+  const fromApp = (login: string | null, extra: Record<string, string> = {}) =>
+    ({ origin: APP, ...(login ? asTailnet(login) : {}), ...extra });
+
+  it("is admitted by tailnet identity, with CORS for its origin", async () => {
+    const base = await serve({}, undefined, undefined, [APP]);
+    const owner = await fetch(`${base}/api/ghosts`, { headers: fromApp("owner@example.com") });
+    expect(owner.status).toBe(200);
+    expect(owner.headers.get("access-control-allow-origin")).toBe(APP);
+    expect(owner.headers.get("vary")).toBe("origin");
+    expect(owner.headers.get("access-control-allow-credentials")).toBeNull();
+
+    const anonymous = await fetch(`${base}/api/ghosts`, { headers: fromApp(null) });
+    expect(anonymous.status).toBe(401);
+    expect(anonymous.headers.get("access-control-allow-origin")).toBe(APP);
+  });
+
+  it("refuses the bearer token from an app origin, even the right one", async () => {
+    const base = await serve({}, undefined, undefined, [APP]);
+    for (const headers of [fromApp(null, { authorization: `Bearer ${TOKEN}` }), fromApp("owner@example.com", { authorization: `Bearer ${TOKEN}` })]) {
+      const response = await fetch(`${base}/api/ghosts`, { headers });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "app_token_refused" } });
+    }
+  });
+
+  it("answers the preflight with the app's methods and headers, and private network when asked", async () => {
+    const base = await serve({}, undefined, undefined, [APP]);
+    const preflight = await fetch(`${base}/api/ghosts/casper/messages`, {
+      method: "OPTIONS",
+      headers: { origin: APP, "access-control-request-method": "POST", "access-control-request-private-network": "true" },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe(APP);
+    expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, POST, PUT, DELETE, OPTIONS");
+    expect(preflight.headers.get("access-control-allow-headers")).toBe("content-type");
+    expect(preflight.headers.get("access-control-allow-private-network")).toBe("true");
+
+    const plain = await fetch(`${base}/api/ghosts`, { method: "OPTIONS", headers: { origin: APP } });
+    expect(plain.headers.get("access-control-allow-private-network")).toBeNull();
+    // A loopback client may still be offered the token header, and is never offered private network.
+    const local = await fetch(`${base}/api/ghosts`, { method: "OPTIONS", headers: { origin: "http://localhost:5173", "access-control-request-private-network": "true" } });
+    expect(local.headers.get("access-control-allow-headers")).toBe("content-type, authorization");
+    expect(local.headers.get("access-control-allow-private-network")).toBeNull();
+  });
+
+  it("keeps guests read-only and peers to their routes", async () => {
+    const base = await serve({ isPeer: (login) => login === "peer@example.com" }, undefined, undefined, [APP]);
+    expect((await fetch(`${base}/api/ghosts`, { headers: fromApp("guest@example.com") })).status).toBe(200);
+    const write = await fetch(`${base}/api/ghosts`, {
+      method: "POST",
+      headers: fromApp("guest@example.com", { "content-type": "application/json" }),
+      body: JSON.stringify({ name: "wraith" }),
+    });
+    expect(await write.json()).toMatchObject({ error: { code: "read_only" } });
+    const peer = await fetch(`${base}/api/ghosts`, { headers: fromApp("peer@example.com") });
+    expect(await peer.json()).toMatchObject({ error: { code: "peer_only" } });
+  });
+
+  it("is an ordinary foreign origin when not listed, or when remote.apps is empty", async () => {
+    for (const apps of [["https://lab.summonghost.com"], []]) {
+      const base = await serve({}, undefined, undefined, apps);
+      const response = await fetch(`${base}/api/ghosts`, { headers: fromApp("owner@example.com") });
+      expect(response.status, JSON.stringify(apps)).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "forbidden_origin" } });
+      expect(response.headers.get("access-control-allow-origin")).toBeNull();
+      await stop();
+    }
+  });
+});
+
+describe("GET /api/remote/machines", () => {
+  it("lists the owner's other machines to the owner, and to no guest", async () => {
+    const base = await serve({}, () => new RemoteServe(7717, { run: fakeTailscale().run }), undefined, [APP]);
+    const response = await fetch(`${base}/api/remote/machines`, { headers: { origin: APP, ...asTailnet("owner@example.com") } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ machines: [
+      { hostname: "laptop.example.ts.net", online: true },
+      { hostname: "phone.example.ts.net", online: false },
+    ] });
+    expect((await fetch(`${base}/api/remote/machines`, { headers: { authorization: `Bearer ${TOKEN}` } })).status).toBe(200);
+    const guest = await fetch(`${base}/api/remote/machines`, { headers: asTailnet("guest@example.com") });
+    expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
+  });
+
+  it("is a 503 when Tailscale does not answer", async () => {
+    const base = await serve({}, () => new RemoteServe(7717, { run: missingBinary() }));
+    const response = await fetch(`${base}/api/remote/machines`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "tailscale_unavailable" } });
+  });
+});

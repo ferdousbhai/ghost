@@ -11,7 +11,21 @@ import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
 import { parsePeers, type Peer } from "./peers.js";
 
-export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[] };
+export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[]; apps?: string[] };
+
+/** The web apps admitted to call this daemon with a tailnet identity (CONTRACTS.md "Daemon HTTP API"). */
+export const DEFAULT_REMOTE_APPS: readonly string[] = ["https://summonghost.com"];
+
+/** An `https://host[:port]` origin exactly as a browser sends it, or null. */
+function appOrigin(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === value ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 export type RemoteConfigFile = Partial<RemoteConfig>;
 
@@ -23,7 +37,9 @@ export interface DaemonConfig {
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
    * says what other tailnet members may do (default "none"), `peers` are
-   * other owners whose ghosts may message this owner's (CONTRACTS.md "Peers").
+   * other owners whose ghosts may message this owner's (CONTRACTS.md "Peers"),
+   * `apps` the web app origins admitted with a tailnet identity (default
+   * `DEFAULT_REMOTE_APPS`; `[]` admits none).
    */
   remote: RemoteConfig;
   /** The config file read; it need not exist. */
@@ -123,6 +139,13 @@ function readConfigFile(path: string): DaemonConfigFile | null {
       remote.guests = raw.guests;
     }
     if (raw.peers !== undefined) remote.peers = parsePeers(raw.peers, path);
+    if (raw.apps !== undefined) {
+      const apps = Array.isArray(raw.apps) ? raw.apps.map(appOrigin) : [null];
+      if (apps.some((app) => app === null)) {
+        throw new Error(`${path}: "remote.apps" must be a list of origins like "https://summonghost.com".`);
+      }
+      remote.apps = apps as string[];
+    }
     config.remote = remote;
   }
   return config;
@@ -158,7 +181,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     port,
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
-    remote: { ...file?.remote },
+    remote: { apps: [...DEFAULT_REMOTE_APPS], ...file?.remote },
     configPath,
     hooksPath,
   };

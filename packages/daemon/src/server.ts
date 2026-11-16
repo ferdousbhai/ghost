@@ -62,6 +62,11 @@ export interface ServerOptions {
   apiToken?: string | null;
   /** Callers reaching the daemon through `tailscale serve`; omit to admit none. */
   remote?: RemoteAccess | null;
+  /**
+   * Web app origins (`remote.apps`) admitted past the Origin check, with a
+   * tailnet identity only, never the bearer token; omitted, none.
+   */
+  remoteApps?: readonly string[];
   /** Owns the Tailscale Serve exposure and its QR code; omitted, the `/api/remote` routes 404. */
   remoteServe?: RemoteServe;
   /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
@@ -252,13 +257,23 @@ function mediaType(header: string | string[] | undefined): string {
   return typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
 }
 
-function applyCors(request: IncomingMessage, response: ServerResponse): void {
+/**
+ * A loopback client may send the token; an app origin may not, so it is not
+ * offered `authorization`. Chrome's private-network preflight is answered
+ * for an app, the one public origin calling a tailnet address.
+ */
+function applyCors(request: IncomingMessage, response: ServerResponse, apps: ReadonlySet<string>): void {
   const origin = request.headers.origin;
-  if (typeof origin !== "string" || !LOOPBACK_ORIGIN.test(origin)) return;
+  if (typeof origin !== "string") return;
+  const app = apps.has(origin);
+  if (!app && !LOOPBACK_ORIGIN.test(origin)) return;
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("vary", "origin");
   response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type, authorization");
+  response.setHeader("access-control-allow-headers", app ? "content-type" : "content-type, authorization");
+  if (app && request.headers["access-control-request-private-network"] === "true") {
+    response.setHeader("access-control-allow-private-network", "true");
+  }
 }
 
 async function readBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
@@ -335,6 +350,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
   const remoteServe = options.remoteServe;
+  const remoteApps = new Set(options.remoteApps ?? []);
   const streamCutBytes = options.streamCutBytes ?? DEFAULT_STREAM_CUT_BYTES;
   const turnLogs = new Map<string, TurnLog>();
 
@@ -354,10 +370,16 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (segments[0] !== "api") return admitted;
 
     // A page served by this daemon is loopback, or same-host through
-    // `tailscale serve`; anything else is a cross-site page.
+    // `tailscale serve`; an app in `remote.apps` is admitted by tailnet
+    // identity alone; anything else is a cross-site page.
     const origin = request.headers.origin;
-    if (typeof origin === "string" && !LOOPBACK_ORIGIN.test(origin) && !sameHostOrigin(origin, request.headers.host)) {
+    const app = typeof origin === "string" && remoteApps.has(origin);
+    if (typeof origin === "string" && !app && !LOOPBACK_ORIGIN.test(origin) && !sameHostOrigin(origin, request.headers.host)) {
       errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
+      return null;
+    }
+    if (app && request.headers.authorization !== undefined) {
+      errorResponse(response, 403, "app_token_refused", "A web app is admitted by its Tailscale identity, never the bearer token.");
       return null;
     }
     const presented = bearerToken(request.headers.authorization);
@@ -912,6 +934,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       });
       response.end(svg);
     }),
+    route("GET", "api/remote/machines", ownerOnly(async ({ response }) => {
+      jsonResponse(response, 200, { machines: await requireRemoteServe().machines() });
+    })),
     route("GET", "api/remote", async ({ response }) => {
       jsonResponse(response, 200, await requireRemoteServe().status());
     }),
@@ -1095,7 +1120,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // instead of becoming an unhandled rejection, which exits Bun — a path
     // of "//" once did exactly that, from the tailnet viewer.
     void (async () => {
-      applyCors(request, response);
+      applyCors(request, response, remoteApps);
       const method = request.method ?? "GET";
       if (method === "OPTIONS") {
         // A preflight cannot carry credentials — that is what it is asking

@@ -13,7 +13,7 @@ import {
   commandRunner,
   readTailscaleNode,
 } from "./tailscale-identity.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, GhostError } from "./errors.js";
 
 export interface RemoteProblem {
   code: string;
@@ -38,12 +38,26 @@ export interface RemoteStatus {
   };
   guests: "read-only" | "none";
   owner: string | null;
+  /**
+   * The first of `remote.apps`, null when there are none, and its link adding
+   * this machine (`<origin>/#add=<hostname>`), null until Serve is on HTTPS:
+   * a page on an https origin cannot call an http address.
+   */
+  app: { origin: string; url: string | null } | null;
   problem: RemoteProblem | null;
+}
+
+/** One of the owner's other tailnet machines, as `GET /api/remote/machines` lists it. */
+export interface RemoteMachine {
+  hostname: string;
+  online: boolean;
 }
 
 export interface RemoteServeOptions {
   owner?: string;
   guests?: "read-only" | "none";
+  /** `remote.apps`; omitted, none. */
+  apps?: readonly string[];
   /** Test seams over `tailscale` and `qrencode`. */
   run?: CommandRunner;
   qrRun?: CommandRunner;
@@ -106,6 +120,7 @@ export class RemoteServe {
   private readonly qrRun: CommandRunner;
   private readonly owner: string | null;
   private readonly guests: "read-only" | "none";
+  private readonly app: string | null;
   /** The last Serve refusal for lack of the operator right; cleared by the next accepted write. */
   private operatorProblem: RemoteProblem | null = null;
 
@@ -116,6 +131,7 @@ export class RemoteServe {
     // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
     this.owner = options.owner?.trim().toLowerCase() || null;
     this.guests = options.guests ?? "none";
+    this.app = options.apps?.[0] ?? null;
   }
 
   async status(): Promise<RemoteStatus> {
@@ -128,6 +144,7 @@ export class RemoteServe {
       tailscale: { installed: true, running: false, loggedIn: false, operator: this.operatorProblem === null, certs: false },
       guests: this.guests,
       owner: this.owner,
+      app: this.app ? { origin: this.app, url: null } : null,
       problem: null,
     };
     const unavailable = (status: RemoteStatus, problem: RemoteProblem): RemoteStatus =>
@@ -176,6 +193,24 @@ export class RemoteServe {
     return this.write(current, ["serve", `--${current.scheme}=${PORT[current.scheme]}`, "off"]);
   }
 
+  /**
+   * The owner's other tailnet machines, from `tailscale status --json`: nodes
+   * signed in as the owner's login, which excludes this one and tagged nodes.
+   * Whether one runs Ghost is the app's probe to find out.
+   */
+  async machines(): Promise<RemoteMachine[]> {
+    let node: Awaited<ReturnType<typeof readTailscaleNode>>;
+    try {
+      node = await readTailscaleNode(this.run);
+    } catch (error) {
+      throw new GhostError("tailscale_unavailable", `Tailscale did not answer: ${firstLine(errorMessage(error))}`, 503);
+    }
+    const owner = this.owner ?? node.login?.toLowerCase();
+    return node.peers
+      .filter((peer) => owner !== undefined && peer.login?.toLowerCase() === owner)
+      .map(({ hostname, online }) => ({ hostname, online }));
+  }
+
   async qrSvg(url: string): Promise<string> {
     let result: CommandResult;
     try {
@@ -210,6 +245,7 @@ export class RemoteServe {
       state: scheme ? "on" : "off",
       scheme,
       url: scheme ? `${scheme}://${known.hostname}/` : null,
+      app: known.app && { ...known.app, url: scheme === "https" ? `${known.app.origin}/#add=${known.hostname}` : null },
       problem: this.operatorProblem,
     };
   }

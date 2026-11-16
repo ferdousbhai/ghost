@@ -25,8 +25,13 @@ Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction.
 `ghostd` owns sessions and state transitions; HUD, CLI, and
 `ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
-access is the explicit Tailscale Serve viewer and, for named peers, a message
-inbox on the same address. See [concepts](docs/concepts.md) for rationale.
+access is the explicit Tailscale Serve viewer, the summonghost.com app over the
+same address, and, for named peers, a message inbox there. The app is a static
+page, not a backend: it has no server, accounts, or storage; the browser calls
+each machine's Serve address directly, admitted by the same Tailscale identity
+to the same routes as the viewer. Whoever controls summonghost.com's code can
+therefore act as a visiting owner on that owner's tailnet; `remote.apps: []`
+opts out. See [concepts](docs/concepts.md) for rationale.
 
 Durable state has three scopes:
 
@@ -770,6 +775,16 @@ commands, or MCP credentials, and see no path in the ghost list or board;
 conversations, tool calls included, are shown to them as recorded.
 Remote access never broadens a ghost's local tool authority.
 
+`remote.apps` lists `https://` web app origins admitted past the Origin check
+(default `["https://summonghost.com"]`; `[]` admits none). An app is admitted
+by tailnet identity alone, with the roles above; a request from it carrying
+`Authorization` is `403 app_token_refused`. Its responses carry
+`Access-Control-Allow-Origin: <origin>` and `Vary: Origin`, its preflight
+allows `GET, POST, PUT, DELETE, OPTIONS` and `content-type`, plus
+`Access-Control-Allow-Private-Network: true` when asked; no credentials or
+cookies. The first app's `<origin>/#add=<hostname>` link (`app` in
+`GET /api/remote`) exists only while Serve is on HTTPS.
+
 Route parsing, validation, status codes, and reverse states are executable in
 [`server.ts`](packages/daemon/src/server.ts) and
 [`server.test.ts`](packages/daemon/test/server.test.ts). Stable route families:
@@ -811,12 +826,13 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/peers/accept` | Owner-only. `{ invite, name?, ghost }`: pair with the invite's daemon and list them (`ghost peers accept`). |
 | `POST /api/peer/pair` | `{ code }` → `{ login }`: spends a pairing code from any verified tailnet login, listing it as a peer; the one route admitted even with guests `none`. |
 | `GET /api/peer/outbox`, `DELETE /api/peer/outbox/:id` | The messages waiting for the calling peer, and the acknowledgement that removes one. |
-| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
+| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control, with the app link (`app: { origin, url } \| null`), and the viewer URL's QR. |
+| `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and
-remote access is the tailnet viewer plus the peer inbox.
+remote access is the tailnet viewer and app plus the peer inbox.
 
 ### Turn wire
 

@@ -354,6 +354,20 @@ describe("CLI API adaptation", () => {
     expect(response.stdout).toBe("off (Tailscale is not running)\n");
   });
 
+  it("ghost remote prints the app link on HTTPS, and how to get HTTPS without it", async () => {
+    let body: Record<string, unknown> = {
+      enabled: true, url: "https://box.tail.ts.net/", problem: null,
+      app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=box.tail.ts.net" },
+    };
+    const fetch: CliFetch = async () => jsonResponse(body);
+    const run = () => runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect((await run()).stdout).toBe("on https://box.tail.ts.net/\napp https://summonghost.com/#add=box.tail.ts.net\n");
+    body = { ...body, url: "http://box.tail.ts.net/", app: { origin: "https://summonghost.com", url: null } };
+    expect((await run()).stdout).toMatch(/^on http:\/\/box\.tail\.ts\.net\/\napp https:\/\/summonghost\.com needs HTTPS: turn on HTTPS Certificates .*admin\/dns.*`ghost remote on` again\.\n$/);
+    body = { ...body, app: null };
+    expect((await run()).stdout).toBe("on http://box.tail.ts.net/\n");
+  });
+
   it("ghost hooks status prints each hook's event, name, and description", async () => {
     const fetch: CliFetch = async () => jsonResponse({
       path: "/home/owner/.config/ghost/hooks.json",

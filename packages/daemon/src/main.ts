@@ -240,6 +240,7 @@ async function serveDaemon(
       port: config.port,
       address: config.host,
       remote: new RemoteAccess({ ...config.remote, isPeer: (login) => peers.byLogin(login) !== undefined }),
+      remoteApps: config.remote.apps,
       remoteServe,
       peers,
       keyExpiry,

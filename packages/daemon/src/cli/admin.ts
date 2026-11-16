@@ -79,8 +79,12 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
     body = await ctx.client.request("POST", "/api/remote", { enabled: action === "on" });
   } else throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
   emit(ctx, body, (result) => {
-    const status = result as Pick<RemoteStatus, "enabled" | "url" | "problem">;
-    return `${status.enabled ? "on" : "off"}${status.url ? ` ${status.url}` : ""}${status.problem ? ` (${status.problem.message})` : ""}\n`;
+    const status = result as Pick<RemoteStatus, "enabled" | "scheme" | "url" | "app" | "problem">;
+    const line = `${status.enabled ? "on" : "off"}${status.url ? ` ${status.url}` : ""}${status.problem ? ` (${status.problem.message})` : ""}\n`;
+    if (!status.app || !status.enabled) return line;
+    return line + (status.app.url
+      ? `app ${status.app.url}\n`
+      : `app ${status.app.origin} needs HTTPS: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then run \`ghost remote on\` again.\n`);
   });
   return 0;
 }

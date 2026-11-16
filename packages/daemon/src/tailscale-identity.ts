@@ -47,6 +47,25 @@ export interface TailscaleNode {
   certs: boolean;
   /** When this machine must sign in again (ISO), or null when key expiry is disabled. */
   keyExpiry: string | null;
+  /** The other nodes this one sees, each with its login (null for a tagged node). */
+  peers: TailscalePeer[];
+}
+
+export interface TailscalePeer {
+  hostname: string;
+  login: string | null;
+  online: boolean;
+}
+
+type StatusUsers = Record<string, { LoginName?: unknown }> | undefined;
+
+function loginOf(users: StatusUsers, userId: unknown): string | null {
+  const login = users?.[String(userId)]?.LoginName;
+  return typeof login === "string" && login.trim() ? login.trim() : null;
+}
+
+function dnsHostname(dnsName: unknown): string | null {
+  return typeof dnsName === "string" ? dnsName.trim().replace(/\.$/, "") || null : null;
 }
 
 /** `tailscale status --json`, reduced to what Ghost asks of it; rejects when tailscale is missing or does not answer. */
@@ -59,17 +78,23 @@ export async function readTailscaleNode(run: CommandRunner = commandRunner("tail
     BackendState?: unknown;
     CertDomains?: unknown;
     Self?: { DNSName?: unknown; UserID?: unknown; KeyExpiry?: unknown };
-    User?: Record<string, { LoginName?: unknown }>;
+    Peer?: Record<string, { DNSName?: unknown; UserID?: unknown; Online?: unknown; Tags?: unknown }>;
+    User?: StatusUsers;
   };
-  const login = status.User?.[String(status.Self?.UserID)]?.LoginName;
-  const dnsName = status.Self?.DNSName;
+  const peers = Object.values(status.Peer ?? {}).flatMap((peer) => {
+    const hostname = dnsHostname(peer?.DNSName);
+    // A tagged node is owned by its tags, whatever user id it reports.
+    const tagged = Array.isArray(peer?.Tags) && peer.Tags.length > 0;
+    return hostname ? [{ hostname, login: tagged ? null : loginOf(status.User, peer.UserID), online: peer.Online === true }] : [];
+  });
   return {
     backendState: typeof status.BackendState === "string" ? status.BackendState : "",
-    login: typeof login === "string" && login.trim() ? login.trim() : null,
-    hostname: typeof dnsName === "string" ? dnsName.trim().replace(/\.$/, "") || null : null,
+    login: loginOf(status.User, status.Self?.UserID),
+    hostname: dnsHostname(status.Self?.DNSName),
     certs: Array.isArray(status.CertDomains) && status.CertDomains.some((domain) => typeof domain === "string" && domain !== ""),
     // Absent, or Go's zero time, when the owner disabled expiry for this machine.
     keyExpiry: typeof status.Self?.KeyExpiry === "string" && !status.Self.KeyExpiry.startsWith("0001-") ? status.Self.KeyExpiry : null,
+    peers,
   };
 }
 

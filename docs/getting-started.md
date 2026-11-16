@@ -312,7 +312,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
-| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote owner, guests, and peers — `ghost help peers`) — optional; a missing file is fine, a malformed one is an error |
+| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote owner, guests, apps, and peers — `ghost help peers`) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
@@ -344,7 +344,9 @@ and any skill you installed untouched.
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** `ghost remote` (or the HUD's Remote access pane)
-  controls the opt-in Tailscale Serve viewer. Only your own login gets in;
+  controls the opt-in Tailscale Serve viewer, and prints the
+  summonghost.com link that adds this machine to the app ([mobile](mobile.md)).
+  Only your own login gets in;
   to let other tailnet members read along, set `remote.guests` to
   `"read-only"` in the config. On a
   phone, `+` starts a conversation and the camera attaches photos; dictate

@@ -28,7 +28,14 @@ export function fakeTailscale(initial: Partial<Pick<FakeTailscale, "scheme" | "c
         return ok(JSON.stringify({
           BackendState: fake.backendState,
           Self: { DNSName: `${FAKE_HOSTNAME}.`, UserID: 42 },
-          User: { 42: { LoginName: "owner@example.com" } },
+          // The owner's laptop and phone, a partner's shared machine, and a tagged server.
+          Peer: {
+            a: { DNSName: "laptop.example.ts.net.", UserID: 42, Online: true },
+            b: { DNSName: "phone.example.ts.net.", UserID: 42, Online: false },
+            c: { DNSName: "partner.example.ts.net.", UserID: 7, Online: true },
+            d: { DNSName: "server.example.ts.net.", UserID: 42, Online: true, Tags: ["tag:server"] },
+          },
+          User: { 42: { LoginName: "owner@example.com" }, 7: { LoginName: "partner@example.com" } },
           CertDomains: fake.certs ? [FAKE_HOSTNAME] : [],
         }));
       }

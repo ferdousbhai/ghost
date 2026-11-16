@@ -38,7 +38,7 @@ describe("loadConfig", () => {
       port: DEFAULT_PORT,
       host: DEFAULT_HOST,
       ghostsRoot: join(root, "ghosts"),
-      remote: {},
+      remote: { apps: ["https://summonghost.com"] },
       configPath: join(root, ".config", "ghost", "config.json"),
     });
   });
@@ -46,7 +46,19 @@ describe("loadConfig", () => {
   it("reads the remote owner and guests, ignoring the retired remote.enabled", () => {
     const root = makeHome();
     writeConfig(root, { remote: { enabled: true, guests: "none" } });
-    expect(loadConfig({ env: {}, home: root }).remote).toEqual({ guests: "none" });
+    expect(loadConfig({ env: {}, home: root }).remote).toEqual({ guests: "none", apps: ["https://summonghost.com"] });
+  });
+
+  it("reads remote.apps, [] admitting none, and refuses anything but https origins", () => {
+    const root = makeHome();
+    writeConfig(root, { remote: { apps: [] } });
+    expect(loadConfig({ env: {}, home: root }).remote.apps).toEqual([]);
+    writeConfig(root, { remote: { apps: ["https://lab.summonghost.com", "https://app.example:8443"] } });
+    expect(loadConfig({ env: {}, home: root }).remote.apps).toEqual(["https://lab.summonghost.com", "https://app.example:8443"]);
+    for (const apps of ["https://summonghost.com", ["http://summonghost.com"], ["https://summonghost.com/"], ["summonghost.com"], [7]]) {
+      writeConfig(root, { remote: { apps } });
+      expect(() => loadConfig({ env: {}, home: root }), JSON.stringify(apps)).toThrow(/remote\.apps/);
+    }
   });
 
   it("reads the XDG config file", () => {
