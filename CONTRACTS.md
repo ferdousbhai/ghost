@@ -490,7 +490,7 @@ the assistant's text and tool calls (a failed call marked
 records, `harness` records naming the harness that took over and the
 session id it reported, per-run `resources` records, `compacted` records of a
 harness compacting its own context (its `trigger` and `preTokens`, as far as it
-says; only Claude Code's `compact_boundary` reports one), and historical `handoff` records. A torn last line is skipped. ghostd is the log's
+says; Claude Code's `compact_boundary` and pi's `compaction_end` report one), and historical `handoff` records. A torn last line is skipped. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never

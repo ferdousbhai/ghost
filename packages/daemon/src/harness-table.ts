@@ -55,7 +55,7 @@ export type HarnessEvent =
   | { readonly type: "error"; readonly message: string }
   /** The harness retries after the error it reported, so that error no longer ends the pass. */
   | { readonly type: "retry" }
-  /** The harness compacted its own context: `auto` near its limit, `manual` when asked. */
+  /** The harness compacted its own context: `auto` near its limit, `manual` when asked, pi's `overflow` after a refusal for size. */
   | { readonly type: "compacted"; readonly trigger: string; readonly preTokens?: number };
 
 export interface HarnessRow {
@@ -335,6 +335,11 @@ function piParser(): (line: string) => HarnessEvent[] {
       if (update.type === "thinking_delta") return [{ type: "thinking", block, delta: str(update.delta) }];
     }
     if (event.type === "auto_retry_start") return [{ type: "retry" }];
+    if (event.type === "compaction_end" && event.result !== undefined) {
+      // Pi says `threshold` where Claude Code says `auto`; `manual` and `overflow` read as they are.
+      const tokens = record(event.result).tokensBefore;
+      return [{ type: "compacted", trigger: event.reason === "threshold" ? "auto" : str(event.reason) || "auto", ...(typeof tokens === "number" ? { preTokens: tokens } : {}) }];
+    }
     if (event.type === "tool_execution_start") {
       return [{ type: "tool_start", id: str(event.toolCallId), name: str(event.toolName), args: event.args ?? {} }];
     }

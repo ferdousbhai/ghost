@@ -151,6 +151,17 @@ describe("parsers over recorded output", () => {
       .toEqual([{ type: "compacted", trigger: "auto" }]);
   });
 
+  // The shapes pi 1.5.2's docs/json.md gives; an aborted or failed compaction has no result.
+  it("pi: a finished compaction, with its reason and size", () => {
+    const parse = harnessRow("pi")!.parser();
+    expect(parse(JSON.stringify({ type: "compaction_end", reason: "threshold",
+      result: { summary: "…", tokensBefore: 150000, estimatedTokensAfter: 32000 }, aborted: false, willRetry: false })))
+      .toEqual([{ type: "compacted", trigger: "auto", preTokens: 150000 }]);
+    expect(parse(JSON.stringify({ type: "compaction_end", reason: "overflow", result: {}, aborted: false, willRetry: true })))
+      .toEqual([{ type: "compacted", trigger: "overflow" }]);
+    expect(parse(JSON.stringify({ type: "compaction_end", reason: "manual", aborted: true }))).toEqual([]);
+  });
+
   // Lines trimmed from 2026-10-04 probes; the recorded fixtures predate the fields.
   it("claude and pi: the model, with pi's provider and thinking level", () => {
     const claude = (harnessRow("claude") ?? { parser: () => () => [] }).parser();
