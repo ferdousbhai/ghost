@@ -439,13 +439,14 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       o.value = s.id; o.textContent = (s.unread ? "● " : "") + (s.title || s.preview || s.id);
       return o;
     };
-    // As the HUD folds them: what intake started, unless the owner must see it, under one group.
+    // As the HUD folds them: what intake started, unless the owner must see it, a group per source.
     const folds = (s) => s.id.startsWith("event-") && !s.pinned && !s.question;
     for (const s of list.filter((s) => !folds(s))) select.append(option(s));
-    const events = list.filter(folds);
-    if (events.length) {
+    const sources = Map.groupBy(list.filter(folds), (s) => s.source || "");
+    for (const [source, events] of sources) {
       const group = document.createElement("optgroup");
-      group.label = "Events";
+      const words = source.replace(/[-_]+/g, " ").trim();
+      group.label = words ? words[0].toUpperCase() + words.slice(1) : "Events";
       group.append(...events.map(option));
       select.append(group);
     }

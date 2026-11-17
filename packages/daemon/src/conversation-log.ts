@@ -146,6 +146,8 @@ export interface LogState {
   /** The owner's title, else one derived from the first owner message. */
   readonly title: string | null;
   readonly preview: string | null;
+  /** The source of the external event that opened the conversation; null for any other. */
+  readonly source: string | null;
   readonly messageCount: number;
   /** The harness bound by the last `harness` entry, its session id, and where it ran. */
   readonly harness: string | null;
@@ -207,10 +209,10 @@ export function isEventPrompt(text: string): boolean {
   return EVENT_PROMPT.test(text);
 }
 
-/** An event conversation's title before its reply says more: `unit: bt-agent.service-20261104`. */
-function eventLabel(prompt: string): string | null {
+/** An event prompt's source and id. */
+function eventKey(prompt: string): { source: string; id: string } | null {
   const match = prompt.match(EVENT_PROMPT);
-  return match ? `${JSON.parse(match[1] as string) as string}: ${JSON.parse(match[2] as string) as string}` : null;
+  return match ? { source: JSON.parse(match[1] as string) as string, id: JSON.parse(match[2] as string) as string } : null;
 }
 
 /** What a reply found: the first sentence of its last text, the answer rather than the narration before its tools. */
@@ -225,6 +227,7 @@ function eventFinding(content: readonly AssistantPart[]): string | null {
 function logStateAccumulator() {
   let title: string | null = null;
   let preview: string | null = null;
+  let source: string | null = null;
   let derived: string | null = null;
   let ownerWrote = false;
   let eventUnanswered = false;
@@ -247,7 +250,10 @@ function logStateAccumulator() {
           // Each event of a thread retitles it, then its reply does (below).
           ownerWrote = eventUnanswered = true;
           preview ??= firstLine(entry.text);
-          derived = eventLabel(entry.text);
+          const key = eventKey(entry.text);
+          // A thread's events share one source; before its reply says more, `unit: bt-agent.service-20261104` titles it.
+          source ??= key?.source ?? null;
+          derived = key ? `${key.source}: ${key.id}` : null;
         } else if (!ownerWrote && entry.origin === undefined) {
           // The first owner message titles the conversation, even after a `!command` previewed it.
           ownerWrote = true;
@@ -287,7 +293,7 @@ function logStateAccumulator() {
         break;
     }
   };
-  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, source, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {

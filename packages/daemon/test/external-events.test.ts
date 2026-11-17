@@ -132,6 +132,8 @@ describe("external event admission", () => {
     const reply = (text: string, extra: object = {}): LogEntry => ({ type: "assistant", at, harness: "fake", content: [{ type: "text", text: "Let me check the journal." }, { type: "text", text }], ...extra });
     const asked: LogEntry = { type: "user", at, text: prompt };
     expect(logState([asked]).title).toBe("unit: bt-agent.service-20261104");
+    expect(logState([asked]).source).toBe("unit");
+    expect(logState([{ type: "user", at, text: "Why?" }]).source).toBeNull();
     expect(logState([asked, reply("API Error: no route", { error: "no route" })]).title).toBe("unit: bt-agent.service-20261104");
     expect(logState([asked, reply("**Why it failed:** `bt-agent.service` found no adapter. The rest is detail.\n\nMore.")]).title).toBe("Why it failed: bt-agent.service found no adapter.");
     expect(logState([asked, reply("x".repeat(200))]).title).toBe(`${"x".repeat(90)}…`);

@@ -42,32 +42,38 @@ TestCase {
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 
-    // Event conversations fold into one row where the first would be, saying
-    // how many are unread; what the owner must see stays out, a filter finds
-    // them all, and one alone stays a plain row.
-    function test_eventConversationsFoldIntoOneRow(): void {
+    // Event conversations fold into one row per source, where its newest would
+    // be, saying how many are unread; what the owner must see stays out, a
+    // filter finds them all, and a source with one stays a plain row.
+    function test_eventConversationsFoldIntoOneRowPerSource(): void {
         const listed = [
-            { id: "event-old", title: "Old finding", updatedAt: "2026-10-20T10:00:00Z" },
+            { id: "event-old", source: "crash", title: "Old finding", updatedAt: "2026-10-20T10:00:00Z" },
             { id: "talk", title: "Taxes", updatedAt: "2026-10-28T10:00:00Z" },
-            { id: "event-new", title: "New finding", unread: true, updatedAt: "2026-10-28T11:00:00Z" },
-            { id: "event-pinned", title: "Pinned finding", pinned: true, updatedAt: "2026-10-01T10:00:00Z" },
-            { id: "event-asking", title: "Asking", question: { text: "Apply it?" }, updatedAt: "2026-10-01T11:00:00Z" }
+            { id: "event-new", source: "crash", title: "New finding", unread: true, updatedAt: "2026-10-28T11:00:00Z" },
+            { id: "event-brief", source: "morning-check", title: "Morning check 2026-10-28", updatedAt: "2026-10-28T09:00:00Z" },
+            { id: "event-brief-old", source: "morning-check", title: "Morning check 2026-10-27", updatedAt: "2026-10-27T09:00:00Z" },
+            { id: "event-battery", source: "battery", title: "Battery low", updatedAt: "2026-10-26T09:00:00Z" },
+            { id: "event-pinned", source: "crash", title: "Pinned finding", pinned: true, updatedAt: "2026-10-01T10:00:00Z" },
+            { id: "event-asking", source: "crash", title: "Asking", question: { text: "Apply it?" }, updatedAt: "2026-10-01T11:00:00Z" }
         ];
         const conversations = rows => kinds(rows).filter(row => /^(session|events):/.test(row));
         const folded = Launcher.rows("", listed, "casper", now, 0);
-        compare(conversations(folded), ["session:event-pinned", "session:event-asking", "events:events", "session:talk"]);
-        const row = folded.find(candidate => candidate.kind === "events");
-        compare(row.detail, "1 unread");
-        verify(row.unread);
-        compare(row.meta, "1h");
-        const open = Launcher.rows("", listed, "casper", now, 0, true);
-        compare(conversations(open), ["session:event-pinned", "session:event-asking", "events:events",
-            "session:event-new", "session:event-old", "session:talk"]);
-        verify(open.find(candidate => candidate.id === "event-new").nested);
+        compare(conversations(folded), ["session:event-pinned", "session:event-asking", "events:events:crash",
+            "session:talk", "events:events:morning-check", "session:event-battery"]);
+        const crash = folded.find(candidate => candidate.id === "events:crash");
+        compare(crash.label, "Crash ▸");
+        compare(crash.detail, "1 unread");
+        verify(crash.unread);
+        compare(crash.meta, "1h");
+        compare(folded.find(candidate => candidate.id === "events:morning-check").label, "Morning check ▸");
+        const open = Launcher.rows("", listed, "casper", now, 0, ["morning-check"]);
+        compare(conversations(open), ["session:event-pinned", "session:event-asking", "events:events:crash",
+            "session:talk", "events:events:morning-check", "session:event-brief", "session:event-brief-old",
+            "session:event-battery"]);
+        verify(open.find(candidate => candidate.id === "event-brief").nested);
+        verify(open.find(candidate => candidate.id === "events:morning-check").open);
         compare(conversations(Launcher.rows("finding", listed, "casper", now, 0)),
             ["session:event-pinned", "session:event-new", "session:event-old"]);
-        compare(conversations(Launcher.rows("", [listed[0], listed[1]], "casper", now, 0)),
-            ["session:talk", "session:event-old"]);
     }
 
     // Like a messenger: pinned, then unread replies, each newest first.

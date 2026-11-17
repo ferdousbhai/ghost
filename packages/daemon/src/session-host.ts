@@ -180,6 +180,8 @@ export interface SessionSummary {
   title: string | null;
   /** First owner text; display-only. */
   preview: string | null;
+  /** The external event source that opened it (an `event-` conversation); null for any other. */
+  source: string | null;
   /** The harness that carried the latest stretch of the conversation. */
   harness: string | null;
   /** What that harness's latest pass ran on, as far as it said; null otherwise. */
@@ -1405,6 +1407,7 @@ export class SessionHost {
         id,
         title: state.title,
         preview: state.preview,
+        source: state.source,
         harness: state.harness,
         model: state.model,
         provider: state.provider,

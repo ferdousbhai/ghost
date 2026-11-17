@@ -18,6 +18,7 @@ function session(id: string): SessionSummary {
     id,
     title: null,
     preview: null,
+    source: null,
     harness: "claude",
     model: null,
     provider: null,

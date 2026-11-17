@@ -24,7 +24,7 @@ Pass `--thread <key>` to keep events about one subject (a unit, an issue) in one
 conversation, so the ghost sees what it said last time. An event whose thread is
 busy takes its own conversation instead of waiting. The first sentence of a
 reply titles the conversation until the owner renames it; the HUD and phone list
-event conversations under one Events group.
+event conversations in a group per source.
 
 The owner supplies instructions separately from the untrusted event payload.
 The payload is data, including any instructions embedded in third-party text;

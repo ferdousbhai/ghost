@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // so Ghost reads as part of the machine rather than an app on it.
 //
 // Typing filters; Up/Down move; Enter opens the row, or asks the ghost what
-// was typed when nothing matches, and unfolds or folds the Events row. Tab
+// was typed when nothing matches, and unfolds or folds an event source's row. Tab
 // moves to the next ghost. On a
 // conversation, Ctrl+R renames it where it is read, Ctrl+P pins it, and
 // Delete (with the cursor at the end of the filter) asks to trash it. Esc is
@@ -32,15 +32,15 @@ FocusScope {
     property string mode: "home"
     readonly property bool ghostMode: root.mode === "ghosts"
 
-    /** Whether the Events row shows its conversations; kept across opens, for reading through several. */
-    property bool eventsOpen: false
+    /** The event sources whose rows show their conversations; kept across opens, for reading through several. */
+    property var openSources: []
 
     property real maxListHeight: 480
     property real now: Date.now()
 
     readonly property var rows: root.ghostMode
         ? Launcher.ghostRows(filter.text, Ghostd.ghosts, Ghostd.activeGhost)
-        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount, root.eventsOpen)
+        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount, root.openSources)
     property int selected: Launcher.first(root.rows)
     readonly property var current: root.selected >= 0 && root.selected < root.rows.length
         ? root.rows[root.selected] : null
@@ -129,9 +129,10 @@ FocusScope {
 
     function activate(row: var): void {
         if (row && row.kind === "events") {
-            root.eventsOpen = !root.eventsOpen;
+            root.openSources = row.open ? root.openSources.filter(source => source !== row.source)
+                : root.openSources.concat([row.source]);
             // The rows just changed under the selection: it stays on this one.
-            root.selected = root.rows.findIndex(candidate => candidate.kind === "events");
+            root.selected = root.rows.findIndex(candidate => candidate.id === row.id);
             list.positionViewAtIndex(root.selected, ListView.Contain);
         } else if (row && row.kind !== "header") root.activated(row);
     }
@@ -511,7 +512,7 @@ FocusScope {
             : root.current && root.current.kind === "session"
                 ? "↵ open   ^R rename   ^P pin   del trash   ⇥ ghost   esc close"
             : root.current && root.current.kind === "events"
-                ? (root.eventsOpen ? "↵ fold" : "↵ unfold") + "   ⇥ ghost   esc close"
+                ? (root.current.open ? "↵ fold" : "↵ unfold") + "   ⇥ ghost   esc close"
             : root.current && root.current.kind === "ghost"
                 ? "↵ switch   ^R rename   del banish   esc back"
             : root.ghostMode ? "↵ summon   esc back"
