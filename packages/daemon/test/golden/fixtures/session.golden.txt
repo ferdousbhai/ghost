@@ -165,6 +165,7 @@ Other people's ghosts can message you once your owner adds them. Add or remove a
     "provider": null,
     "question": null,
     "running": false,
+    "source": null,
     "title": "Remember that I want short answers",
     "unread": true,
     "updatedAt": "<time>"

@@ -841,6 +841,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       "provider",
       "question",
       "running",
+      "source",
       "title",
       "unread",
       "updatedAt",
