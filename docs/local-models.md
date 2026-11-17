@@ -1,11 +1,13 @@
 # Local models
 
-Findings on running a model on the owner's own machine. Ghost does not use a
-local model today, and whether it should is undecided. This page records what
-was measured so that decision starts from numbers.
+Findings on running a model on the owner's own machine. Ghost itself has no
+local-model code: the contract leaves models to harnesses, so a local model is
+one harness's provider config. This page records what was measured.
 
 ## Status
 
+- **In use (2026-11-17):** Gemma 4 26B A4B through the `crush` harness. See
+  [Gemma 4 26B A4B through Crush](#gemma-4-26b-a4b-through-crush-2026-11-17).
 - **Undecided:** driving a ghost from Gemma 4 E4B. It passed a small
   tool-calling probe (2026-11-14); it has not been tried on real ghost turns.
 - **Dropped (2026-11-09):** an offline fallback on Qwen3.5-0.8B. See
@@ -84,6 +86,33 @@ it acts.
   Earlier local-model runs overheated this laptop and ran its battery flat.
 
 The probe script was not kept; the table above is enough to rebuild it.
+
+## Gemma 4 26B A4B through Crush (2026-11-17)
+
+| | |
+|---|---|
+| Model | `unsloth/gemma-4-26B-A4B-it-GGUF`, `gemma-4-26B-A4B-it-UD-Q4_K_M.gguf` (15.8 GiB), revision `c099eb48e663`; Lastbook loads the same file |
+| Server | `llama-server` from the source build above, all layers on Vulkan, 64K context, one slot |
+| Units | `llama-server-proxy.socket` on 127.0.0.1:8013 starts `systemd-socket-proxyd --exit-idle-time=5min`, which pulls in `llama-server.service` (`StopWhenUnneeded`) on :8014, so the model loads on the first request and unloads after five idle minutes. An API key file and a same-origin CORS setting keep web pages out. |
+| Harness | Crush, which had no provider before: `~/.config/crush/crush.json` names a `llamacpp` provider for both its large and small model. Its model entry must declare reasoning levels, because the Ghost row passes `--reasoning-effort`. Ghost reaches it as any other harness (`ghost switch crush`), and as the last automatic fallback. |
+
+Measured on this machine:
+
+- A real ghost turn sent 22,646 prompt tokens (Crush's system prompt and
+  tools plus the persona). At the default 512-token micro-batch they took
+  309 s (73 tokens/s), then 41 tokens generated at 5 tokens/s.
+- `llama-bench -p 2048`: micro-batch 512 gives 102 tokens/s, 2048 gives 164;
+  flash attention changes neither. The unit now uses 2048.
+- Generation ran at 23 tokens/s on a short prompt, but 6.5 tokens/s in
+  `llama-bench` minutes later with the machine otherwise idle (load 1.5).
+  The cause was not found.
+- Asked for the time and told to check the clock, it answered with a time
+  four hours off and ran no command.
+
+Lastbook loads its own copy through its own runner and gives it back after
+15 idle minutes. It treats an outside stop of an idle model as "stopped" and
+reloads on its next question. Stopping that copy before llama-server loads
+was not set up; until it is, both can be resident for up to that long.
 
 ## The earlier attempt (Qwen3.5-0.8B)
 
