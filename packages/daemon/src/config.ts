@@ -10,6 +10,7 @@ import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
 import { parsePeers, type Peer } from "./peers.js";
+import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, type LocalModelConfig } from "./local-model.js";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[]; apps?: string[] };
 
@@ -45,6 +46,8 @@ export interface DaemonConfig {
   /** The config file read; it need not exist. */
   configPath: string;
   hooksPath: string;
+  /** The model ghostd runs itself, or null when none is configured (CONTRACTS.md "Local model"). */
+  local: LocalModelConfig | null;
 }
 
 export interface DaemonConfigFile {
@@ -52,6 +55,28 @@ export interface DaemonConfigFile {
   host?: string;
   ghostsRoot?: string;
   remote?: RemoteConfigFile;
+  local?: LocalModelConfig;
+}
+
+/** `local`: `{ model, server?, contextSize?, idleMinutes? }`, paths `~`-expanded. */
+function parseLocal(raw: unknown, path: string, home: string): LocalModelConfig {
+  if (!isRecord(raw)) throw new Error(`${path}: "local" must be a JSON object.`);
+  if (typeof raw.model !== "string" || !raw.model.trim()) throw new Error(`${path}: "local.model" must be the path of a GGUF file.`);
+  if (raw.server !== undefined && (typeof raw.server !== "string" || !raw.server.trim())) {
+    throw new Error(`${path}: "local.server" must be the llama-server executable.`);
+  }
+  const positive = (key: string, fallback: number): number => {
+    const value = raw[key];
+    if (value === undefined) return fallback;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) throw new Error(`${path}: "local.${key}" must be a positive whole number.`);
+    return value;
+  };
+  return {
+    model: resolve(expandHome(raw.model, home)),
+    server: typeof raw.server === "string" ? expandHome(raw.server, home) : "llama-server",
+    contextSize: positive("contextSize", DEFAULT_LOCAL_CONTEXT),
+    idleMs: positive("idleMinutes", DEFAULT_LOCAL_IDLE_MS / 60_000) * 60_000,
+  };
 }
 
 export interface DaemonConfigOverrides {
@@ -89,7 +114,7 @@ function parsePort(raw: string, source: string): number {
   return port;
 }
 
-function readConfigFile(path: string): DaemonConfigFile | null {
+function readConfigFile(path: string, home: string): DaemonConfigFile | null {
   let text: string | null;
   try {
     text = readPrivateFileText(path);
@@ -148,6 +173,7 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.remote = remote;
   }
+  if (file.local !== undefined) config.local = parseLocal(file.local, path, home);
   return config;
 }
 
@@ -157,7 +183,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const configPath = overrides.configPath
     ?? (env.GHOSTD_CONFIG?.trim() || undefined)
     ?? defaultConfigPath(env, home);
-  const file = readConfigFile(configPath);
+  const file = readConfigFile(configPath, home);
 
   const envPort = env.GHOSTD_PORT?.trim();
   const envHost = env.GHOSTD_HOST?.trim();
@@ -184,5 +210,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     remote: { apps: [...DEFAULT_REMOTE_APPS], ...file?.remote },
     configPath,
     hooksPath,
+    local: file?.local ?? null,
   };
 }

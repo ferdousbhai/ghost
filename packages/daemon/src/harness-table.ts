@@ -13,6 +13,7 @@
 import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
+import type { NativeTurnInput } from "./local-turn.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord } from "./record.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
@@ -71,6 +72,20 @@ export interface HarnessRow {
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
 }
+
+/**
+ * A turn ghostd runs itself instead of launching a CLI: the local model
+ * (CONTRACTS.md "Local model"). It emits the same events a parser does and
+ * throws with the message the turn reports as its error.
+ */
+export interface NativeRow {
+  readonly id: string;
+  readonly effort?: string;
+  run(input: NativeTurnInput): Promise<void>;
+}
+
+/** What a conversation can run on: a CLI row, or a native one. */
+export type TurnRow = HarnessRow | NativeRow;
 
 const MAX_TOOL_OUTPUT = 4_000;
 

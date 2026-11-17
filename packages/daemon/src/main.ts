@@ -17,6 +17,7 @@ import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
+import { LocalModel } from "./local-model.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
@@ -225,6 +226,7 @@ async function serveDaemon(
     hooks,
     peers,
     keyExpiry,
+    localModel: config.local ? new LocalModel(config.local, logger.child({ part: "local-model" })) : null,
   });
   const mcp = new McpCatalog({ registry });
 

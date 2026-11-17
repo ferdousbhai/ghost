@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "../src/persona.js";
 import type { RunningSource } from "../src/running-source.js";
 import { stablePolicySections } from "../src/session-host.js";
+import { LOCAL_SECTION } from "../src/local-turn.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
@@ -106,5 +107,14 @@ describe("the stable prompt policy budget", () => {
   it("keeps the whole stable policy at or below the total ceiling", () => {
     const sizes = measureStablePolicy();
     expect(total(sizes), budgetTable(sizes)).toBeLessThanOrEqual(TOTAL_CEILING);
+  });
+});
+
+/** Only a local pass adds it, after the stable policy; it has its own ceiling. */
+const LOCAL_CEILING = 542;
+
+describe("the local model's section", () => {
+  it("stays at or below its ceiling", () => {
+    expect(LOCAL_SECTION.length).toBeLessThanOrEqual(LOCAL_CEILING);
   });
 });

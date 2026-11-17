@@ -44,13 +44,14 @@ import {
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, which, type Harness, type HarnessReport } from "./harnesses.js";
-import { runHarness, writeLaunchFiles } from "./harness-process.js";
+import { runHarness, writeLaunchFiles, type HarnessExit } from "./harness-process.js";
 import {
   harnessRow,
   SUPPORTED_HARNESSES,
   type HarnessEvent,
   type HarnessMcpServer,
   type HarnessRow,
+  type TurnRow,
 } from "./harness-table.js";
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -80,6 +81,8 @@ import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecover
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath } from "./trash.js";
+import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
+import { runLocalTurn } from "./local-turn.js";
 import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "./run-resources.js";
 
 
@@ -134,6 +137,8 @@ export interface SessionHostOptions {
   /** Omarchy's installed agents with their usage, for the agent picker. */
   harnessReport?: () => Promise<HarnessReport>;
   harnessRows?: (id: string) => HarnessRow | null;
+  /** The model ghostd runs itself, when the owner configured one (CONTRACTS.md "Local model"). */
+  localModel?: LocalModel | null;
   /** Omarchy's default agent; production asks `omarchy-default-agent`. */
   defaultHarness?: () => Promise<string | null>;
   /** The environment harnesses run with; the daemon's own by default. */
@@ -376,7 +381,8 @@ export class SessionHost {
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
   private readonly harnessReport: () => Promise<HarnessReport>;
   private readonly defaultHarness: () => Promise<string | null>;
-  private readonly rowOf: (id: string) => HarnessRow | null;
+  private readonly rowOf: (id: string) => TurnRow | null;
+  private readonly localModel: LocalModel | null;
   private readonly env: NodeJS.ProcessEnv;
   private readonly bundledSkills: string | null;
   private readonly live = new Map<string, LiveTurn>();
@@ -413,7 +419,11 @@ export class SessionHost {
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
-    this.rowOf = options.harnessRows ?? harnessRow;
+    this.localModel = options.localModel ?? null;
+    const rows = options.harnessRows ?? harnessRow;
+    const local = this.localModel;
+    const localRow: TurnRow | null = local ? { id: LOCAL_HARNESS, run: (input) => runLocalTurn(local, input) } : null;
+    this.rowOf = (id) => id === LOCAL_HARNESS ? localRow : rows(id);
     this.eventRetryDelays = options.eventRetryDelays ?? EVENT_RETRY_DELAYS_MS;
   }
 
@@ -578,6 +588,10 @@ export class SessionHost {
    * then every other eligible one Ghost has a row for.
    */
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
+    // The local model is never a fallback: it runs where it was chosen, and nothing else runs there.
+    if (current === LOCAL_HARNESS || (current === null && readHarnessSetting(ghost.dir) === LOCAL_HARNESS)) {
+      return this.localModel ? [LOCAL_HARNESS] : [];
+    }
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
     const ordered = orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, readHarnessSetting(ghost.dir), omarchyDefault]);
     // A harness that just failed before answering goes to the back, not out:
@@ -619,10 +633,13 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const [report, omarchyDefault] = await Promise.all([this.cachedReport(), this.defaultHarness()]);
     return {
-      harnesses: report.harnesses.flatMap((harness) => {
-        const row = this.rowOf(harness.id);
-        return row ? [{ ...harness, effort: row.effort ?? null, resting: this.restingFor(harness.id) }] : [];
-      }),
+      harnesses: [
+        ...report.harnesses.flatMap((harness) => {
+          const row = this.rowOf(harness.id);
+          return row ? [{ ...harness, effort: row.effort ?? null, resting: this.restingFor(harness.id) }] : [];
+        }),
+        ...(this.localModel ? [{ id: LOCAL_HARNESS, usage: null, effort: null, resting: null }] : []),
+      ],
       ghostDefault: readHarnessSetting(ghost.dir),
       omarchyDefault,
     };
@@ -646,7 +663,7 @@ export class SessionHost {
   async chooseHarness(ghostName: string, sessionId: string, id: string): Promise<{ id: string; harness: string }> {
     this.requireRow(id);
     this.resting.delete(id);
-    const listed = (await this.cachedReport()).harnesses.find((harness) => harness.id === id);
+    const listed = id === LOCAL_HARNESS || (await this.cachedReport()).harnesses.some((harness) => harness.id === id);
     if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
     const ghost = this.registry.get(ghostName);
     const conversation = requireConversationId(sessionId);
@@ -1026,12 +1043,14 @@ export class SessionHost {
       return {
         type: "error",
         reason: "error",
-        errorMessage: "No supported agent CLI is installed. See `ghost harnesses`.",
+        errorMessage: logState(entries).harness === LOCAL_HARNESS || readHarnessSetting(ghost.dir) === LOCAL_HARNESS
+          ? "This conversation runs on the local model, and none is configured: set `local.model` in ~/.config/ghost/config.json."
+          : "No supported agent CLI is installed. See `ghost harnesses`.",
       };
     }
     let lastError = "The turn failed.";
     for (const harness of candidates) {
-      const row = this.rowOf(harness) as HarnessRow;
+      const row = this.rowOf(harness) as TurnRow;
       const bound = logState(entries);
       const dir = conversationDir(sessionDir, id);
       // A harness new to the conversation, or to its directory since a home
@@ -1041,7 +1060,8 @@ export class SessionHost {
       if (bound.harness !== harness || moved || bound.harnessDir === null) {
         await appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness, session: null, dir }]);
       }
-      const fresh = bound.harness !== harness || moved || !bound.harnessStarted;
+      // The local model keeps no session of its own: every pass is handed the conversation.
+      const fresh = "run" in row || bound.harness !== harness || moved || !bound.harnessStarted;
       const earlier = entries.slice(0, entries.findLastIndex((entry) => entry.type === "user"));
       const carried = fresh ? handoffContext(earlier) : null;
       const commands = fresh ? null : unseenCommands(entries);
@@ -1093,7 +1113,7 @@ export class SessionHost {
   private async runPass(
     ghost: Ghost,
     id: string,
-    row: HarnessRow,
+    row: TurnRow,
     turn: { prompt: string; resume: boolean; sessionId: string | null },
     stream: AdmittedTurnOptions,
     blocks: { next: number },
@@ -1102,10 +1122,10 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
-    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost)]);
+    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), "run" in row ? [] : this.mcpServers(ghost)]);
     await this.prepareDirectory(ghost, dir, persona);
-    const launch = row.launch({ ...turn, persona, mcp });
-    await writeLaunchFiles(dir, launch.files);
+    const launch = "run" in row ? null : row.launch({ ...turn, persona, mcp });
+    await writeLaunchFiles(dir, launch?.files);
 
     const run = randomUUID();
     const at = new Date().toISOString();
@@ -1193,18 +1213,26 @@ export class SessionHost {
     };
 
     const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
-    const exit = await runHarness({
-      launch,
-      cwd: dir,
-      env,
-      parse: row.parser(),
-      onEvent,
-      signal,
-    });
+    const exit: HarnessExit = "run" in row
+      ? await row.run({
+        prompt: turn.prompt, persona, cwd: dir, home: this.ownerHome, env, signal, onEvent,
+        ask: async (text, options) => { await this.setQuestion(ghost.name, id, text, options); },
+      }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
+        if (!signal.aborted) error = errorMessage(failure);
+        return { code: 1, signal: null, stderr: "" };
+      })
+      : await runHarness({
+        launch: launch as NonNullable<typeof launch>,
+        cwd: dir,
+        env,
+        parse: row.parser(),
+        onEvent,
+        signal,
+      });
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
-    if (reported !== null && row.inspectSession && !exit.spawnError && !signal.aborted) {
+    if (reported !== null && "inspectSession" in row && row.inspectSession && !exit.spawnError && !signal.aborted) {
       for (const fact of await row.inspectSession(reported, env, at).catch(() => [])) {
         // Found after the reply streamed: logged ahead of it, shown when the client reloads the transcript.
         if (fact.type === "compacted") logCompaction(fact);
@@ -1219,7 +1247,7 @@ export class SessionHost {
       error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
     }
     const snapshot = error === null ? { type: "resources" as const, at: new Date().toISOString(), run, harness: row.id, resources,
-      supplied: { instructions: ["Ghost character and policy"], mcpServers: [...launch.suppliedMcp ?? []] }, summary: "" } : undefined;
+      supplied: { instructions: ["Ghost character and policy"], mcpServers: [...launch?.suppliedMcp ?? []] }, summary: "" } : undefined;
     if (snapshot) snapshot.summary = snapshotSummary(snapshot);
     return { content, error, aborted: false, produced, model, resources: snapshot };
   }
@@ -1745,5 +1773,6 @@ export class SessionHost {
     this.eventRetries.clear();
     for (const controller of this.admissions.values()) controller.abort();
     for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
+    await this.localModel?.stop("daemon stopping");
   }
 }

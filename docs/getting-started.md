@@ -210,7 +210,11 @@ preference lives in the ghost's `settings.yml` as `harness: codex`.
 An agent that fails before replying or starting a tool hands the turn to the
 next, with the conversation so far. A later failure ends the turn with an error. The model, sign-in, tools,
 and permissions are that agent's own, configured as you would for yourself;
-Ghost has no model picker or provider login. For the hard questions, a ghost
+Ghost has no model picker or provider login. The exception is a model on this
+machine, which Ghost runs itself as the `local` agent once `local.model` in
+`~/.config/ghost/config.json` names a GGUF file
+([contract](../CONTRACTS.md#local-model)); it reads your files, Recall and
+Lastbook, and asks before anything else. For the hard questions, a ghost
 also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
 
 ## 6. First conversation

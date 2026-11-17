@@ -22,7 +22,9 @@ installed size as well as code saved; Omarchy-shipped facilities are available
 to reuse. Ask the owner before breaking these rules.
 
 Ghost owns persona, shared history, and harness choice. Harnesses own models,
-credentials, permissions, tool loops, retries, and compaction.
+credentials, permissions, tool loops, retries, and compaction. The one
+exception is the [local model](#local-model): a model on this machine that
+ghostd runs, and loops over, itself.
 `ghostd` owns sessions and state transitions; HUD, CLI, and
 `ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
 access is the explicit Tailscale Serve viewer, the summonghost.com app over the
@@ -651,7 +653,9 @@ Which harness answers is decided per turn
 carrying the conversation (or the one the owner or ghost switched it to),
 then the ghost's `settings.yml` `harness`, then
 Omarchy's default agent, then every other harness Omarchy reports installed
-(`ghost harnesses`). A harness that fails
+(`ghost harnesses`). `local` is never in that order: a conversation runs on it
+only when it carries it, or is new and the ghost's `harness` is `local`, and
+then nothing else is tried. A harness that fails
 before producing anything (not signed in, out of quota, not installed) hands
 the prompt to the next; one that fails after answering ends the turn in an
 error. A harness that failed before producing anything is then tried last,
@@ -804,7 +808,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the name `ghost` is reserved for `ghost-desktop` and refused; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
-| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
+| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
@@ -908,7 +912,8 @@ commands. There are no plan or todo commands.
 
 ## Limits and credentials
 
-Ghost has no model, provider, or credential of its own: each harness reads its
+Apart from the [local model](#local-model), Ghost has no model, provider, or
+credential of its own: each harness reads its
 sign-in from its own configuration exactly as when the owner runs it by hand,
 and its environment is the daemon's own, unscrubbed. Credential values never
 enter logs; the only API response that carries them is the owner's own MCP
@@ -1048,6 +1053,43 @@ operations use semantic or CSS selectors. Ref-based sequences hold the lock
 from selection and snapshot through action without reselecting. Tabs and CLI
 state survive Ghost restarts, rename and deletion; explicitly close a task's tabs when finished, never the owner's
 browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
+
+### Local model
+
+`local` in `~/.config/ghost/config.json` is
+`{ model, server?, contextSize?, idleMinutes? }`: a GGUF file used in place,
+the `llama-server` executable (default: on `PATH`; a Vulkan build on Asahi),
+the context in tokens (32768), and the idle minutes before it stops (5).
+Configured, `local` is listed with the harnesses (`GET …/harness`, the HUD
+agent menu) and chosen like one (`ghost switch local`, `ghost harness
+local`); `ghost harnesses`, which reads Omarchy, does not list it.
+
+[`local-model.ts`](packages/daemon/src/local-model.ts) spawns one
+`llama-server` on the first local turn, on a loopback port picked at spawn
+with a key minted at spawn, every layer on the GPU, and stops it once unused
+for the idle minutes, on daemon stop, or after a failed load. ghostd kills
+only that process. Another program loading the same file (Lastbook) holds its
+own copy; Ghost does not stop it, and frees its own when idle.
+
+A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) sends
+the rendered persona plus the "Running locally" section and the current time,
+and, as the user message, the conversation so far
+(`HANDOFF_CONTEXT_CHARS`) and the prompt; it keeps no session of its own.
+It streams the same events a harness parser emits, records the model as the
+file's name and the provider as `local`, and makes at most eight model calls,
+the last without tools. Its tools ([`local-tools.ts`](packages/daemon/src/local-tools.ts))
+read: `search_content` (Recall, when installed), `grep_files`, `find_files`,
+`list_folder`, `read_file` (text, and PDF pages through `pdftotext`), and
+`search_lastbook` (Lastbook's library index, opened read-only and immutable,
+when present). Results are cut at 8000 characters. `run_command` runs
+nothing: it records the command beside the conversation, sets the
+conversation's question with the options "Run it" and "Don't run it", and
+ends tool use for the pass. The owner's next message settles it before the
+model is called: an approval (it opens with run it, yes, ok, go, do it, …)
+runs the command with `bash -lc` in the owner home, at most 120 seconds, and
+shows it as a `run_command` tool call; anything else declines it. Either way
+the model is told the outcome. Ghost's MCP servers, `ghost-desktop`
+included, are not given to a local pass.
 
 ## Harness and lifecycle invariants
 

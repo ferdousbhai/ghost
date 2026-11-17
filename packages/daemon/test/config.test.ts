@@ -43,6 +43,21 @@ describe("loadConfig", () => {
     });
   });
 
+  it("reads the local model, expanding ~, with defaults, and has none unless configured", () => {
+    const root = makeHome();
+    expect(loadConfig({ env: {}, home: root }).local).toBeNull();
+    writeConfig(root, { local: { model: "~/models/gemma.gguf" } });
+    expect(loadConfig({ env: {}, home: root }).local).toEqual({
+      model: join(root, "models", "gemma.gguf"), server: "llama-server", contextSize: 32_768, idleMs: 300_000,
+    });
+    writeConfig(root, { local: { model: "/m.gguf", server: "~/bin/llama-server", contextSize: 8192, idleMinutes: 1 } });
+    expect(loadConfig({ env: {}, home: root }).local).toEqual({ model: "/m.gguf", server: join(root, "bin", "llama-server"), contextSize: 8192, idleMs: 60_000 });
+    for (const local of [{}, { model: "" }, { model: "/m.gguf", idleMinutes: 0 }, "gemma"]) {
+      writeConfig(root, { local });
+      expect(() => loadConfig({ env: {}, home: root }), JSON.stringify(local)).toThrow(/local/);
+    }
+  });
+
   it("reads the remote owner and guests, ignoring the retired remote.enabled", () => {
     const root = makeHome();
     writeConfig(root, { remote: { enabled: true, guests: "none" } });
