@@ -653,9 +653,12 @@ Which harness answers is decided per turn
 carrying the conversation (or the one the owner or ghost switched it to),
 then the ghost's `settings.yml` `harness`, then
 Omarchy's default agent, then every other harness Omarchy reports installed
-(`ghost harnesses`). `local` is never in that order: a conversation runs on it
-only when it carries it, or is new and the ghost's `harness` is `local`, and
-then nothing else is tried. A harness that fails
+(`ghost harnesses`). When the [local model](#local-model) is configured it
+replaces that order as the default: a conversation runs on `local` when it
+carries it, or is new and the ghost's `harness` is `local` or unset, and then
+nothing else is tried, so the owner's content stays on the machine. A
+conversation the owner switched to a harness, or a ghost whose `harness` names
+one, keeps the order above. A harness that fails
 before producing anything (not signed in, out of quota, not installed) hands
 the prompt to the next; one that fails after answering ends the turn in an
 error. A harness that failed before producing anything is then tried last,
@@ -1060,9 +1063,10 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
 `{ model, server?, contextSize?, idleMinutes? }`: a GGUF file used in place,
 the `llama-server` executable (default: on `PATH`; a Vulkan build on Asahi),
 the context in tokens (32768), and the idle minutes before it stops (5).
-Configured, `local` is listed with the harnesses (`GET …/harness`, the HUD
-agent menu) and chosen like one (`ghost switch local`, `ghost harness
-local`); `ghost harnesses`, which reads Omarchy, does not list it.
+Configured, `local` is the default runtime ([Harnesses](#harnesses)), listed
+with the harnesses (`GET …/harness`, the HUD agent menu) and chosen like one
+(`ghost switch local`, `ghost harness local`); `ghost harnesses`, which reads
+Omarchy, does not list it.
 
 [`local-model.ts`](packages/daemon/src/local-model.ts) spawns one
 `llama-server` on the first local turn, on a loopback port picked at spawn
@@ -1071,25 +1075,43 @@ for the idle minutes, on daemon stop, or after a failed load. ghostd kills
 only that process. Another program loading the same file (Lastbook) holds its
 own copy; Ghost does not stop it, and frees its own when idle.
 
-A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) sends
-the rendered persona plus the "Running locally" section and the current time,
-and, as the user message, the conversation so far
-(`HANDOFF_CONTEXT_CHARS`) and the prompt; it keeps no session of its own.
-It streams the same events a harness parser emits, records the model as the
-file's name and the provider as `local`, and makes at most eight model calls,
-the last without tools. Its tools ([`local-tools.ts`](packages/daemon/src/local-tools.ts))
-read: `search_content` (Recall, when installed), `grep_files`, `find_files`,
-`list_folder`, `read_file` (text, and PDF pages through `pdftotext`), and
-`search_lastbook` (Lastbook's library index, opened read-only and immutable,
-when present). Results are cut at 8000 characters. `run_command` runs
-nothing: it records the command beside the conversation, sets the
-conversation's question with the options "Run it" and "Don't run it", and
-ends tool use for the pass. The owner's next message settles it before the
-model is called: an approval (it opens with run it, yes, ok, go, do it, …)
-runs the command with `bash -lc` in the owner home, at most 120 seconds, and
-shows it as a `run_command` tool call; anything else declines it. Either way
-the model is told the outcome. Ghost's MCP servers, `ghost-desktop`
-included, are not given to a local pass.
+A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) first
+searches the owner's message and opens its first three file or library
+hits (up to 2000 characters each), then sends the rendered persona plus the
+"Running locally" section and the current time, and, as the user message,
+the conversation so far (`HANDOFF_CONTEXT_CHARS`), the prompt, and the hits
+and opened text in a `<found>` block marked as reference text. Thinking is
+off (`enable_thinking: false`), as in Lastbook. It keeps no session of its
+own, streams the same events a harness parser emits (the first search shows
+as a `search` tool call), and records the model as the file's name and the
+provider as `local`. It offers three tools
+([`local-tools.ts`](packages/daemon/src/local-tools.ts)) for at most three
+rounds, then makes one more call without them:
+
+- `search(query)`: Recall over its folders by meaning and keywords, and
+  alongside it the search Omarchy ships: ripgrep for the words in files and
+  fd's file list ranked by name with fzf (Omarchy's `ff`; fd's substring
+  match without fzf), over Recall's folders minus its exclusions (the home
+  folder without Recall), adding what Recall did not return; so a file
+  Recall has not indexed yet, or every file when Recall is missing or
+  failing, is still found. Lastbook's library index (opened read-only, when
+  present), and, for the model's queries but not the first search,
+  `cloudmail search` and `icloud-contacts list`. Hits are numbered `S1`,
+  `S2`, … in that source order for this pass only.
+- `read(id, page?)`: one hit by its id, never a path: a text file of up to
+  16 KiB whole, a PDF's page (column padding collapsed), the lines around a ripgrep match, a mail
+  thread (`cloudmail thread read`), a contact, else Recall's passage.
+- `delegate(task)`: one headless run of a harness, in the conversation's
+  directory with the ghost's persona and MCP servers, tried in the order
+  above minus `local`; its reply, not its tool calls, returns to the model.
+  The task leaves the machine; the section tells the model to send only
+  what it needs.
+
+Results are cut at 8000 characters. Owner content reaches a cloud model only
+through a delegated task or a conversation the owner moved to a harness.
+Recall's coverage is its own configuration: on the owner's machine its root
+is the home folder, minus code and scratch folders it lists as excluded, so a
+new folder is indexed without anyone adding it.
 
 ## Harness and lifecycle invariants
 

@@ -82,7 +82,8 @@ import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
-import { runLocalTurn } from "./local-turn.js";
+import { runLocalTurn, type DelegateResult } from "./local-turn.js";
+import { TOOL_RESULT_CHARS } from "./local-tools.js";
 import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "./run-resources.js";
 
 
@@ -588,8 +589,10 @@ export class SessionHost {
    * then every other eligible one Ghost has a row for.
    */
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
-    // The local model is never a fallback: it runs where it was chosen, and nothing else runs there.
-    if (current === LOCAL_HARNESS || (current === null && readHarnessSetting(ghost.dir) === LOCAL_HARNESS)) {
+    // The local model is the default when configured, and never a fallback:
+    // a conversation on it runs only there, so the owner's content stays local.
+    const setting = readHarnessSetting(ghost.dir);
+    if (current === LOCAL_HARNESS || (current === null && (setting === LOCAL_HARNESS || (setting === null && this.localModel)))) {
       return this.localModel ? [LOCAL_HARNESS] : [];
     }
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
@@ -1075,6 +1078,7 @@ export class SessionHost {
       stream.emit({ type: "harness", harness });
       const result = await this.runPass(ghost, id, row, {
         prompt: passPrompt,
+        message: entries.findLast((entry) => entry.type === "user")?.text,
         resume: !fresh,
         sessionId: fresh ? null : bound.harnessSession,
       }, stream, blocks, signal);
@@ -1104,6 +1108,44 @@ export class SessionHost {
     return this.failure(stream, last, lastError, false);
   }
 
+  /**
+   * The local model's `delegate`: one headless run of the first cloud harness
+   * that answers, in the conversation's directory, with the ghost's persona
+   * and MCP servers. Its reply returns to the local model, not the owner.
+   */
+  private async delegateTask(
+    ghost: Ghost, dir: string, env: NodeJS.ProcessEnv, persona: string, task: string, signal: AbortSignal,
+  ): Promise<DelegateResult> {
+    const setting = readHarnessSetting(ghost.dir);
+    const [eligible, omarchyDefault, mcp] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness(), this.mcpServers(ghost)]);
+    const ordered = orderHarnesses(eligible.filter((harness) => harness !== LOCAL_HARNESS && this.rowOf(harness) !== null),
+      [setting === LOCAL_HARNESS ? null : setting, omarchyDefault]);
+    let lastError = "No cloud agent is installed to delegate to.";
+    for (const harness of [...ordered.filter((h) => !this.restingFor(h)), ...ordered.filter((h) => this.restingFor(h))]) {
+      const row = this.rowOf(harness) as HarnessRow;
+      const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
+      const launch = row.launch({ prompt, resume: false, sessionId: null, persona, mcp });
+      await writeLaunchFiles(dir, launch.files);
+      let text = "";
+      let error: string | null = null;
+      const exit = await runHarness({
+        launch, cwd: dir, env: { ...env, ...(await accountEnv(harness, this.env)) }, signal, parse: row.parser(),
+        onEvent: (event) => {
+          if (event.type === "text") text += event.delta;
+          else if (event.type === "error") error = event.message;
+          else if (event.type === "retry") error = null;
+        },
+      });
+      if (signal.aborted) return { harness, text: "Stopped.", isError: true };
+      error ??= exit.spawnError ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").slice(-4).join("\n") || `${harness} exited with ${exit.code}.`);
+      if (text.trim() && error === null) return { harness, text: text.trim().slice(0, TOOL_RESULT_CHARS), isError: false };
+      if (text.trim()) return { harness, text: `${text.trim().slice(0, TOOL_RESULT_CHARS)}\n(${harness} then failed: ${error})`, isError: true };
+      lastError = `${harness}: ${error ?? "no answer"}`;
+      if (error) this.rest(harness, error);
+    }
+    return { harness: null, text: `No cloud agent could take the task. ${lastError}`, isError: true };
+  }
+
   private failure(stream: AdmittedTurnOptions, harness: string, message: string, aborted: boolean): TerminalError {
     const kind = aborted ? null : classifyLimitMessage(message);
     if (kind) stream.emit({ type: "limit_reached", harness, kind });
@@ -1114,7 +1156,7 @@ export class SessionHost {
     ghost: Ghost,
     id: string,
     row: TurnRow,
-    turn: { prompt: string; resume: boolean; sessionId: string | null },
+    turn: { prompt: string; message?: string; resume: boolean; sessionId: string | null },
     stream: AdmittedTurnOptions,
     blocks: { next: number },
     signal: AbortSignal,
@@ -1215,8 +1257,8 @@ export class SessionHost {
     const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
     const exit: HarnessExit = "run" in row
       ? await row.run({
-        prompt: turn.prompt, persona, cwd: dir, home: this.ownerHome, env, signal, onEvent,
-        ask: async (text, options) => { await this.setQuestion(ghost.name, id, text, options); },
+        prompt: turn.prompt, message: turn.message ?? turn.prompt, persona, cwd: dir, home: this.ownerHome, env, signal, onEvent,
+        delegate: (task) => this.delegateTask(ghost, dir, env, persona, task, signal),
       }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
         if (!signal.aborted) error = errorMessage(failure);
         return { code: 1, signal: null, stderr: "" };

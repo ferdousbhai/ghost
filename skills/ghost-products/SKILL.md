@@ -66,7 +66,34 @@ Run the installer from a terminal in the owner's desktop session: it runs
 skips it) and installs the `recall` skill. It selects `~/Documents` and
 `~/Pictures` when they exist, so indexing starts at once, first downloading
 about 865 MB of models: say so before installing. Add other folders only when
-the owner asked for that scope.
+the owner asked for that scope. For a ghost that runs locally (below), the
+owner may choose the whole home folder as Recall's root, with code, build and
+scratch folders excluded (`recall config set roots`, `excluded_folders`), so a
+new folder is searchable without anyone adding it.
+
+## Running locally
+
+With a model on this machine, Ghost answers on it by default and the owner's
+notes, chats, mail, photos and files never leave the computer
+([contract](../../CONTRACTS.md#local-model)); cloud agents take only the tasks
+it hands them. All of it is optional; each piece has an alternative.
+
+| Piece | Recommended | Alternatives |
+| --- | --- | --- |
+| Runtime | `llama-server` from llama.cpp with Vulkan: AUR `llama.cpp-vulkan` on Arch | a source build with `-DGGML_VULKAN=ON`; any `llama-server` (CUDA, ROCm, Metal) for that GPU |
+| Model | Gemma 4 26B A4B instruct, `unsloth/gemma-4-26B-A4B-it-GGUF`, `UD-Q4_K_M` (16 GiB; needs about 20 GB free memory) | Gemma 4 E4B (5 GB) on a 16 GB machine; any GGUF with tool calling |
+| Search | Recall (above), with Omarchy's ripgrep, fd and fzf always alongside | without Recall, those three alone, by keyword and file name |
+| Mail, contacts | Cloudmail, iCloud for Omarchy (above) | none: the local model then cannot see them |
+| WhatsApp | wacli (above), whose folders Recall indexes | any export kept as files under Recall's root |
+| Offline library | [Lastbook](https://github.com/Immortal-Protocols/lastbook), on Omarchy (Apple Silicon included) run from source as its README says; point it at the same weights with `LASTBOOK_MODEL_DIR` so one copy is on disk | none |
+
+Weights go in the Hugging Face hub cache:
+`uvx --from huggingface_hub hf download unsloth/gemma-4-26B-A4B-it-GGUF gemma-4-26B-A4B-it-UD-Q4_K_M.gguf`.
+Then set `local` in `~/.config/ghost/config.json` to
+`{"model": "<the .gguf path>", "server": "<llama-server, if not on PATH>"}` and
+restart ghostd. The owner keeps choosing: `ghost harness <agent>` makes a cloud
+agent a ghost's default again, `ghost switch <agent>` moves one conversation,
+and removing `local` from the config turns local running off.
 
 ## wacli
 

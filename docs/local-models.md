@@ -98,7 +98,8 @@ It was first tried through the Crush harness. A ghost turn there sent 22,646
 prompt tokens, almost all of them Crush's own instructions and tools, which
 took 309 s at the default 512-token micro-batch; asked the time and told to
 check the clock, it guessed, four hours off. That is why Ghost now runs the
-model itself, with a prompt of about 1,500 tokens and its own read-only tools.
+model itself, with a prompt of about 1,500 tokens and three tools (search,
+read, delegate), as Lastbook does.
 
 Measured on this machine:
 
@@ -113,8 +114,26 @@ Measured on this machine:
 - A question for the Lastbook library took 2 min 21 s and ten tool calls
   (it tried `find_files` and `grep_files` before reading the page it found),
   and cited the right booklet and pages.
-- A proposed `touch` waited for "Run it", then ran; a reply of "No, leave it."
-  declined it.
+- Those two runs used an earlier tool set (seven tools and an approval step
+  for commands), replaced the same day by search, read and delegate, with the
+  owner's message searched before the model runs and three tool rounds.
+
+With search, read and delegate, ripgrep and fzf beside Recall, thinking
+off, and the first search's top three hits opened into the prompt (all on
+2026-11-17, a scratch daemon, the model warm):
+
+- Thinking had cost about a minute per answer (about 1,000 tokens of it);
+  without it a turn took 22–39 s, the first after a load 32 s.
+- "What did my WhatsApp chats say about handing over a passport?" named
+  three or four of the right chats each time, from the first search alone.
+- "When was the scooter import tax invoice from PT Yan Trading, and how
+  much was it?" found it in `~/Work`. It never called `read`; until the
+  right hits were opened into the prompt it answered 15,981,273, a misreading
+  of the file name's `IDR 159812737`, in 7 of 8 runs. With them it quoted
+  `Rp 159.812.737` both times, but that is the invoice's subtotal, not its
+  `TOTAL` line (`Rp 93.248.737`).
+- Hits had been numbered in the order sources finished, so the fastest,
+  Lastbook, took `S1`; they are now numbered in source order.
 
 Lastbook gives its copy back after 15 idle minutes; Ghost gives its own back
 after its idle minutes. Both can be resident at once for up to that long.
