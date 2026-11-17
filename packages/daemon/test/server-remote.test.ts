@@ -299,6 +299,17 @@ describe("remote management", () => {
     expect(await off.json()).toMatchObject({ error: { code: "not_found" } });
   });
 
+  it("serves the app link's QR only while there is one", async () => {
+    const { fake, base } = await serveFake(true);
+    const headers = { authorization: `Bearer ${TOKEN}` };
+    expect((await fetch(`${base}/api/remote/qr.svg?for=app`, { headers })).status).toBe(404);
+    fake.current = { ...remoteStatus(true), app: { origin: APP, url: `${APP}/#add=ghostbox.example.ts.net` } };
+    const qr = await fetch(`${base}/api/remote/qr.svg?for=app`, { headers });
+    expect(qr.status).toBe(200);
+    expect(await qr.text()).toContain(`${APP}/#add=ghostbox.example.ts.net`);
+    expect(await (await fetch(`${base}/api/remote/qr.svg`, { headers })).text()).toContain("https://ghostbox.example.ts.net/");
+  });
+
   it("has no remote routes on a server built without a RemoteServe", async () => {
     const base = await serve();
     const headers = { authorization: `Bearer ${TOKEN}` };

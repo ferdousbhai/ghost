@@ -826,7 +826,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/peers/accept` | Owner-only. `{ invite, name?, ghost }`: pair with the invite's daemon and list them (`ghost peers accept`). |
 | `POST /api/peer/pair` | `{ code }` → `{ login }`: spends a pairing code from any verified tailnet login, listing it as a peer; the one route admitted even with guests `none`. |
 | `GET /api/peer/outbox`, `DELETE /api/peer/outbox/:id` | The messages waiting for the calling peer, and the acknowledgement that removes one. |
-| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control, with the app link (`app: { origin, url } \| null`), and the viewer URL's QR. |
+| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control, with the app link (`app: { origin, url } \| null`), and the viewer URL's QR, or with `?for=app` the app link's. |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 

@@ -921,10 +921,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       await options.host.recordSentMessage(peer, message.text);
       jsonResponse(response, 200, { delivered });
     })),
-    route("GET", "api/remote/qr.svg", async ({ response }) => {
-      const url = remoteServe ? (await remoteServe.status()).url : null;
+    // The viewer's URL, or with `?for=app` the app link adding this machine.
+    route("GET", "api/remote/qr.svg", async ({ response, url: request }) => {
+      const app = request.searchParams.get("for") === "app";
+      const status = remoteServe ? await remoteServe.status() : null;
+      const url = app ? status?.app?.url : status?.url;
       if (!remoteServe || !url) {
-        throw new GhostError("not_found", "Remote access is off.", 404);
+        throw new GhostError("not_found", app ? "The app needs Remote access on HTTPS." : "Remote access is off.", 404);
       }
       const svg = await remoteServe.qrSvg(url);
       response.writeHead(200, {

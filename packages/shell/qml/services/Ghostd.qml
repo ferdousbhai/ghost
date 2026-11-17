@@ -73,14 +73,17 @@ Singleton {
                     && typeof body.problem.message === "string"));
     }
 
-    /** Adopt a status; the QR code is fetched once per URL. */
+    /** Adopt a status; each QR code is fetched once per URL. */
     function applyRemoteStatus(body: var): bool {
         if (!root.validRemoteStatus(body)) return false;
         const urlBefore = root.remoteUrl;
+        const appUrlBefore = root.remoteAppUrl;
         root.remoteStatus = body;
         root.remoteError = "";
         if (root.remoteUrl !== urlBefore) root.clearRemoteQr();
+        if (root.remoteAppUrl !== appUrlBefore) root.clearRemoteAppQr();
         if (root.remoteUrl !== "" && root.remoteQrSource === "") root.fetchRemoteQr();
+        if (root.remoteAppUrl !== "" && root.remoteAppQrSource === "") root.fetchRemoteAppQr();
         return true;
     }
 
@@ -89,29 +92,45 @@ Singleton {
         root.remoteQrSource = "";
     }
 
+    function clearRemoteAppQr(): void {
+        root.retire(root, "remoteAppQrRequest");
+        root.remoteAppQrSource = "";
+    }
+
     function retireRemoteRequests(): void {
         root.retire(root, "remoteRequest");
         root.remoteLoading = false;
         root.remoteMutating = false;
         root.clearRemoteQr();
+        root.clearRemoteAppQr();
     }
 
     function fetchRemoteQr(): void {
-        const expectedUrl = root.remoteUrl;
+        root.fetchQr("remoteQrRequest", "remoteQrSource", "remoteUrl", "/api/remote/qr.svg");
+    }
+
+    function fetchRemoteAppQr(): void {
+        root.fetchQr("remoteAppQrRequest", "remoteAppQrSource", "remoteAppUrl", "/api/remote/qr.svg?for=app");
+    }
+
+    /** One QR code into `source`, for the URL in `urlProperty` as it was asked. */
+    function fetchQr(slot: string, source: string, urlProperty: string, path: string): void {
+        const expectedUrl = root[urlProperty];
         if (expectedUrl === "") {
-            root.clearRemoteQr();
+            root.retire(root, slot);
+            root[source] = "";
             return;
         }
-        if (root.remoteQrRequest) return;
-        root.request(root, "remoteQrRequest", "GET", "/api/remote/qr.svg", null, function (xhr) {
-            if (root.remoteUrl !== expectedUrl) return;
+        if (root[slot]) return;
+        root.request(root, slot, "GET", path, null, function (xhr) {
+            if (root[urlProperty] !== expectedUrl) return;
             const svg = String(xhr.responseText || "");
             if (xhr.status !== 200)
                 root.remoteError = root.describeError(xhr, "GET remote-access QR code");
             else if (svg.indexOf("<svg") < 0)
                 root.remoteError = "ghostd sent malformed remote-access QR code";
             else
-                root.remoteQrSource = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+                root[source] = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
         });
     }
 
@@ -244,6 +263,13 @@ Singleton {
         network loader cannot attach the bearer header itself. */
     property string remoteQrSource: ""
     readonly property bool remoteQrLoading: root.remoteQrRequest !== null
+    /** `app`: the first `remote.apps` origin, and its link adding this machine ("" until Serve is on HTTPS). */
+    readonly property string remoteAppOrigin: root.remoteStatus.app && typeof root.remoteStatus.app.origin === "string"
+        ? root.remoteStatus.app.origin : ""
+    readonly property string remoteAppUrl: root.remoteStatus.app && typeof root.remoteStatus.app.url === "string"
+        ? root.remoteStatus.app.url : ""
+    property string remoteAppQrSource: ""
+    readonly property bool remoteAppQrLoading: root.remoteAppQrRequest !== null
 
     /** The handlers the daemon runs: every one in the hooks.json it admitted. */
     readonly property int activeHookCount: HookConfig.handlers(root.hookConfig).length
@@ -363,6 +389,7 @@ Singleton {
     property var characterWriteRequest: null
     property var remoteRequest: null
     property var remoteQrRequest: null
+    property var remoteAppQrRequest: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
     property var mcpRequest: null

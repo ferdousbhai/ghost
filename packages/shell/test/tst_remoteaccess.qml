@@ -109,6 +109,49 @@ TestCase {
         verify(audience.text.indexOf("read-only") >= 0);
     }
 
+    function test_appLinkAndItsQrWhileOnHttps(): void {
+        const panel = createTemporaryObject(panelComponent, tc);
+        const add = "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net";
+        requests[0].complete(200, status({
+            enabled: true,
+            state: "on",
+            url: "https://omarchy-thinkpad.tail58bdd3.ts.net",
+            app: { origin: "https://summonghost.com", url: add }
+        }));
+        compare(requests.length, 3);
+        verify(requests[1].url.endsWith("/api/remote/qr.svg"));
+        verify(requests[2].url.endsWith("/api/remote/qr.svg?for=app"));
+        requests[2].complete(200,
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0h1v1H0z"/></svg>');
+
+        verify(findChild(panel, "remoteAppCard").visible);
+        compare(findChild(panel, "remoteAppUrlText").text, add);
+        verify(String(findChild(panel, "remoteAppQrImage").source).startsWith("data:image/svg+xml"));
+        verify(!findChild(panel, "remoteAppHttpsText").visible);
+    }
+
+    function test_appCardSaysHttpsIsNeededWithoutCertificates(): void {
+        const panel = createTemporaryObject(panelComponent, tc);
+        requests[0].complete(200, status({
+            enabled: true,
+            state: "on",
+            scheme: "http",
+            url: "http://omarchy-thinkpad.tail58bdd3.ts.net",
+            app: { origin: "https://summonghost.com", url: null }
+        }));
+        // Only the viewer's QR code: there is no app link to encode.
+        compare(requests.length, 2);
+        verify(findChild(panel, "remoteAppCard").visible);
+        verify(findChild(panel, "remoteAppHttpsText").visible);
+        verify(!findChild(panel, "remoteAppQrImage").visible);
+    }
+
+    function test_noAppCardWithoutApps(): void {
+        const panel = createTemporaryObject(panelComponent, tc);
+        requests[0].complete(200, status({ enabled: true, state: "on", url: "https://omarchy-thinkpad.tail58bdd3.ts.net" }));
+        verify(!findChild(panel, "remoteAppCard").visible);
+    }
+
     function test_eachProblemShowsMessageAndOptionalAction(): void {
         const problems = [
             ["tailscale_missing", "Tailscale is not installed.",

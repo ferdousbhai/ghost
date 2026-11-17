@@ -114,6 +114,44 @@ Rectangle {
         }
     }
 
+    // A QR code for `url`, fetched by Ghostd as an authenticated data URL.
+    component QrCode: Item {
+        id: qrCode
+
+        required property string imageName
+        required property string source
+        required property bool loading
+        required property string url
+
+        width: parent.width
+        height: 230
+
+        Image {
+            objectName: qrCode.imageName
+            anchors.centerIn: parent
+            width: 220
+            height: 220
+            source: qrCode.source
+            sourceSize.width: 220
+            sourceSize.height: 220
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+            cache: false
+            Accessible.role: Accessible.Graphic
+            Accessible.name: "QR code for " + qrCode.url
+        }
+
+        Text {
+            anchors.centerIn: parent
+            visible: qrCode.loading || qrCode.source === ""
+            text: qrCode.loading ? "Loading QR code…" : "QR code unavailable"
+            textFormat: Text.PlainText
+            color: Theme.foregroundFaint
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
+        }
+    }
+
     Component.onCompleted: {
         if (root.visible) Ghostd.refreshRemote();
         Qt.callLater(function () {
@@ -347,34 +385,11 @@ Rectangle {
                         copyName: "remoteUrlCopy"
                     }
 
-                    Item {
-                        width: parent.width
-                        height: 230
-
-                        Image {
-                            objectName: "remoteQrImage"
-                            anchors.centerIn: parent
-                            width: 220
-                            height: 220
-                            source: Ghostd.remoteQrSource
-                            sourceSize.width: 220
-                            sourceSize.height: 220
-                            fillMode: Image.PreserveAspectFit
-                            asynchronous: true
-                            cache: false
-                            Accessible.role: Accessible.Graphic
-                            Accessible.name: "QR code for " + Ghostd.remoteUrl
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            visible: Ghostd.remoteQrLoading || Ghostd.remoteQrSource === ""
-                            text: Ghostd.remoteQrLoading ? "Loading QR code…" : "QR code unavailable"
-                            textFormat: Text.PlainText
-                            color: Theme.foregroundFaint
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                        }
+                    QrCode {
+                        imageName: "remoteQrImage"
+                        source: Ghostd.remoteQrSource
+                        loading: Ghostd.remoteQrLoading
+                        url: Ghostd.remoteUrl
                     }
 
                     Column {
@@ -403,6 +418,63 @@ Rectangle {
                             font.pixelSize: Theme.fontSize
                             wrapMode: Text.WordWrap
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                objectName: "remoteAppCard"
+                width: parent.width
+                height: appContent.implicitHeight + Theme.pad * 2
+                visible: root.remoteOn && Ghostd.remoteAppOrigin !== ""
+                radius: Theme.radius
+                color: Theme.surface
+                border.width: 1
+                border.color: Theme.border
+
+                Column {
+                    id: appContent
+                    x: Theme.pad
+                    y: Theme.pad
+                    width: parent.width - Theme.pad * 2
+                    spacing: Theme.gap
+
+                    Text {
+                        width: parent.width
+                        text: "Add to " + Ghostd.remoteAppOrigin.replace(/^https:\/\//, "")
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundBright
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSubtitle
+                        font.weight: Font.DemiBold
+                    }
+
+                    Text {
+                        objectName: "remoteAppHttpsText"
+                        width: parent.width
+                        visible: Ghostd.remoteAppUrl === ""
+                        text: "The app needs HTTPS. Turn on HTTPS Certificates on the DNS page of the Tailscale admin console, then turn remote access off and on."
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        wrapMode: Text.WordWrap
+                    }
+
+                    CopyField {
+                        visible: Ghostd.remoteAppUrl !== ""
+                        label: "App link"
+                        value: Ghostd.remoteAppUrl
+                        textName: "remoteAppUrlText"
+                        copyName: "remoteAppUrlCopy"
+                    }
+
+                    QrCode {
+                        visible: Ghostd.remoteAppUrl !== ""
+                        imageName: "remoteAppQrImage"
+                        source: Ghostd.remoteAppQrSource
+                        loading: Ghostd.remoteAppQrLoading
+                        url: Ghostd.remoteAppUrl
                     }
                 }
             }

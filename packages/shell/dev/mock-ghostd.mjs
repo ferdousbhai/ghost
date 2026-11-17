@@ -141,6 +141,10 @@ function remoteSnapshot() {
     tailscale,
     guests: "none",
     owner: loggedIn ? "owner@example.com" : null,
+    app: {
+      origin: "https://summonghost.com",
+      url: available && remoteEnabled ? `https://summonghost.com/#add=${REMOTE_HOSTNAME}` : null,
+    },
     problem,
   };
 }
@@ -779,7 +783,8 @@ const mockServer = createServer(async (req, res) => {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
     const status = remoteSnapshot();
-    if (!status.enabled || status.state !== "on" || !status.url) {
+    const forApp = new URL(req.url, "http://mock").searchParams.get("for") === "app";
+    if (!status.enabled || status.state !== "on" || !(forApp ? status.app.url : status.url)) {
       return json(res, 404, {
         error: { code: "remote_off", message: "Remote access is off." },
       });

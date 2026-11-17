@@ -4,7 +4,8 @@ Enable the existing Tailscale viewer with `ghost remote on`; open the URL from
 `ghost remote status` on a phone signed into the tailnet. The host must remain
 awake, logged in, and connected. A missing host cannot run work or deliver alerts.
 
-Or open the `app` link `ghost remote status` prints,
+Or open the `app` link `ghost remote status` prints (the HUD's Remote access
+pane shows it with a QR code),
 `https://summonghost.com/#add=<hostname>`: the app adds this machine, then
 finds your other machines running Ghost, all in one page. It needs the tailnet's
 HTTPS certificates (Tailscale admin console → DNS → HTTPS Certificates, then
