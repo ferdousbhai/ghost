@@ -363,3 +363,26 @@ describe("remote routine controls", () => {
     expect(list.textContent).toBe("User manager unavailable");
   });
 });
+
+// Release bundles are minified, which renames functions even with
+// --keep-names; the page must reach the embedded helpers by the names it calls.
+test("the viewer still names its embedded helpers after a minified release build", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ghost-viewer-min-"));
+  try {
+    const entry = join(dir, "entry.ts");
+    writeFileSync(entry, `import { REMOTE_VIEWER_HTML } from ${JSON.stringify(join(__dirname, "../src/remote-viewer.ts"))};\nprocess.stdout.write(REMOTE_VIEWER_HTML);\n`);
+    const out = join(dir, "out.js");
+    const build = spawnSync("bun", ["build", "--target=bun", "--format=esm", "--minify", "--keep-names", `--outfile=${out}`, entry], { encoding: "utf8" });
+    expect(build.status, build.stdout + build.stderr).toBe(0);
+    const run = spawnSync("bun", [out], { encoding: "utf8" });
+    expect(run.status, run.stderr).toBe(0);
+    const script = /<script>([\s\S]*?)<\/script>/.exec(run.stdout)?.[1] ?? "";
+    for (const name of ["renderMarkdown", "toolCall"]) {
+      expect(script).toMatch(new RegExp(`\\b${name}\\(`));
+      expect(script).toMatch(new RegExp(`\\b(?:const|let|var|function) ${name}\\b`));
+    }
+    expect(() => new Function(script)).not.toThrow();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

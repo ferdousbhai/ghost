@@ -184,8 +184,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   });
   const seg = (id) => encodeURIComponent(id);
   const mint = () => "remote-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-  ${renderMarkdown.toString()}
-  ${toolCall.toString()}
+  const renderMarkdown = ${renderMarkdown.toString()};
+  const toolCall = ${toolCall.toString()};
   const GLYPH = ${JSON.stringify(GLYPH)};
   let ghost = null, session = null, draft = null, events = null, streaming = false, owner = false;
   let pending = [];
