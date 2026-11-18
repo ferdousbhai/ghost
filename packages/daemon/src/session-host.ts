@@ -71,7 +71,7 @@ import {
   sweepGhostSchedules,
 } from "./schedules.js";
 import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, discardRoutineRecoveries, type RoutineConfig } from "./routine-config.js";
-import type { CommandRunner } from "./tailscale-identity.js";
+import type { CommandRunner } from "./command-runner.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
 import { runLocalTurn, type DelegateResult } from "./local-turn.js";

@@ -8,12 +8,8 @@
  * operator refusal, because only a write attempt can reveal it. Tailscale keeps
  * a `--bg` Serve entry across restarts, so Ghost stores no on/off of its own.
  */
-import {
-  type CommandResult,
-  type CommandRunner,
-  commandRunner,
-  readTailscaleNode,
-} from "./tailscale-identity.js";
+import { type CommandResult, type CommandRunner, commandRunner } from "./command-runner.js";
+import { readTailscaleNode } from "./tailscale-identity.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { DAEMON_HOST } from "./loopback.js";
 

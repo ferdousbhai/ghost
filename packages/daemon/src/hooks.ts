@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import {
   parseCommandResult, parseHooksDocument,
   runSessionStopHooks,
-  type CommandHook, type CommandResult, type GhostHookCommandConfig, type GhostHookEvent,
+  type CommandHook, type HookCommandResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostSessionStopEvent,
   type GhostSessionStopResult, type GhostTurnEndEvent,
 } from "./hook-policy.js";
@@ -21,7 +21,7 @@ export type HookObserver = (name: string, event: GhostHookEvent["type"], running
 interface GhostHookRunnerOptions {
   logger?: Logger;
   /** Test seam for a rejected command execution boundary. */
-  commandRunner?: (hook: CommandHook, event: GhostHookEvent) => Promise<CommandResult>;
+  commandRunner?: (hook: CommandHook, event: GhostHookEvent) => Promise<HookCommandResult>;
 }
 
 /** The parsed file, unvalidated: `parseHooksDocument` admits it. */
@@ -37,7 +37,7 @@ function readCommandHooksDocument(path: string): unknown {
  * One hook command in bash, as its own process group: the event as JSON on
  * stdin, ended on abort, timeout, or more than 1 MB of stdout.
  */
-async function runCommandHook(hook: CommandHook, event: GhostHookEvent): Promise<CommandResult> {
+async function runCommandHook(hook: CommandHook, event: GhostHookEvent): Promise<HookCommandResult> {
   const timeout = AbortSignal.timeout(hook.timeoutMs);
   const overflow = new AbortController();
   let stdout = "";

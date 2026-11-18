@@ -24,11 +24,7 @@ import { errorMessage, GhostError } from "./errors.js";
 import { ACCEPTED_EVENT_LINE } from "./external-events.js";
 import { isValidGhostName } from "./ghosts.js";
 import { which } from "./harnesses.js";
-import {
-  commandRunner,
-  type CommandResult,
-  type CommandRunner,
-} from "./tailscale-identity.js";
+import { commandRunner, type CommandResult, type CommandRunner } from "./command-runner.js";
 import { silentLogger, type Logger } from "./log.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
 

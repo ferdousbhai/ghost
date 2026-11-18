@@ -152,7 +152,7 @@ export function parseHooksDocument(
   return result;
 }
 
-export interface CommandResult {
+export interface HookCommandResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -165,7 +165,7 @@ export interface CommandResult {
 
 export function parseCommandResult(
   hook: CommandHook,
-  result: CommandResult,
+  result: HookCommandResult,
   warn: (message: string, details: Record<string, unknown>) => void,
 ): GhostSessionStopResult | undefined {
   if (result.aborted) return undefined;

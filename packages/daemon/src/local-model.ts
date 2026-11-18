@@ -6,9 +6,9 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createServer } from "node:net";
 import { basename } from "node:path";
 import type { Logger } from "./log.js";
+import { freePort } from "./loopback.js";
 
 export interface LocalModelConfig {
   /** The GGUF file, used in place. */
@@ -31,18 +31,6 @@ const STOP_GRACE_MS = 5_000;
 interface LocalEndpoint {
   readonly url: string;
   readonly key: string;
-}
-
-/** A free loopback port, released for llama-server to bind. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() => typeof address === "object" && address ? resolve(address.port) : reject(new Error("no port")));
-    });
-  });
 }
 
 function delay(ms: number): Promise<void> {

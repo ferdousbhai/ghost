@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ghostSessionStopContinuation, parseCommandResult, parseHooksDocument,
   runSessionStopHooks,
-  type CommandResult, type GhostSessionStopEvent,
+  type HookCommandResult, type GhostSessionStopEvent,
 } from "../src/hook-policy.js";
 
 const path = "/owner/hooks.json";
@@ -19,7 +19,7 @@ const config = {
     ] }],
   },
 };
-const result = (fields: Partial<CommandResult> = {}): CommandResult => ({
+const result = (fields: Partial<HookCommandResult> = {}): HookCommandResult => ({
   exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false, ...fields,
 });
 const base = {

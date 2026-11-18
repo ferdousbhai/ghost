@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { which } from "../src/harnesses.js";
 import { discardRoutineRecoveries, listRoutineRecoveries, readRoutineConfig, removeRoutine, restoreRoutine, saveRoutineConfig } from "../src/routine-config.js";
-import type { CommandRunner } from "../src/tailscale-identity.js";
+import type { CommandRunner } from "../src/command-runner.js";
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });

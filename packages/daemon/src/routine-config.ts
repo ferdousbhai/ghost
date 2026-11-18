@@ -3,7 +3,7 @@ import { lstat, mkdir, mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/p
 import { join } from "node:path";
 import { errorMessage, GhostError } from "./errors.js";
 import { readPrivateFileText, writePrivateJsonAtomic, writePrivateTextAtomic } from "./private-file.js";
-import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
+import { commandRunner, type CommandRunner } from "./command-runner.js";
 import { routineUnits, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";
 
 const MAX_SOURCE_BYTES = 131072;

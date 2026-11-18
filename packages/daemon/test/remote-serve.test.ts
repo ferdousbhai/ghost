@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RemoteServe } from "../src/remote-serve.js";
-import type { CommandRunner } from "../src/tailscale-identity.js";
+import type { CommandRunner } from "../src/command-runner.js";
 import { FAKE_TARGET, fakeTailscale, missingBinary, ok } from "./helpers/fake-tailscale.js";
 
 describe("RemoteServe status", () => {

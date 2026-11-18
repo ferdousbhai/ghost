@@ -33,7 +33,7 @@ export async function freePort(): Promise<number> {
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const port = PORT_FLOOR + Math.floor(Math.random() * (PORT_CEILING - PORT_FLOOR + 1));
     try {
-      await closeServer(await listenOnce("127.0.0.1", port));
+      await closeServer(await listenOnce(DAEMON_HOST, port));
       return port;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
@@ -54,7 +54,7 @@ export async function waitUntilServing(
       throw new Error(`daemon exited before listening (${child.exitCode})`);
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/status`, {
+      const response = await fetch(`http://${DAEMON_HOST}:${port}/api/status`, {
         signal: AbortSignal.timeout(2_000),
       });
       if (response.status === 200 || response.status === 401) return;

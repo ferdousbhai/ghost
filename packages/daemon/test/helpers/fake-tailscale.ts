@@ -1,4 +1,4 @@
-import type { CommandRunner } from "../../src/tailscale-identity.js";
+import type { CommandRunner } from "../../src/command-runner.js";
 
 export type FakeScheme = "https" | "http" | null;
 
