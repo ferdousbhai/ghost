@@ -76,7 +76,7 @@ TestCase {
         }];
         Ghostd.showTurnState("casper", state.sessionId);
 
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
 
         compare(requests.length, 1);
         verify(requests[0].url.endsWith("?limit=1000&offset=0"));
@@ -99,7 +99,7 @@ TestCase {
 
     function test_aPageForAnotherConversationIsRejected(): void {
         const state = activeState("mine");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         const foreign = page(state, messages(0, 1), 1, false);
         foreign.id = "someone-else";
         requests[0].complete(200, foreign);
@@ -109,7 +109,7 @@ TestCase {
 
     function test_failedTurnErrorIsRestored(): void {
         const state = activeState("failed-turn");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[0].complete(200, page(state, [
             { role: "user", content: [{ type: "text", text: "hi" }], entryId: "u" },
             { role: "assistant", content: [], errorMessage: "codex usage limit reached",
@@ -121,7 +121,7 @@ TestCase {
 
     function test_savedTextTruncationIsVisibleAfterRehydration(): void {
         const state = activeState("bounded");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[0].complete(200, page(state, [{
             role: "user",
             content: [{ type: "text", text: "bounded text" }],
@@ -136,18 +136,18 @@ TestCase {
 
     function test_aReloadUpdatesRowsWithoutEmptyingTheModel(): void {
         const state = activeState("in-place");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[0].complete(200, page(state, messages(0, 3), 3, false));
         compare(Ghostd.transcript.count, 3);
 
         const counts = [];
         const watch = () => counts.push(Ghostd.transcript.count);
         Ghostd.transcript.countChanged.connect(watch);
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         const grown = messages(0, 4);
         grown[1].content = [{ type: "text", text: "as stored" }];
         requests[1].complete(200, page(state, grown, 4, false));
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[2].complete(200, page(state, messages(0, 2), 2, false));
         Ghostd.transcript.countChanged.disconnect(watch);
 
@@ -162,30 +162,12 @@ TestCase {
             error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[0].complete(200, page(state, [], 0, false));
 
         compare(requests.length, 1);
         compare(state.rows.length, 0);
         compare(Ghostd.transcript.count, 0);
-    }
-
-    function test_open404IsAnHonestEmptyTranscript(): void {
-        const state = activeState("not-started");
-        state.rows = [{
-            role: "user", text: "local placeholder", toolActivity: [],
-            error: "", pending: false
-        }];
-        Ghostd.showTurnState("casper", state.sessionId);
-        Ghostd.loadConversationTranscript(state, true);
-        requests[0].complete(404, {
-            error: { code: "not_found", message: "no such conversation" }
-        });
-
-        compare(requests.length, 1);
-        compare(state.rows.length, 0);
-        compare(Ghostd.transcript.count, 0);
-        compare(Ghostd.sessionsError, "");
     }
 
     function test_shortPageContinuesButChangingTotalFailsUnpublished(): void {
@@ -198,7 +180,7 @@ TestCase {
             error: "", pending: false
         }];
         Ghostd.showTurnState("casper", shortState.sessionId);
-        Ghostd.loadConversationTranscript(shortState, false);
+        Ghostd.loadConversationTranscript(shortState);
         requests[0].complete(200, page(shortState, messages(0, 2), 3, true));
 
         compare(requests.length, 2);
@@ -213,7 +195,7 @@ TestCase {
 
         requests = [];
         const changingState = activeState("changing");
-        Ghostd.loadConversationTranscript(changingState, false);
+        Ghostd.loadConversationTranscript(changingState);
         requests[0].complete(200,
             page(changingState, messages(0, 1000), 1001, true));
         compare(requests.length, 2);
@@ -228,7 +210,7 @@ TestCase {
         // transcriptMaxPages is the only cap; a daemon that clamps its page
         // size must not trip a total pre-check.
         const state = activeState("runaway");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
             compare(requests.length, pageIndex + 1);
             requests[pageIndex].complete(200, page(state,
@@ -242,7 +224,7 @@ TestCase {
 
     function test_exactTenThousandMessageBoundaryCompletes(): void {
         const state = activeState("cap-boundary");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
             compare(requests.length, pageIndex + 1);
             requests[pageIndex].complete(200, page(state,
@@ -258,7 +240,7 @@ TestCase {
 
     function test_repeatedPageRangeIsRejectedByPersistedEntryIdentity(): void {
         const state = activeState("repeat");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         const firstPage = messages(0, 1000);
         requests[0].complete(200, page(state, firstPage, 2000, true));
         compare(requests.length, 2);
@@ -273,9 +255,9 @@ TestCase {
 
     function test_supersedeAndSessionSwitchAbortAndIgnoreLatePages(): void {
         const first = activeState("first");
-        Ghostd.loadConversationTranscript(first, false);
+        Ghostd.loadConversationTranscript(first);
         const stale = requests[0];
-        Ghostd.loadConversationTranscript(first, false);
+        Ghostd.loadConversationTranscript(first);
         const fresh = requests[1];
 
         verify(stale.aborted);
@@ -285,7 +267,7 @@ TestCase {
         compare(first.rows[0].text, "message-10");
 
         requests = [];
-        Ghostd.loadConversationTranscript(first, false);
+        Ghostd.loadConversationTranscript(first);
         const switched = requests[0];
         Ghostd.adoptConversation("casper", "second");
         Ghostd.ensureTurnState("casper", "second");
@@ -299,7 +281,7 @@ TestCase {
 
     function test_ghostSwitchCancelsWithoutStalePollution(): void {
         const state = activeState("ghost-switch");
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         const stale = requests[0];
 
         Ghostd.sessionIds.other = "";
@@ -317,7 +299,7 @@ TestCase {
 
     function test_newConversationCancelsAbandonedLoads(): void {
         const first = activeState("new-conversation");
-        Ghostd.loadConversationTranscript(first, false);
+        Ghostd.loadConversationTranscript(first);
         const abandonedNew = requests[0];
         Ghostd.reachable = false;
         Ghostd.newConversation();
@@ -337,7 +319,7 @@ TestCase {
             id: deleted.sessionId,
             title: null
         }];
-        Ghostd.loadConversationTranscript(deleted, false);
+        Ghostd.loadConversationTranscript(deleted);
         const deletedLoad = requests[0];
         Ghostd.deleteConversation(deleted.sessionId);
         compare(deleteRequests.length, 1);
@@ -354,8 +336,8 @@ TestCase {
         requests = [];
         const active = activeState("destroy-active");
         const background = Ghostd.ensureTurnState("casper", "destroy-background");
-        Ghostd.loadConversationTranscript(active, false);
-        Ghostd.loadConversationTranscript(background, false);
+        Ghostd.loadConversationTranscript(active);
+        Ghostd.loadConversationTranscript(background);
         const activeLoad = requests[0];
         const backgroundLoad = requests[1];
         Ghostd.retireClientRequests();
@@ -377,7 +359,7 @@ TestCase {
             error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
-        Ghostd.loadConversationTranscript(state, false);
+        Ghostd.loadConversationTranscript(state);
         requests[0].complete(503, JSON.stringify({
             error: { code: "busy", message: "try later" }
         }));

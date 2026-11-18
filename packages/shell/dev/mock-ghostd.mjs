@@ -1197,12 +1197,8 @@ const mockServer = createServer(async (req, res) => {
     }
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation);
-    if (!s) {
-      return json(res, 404, {
-        error: { message: "no such session", code: "session_not_found" },
-      });
-    }
+    // As in ghostd, a conversation with no log yet reads as an empty page.
+    const s = ghostSessions(name).get(conversation) ?? { id: conversation, messages: [] };
     return json(res, 200, transcriptOf(s, url.searchParams));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stop" && req.method === "POST") {

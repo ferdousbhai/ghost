@@ -178,6 +178,14 @@ try {
   const transcript = JSON.stringify(transcriptBody);
   assert.ok(transcript.includes(join(homedir(), "project-brief.md")));
 
+  // A conversation with no log yet is ghostd's empty page, not a 404.
+  const unknownTranscript = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/never-started/transcript`);
+  assert.equal(unknownTranscript.status, 200);
+  assert.deepEqual(
+    { ...await unknownTranscript.json(), readThrough: "" },
+    { id: "never-started", messages: [], total: 0, truncated: false, readThrough: "" },
+  );
+
   const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
     method: "POST",
     headers: { "content-type": "application/json" },

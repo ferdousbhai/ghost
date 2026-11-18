@@ -1539,7 +1539,7 @@ Singleton {
             }
             // ghostd announces each pass too (a follow-up, a stop hook): with no
             // stream here, the transcript and the queue are read again each time.
-            root.loadConversationTranscript(state, false);
+            root.loadConversationTranscript(state);
             root.fetchQueueFor(state);
             root.projectTurnFields(state);
         }
@@ -1826,7 +1826,7 @@ Singleton {
         if (root.hudChatFocused) root.markConversationRead(ghost, id);
         const state = root.ensureTurnState(ghost, id);
         if (state.streaming) return;
-        root.loadConversationTranscript(state, true);
+        root.loadConversationTranscript(state);
         // Another client's running turn may already hold follow-ups.
         root.fetchQueueFor(state);
     }
@@ -1851,7 +1851,7 @@ Singleton {
     }
 
     function refreshCurrentTranscript(): void {
-        root.loadConversationTranscript(root.activeTurnState(), false);
+        root.loadConversationTranscript(root.activeTurnState());
     }
 
     function transcriptLoadIsCurrent(state: var, load: var): bool {
@@ -1864,11 +1864,10 @@ Singleton {
      * so a failed or inconsistent read is visible as an error, never as a
      * convincing partial history.
      */
-    function loadConversationTranscript(state: var, allowNotFound: bool): void {
+    function loadConversationTranscript(state: var): void {
         if (!state || state.streaming) return;
         root.cancelTranscriptLoad(state);
         const load = {
-            allowNotFound: allowNotFound,
             total: -1,
             nextOffset: 0,
             pageCount: 0,
@@ -1906,11 +1905,6 @@ Singleton {
         load.pageCount += 1;
         root.request(state, "transcriptRequest", "GET", root.sessionPath(state.ghost, state.sessionId) + "/transcript"
             + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset, null, function (xhr, body) {
-            if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
-                load.messages = [];
-                root.completeTranscriptLoad(state, load);
-                return;
-            }
             if (xhr.status !== 200) {
                 const message = root.describeError(xhr, "GET transcript");
                 root.failTranscriptLoad(state, load, message, xhr.status === 0);
@@ -2504,7 +2498,7 @@ Singleton {
         }
         root.projectTurnFields(state);
         Qt.callLater(function () {
-            root.loadConversationTranscript(state, false);
+            root.loadConversationTranscript(state);
         });
         if (errorMessage === "" && root.hudChatFocused && root.isActiveTurn(state))
             root.markConversationRead(state.ghost, state.sessionId);
