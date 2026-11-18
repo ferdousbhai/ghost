@@ -80,12 +80,12 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
  * The preference, and any agent a recent failure keeps at the back;
  * `ghost harnesses` lists installed agents and usage.
  */
-function harnessChoicesText(name: string, body: HarnessChoices): string {
+function harnessChoicesText(name: string, body: HarnessChoices, changed: boolean): string {
   const preferred = body.ghostDefault ?? (body.automatic ? `automatic (now ${body.automatic})` : "automatic");
   const resting = body.harnesses.flatMap((harness) => harness.resting
     ? [`${harness.id} is tried last until ${new Date(harness.resting.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${harness.resting.reason}\n`]
     : []);
-  return `${name} runs on ${preferred}\n${resting.join("")}`;
+  return `${changed ? `Ghost ${name} now runs on ${preferred}.` : `${name} runs on ${preferred}`}\n${resting.join("")}`;
 }
 
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
@@ -98,8 +98,9 @@ export async function harnessCommand(ctx: CliContext): Promise<number> {
     ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
     : await ctx.client.request("GET", ghostPath(name, "/harness"));
   emit(ctx, body, (result) => {
-    const text = harnessChoicesText(name, result as HarnessChoices);
-    return id || flagBoolean(parsed, "none") ? text : primary(text);
+    const changed = Boolean(id) || flagBoolean(parsed, "none");
+    const text = harnessChoicesText(name, result as HarnessChoices, changed);
+    return changed ? text : primary(text);
   });
   return 0;
 }
@@ -164,7 +165,7 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
   } else if (action === "recoveries") {
     const { recoveries } = await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path), result = { recoveries };
     emit(ctx, result, () => ({
-      human: result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}\n`).join(""),
+      human: result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}\n`).join("") || "No recovery checkpoints.\n",
       quiet: result.recoveries.map(r => `${r.id}\n`).join(""),
     }));
   } else {
@@ -177,7 +178,8 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
     } else {
       result = await request("POST", action === "restore" ? `${path}/recoveries/${encodeURIComponent(slug as string)}/restore` : `${target}/${action}`, {});
     }
-    emit(ctx, result, () => `${ghost}/${slug}: ${action} accepted.${(result as { recovery?: string }).recovery ? ` Recovery: ${(result as { recovery: string }).recovery}` : ""}\n`);
+    const recovery = (result as { recovery?: string }).recovery;
+    emit(ctx, result, () => `${action.charAt(0).toUpperCase()}${action.slice(1)} accepted for ${ghost}/${slug}.${recovery ? ` Recovery: ${recovery}.` : ""}\n`);
   }
   return 0;
 }

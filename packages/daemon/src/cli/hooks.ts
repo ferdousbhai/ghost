@@ -27,7 +27,7 @@ export async function hooksCommand(ctx: CliContext): Promise<number> {
     if (action === "show") return primary(`${JSON.stringify(result, null, 2)}\n`);
     const { path, document } = result as GhostHookCommandConfig;
     const hooks = parseHooksDocument(document, path);
-    if (action === "set") return `replaced ${path} (${hooks.length} ${hooks.length === 1 ? "hook" : "hooks"})\n`;
+    if (action === "set") return `Replaced ${path} (${hooks.length} ${hooks.length === 1 ? "hook" : "hooks"}).\n`;
     return {
       human: hooks.length > 0
         ? `${table(hooks.map((hook) => [hook.eventName, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`

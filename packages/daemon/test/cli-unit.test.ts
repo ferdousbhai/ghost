@@ -86,6 +86,25 @@ describe("a ghost's own shell addresses its conversation", () => {
     expect((await runCli(["ask"], { env, home: "/tmp/ghost-cli-unit", fetch })).code).not.toBe(0);
   });
 
+  it("a change verb acknowledges in a sentence, and -q prints nothing", async () => {
+    const fetch: CliFetch = async (input, init) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/title")) return jsonResponse({ ok: true, title: JSON.parse(String(init?.body)).title });
+      if (path.endsWith("/pin") || path.endsWith("/stop")) return jsonResponse({ ok: true });
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    for (const [argv, sentence] of [
+      [["title", "Release notes"], 'Conversation conv-mine is now titled "Release notes".\n'],
+      [["pin"], "Pinned conv-mine.\n"],
+      [["unpin"], "Unpinned conv-mine.\n"],
+      [["stop"], "Stopped conv-mine.\n"],
+    ] as const) {
+      expect(await runCli([...argv], { env, home: "/tmp/ghost-cli-unit", fetch }), argv[0]).toMatchObject({ code: 0, stdout: sentence });
+      expect(await runCli([...argv, "-q"], { env, home: "/tmp/ghost-cli-unit", fetch }), argv[0]).toMatchObject({ code: 0, stdout: "" });
+    }
+  });
+
   it("`ghost stop` targets the running turn", async () => {
     const requests: string[] = [];
     const running = [session("conv-other"), { ...session("conv-mine"), running: true }];
@@ -129,7 +148,7 @@ describe("a ghost's own shell addresses its conversation", () => {
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
     const human = await runCli(["say", "--follow-up", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
-    expect(human).toMatchObject({ code: 0, stdout: "queued for conv-mine\n" });
+    expect(human).toMatchObject({ code: 0, stdout: "Queued for conv-mine.\n" });
     const quiet = await runCli(["say", "--follow-up", "-q", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(quiet).toMatchObject({ code: 0, stdout: "" });
   });
@@ -428,6 +447,25 @@ describe("CLI API adaptation", () => {
     expect(await remote("off", { ...stillOn, state: "off" })).toEqual({ code: 0, stdout: "Remote access is off.\n", stderr: "" });
   });
 
+  it("an empty list says so in a sentence, and -q prints nothing", async () => {
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts") return jsonResponse([]);
+      if (path.endsWith("/sessions")) return jsonResponse({ sessions: [] });
+      if (path.endsWith("/routines")) return jsonResponse({ routines: [], recoveries: [] });
+      throw new Error(`unexpected request to ${path}`);
+    };
+    for (const [argv, sentence] of [
+      [["list"], "No ghosts.\n"],
+      [["sessions"], "No conversations.\n"],
+      [["routines", "recoveries"], "No recovery checkpoints.\n"],
+    ] as const) {
+      const run = (...flags: string[]) => runCli([...argv, ...flags], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
+      expect(await run(), argv.join(" ")).toMatchObject({ code: 0, stdout: sentence });
+      expect(await run("-q"), argv.join(" ")).toMatchObject({ code: 0, stdout: "" });
+    }
+  });
+
   it("ghost hooks status prints each hook's event, name, and description", async () => {
     const fetch: CliFetch = async () => jsonResponse({
       path: "/home/owner/.config/ghost/hooks.json",
@@ -459,7 +497,7 @@ describe("CLI API adaptation", () => {
       const file = join(dir, "hooks.json");
       writeFileSync(file, JSON.stringify(config.document));
       const run = (...flags: string[]) => runCli(["hooks", "set", file, ...flags], { env: { GHOSTD_PORT: "7718" }, home: dir, fetch });
-      expect(await run()).toMatchObject({ code: 0, stdout: "replaced /home/owner/.config/ghost/hooks.json (2 hooks)\n" });
+      expect(await run()).toMatchObject({ code: 0, stdout: "Replaced /home/owner/.config/ghost/hooks.json (2 hooks).\n" });
       expect(JSON.parse((await run("--json")).stdout)).toEqual(config);
       expect(await run("-q")).toMatchObject({ code: 0, stdout: "" });
     } finally {

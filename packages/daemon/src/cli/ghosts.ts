@@ -11,7 +11,7 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
     emit(ctx, ghosts, () => ({
       human: ghosts.length > 0
         ? `${table(ghosts.map((ghost) => [ghost.name, ghost.dir]), ["NAME", "DIR"])}\n`
-        : "",
+        : "No ghosts.\n",
       quiet: ghosts.map((ghost) => ghost.name).join("\n") + (ghosts.length ? "\n" : ""),
     }));
     return 0;
@@ -19,7 +19,7 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
 
   if (verb === "new") {
     const response = await ctx.client.request("POST", "/api/ghosts", { name: parsed.positionals[0] });
-    emit(ctx, response, () => `created ${parsed.positionals[0]}\n`);
+    emit(ctx, response, () => `Created ${parsed.positionals[0]}.\n`);
     return 0;
   }
 
@@ -34,7 +34,7 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
     const name = requested.trim();
     if (!(await listGhosts(ctx.client)).some((ghost) => ghost.name === name)) throw notFound(`ghost ${JSON.stringify(name)}`);
     const path = await writeDefaultGhost(ctx.runtime, name);
-    emit(ctx, { ghost: name, path }, () => `${name}\n`);
+    emit(ctx, { ghost: name, path }, () => `Default ghost is now ${name}.\n`);
     return 0;
   }
 
@@ -44,7 +44,7 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
     if (parsed.positionals.length > 0) throw new ArgsError("ghost rm -s does not take a ghost name positional");
     const { path, session } = await resolveTarget(ctx);
     const response = await ctx.client.request("DELETE", path);
-    emit(ctx, response, () => `trashed ${session.id}\n`);
+    emit(ctx, response, () => `Trashed ${session.id}.\n`);
     return 0;
   }
   if (parsed.positionals.length !== 1) throw new ArgsError("ghost rm needs a ghost name or -s <id>");
@@ -54,6 +54,6 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
     ghostPath(name, `?confirm=${encodeURIComponent(name)}`),
   );
   await followDefaultGhost(ctx.runtime, name, null);
-  emit(ctx, response, () => `trashed ${name}; \`gio trash --list\` shows it\n`);
+  emit(ctx, response, () => `Trashed ${name}; \`gio trash --list\` shows it.\n`);
   return 0;
 }

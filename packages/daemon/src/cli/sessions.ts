@@ -16,7 +16,7 @@ export async function sessionsCommand(ctx: CliContext): Promise<number> {
       [session.question ? "asking" : "", session.running ? "running" : "", session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
     ]);
     return {
-      human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "",
+      human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "No conversations.\n",
       quiet: sessions.map((session) => session.id).join("\n") + (sessions.length ? "\n" : ""),
     };
   });
@@ -63,7 +63,7 @@ export async function showCommand(ctx: CliContext): Promise<number> {
       ? `(messages ${first + 1}–${first + body.messages.length} of ${body.total}; --offset/--limit for others)\n`
       : "";
     const quiet = markdown ? `${markdown}\n` : "";
-    return { human: `${quiet}${trailer && markdown ? "\n" : ""}${trailer}`, quiet };
+    return { human: markdown ? `${quiet}${trailer ? "\n" : ""}${trailer}` : "No messages.\n", quiet };
   });
   return 0;
 }
@@ -72,7 +72,7 @@ export async function showCommand(ctx: CliContext): Promise<number> {
 export async function stopCommand(ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx);
   const body = await ctx.client.request("POST", `${path}/stop`, {});
-  emit(ctx, body, () => `stopped ${session.id}\n`);
+  emit(ctx, body, () => `Stopped ${session.id}.\n`);
   return 0;
 }
 
@@ -91,11 +91,11 @@ export async function askCommand(ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx);
   if (clear) {
     const body = await ctx.client.request("DELETE", `${path}/question`);
-    emit(ctx, body, () => `cleared the question in ${session.id}\n`);
+    emit(ctx, body, () => `Cleared the question in ${session.id}.\n`);
     return 0;
   }
   const body = await ctx.client.request("PUT", `${path}/question`, { text, options });
-  emit(ctx, body, () => `asked in ${session.id}; the owner's next message there is the answer\n`);
+  emit(ctx, body, () => `Asked in ${session.id}; the owner's next message there is the answer.\n`);
   return 0;
 }
 
@@ -113,8 +113,8 @@ export async function sessionActionCommand(verb: "title" | "pin" | "unpin", ctx:
     });
   }
   emit(ctx, body, () => {
-    if (verb === "title") return `${(body as { title?: string }).title ?? parsed.positionals[0]}\n`;
-    return `${verb === "pin" ? "pinned" : "unpinned"} ${session.id}\n`;
+    if (verb === "title") return `Conversation ${session.id} is now titled ${JSON.stringify((body as { title?: string }).title ?? parsed.positionals[0])}.\n`;
+    return `${verb === "pin" ? "Pinned" : "Unpinned"} ${session.id}.\n`;
   });
   return 0;
 }

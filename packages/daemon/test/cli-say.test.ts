@@ -171,7 +171,7 @@ describe("ghost say", () => {
     const port = typeof address === "object" && address ? address.port : 0;
     const result = await runCli(["stop", "-g", "casper", "-s", "remote-1"], { env: { GHOSTD_PORT: String(port) }, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
-    expect(result.stdout).toBe("stopped remote-1\n");
+    expect(result.stdout).toBe("Stopped remote-1.\n");
     expect(requests).toContain("POST /api/ghosts/casper/sessions/remote-1/stop");
   });
 

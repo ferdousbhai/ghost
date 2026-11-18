@@ -73,7 +73,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
     const path = sessionPath(name, id);
     try {
       const response = await ctx.client.request("POST", `${path}/queue`, { text });
-      emit(ctx, response, () => `queued for ${id}\n`);
+      emit(ctx, response, () => `Queued for ${id}.\n`);
       return 0;
     } catch (error) {
       // A follow-up to an idle conversation is its next turn: this is how a

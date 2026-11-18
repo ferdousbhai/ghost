@@ -690,6 +690,8 @@ and a conversation runs on (`ghost switch`), MCP, hooks, remote, and status), so
 ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
 a verb's primary output: what a read prints (a transcript without its paging
 note, a character, ids or names, `ok` for status), and nothing for a change.
+A change acknowledges in one capitalised sentence ending in a full stop; an
+empty list prints a sentence saying so (`No ghosts.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),

@@ -47,7 +47,7 @@ describe("ghost CLI against a real daemon server", () => {
 
     expect(await cli(["new", "probe", "--json"])).toMatchObject({ code: 0 });
     const used = await cli(["use", "casper"]);
-    expect(used).toMatchObject({ code: 0, stdout: "casper\n" });
+    expect(used).toMatchObject({ code: 0, stdout: "Default ghost is now casper.\n" });
     const path = join(env.XDG_CONFIG_HOME!, "ghost", "cli.json");
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "casper" });
     expect(statSync(path).mode & 0o777).toBe(0o600);
