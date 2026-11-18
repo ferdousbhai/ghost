@@ -245,8 +245,9 @@ Item {
             }
 
             // What a new conversation starts on: the ghost's own default, else
-            // Omarchy's. "use <current>" makes this conversation's harness the
-            // default; "automatic" hands the choice back to Omarchy.
+            // the daemon's automatic choice. "use <current>" makes this
+            // conversation's harness the default; "automatic" clears the
+            // default, so whatever the daemon's `automatic` names applies.
             Item {
                 visible: picker.choice !== null
                 width: pickerColumn.width

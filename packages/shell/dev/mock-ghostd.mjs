@@ -54,6 +54,8 @@ const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576
 const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 /** Each scripted pass begins with the harness compacting its context, as Claude Code reports. */
 const COMPACT = flag("--compact");
+/** Each scripted turn ends with the ghost asking the owner a question, as `ghost ask` does. */
+const ASK = flag("--ask");
 /**
  * The agent CLIs the mock pretends are installed, in Omarchy's order, then the
  * configured local model; codex reports a full usage window, which is
@@ -358,6 +360,8 @@ const sessionSummary = (name) => (s) => {
     title: s.title ?? null,
     // As in ghostd, the first owner text logged previews it, a `!command` included.
     preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
+    // The event source that opened an `event-` conversation, as ghostd reports it.
+    source: s.source ?? null,
     harness: s.harness ?? null,
     // What the harness reported it ran on; the mock's scripted turns report none.
     model: null,
@@ -368,6 +372,7 @@ const sessionSummary = (name) => (s) => {
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
     running: activeTurns.has(turnKey(name, s.id)),
+    question: s.question ?? null,
   };
 };
 
@@ -649,7 +654,11 @@ async function streamTurn(res, name, body) {
     existing = { id: sessionId, title: null, updatedAt: new Date().toISOString(), messages: [] };
     store.set(sessionId, existing);
   }
-  if (!prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
+  if (!prompt.startsWith("!")) {
+    append(existing, { role: "user", content: textParts(prompt) });
+    // The owner's message answers whatever the ghost asked there.
+    existing.question = null;
+  }
   publishConversationUpdated(name, sessionId);
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
@@ -688,6 +697,7 @@ async function streamTurn(res, name, body) {
         if (turn.followUp.length === 0) break;
         const text = turn.followUp.shift();
         append(existing, { role: "user", content: textParts(text) });
+        existing.question = null;
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
@@ -695,6 +705,9 @@ async function streamTurn(res, name, body) {
         logReply(reply);
       }
       stopped = reply === null || log.stopped;
+      if (ASK && !stopped) {
+        existing.question = { text: "Shall I go ahead with that?", options: ["Yes", "Not yet"], askedAt: new Date().toISOString() };
+      }
       // A stopped turn already ended its stream with `aborted`.
       if (!stopped) {
         if (flag("--stall-stream")) {
@@ -874,6 +887,7 @@ const mockServer = createServer(async (req, res) => {
     if (sessions.has(sessionId)) return json(res, 200, { sessionId, duplicate: true });
     sessions.set(sessionId, seedSession({
       id: sessionId,
+      source,
       title: `${source} ${id}`,
       harness: turnHarness(name, sessionId, undefined),
       updatedAt: new Date().toISOString(),
@@ -1120,6 +1134,24 @@ const mockServer = createServer(async (req, res) => {
     s.pinned = body.pinned;
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, pinned: s.pinned });
+  }
+  // A ghost asking the owner (`ghost ask`), and its withdrawal unanswered.
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "question" && (req.method === "PUT" || req.method === "DELETE")) {
+    const body = req.method === "PUT" ? await readBody(req).catch(() => ({})) : null;
+    const options = body?.options ?? [];
+    if (body && (typeof body.text !== "string" || !body.text.trim()
+      || !Array.isArray(options) || options.some((option) => typeof option !== "string"))) {
+      return json(res, 400, { error: { message: "A question needs text, and options must be strings.", code: "invalid_request" } });
+    }
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const s = ghostSessions(name).get(conversation);
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    s.question = body
+      ? { text: body.text.trim(), options: [...new Set(options.map((option) => option.trim()).filter(Boolean))], askedAt: new Date().toISOString() }
+      : null;
+    publishConversationUpdated(name, s.id, s.updatedAt);
+    return json(res, 200, body ? { ok: true, question: s.question } : { ok: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
     await readBody(req).catch(() => ({}));

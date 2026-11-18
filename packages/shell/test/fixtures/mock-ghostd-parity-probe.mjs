@@ -77,8 +77,21 @@ try {
   assert.equal(sessionsResponse.status, 200);
   const { sessions } = await sessionsResponse.json();
   assert.deepEqual(Object.keys(sessions[0]), [
-    "id", "title", "preview", "harness", "model", "provider", "effort", "updatedAt", "messageCount", "pinned", "unread", "running",
+    "id", "title", "preview", "source", "harness", "model", "provider", "effort", "updatedAt", "messageCount", "pinned", "unread", "running", "question",
   ]);
+
+  // A question the ghost asks is on its row until withdrawn.
+  const questionUrl = `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/question`;
+  const asked = await fetch(questionUrl, {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "Go ahead?", options: ["Yes", "No"] }),
+  });
+  assert.equal(asked.status, 200);
+  assert.deepEqual((await asked.json()).question.options, ["Yes", "No"]);
+  const rowOf = async (id) => (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
+    .sessions.find((session) => session.id === id);
+  assert.equal((await rowOf("sess-casper-1")).question.text, "Go ahead?");
+  assert.deepEqual(await (await fetch(questionUrl, { method: "DELETE" })).json(), { ok: true });
+  assert.equal((await rowOf("sess-casper-1")).question, null);
 
   // Pinning lifts a conversation above newer ones, and unpinning puts it back.
   const pinUrl = (id) => `http://127.0.0.1:${port}/api/ghosts/casper/sessions/${id}/pin`;

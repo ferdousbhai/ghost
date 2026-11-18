@@ -327,7 +327,7 @@ Singleton {
 
     // The agent picker: GET /harness for the active ghost, the ghost's default
     // (PUT /harness), and one conversation's next agent (PUT .../harness).
-    /** `{ harnesses: [{ id, effort }], ghostDefault, omarchyDefault, automatic }`, or null until read. */
+    /** `{ harnesses: [{ id, effort, note, resting }], ghostDefault, automatic }`, or null until read. */
     property var harnessChoice: null
     property string harnessError: ""
     /** conversationKey -> the agent the owner picked, until a listing reports it. */
@@ -367,7 +367,6 @@ Singleton {
     property var createGhostRequest: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
-    property var renameSessionRequest: null
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -389,8 +388,13 @@ Singleton {
         15s SSE keepalives missed means that response is no longer live. */
     readonly property int streamSilenceMs: 45000
     property var deleteSessionRequest: null
-    property var pinSessionRequest: null
-    property var questionRequest: null
+    /**
+     * Pin, rename, and question writes in flight, each in its own slot: two
+     * rows changed in quick succession must each keep their own failure
+     * callback, or the first's optimistic change is neither undone nor reported.
+     */
+    property var rowWrites: ({})
+    property int rowWriteCount: 0
     /** conversationKey -> its in-flight mark-read request. */
     property var readSessionRequests: ({})
 
@@ -880,7 +884,6 @@ Singleton {
                 resting: root.restingUntil(h) !== null
             })),
             ghostDefault: name(body.ghostDefault),
-            omarchyDefault: name(body.omarchyDefault),
             automatic: name(body.automatic)
         };
     }
@@ -908,7 +911,7 @@ Singleton {
             null, (xhr, body) => root.adoptHarnessChoice(xhr, body, ghost, "GET harnesses"));
     }
 
-    /** Set the ghost's own default agent; null hands the choice back to Omarchy's default. */
+    /** Set the ghost's own default agent; null clears it, so the daemon's `automatic` choice applies. */
     function setGhostHarness(harness: var): void {
         const ghost = root.activeGhost;
         const next = typeof harness === "string" && harness !== "" ? harness : null;
@@ -1647,6 +1650,16 @@ Singleton {
             });
     }
 
+    /** One conversation-row write in a slot of its own (`rowWrites`). */
+    function rowWrite(method: string, path: string, payload: var, done: var): void {
+        root.rowWriteCount += 1;
+        const slot = "w" + root.rowWriteCount;
+        root.request(root.rowWrites, slot, method, path, payload, function (xhr, body) {
+            delete root.rowWrites[slot];
+            done(xhr, body);
+        });
+    }
+
     /**
      * Pin or unpin one conversation. The daemon owns the listing order (pinned
      * first, newest-updated first inside each group); we reproduce it here so the
@@ -1666,7 +1679,7 @@ Singleton {
         }));
         const local = root.sessionRow(id);
         if (local && local.localOnly === true) return;
-        root.request(root, "pinSessionRequest", "PUT", root.sessionPath(ghost, id) + "/pin", { pinned: pinned }, function (xhr) {
+        root.rowWrite("PUT", root.sessionPath(ghost, id) + "/pin", { pinned: pinned }, function (xhr) {
                 if (ghost !== root.activeGhost || xhr.status === 200) return;
                 root.sessionsError = root.describeError(xhr, "PUT pin conversation");
                 // The optimistic reorder is now a lie; take the server's truth.
@@ -1687,7 +1700,7 @@ Singleton {
         root.sessions = root.sessions.map(function (session) {
             return session.id === id ? Object.assign({}, session, { question: null }) : session;
         });
-        root.request(root, "questionRequest", "DELETE", root.sessionPath(ghost, id) + "/question", null, function (xhr) {
+        root.rowWrite("DELETE", root.sessionPath(ghost, id) + "/question", null, function (xhr) {
             if (ghost !== root.activeGhost || xhr.status === 200) return;
             root.sessionsError = root.describeError(xhr, "DELETE question");
             root.fetchSessions(ghost);
@@ -1715,7 +1728,7 @@ Singleton {
         if (previous === next) return;
         root.sessionsError = "";
         root.applySessionTitle(id, next);
-        root.request(root, "renameSessionRequest", "PUT", root.sessionPath(ghost, id) + "/title", { title: next }, function (xhr, body) {
+        root.rowWrite("PUT", root.sessionPath(ghost, id) + "/title", { title: next }, function (xhr, body) {
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.applySessionTitle(id, previous);
