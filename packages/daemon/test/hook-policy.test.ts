@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   ghostSessionStopContinuation, parseCommandResult, parseHooksDocument,
-  runBeforePromptHooks, runSessionStopHooks,
-  type CommandResult, type GhostBeforePromptEvent, type GhostSessionStopEvent,
+  runSessionStopHooks,
+  type CommandResult, type GhostSessionStopEvent,
 } from "../src/hook-policy.js";
 
 const path = "/owner/hooks.json";
 const config = {
   hooks: {
-    before_prompt: [{ hooks: [
+    turn_end: [{ hooks: [
       { type: "command", command: "first" },
-      { type: "command", command: "second", name: "Named context", timeout: 0.5 },
+      { type: "command", command: "second", name: "Named notice", timeout: 0.5 },
     ] }],
     session_stop: [{ hooks: [
       { type: "command", command: "accept" },
@@ -32,28 +32,22 @@ describe("shared hook policy", () => {
   it("keeps local admission, defaults, source order and public status", () => {
     const commands = parseHooksDocument(config, path);
     expect(commands.map((hook) => [hook.eventName, hook.command, hook.timeoutMs])).toEqual([
-      ["before_prompt", "first", 30000], ["before_prompt", "second", 500],
       ["session_stop", "accept", 30000], ["session_stop", "continue", 30000],
       ["session_stop", "unreached", 30000],
+      ["turn_end", "first", 30000], ["turn_end", "second", 500],
     ]);
-    expect(commands[1]?.name).toBe("Named context");
+    expect(commands[4]?.name).toBe("Named notice");
     for (const invalid of [
       { hooks: { other: [] } },
-      { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },
+      { hooks: { before_prompt: [] } },
+      { hooks: { session_stop: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },
     ]) expect(() => parseHooksDocument(invalid, path)).toThrow();
   });
 
-  it("combines before-prompt contexts and stops at the first real continuation", async () => {
+  it("stops at the first real continuation", async () => {
     const commands = parseHooksDocument(config, path);
-    const before: GhostBeforePromptEvent = { ...base, type: "before_prompt", prompt: "Continue", turn_id: "turn-1" };
     const called: string[] = [];
-    expect(await runBeforePromptHooks(commands, before, async (hook) => {
-      called.push(hook.command);
-      return { additionalContext: hook.command };
-    })).toEqual({ additionalContext: "first\n\nsecond" });
-    expect(called).toEqual(["first", "second"]);
     const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, transcript_path: base.session_file, turn_id: "turn-1", stop_hook_active: false };
-    called.length = 0;
     expect(await runSessionStopHooks(commands, stop, async (hook) => {
       called.push(hook.command);
       return hook.command === "continue" ? { decision: "block", reason: "Revise" } : { continue: true };
@@ -62,11 +56,12 @@ describe("shared hook policy", () => {
   });
 
   it("preserves exit-code, invalid-output and fail-open interpretation", () => {
-    const [before, , stop] = parseHooksDocument(config, path);
-    if (!before || !stop) throw new Error("fixture hooks missing");
+    const commands = parseHooksDocument(config, path);
+    const stop = commands[0], notice = commands[3];
+    if (!notice || !stop) throw new Error("fixture hooks missing");
     const warnings: string[] = [];
     const warn = (message: string) => warnings.push(message);
-    expect(parseCommandResult(before, result({ exitCode: 2, stderr: "Blocked" }), warn)).toBeUndefined();
+    expect(parseCommandResult(notice, result({ exitCode: 2, stderr: "Blocked" }), warn)).toBeUndefined();
     expect(parseCommandResult(stop, result({ exitCode: 2, stderr: "Blocked" }), warn)).toEqual({ decision: "block", reason: "Blocked" });
     expect(parseCommandResult(stop, result({ stdout: "{bad" }), warn)).toBeUndefined();
     expect(parseCommandResult(stop, result({ timedOut: true }), warn)).toBeUndefined();

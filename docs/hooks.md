@@ -5,9 +5,7 @@ conversation turn. The harness carrying the turn (Claude Code, Codex, …), and
 any harness the ghost runs from Bash, keeps its own native hook behavior;
 Ghost does not translate, duplicate, or await those hooks.
 
-Ghost supports three events. `before_prompt` runs after the owner submits a prompt
-and before the harness is launched with it. It can add advisory context to that
-prompt without blocking or creating another turn. `session_stop` runs after a
+Ghost supports two events. `session_stop` runs after a
 harness pass ends and before Ghost emits the turn's terminal `done` frame. It
 can accept the pass or return context for a continuation pass. `turn_end` runs once
 after the whole streamed turn succeeds or fails, including queued passes and owner
@@ -23,18 +21,6 @@ names this file alone.
 ```json
 {
   "hooks": {
-    "before_prompt": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/advisory-context",
-            "name": "Advisory context",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "session_stop": [
       {
         "hooks": [
@@ -57,13 +43,10 @@ needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
-event, and are what the Hooks pane shows. While a `before_prompt` or `session_stop` handler runs, the turn
-stream carries `hook_start`/`hook_end` with its `name` and `event`. The HUD
-shows a `before_prompt` hook's name as the turn's activity, so give a slow one
-a name that says what it is doing. A `session_stop` hook runs out of sight:
-the reply already reads as finished, and only a continuation shows.
-All non-empty `before_prompt` contexts are combined. The first `session_stop`
-handler that requests a continuation wins.
+event, and are what the Hooks pane shows. While a `session_stop` handler runs, the turn
+stream carries `hook_start`/`hook_end` with its `name` and `event`. It runs
+out of sight: the reply already reads as finished, and only a continuation
+shows. The first `session_stop` handler that requests a continuation wins.
 
 Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
 Legacy top-level `builtin` settings are ignored.
@@ -89,39 +72,6 @@ and still holds the pipes cannot hold the daemon's hook promise open. Synchronou
 errors, and unexpected command-runner rejection are generically logged and
 fail open for every event; they never fail the owner turn or expose the
 command/error payload.
-
-## `before_prompt` protocol
-
-A command receives the owner prompt, conversation metadata, the harness that
-carried the conversation last (absent before its first turn), ghost name,
-ghost-home storage root, and the conversation directory:
-
-```json
-{
-  "type": "before_prompt",
-  "prompt": "Continue.",
-  "turn_id": "95d8e048-e69e-4a0e-95a4-f10ad22f42d7",
-  "session_id": "conversation-a",
-  "session_file": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
-  "ghost_name": "casper",
-  "ghost_home": "/home/me/ghosts/casper",
-  "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
-  "conversation_id": "conversation-a",
-  "harness": "claude"
-}
-```
-
-Exit 0 with no output or `{}` adds nothing. To add model-visible guidance to the
-same user-initiated model request, return:
-
-```json
-{ "additionalContext": "Avoid the style warning from the previous reply." }
-```
-
-`before_prompt` cannot block and does not accept continuation decisions. Errors,
-timeouts, and malformed output fail open. Context is hidden from the chat UI: it
-is appended to the prompt the harness receives, inside `<hook-context>`, and is
-not written to the conversation log.
 
 ## `session_stop` protocol
 
@@ -223,8 +173,8 @@ Hooks pane read it there, showing a handler without a `name` or
 `hooks` (and the ignored legacy `builtin`), so a pasted `{ path, document }` reply cannot empty the file, then
 validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
-is a 400 naming the offending field and changes nothing. `before_prompt` and
-`session_stop` and `turn_end` changes apply at the next boundary.
+is a 400 naming the offending field and changes nothing. `session_stop` and
+`turn_end` changes apply at the next boundary.
 
 Scheduled work is separate from lifecycle hooks: `ghost routines` and the HUD
 and tailnet owner view inspect and control systemd timers, as specified in

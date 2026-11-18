@@ -32,7 +32,7 @@ TestCase {
                 { name: "linear", enabled: false, path: "mcp.json", config: { type: "http", url: "https://mcp.linear.app/sse" } }
             ], skipped: [] });
             else if (/\/api\/hooks\/config$/.test(url)) xhr.complete(200, { path: "/home/owner/.config/ghost/hooks.json", document: { hooks: {
-                before_prompt: [{ hooks: [{ type: "command", command: "/home/owner/bin/context", name: "Add context", timeout: 5 }] }],
+                session_stop: [{ hooks: [{ type: "command", command: "/home/owner/bin/review", name: "Review", timeout: 5 }] }],
                 turn_end: [{ hooks: [{ type: "command", command: "/home/owner/bin/ntfy", name: "Phone alert", timeout: 15 }] }]
             } } });
             else if (/\/routines$/.test(url)) xhr.complete(200, { routines: [{

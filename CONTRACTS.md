@@ -738,9 +738,9 @@ reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
 from a checkout, outside the shipped package: attempts, refusals by kind, exit
 outcomes, unmeasured checks, and limits hit, per harness.
 
-Ghost hooks are `before_prompt`, `session_stop`, and `turn_end`, run by ghostd
+Ghost hooks are `session_stop` and `turn_end`, run by ghostd
 above whatever hooks the harness has of its own.
-The first two are awaited around each pass; `turn_end` runs detached after the
+`session_stop` is awaited after each pass; `turn_end` runs detached after the
 terminal frame, bounded by its own timeout (a daemon stop does not wait for it).
 Their JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
@@ -839,8 +839,8 @@ types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `resources` (a successful pass's final resource snapshot, display-only), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
-waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `before_prompt` or `session_stop` command hook
-running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context, as far as its stream says; the transcript keeps it as a `compacted` message) events, and exactly one
+waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
+running, by its `name` and `event`; clients show it as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context, as far as its stream says; the transcript keeps it as a `compacted` message) events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id; a start names the

@@ -8,14 +8,14 @@ TestCase {
     function document(): var {
         return {
             hooks: {
-                before_prompt: [
-                    { hooks: [{ type: "command", command: "/bin/context" }] }
-                ],
                 session_stop: [
                     { hooks: [
                         { type: "command", command: "/bin/review", name: "Review", timeout: 5, statusMessage: "Reviewing" },
                         { type: "command", command: "/bin/style" }
                     ] }
+                ],
+                turn_end: [
+                    { hooks: [{ type: "command", command: "/bin/notify" }] }
                 ]
             }
         };
@@ -31,17 +31,17 @@ TestCase {
     function test_cardsFollowTheDocumentWithTheDaemonsDefaults(): void {
         const cards = HookConfig.cards(document());
         compare(cards.map(function (card) { return card.name; }), [
-            "Before-prompt command hook",
             "Review",
-            "Session-stop command hook"
+            "Session-stop command hook",
+            "Turn-end command hook"
         ]);
-        compare(cards[0].description, "Adds context before the owner prompt is sent.");
-        compare(cards[2].description, "Runs after the assistant pass and may continue it.");
-        compare(cards[1].key, "config:session_stop:0:0");
-        compare(cards[2].key, "config:session_stop:0:1");
-        compare(cards[1].fields.command, "/bin/review");
-        compare(cards[1].fields.timeout, "5");
-        compare(cards[2].fields.name, "");
+        compare(cards[2].description, "Observes final turn success or failure without continuing it.");
+        compare(cards[1].description, "Runs after the assistant pass and may continue it.");
+        compare(cards[0].key, "config:session_stop:0:0");
+        compare(cards[1].key, "config:session_stop:0:1");
+        compare(cards[0].fields.command, "/bin/review");
+        compare(cards[0].fields.timeout, "5");
+        compare(cards[1].fields.name, "");
         compare(HookConfig.cards(null).length, 0);
     }
 
@@ -61,17 +61,17 @@ TestCase {
     }
 
     function test_numbersThatDoNotParseGoToTheDaemonAsTyped(): void {
-        const next = HookConfig.withHandler(document(), "before_prompt", 0, 0, {
-            command: "/bin/context", name: "", description: "", timeout: "soon"
+        const next = HookConfig.withHandler(document(), "turn_end", 0, 0, {
+            command: "/bin/notify", name: "", description: "", timeout: "soon"
         });
-        compare(next.hooks.before_prompt[0].hooks[0].timeout, "soon");
+        compare(next.hooks.turn_end[0].hooks[0].timeout, "soon");
     }
 
     function test_withNewHandlerAppendsItsOwnGroupAndBuildsMissingStructure(): void {
-        const next = HookConfig.withNewHandler({}, "before_prompt", {
-            command: "/bin/ctx", name: "Context", description: "", timeout: ""
+        const next = HookConfig.withNewHandler({}, "turn_end", {
+            command: "/bin/ntfy", name: "Notify", description: "", timeout: ""
         });
-        compare(next, { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/ctx", name: "Context" }] }] } });
+        compare(next, { hooks: { turn_end: [{ hooks: [{ type: "command", command: "/bin/ntfy", name: "Notify" }] }] } });
         const appended = HookConfig.withNewHandler(document(), "session_stop", {
             command: "/bin/more", name: "", description: "", timeout: ""
         });
@@ -85,8 +85,8 @@ TestCase {
         compare(one.hooks.session_stop[0].hooks[0].command, "/bin/style");
         const none = HookConfig.withoutHandler(one, "session_stop", 0, 0);
         verify(none.hooks.session_stop === undefined);
-        compare(none.hooks.before_prompt[0].hooks[0].command, "/bin/context");
-        const gone = HookConfig.withoutHandler(none, "before_prompt", 0, 0);
+        compare(none.hooks.turn_end[0].hooks[0].command, "/bin/notify");
+        const gone = HookConfig.withoutHandler(none, "turn_end", 0, 0);
         compare(gone, { hooks: {} });
     }
 }

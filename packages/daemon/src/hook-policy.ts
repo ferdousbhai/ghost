@@ -13,16 +13,6 @@ export interface GhostHookEventBase {
   harness?: string;
 }
 
-export interface GhostBeforePromptEvent extends GhostHookEventBase {
-  type: "before_prompt";
-  prompt: string;
-  turn_id: string;
-}
-
-export interface GhostBeforePromptResult {
-  additionalContext?: string;
-}
-
 export interface GhostSessionStopEvent extends GhostHookEventBase {
   type: "session_stop";
   owner_prompt: string;
@@ -49,8 +39,7 @@ export interface GhostTurnEndEvent extends GhostHookEventBase {
   excerpt: string;
   url: string | null;
 }
-export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent | GhostTurnEndEvent;
-export type GhostHookResult = GhostBeforePromptResult | GhostSessionStopResult;
+export type GhostHookEvent = GhostSessionStopEvent | GhostTurnEndEvent;
 
 /** The admitted `hooks.json` document and where it lives. */
 export interface GhostHookCommandConfig {
@@ -81,7 +70,6 @@ export function ghostSessionStopContinuation(
 
 /** Every hook event, in the order hooks are loaded, with a handler's default name and description. */
 const HOOK_EVENTS: Record<GhostHookEvent["type"], { name: string; description: string }> = {
-  before_prompt: { name: "Before-prompt command hook", description: "Adds context before the owner prompt is sent." },
   session_stop: { name: "Session-stop command hook", description: "Runs after the assistant pass and may continue it." },
   turn_end: { name: "Turn-end command hook", description: "Observes final turn success or failure without continuing it." },
 };
@@ -164,7 +152,7 @@ export function parseCommandResult(
   hook: CommandHook,
   result: CommandResult,
   warn: (message: string, details: Record<string, unknown>) => void,
-): GhostHookResult | undefined {
+): GhostSessionStopResult | undefined {
   if (result.aborted) return undefined;
   if (result.executionFailed) {
     warn(`${hook.eventName} hook failed open`, {
@@ -201,14 +189,6 @@ export function parseCommandResult(
   try {
     const parsed = JSON.parse(output);
     if (!isRecord(parsed)) throw new Error("hook output must be a JSON object");
-    if (hook.eventName === "before_prompt") {
-      if (parsed.decision !== undefined || parsed.continue !== undefined || parsed.reason !== undefined) {
-        throw new Error("before_prompt only supports additionalContext");
-      }
-      return typeof parsed.additionalContext === "string"
-        ? { additionalContext: parsed.additionalContext }
-        : undefined;
-    }
     const decision = parsed.decision;
     if (decision !== undefined && decision !== "block") {
       throw new Error(`unsupported decision ${JSON.stringify(decision)}`);
@@ -228,29 +208,13 @@ export function parseCommandResult(
   }
 }
 
-export async function runBeforePromptHooks(
-  commands: readonly CommandHook[], event: GhostBeforePromptEvent,
-  invoke: (hook: CommandHook, event: GhostBeforePromptEvent) => Promise<GhostHookResult | undefined>,
-): Promise<GhostBeforePromptResult | undefined> {
-  if (event.signal.aborted) return undefined;
-  const contexts: string[] = [];
-  for (const command of commands.filter((hook) => hook.eventName === "before_prompt")) {
-    const result = await invoke(command, event);
-    if (event.signal.aborted) return undefined;
-    if (typeof result?.additionalContext === "string" && result.additionalContext.length > 0) {
-      contexts.push(result.additionalContext);
-    }
-  }
-  return contexts.length ? { additionalContext: contexts.join("\n\n") } : undefined;
-}
-
 export async function runSessionStopHooks(
   commands: readonly CommandHook[], event: GhostSessionStopEvent,
-  invoke: (hook: CommandHook, event: GhostSessionStopEvent) => Promise<GhostHookResult | undefined>,
+  invoke: (hook: CommandHook, event: GhostSessionStopEvent) => Promise<GhostSessionStopResult | undefined>,
 ): Promise<GhostSessionStopResult | undefined> {
   if (event.signal.aborted) return undefined;
   for (const command of commands.filter((hook) => hook.eventName === "session_stop")) {
-    const result = await invoke(command, event) as GhostSessionStopResult | undefined;
+    const result = await invoke(command, event);
     if (ghostSessionStopContinuation(result)) return result;
   }
   return undefined;

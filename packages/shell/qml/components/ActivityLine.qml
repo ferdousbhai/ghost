@@ -52,8 +52,7 @@ Item {
     }
 
     /**
-     * The runtime's own word for a turn that is not inside a tool call, or the
-     * name of the owner hook it is waiting on. A tool name arriving here is not
+     * The runtime's own word for a turn that is not inside a tool call. A tool name arriving here is not
      * repeated: {@link toolLine} already said it, with the arguments that make
      * it mean something. Between calls the line never replays what the last
      * one returned (its output is material, not news), except that a call
@@ -64,7 +63,6 @@ Item {
         if (activity === "writing") return "Writing a reply";
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
         if (activity.startsWith("starting:")) return "Starting " + activity.slice(9);
-        if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         if (root.lastTool && root.lastTool.status === "failed") {
             const error = ToolTrace.output(root.lastTool);
             return ToolTrace.text(root.lastTool, true, true) + " failed" + (error !== "" ? ": " + error : "");

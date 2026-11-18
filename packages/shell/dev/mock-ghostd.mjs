@@ -419,16 +419,9 @@ const MOCK_BOARD = {
 // loader's shape check is the small subset a pane edit can plausibly trip,
 // worded the way ghostd words it.
 const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
-const HOOK_EVENTS = ["before_prompt", "session_stop", "turn_end"];
+const HOOK_EVENTS = ["session_stop", "turn_end"];
 let hooksDocument = {
   hooks: {
-    before_prompt: [{ hooks: [{
-      type: "command",
-      command: "/home/owner/.local/bin/prompt-context",
-      name: "Prompt context",
-      description: "Adds bounded guidance before an owner prompt.",
-      timeout: 10,
-    }] }],
     session_stop: [{ hooks: [{
       type: "command",
       command: "/home/owner/.local/bin/completion-check",

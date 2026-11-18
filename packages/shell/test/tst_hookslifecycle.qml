@@ -16,14 +16,14 @@ TestCase {
         return {
             path: tc.path,
             document: { hooks: {
-                before_prompt: [{ hooks: [{ type: "command", command: "/bin/context", name }] }],
-                session_stop: [{ hooks: [{ type: "command", command: "/bin/review", name: "Review" }] }]
+                session_stop: [{ hooks: [{ type: "command", command: "/bin/review", name }] }],
+                turn_end: [{ hooks: [{ type: "command", command: "/bin/notify", name: "Notify" }] }]
             } }
         };
     }
 
     function firstName(): string {
-        return Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].name;
+        return Ghostd.hookConfig.hooks.session_stop[0].hooks[0].name;
     }
 
     function init(): void {
@@ -134,7 +134,7 @@ TestCase {
 
     function test_configIsReadWrittenAndRefusedThroughTheDaemon(): void {
         const document = {
-            hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }] }
+            hooks: { turn_end: [{ hooks: [{ type: "command", command: "/bin/true" }] }] }
         };
         let finished = [];
         const watcher = function (ok) { finished.push(ok); };
@@ -149,7 +149,7 @@ TestCase {
             verify(Ghostd.hookConfigLoaded);
             verify(Ghostd.hookConfigAvailable);
             compare(Ghostd.hookConfigPath, "/owner/.config/ghost/hooks.json");
-            compare(Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].command, "/bin/true");
+            compare(Ghostd.hookConfig.hooks.turn_end[0].hooks[0].command, "/bin/true");
 
             const next = { hooks: {} };
             Ghostd.writeHookConfig(next);

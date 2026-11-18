@@ -2,10 +2,9 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   parseCommandResult, parseHooksDocument,
-  runBeforePromptHooks, runSessionStopHooks,
-  type CommandHook, type CommandResult, type GhostBeforePromptEvent,
-  type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
-  type GhostHookResult, type GhostSessionStopEvent,
+  runSessionStopHooks,
+  type CommandHook, type CommandResult, type GhostHookCommandConfig, type GhostHookEvent,
+  type GhostSessionStopEvent,
   type GhostSessionStopResult, type GhostTurnEndEvent,
 } from "./hook-policy.js";
 import { runHarness } from "./harness-process.js";
@@ -123,7 +122,7 @@ export class GhostHookRunner {
   private async runCommandFailOpen(
     hook: CommandHook,
     event: GhostHookEvent,
-  ): Promise<GhostHookResult | undefined> {
+  ): Promise<GhostSessionStopResult | undefined> {
     const logger = this.logger.child({
       ghost: event.ghost_name,
       conversation: event.conversation_id,
@@ -140,7 +139,7 @@ export class GhostHookRunner {
   }
 
   private observed(onHook?: HookObserver) {
-    return async (hook: CommandHook, event: GhostHookEvent): Promise<GhostHookResult | undefined> => {
+    return async (hook: CommandHook, event: GhostHookEvent): Promise<GhostSessionStopResult | undefined> => {
       onHook?.(hook.name, event.type, true);
       try {
         return await this.runCommandFailOpen(hook, event);
@@ -156,13 +155,6 @@ export class GhostHookRunner {
 
   async emitTurnEnd(event: GhostTurnEndEvent): Promise<void> {
     for (const hook of this.commands.filter(hook => hook.eventName === "turn_end")) await this.runCommandFailOpen(hook, event);
-  }
-
-  async emitBeforePrompt(
-    event: GhostBeforePromptEvent,
-    onHook?: HookObserver,
-  ): Promise<GhostBeforePromptResult | undefined> {
-    return runBeforePromptHooks(this.commands, event, this.observed(onHook));
   }
 
   async emitSessionStop(

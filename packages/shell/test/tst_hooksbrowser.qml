@@ -138,24 +138,25 @@ TestCase {
         // Save is inert until there is a command.
         mouseClick(findChild(browser, "hookSaveButton"));
         verify(browser.drafting);
-        browser.draftEvent = "before_prompt";
-        findChild(browser, "hookField-command").text = "/bin/context";
+        browser.draftEvent = "turn_end";
+        findChild(browser, "hookField-command").text = "/bin/notify";
         mouseClick(findChild(browser, "hookSaveButton"));
         compare(tc.requests.length, 1);
-        compare(JSON.parse(tc.requests[0].body).hooks.before_prompt,
-            [{ hooks: [{ type: "command", command: "/bin/context" }] }]);
+        compare(JSON.parse(tc.requests[0].body).hooks.turn_end,
+            [{ hooks: [{ type: "command", command: "/bin/notify" }] }]);
         tc.requests[0].complete(200, {
             path: "/owner/.config/ghost/hooks.json",
             document: JSON.parse(tc.requests[0].body)
         });
         // The admitted document is the live hook set; nothing else is read.
         compare(tc.requests.length, 1);
-        compare(Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].command, "/bin/context");
+        compare(Ghostd.hookConfig.hooks.turn_end[0].hooks[0].command, "/bin/notify");
         compare(Ghostd.activeHookCount, 2);
 
         // The first card's delete prunes its event, leaving the rest of the file.
         mouseClick(findChild(browser, "hookDeleteButton"));
         compare(tc.requests.length, 2);
-        compare(JSON.parse(tc.requests[1].body), configDocument());
+        compare(JSON.parse(tc.requests[1].body),
+            { hooks: { turn_end: [{ hooks: [{ type: "command", command: "/bin/notify" }] }] } });
     }
 }

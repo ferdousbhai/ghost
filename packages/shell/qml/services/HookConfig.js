@@ -8,7 +8,7 @@
 // daemon's loader is the only validator: a refused document comes back as its
 // message, never as a rule re-implemented here.
 
-const EVENT_ORDER = ["before_prompt", "session_stop", "turn_end"];
+const EVENT_ORDER = ["session_stop", "turn_end"];
 const DRAFT_KEY = "draft";
 
 function isObject(value) {
@@ -16,14 +16,12 @@ function isObject(value) {
 }
 
 function label(event) {
-    if (event === "before_prompt") return "Before prompt";
     if (event === "session_stop") return "Session stop";
     if (event === "turn_end") return "Turn end";
     return "";
 }
 
 function trigger(event) {
-    if (event === "before_prompt") return "Before each owner prompt";
     if (event === "session_stop") return "After each assistant pass";
     if (event === "turn_end") return "After final success or failure";
     return "";
@@ -107,12 +105,11 @@ function fieldsOf(handler) {
 
 // The daemon's display defaults for a handler that names or describes nothing.
 function defaultName(event) {
-    return (event === "before_prompt" ? "Before-prompt" : event === "turn_end" ? "Turn-end" : "Session-stop") + " command hook";
+    return (event === "turn_end" ? "Turn-end" : "Session-stop") + " command hook";
 }
 
 function defaultDescription(event) {
-    return event === "turn_end" ? "Observes final turn success or failure without continuing it." : event === "before_prompt"
-        ? "Adds context before the owner prompt is sent."
+    return event === "turn_end" ? "Observes final turn success or failure without continuing it."
         : "Runs after the assistant pass and may continue it.";
 }
 

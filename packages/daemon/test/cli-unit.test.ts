@@ -373,15 +373,15 @@ describe("CLI API adaptation", () => {
     const fetch: CliFetch = async () => jsonResponse({
       path: "/home/owner/.config/ghost/hooks.json",
       document: { hooks: {
-        before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }],
         session_stop: [{ hooks: [{ type: "command", command: "/bin/true", name: "Review", description: "Reviews the pass." }] }],
+        turn_end: [{ hooks: [{ type: "command", command: "/bin/true" }] }],
       } },
     });
     const response = await runCli(["hooks"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect(response.stdout.split("\n").map((line) => line.trim().split(/\s{2,}/))).toEqual([
       ["EVENT", "NAME", "DESCRIPTION"],
-      ["before_prompt", "Before-prompt command hook", "Adds context before the owner prompt is sent."],
       ["session_stop", "Review", "Reviews the pass."],
+      ["turn_end", "Turn-end command hook", "Observes final turn success or failure without continuing it."],
       [""],
     ]);
   });

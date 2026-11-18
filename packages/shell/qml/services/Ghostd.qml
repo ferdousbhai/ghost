@@ -2413,17 +2413,12 @@ Singleton {
             root.insertTurnBreakFor(state, "user", event.text);
             break;
         case "hook_start":
-            if (event.event === "session_stop") {
-                state.settling = true;
-                state.activity = "";
-                root.closeAssistantRowFor(state);
-                break;
-            }
-            // ActivityLine shows the name of the hook the turn is waiting on.
-            state.activity = "hook:" + (event.name || "");
+            // A session_stop hook runs after the reply is complete.
+            state.settling = true;
+            state.activity = "";
+            root.closeAssistantRowFor(state);
             break;
         case "hook_end":
-            if (event.event !== "session_stop") state.activity = "";
             break;
         case "session_stop_continued":
             root.insertTurnBreakFor(state, "hook", event.reason);

@@ -937,7 +937,7 @@ export class SessionHost {
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
     const blocks = { next: 0 };
-    const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event: event as "before_prompt" | "session_stop" });
+    const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event: event as "session_stop" });
     let terminal: TurnEvent = { type: "done" };
     // The id of the owner request the final pass answered, which `turn_end` reports.
     let turnId = initialTurnId;
@@ -965,10 +965,6 @@ export class SessionHost {
         const mail = origin === "hook" ? null : await this.handPeerMail(ghost, id);
         if (mail) passPrompt = `${mail}\n\n${passPrompt}`;
         if (desktop && next === first && origin === undefined) passPrompt = `${passPrompt}\n\n${renderDesktopContext(desktop)}`;
-        if (origin !== "hook") {
-          const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
-          if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;
-        }
         const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
         // A failed pass ends the turn only when nothing is queued behind it:
         // the owner's follow-ups were accepted and still run.
@@ -1299,27 +1295,6 @@ export class SessionHost {
         ...hookEventBase(ghost, id, event.sessionDir, signal),
       });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
-  }
-
-  private async beforePrompt(
-    ghost: Ghost,
-    id: string,
-    prompt: string,
-    turnId: string,
-    signal: AbortSignal,
-    onHook: HookObserver,
-  ): Promise<string | null> {
-    if (!this.hooks.hasHandlers("before_prompt")) return null;
-    const { sessionDir } = ghostPaths(ghost.dir);
-    const harness = logState((await readLog(sessionDir, id)) ?? []).harness;
-    const result = await this.hooks.emitBeforePrompt({
-      type: "before_prompt",
-      prompt,
-      turn_id: turnId,
-      ...hookEventBase(ghost, id, sessionDir, signal),
-      ...(harness ? { harness } : {}),
-    }, onHook);
-    return result?.additionalContext || null;
   }
 
   private async sessionStop(

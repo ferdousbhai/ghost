@@ -513,20 +513,15 @@ describe("owner commands and hooks", () => {
       for await (const chunk of process.stdin) input += chunk;
       const event = JSON.parse(input);
       appendFileSync(${JSON.stringify(observed)}, JSON.stringify(event) + "\\n");
-      if (event.type === "session_stop") {
-        writeFileSync(${JSON.stringify(started)}, "");
-        if (${gated}) while (!existsSync(${JSON.stringify(go)})) await setTimeout(20);
-        const block = ${gated} ? !existsSync(${JSON.stringify(seen)}) : !event.stop_hook_active;
-        writeFileSync(${JSON.stringify(seen)}, "");
-        process.stdout.write(JSON.stringify(block ? { decision: "block", reason: "verify it" } : {}));
-      } else process.stdout.write("{}");
+      writeFileSync(${JSON.stringify(started)}, "");
+      if (${gated}) while (!existsSync(${JSON.stringify(go)})) await setTimeout(20);
+      const block = ${gated} ? !existsSync(${JSON.stringify(seen)}) : !event.stop_hook_active;
+      writeFileSync(${JSON.stringify(seen)}, "");
+      process.stdout.write(JSON.stringify(block ? { decision: "block", reason: "verify it" } : {}));
     `);
     const hooksPath = join(scratch.path, "hooks.json");
     const hook = { type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`, name: "Review" };
-    writeFileSync(hooksPath, JSON.stringify({ hooks: {
-      before_prompt: [{ hooks: [hook] }],
-      session_stop: [{ hooks: [hook] }],
-    } }));
+    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [hook] }] } }));
     return {
       hooks: GhostHookRunner.fromConfig(hooksPath),
       started,
@@ -659,8 +654,6 @@ describe("owner commands and hooks", () => {
     const hookEvents = events.filter((event) => event.type === "hook_start" || event.type === "hook_end"
       || event.type === "session_stop_continued" || event.type === "done");
     expect(hookEvents).toEqual([
-      { type: "hook_start", name: "Review", event: "before_prompt" },
-      { type: "hook_end", name: "Review", event: "before_prompt" },
       { type: "hook_start", name: "Review", event: "session_stop" },
       { type: "hook_end", name: "Review", event: "session_stop" },
       { type: "session_stop_continued", reason: "verify it" },
@@ -670,10 +663,9 @@ describe("owner commands and hooks", () => {
     ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
     expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
-    const [before, first, continued] = stop.inputs();
-    expect(before).toMatchObject({ type: "before_prompt", prompt: "do it", turn_id: expect.any(String) });
-    expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: false });
-    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: true });
+    const [first, continued] = stop.inputs();
+    expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: expect.any(String), stop_hook_active: false });
+    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: first?.turn_id, stop_hook_active: true });
   });
 
   // `ghost ask` ends the turn on the owner: a stop hook's "keep going" must
@@ -703,8 +695,8 @@ describe("owner commands and hooks", () => {
     await turn(sessions, "do it");
     await turn(sessions, "do it");
     const ids = stop.inputs().map((input) => input.turn_id);
-    expect(ids).toEqual([ids[0], ids[0], ids[0], ids[3], ids[3], ids[3]]);
-    expect(ids[3]).not.toBe(ids[0]);
+    expect(ids).toEqual([ids[0], ids[0], ids[2], ids[2]]);
+    expect(ids[2]).not.toBe(ids[0]);
   });
 
   it("does not ask the stop hook while the owner's follow-up waits", async () => {
@@ -725,11 +717,9 @@ describe("owner commands and hooks", () => {
     expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two", "Stop hook feedback:\nverify it"]);
     expect(events.findIndex((event) => event.type === "owner_message"))
       .toBeLessThan(events.findIndex((event) => event.type === "session_stop_continued"));
-    const [before, followUp, reviewed, continued] = stop.inputs();
-    expect(followUp?.turn_id).not.toBe(before?.turn_id);
-    expect(followUp).toMatchObject({ type: "before_prompt", prompt: "two", turn_id: expect.any(String) });
-    expect(reviewed).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: false });
-    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: true });
+    const [reviewed, continued] = stop.inputs();
+    expect(reviewed).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: expect.any(String), stop_hook_active: false });
+    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: reviewed?.turn_id, stop_hook_active: true });
   });
 
   it("lets a follow-up sent while the stop hook runs win over its continuation", async () => {
@@ -746,10 +736,10 @@ describe("owner commands and hooks", () => {
     expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
     expect(events).toContainEqual({ type: "owner_message", text: "two" });
     expect(events.some((event) => event.type === "session_stop_continued")).toBe(false);
-    const [before, first, followUp, reviewed] = stop.inputs();
-    expect(first).toMatchObject({ owner_prompt: "one", turn_id: before?.turn_id });
-    expect(followUp?.turn_id).not.toBe(before?.turn_id);
-    expect(reviewed).toMatchObject({ owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: false });
+    const [first, reviewed] = stop.inputs();
+    expect(first).toMatchObject({ owner_prompt: "one", turn_id: expect.any(String) });
+    expect(reviewed).toMatchObject({ owner_prompt: "two", stop_hook_active: false });
+    expect(reviewed?.turn_id).not.toBe(first?.turn_id);
   });
 });
 
@@ -952,7 +942,7 @@ describe("completion delivery", () => {
     const seen: GhostHookEvent[] = [];
     const hooks = new GhostHookRunner({
       commands: parseHooksDocument({ hooks: {
-        before_prompt: [{ hooks: [{ type: "command", command: "record" }] }],
+        session_stop: [{ hooks: [{ type: "command", command: "record" }] }],
         turn_end: [{ hooks: [{ type: "command", command: "notify" }] }],
       } }, "test"),
       commandRunner: async (_hook, event) => {
@@ -968,7 +958,7 @@ describe("completion delivery", () => {
     await sessions.queueMessage("casper", "c1", "two");
     gate.release(); await running;
     await waitFor(() => seen.some(event => event.type === "turn_end"));
-    const followUp = seen.find(event => event.type === "before_prompt" && event.prompt === "two");
+    const followUp = seen.find(event => event.type === "session_stop" && event.owner_prompt === "two");
     expect(seen.find(event => event.type === "turn_end")).toMatchObject({ turn_id: followUp?.turn_id, excerpt: "second" });
   });
   it("lets the owner prompt again while a slow notifier is still delivering", async () => {

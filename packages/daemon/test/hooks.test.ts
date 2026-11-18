@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostHookRunner } from "../src/hooks.js";
-import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent, type GhostTurnEndEvent } from "../src/hook-policy.js";
+import { ghostSessionStopContinuation, type GhostSessionStopEvent, type GhostTurnEndEvent } from "../src/hook-policy.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];
@@ -18,10 +18,13 @@ function temporaryDirectory(): string {
   return directory;
 }
 
-function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): GhostBeforePromptEvent {
+function turnEndEvent(overrides: Partial<GhostTurnEndEvent> = {}): GhostTurnEndEvent {
   return {
-    type: "before_prompt",
-    prompt: "Continue",
+    type: "turn_end",
+    outcome: "done",
+    title: "Report ready",
+    excerpt: "Finished the report.",
+    url: null,
     turn_id: "turn-2",
     session_id: "session-1",
     session_file: join(process.cwd(), ".conversation.jsonl"),
@@ -106,29 +109,6 @@ describe("GhostHookRunner", () => {
     const result = await runner.emitSessionStop(event());
     expect(readFileSync(order, "utf8").split("\n").filter(Boolean)).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
-  });
-
-  it("combines nonblocking before_prompt context without starting a continuation", async () => {
-    const directory = temporaryDirectory();
-    const config = join(directory, "hooks.json");
-    const advisory = (text: string) =>
-      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
-        `process.stdout.write(${JSON.stringify(JSON.stringify({ additionalContext: text }))});`,
-      )}`;
-    writeFileSync(config, JSON.stringify({
-      hooks: {
-        before_prompt: [{
-          hooks: [
-            { type: "command", command: advisory("First advisory.") },
-            { type: "command", command: advisory("Second advisory.") },
-          ],
-        }],
-      },
-    }));
-
-    const runner = GhostHookRunner.fromConfig(config);
-    const result = await runner.emitBeforePrompt(beforePromptEvent());
-    expect(result?.additionalContext).toBe("First advisory.\n\nSecond advisory.");
   });
 
   it("replaces the command configuration live", async () => {
@@ -217,37 +197,6 @@ describe("GhostHookRunner", () => {
       cwd: process.cwd(),
       owner_prompt: "Continue",
       stop_hook_active: true,
-    });
-  });
-
-  it("runs configured before_prompt hooks and returns advisory context", async () => {
-    const directory = temporaryDirectory();
-    const script = join(directory, "before-prompt.mjs");
-    const observed = join(directory, "before-prompt.json");
-    writeFileSync(script, `
-      import { writeFileSync } from "node:fs";
-      let input = "";
-      process.stdin.setEncoding("utf8");
-      for await (const chunk of process.stdin) input += chunk;
-      writeFileSync(${JSON.stringify(observed)}, input);
-      process.stdout.write(JSON.stringify({ additionalContext: "Avoid the prior warning." }));
-    `);
-    const config = join(directory, "hooks.json");
-    writeFileSync(config, JSON.stringify({
-      hooks: {
-        before_prompt: [{
-          hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}` }],
-        }],
-      },
-    }));
-
-    const runner = GhostHookRunner.fromConfig(config);
-    const result = await runner.emitBeforePrompt(beforePromptEvent());
-    expect(result?.additionalContext).toBe("Avoid the prior warning.");
-    expect(JSON.parse(readFileSync(observed, "utf8"))).toMatchObject({
-      type: "before_prompt",
-      session_id: "session-1",
-      prompt: "Continue",
     });
   });
 
@@ -397,14 +346,14 @@ describe("GhostHookRunner", () => {
     const nulConfig = join(directory, "nul-hooks.json");
     writeFileSync(nulConfig, JSON.stringify({
       hooks: {
-        before_prompt: [{ hooks: [{ type: "command", command: "echo before\0after" }] }],
+        session_stop: [{ hooks: [{ type: "command", command: "echo before\0after" }] }],
       },
     }));
     expect(() => GhostHookRunner.fromConfig(nulConfig)).toThrow(/NUL-free command/u);
 
     const config = join(directory, "throwing-hooks.json");
     writeFileSync(config, JSON.stringify({
-      hooks: Object.fromEntries(["before_prompt", "session_stop"].map((name) => [
+      hooks: Object.fromEntries(["session_stop", "turn_end"].map((name) => [
         name,
         [{ hooks: [{ type: "command", command: "/bin/true" }] }],
       ])),
@@ -414,11 +363,11 @@ describe("GhostHookRunner", () => {
       commandRunner: async () => { throw new Error("must-not-leak execution sentinel"); },
       logger,
     });
-    await expect(runner.emitBeforePrompt(beforePromptEvent())).resolves.toBeUndefined();
     await expect(runner.emitSessionStop(event())).resolves.toBeUndefined();
+    await expect(runner.emitTurnEnd(turnEndEvent())).resolves.toBeUndefined();
     expect(logger.records.map(({ message }) => message)).toEqual([
-      "before_prompt hook failed open",
       "session_stop hook failed open",
+      "turn_end hook failed open",
     ]);
     expect(JSON.stringify(logger.records)).not.toContain("must-not-leak");
   });
@@ -428,7 +377,7 @@ describe("GhostHookRunner", () => {
     const config = join(directory, "redacted-command-hooks.json");
     writeFileSync(config, JSON.stringify({
       hooks: {
-        before_prompt: [{
+        session_stop: [{
           hooks: [
             { type: "command", command: "/bin/false" },
             { type: "command", command: "/bin/true" },
@@ -474,23 +423,23 @@ describe("GhostHookRunner", () => {
       },
     });
 
-    await expect(runner.emitBeforePrompt(beforePromptEvent())).resolves.toBeUndefined();
+    await expect(runner.emitSessionStop(event())).resolves.toBeUndefined();
 
     expect(commandRunner).toHaveBeenCalledTimes(2);
     expect(logs).toEqual([
       {
         level: "warn",
-        message: "before_prompt hook failed open",
+        message: "session_stop hook failed open",
         fields: {
-          source: `${config}#hooks.before_prompt[0].hooks[0]`,
+          source: `${config}#hooks.session_stop[0].hooks[0]`,
           exitCode: 17,
         },
       },
       {
         level: "warn",
-        message: "before_prompt hook returned invalid JSON",
+        message: "session_stop hook returned invalid JSON",
         fields: {
-          source: `${config}#hooks.before_prompt[0].hooks[1]`,
+          source: `${config}#hooks.session_stop[0].hooks[1]`,
           error: "invalid hook output",
         },
       },
@@ -503,15 +452,15 @@ describe("GhostHookRunner", () => {
     const directory = temporaryDirectory();
     const config = join(directory, "startup-hooks.json");
     writeFileSync(config, JSON.stringify({
-      hooks: Object.fromEntries(["before_prompt", "session_stop"].map((name) => [
+      hooks: Object.fromEntries(["session_stop", "turn_end"].map((name) => [
         name,
         [{ hooks: [{ type: "command", command: "/bin/true" }] }],
       ])),
     }));
     const missingCwd = join(directory, "missing-cwd");
     const runner = GhostHookRunner.fromConfig(config);
-    await expect(runner.emitBeforePrompt(beforePromptEvent({ cwd: missingCwd }))).resolves.toBeUndefined();
     await expect(runner.emitSessionStop(event({ cwd: missingCwd }))).resolves.toBeUndefined();
+    await expect(runner.emitTurnEnd(turnEndEvent({ cwd: missingCwd }))).resolves.toBeUndefined();
   });
 
   it("rejects unsupported configured events instead of silently ignoring them", () => {
@@ -537,7 +486,7 @@ it("delivers turn completion to a local notification endpoint and honors live op
     const command = `jq '{topic:"scratch",title:.title,message:.excerpt,click:.url}' | curl --fail --silent --show-error --noproxy 127.0.0.1 --max-time 3 -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:${port}/`;
     writeFileSync(config, JSON.stringify({ hooks: { turn_end: [{ hooks: [{ type: "command", command, timeout: 5 }] }] } }));
     const runner = GhostHookRunner.fromConfig(config);
-    const notification: GhostTurnEndEvent = { ...beforePromptEvent({ cwd: directory }), type: "turn_end", outcome: "done", title: "Report ready", excerpt: "Finished the report.", url: "https://example.ts.net/?ghost=casper&session=c1" };
+    const notification = turnEndEvent({ cwd: directory, url: "https://example.ts.net/?ghost=casper&session=c1" });
     await runner.emitTurnEnd(notification);
     expect(received).toEqual([{ topic: "scratch", title: notification.title, message: notification.excerpt, click: notification.url }]);
     await runner.replaceConfig({ hooks: {} });
