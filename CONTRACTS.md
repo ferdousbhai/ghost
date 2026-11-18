@@ -428,7 +428,10 @@ offers (`omarchy default agent`), and Ghost offers only those Omarchy reports
 installed: claude, codex, grok, copilot, opencode, pi, omp, agy, ori, and
 crush. Their parsers are tested against output each CLI really printed (ori's
 recorded with a local stand-in for OpenRouter's API, since a run needs an
-OpenRouter key). That table is the one
+OpenRouter key), with two exceptions: omp has no recording of its own and is
+tested through pi's, since it prints the same events, and agy's test feeds
+lines written to its documented stream, since neither runs without the
+owner's sign-in. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. The one deliberate exception: display-only facts absent from stdout are read
 after the pass from the session record the harness wrote, found by a session id
@@ -458,8 +461,8 @@ the conversation's resume; opencode, whose continue is not
 cwd-scoped, and ori, which has none, are resumed by the session id they reported. Each turn also
 receives the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
-home, in that harness's own dialect: a `--mcp-config` file, `-c
-mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, `ORI_MCP_CONFIG` (ori ignores a stdio `cwd`), or a
+home, in that harness's own dialect: a `--mcp-config` file, copilot's
+`--additional-mcp-config` file, `-c mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, `ORI_MCP_CONFIG` (ori ignores a stdio `cwd`), or a
 project config file in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
@@ -890,9 +893,7 @@ rounds, then makes one more call without them:
 Results are cut at 8000 characters, and each reaches the model in a
 `<result>` block marked, like `<found>`, as reference text, not instructions. Owner content reaches a cloud model only
 through a delegated task or a conversation the owner moved to a harness.
-Recall's coverage is its own configuration: on the owner's machine its root
-is the home folder, minus code and scratch folders it lists as excluded, so a
-new folder is indexed without anyone adding it.
+Recall's coverage is its own configuration.
 
 ## Harness and lifecycle invariants
 
@@ -918,7 +919,7 @@ new folder is indexed without anyone adding it.
   ghost and conversation included, are JSON in its journal `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
   CLI, or machine skill is required before enabling the services.
-- Package removal preserves ghost homes, XDG config/state, owner documents, and any owner-installed machine skill.
+- Package removal preserves ghost homes, XDG config/state, and owner documents.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute

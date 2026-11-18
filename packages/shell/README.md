@@ -1,7 +1,7 @@
 # `@ghost/omarchy`
 
 Ghost's Omarchy desktop surfaces, as an omarchy-shell plugin
-(`ferdousbhai.ghost`): the desktop presence, chat HUD, bar dot, settings and
+(`ferdousbhai.ghost`): the desktop presence, chat HUD, bar mark, settings and
 context panes, and notifications. It runs inside the shell Omarchy already starts, so there is no
 second Quickshell process, no unit, and no tray helper.
 

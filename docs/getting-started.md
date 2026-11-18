@@ -320,8 +320,7 @@ codes.
 HUD dial (7717 by default).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
-leaves personas, conversations, tokens, your documents,
-and any skill you installed untouched.
+leaves personas, conversations, tokens, and your documents untouched.
 
 ## 9. Optional, once you are talking
 

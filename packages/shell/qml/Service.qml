@@ -4,7 +4,7 @@
 //
 // It is a `service` kind so the host mounts it at startup and keeps it
 // mounted. The panel is loaded only when summoned, so this is what makes the
-// bar dot live, keeps the presence's ticker and card up after its prompt
+// bar mark live, keeps the presence's ticker and card up after its prompt
 // closes, and lets a finished turn reach the owner while the window is shut.
 import QtQuick
 import Quickshell.Io

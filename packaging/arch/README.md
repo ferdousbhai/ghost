@@ -115,8 +115,7 @@ The package owns only files under `/usr`; the HUD's per-user link is the
 owner's. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, documents, sessions, provider credentials, and API tokens
-untouched. Its removal hook likewise leaves owner documents and any
-owner-installed machine skill untouched.
+untouched.
 
 A runtime upgrade requires `systemctl --user restart ghostd.service` to load
 the new bundle; an installed HUD also needs `omarchy-restart-shell`.

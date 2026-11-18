@@ -92,6 +92,9 @@ after its idle minutes. Both can be resident at once for up to that long.
   `cmake` (`uvx cmake` works), `glslc` and the Vulkan headers.
 - Weights go in the Hugging Face hub cache (`~/.cache/huggingface/hub`),
   fetched with `uvx --from huggingface_hub hf download <repo> <file>`.
+- What `search` finds through Recall is Recall's own configuration. On the
+  test machine its root is the home folder, minus code and scratch folders it
+  lists as excluded, so a new folder is indexed without anyone adding it.
 
 ## Open questions
 
