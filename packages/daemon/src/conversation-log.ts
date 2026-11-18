@@ -31,8 +31,8 @@ export type AssistantPart = { readonly type: "text"; readonly text: string } | T
 
 export type LogEntry =
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
-  /** `origin` is absent for an owner message; `auto` marks historical next-work prompts; `peer` is another owner's ghost. */
-  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" | "peer" }
+  /** `origin` is absent for an owner message; `peer` is another owner's ghost. */
+  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "peer" }
   /** A message to a peer, logged when queued in the conversation with them, whichever conversation sent it. */
   | { readonly type: "sent"; readonly at: string; readonly peer: string; readonly text: string }
   /** The ghost was handed the peer's messages through the one with this id. */
@@ -59,9 +59,7 @@ export type LogEntry =
   | { readonly type: "harness"; readonly at: string; readonly harness: string; readonly session: string | null; readonly dir?: string }
   | { readonly type: "title"; readonly at: string; readonly title: string | null }
   /** The harness compacted its own context during a pass. */
-  | { readonly type: "compacted"; readonly at: string; readonly harness: string; readonly trigger: string; readonly preTokens?: number }
-  /** Historical: an idle-handoff reply, or why it failed. Read, never written. */
-  | { readonly type: "handoff"; readonly at: string; readonly harness: string; readonly text: string; readonly error?: string };
+  | { readonly type: "compacted"; readonly at: string; readonly harness: string; readonly trigger: string; readonly preTokens?: number };
 
 const CONVERSATION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u;
 
@@ -157,7 +155,7 @@ interface LogState {
   readonly model: string | null;
   readonly provider: string | null;
   readonly effort: string | null;
-  /** When the owner or the ghost last added to the conversation; a handoff or harness record is not that. */
+  /** When the owner or the ghost last added to the conversation; a harness record is not that. */
   readonly activeAt: string | null;
 }
 
@@ -238,7 +236,7 @@ function logStateAccumulator() {
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
+    if (entry.type !== "conversation" && entry.type !== "harness" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -301,7 +299,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "handoff" | "auto" | "peer" | "compacted";
+  role: "user" | "assistant" | "hook" | "peer" | "compacted";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -331,7 +329,7 @@ function entryMessages(entry: LogEntry, entryId: string, skip: number, take: num
   }
   if (entry.type === "user") {
     return [{
-      role: entry.origin === "hook" || entry.origin === "auto" ? entry.origin : "user",
+      role: entry.origin === "hook" ? "hook" : "user",
       content: [{ type: "text", text: entry.text }],
       entryId,
       ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
@@ -343,13 +341,6 @@ function entryMessages(entry: LogEntry, entryId: string, skip: number, take: num
       content: entry.content,
       entryId,
       ...(entry.error ? { errorMessage: entry.error } : {}),
-    }];
-  }
-  if (entry.type === "handoff") {
-    return [{
-      role: "handoff",
-      content: [{ type: "text", text: entry.error ? `Failed: ${entry.error}` : entry.text }],
-      entryId,
     }];
   }
   if (entry.type === "compacted") {
@@ -399,7 +390,7 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
     if (!entry) continue;
     let line: string | null = null;
     if (entry.type === "user") line = entry.origin === "peer" ? peerLine(entry.text)
-      : `${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`;
+      : `${entry.origin === "hook" ? "Hook" : "Owner"}: ${entry.text}`;
     if (entry.type === "sent") line = sentLine(entry);
     if (entry.type === "assistant") {
       const text = assistantText(entry.content).trim();
@@ -492,16 +483,22 @@ function sameFile(a: Stats, b: Stats): boolean {
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
-    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" || entry.type === "sent" || entry.type === "compacted" ? 1 : 0;
+    : entry.type === "user" || entry.type === "assistant" || entry.type === "sent" || entry.type === "compacted" ? 1 : 0;
 }
-/** The entry types ghostd writes; any other line, such as a retired `resources` record, is skipped. */
+/**
+ * The entry types ghostd writes. Any other line is skipped: a retired record
+ * of an earlier version (`resources`, an idle `handoff`, or a user message with
+ * `origin: "auto"`) or one from a later one.
+ */
 const ENTRY_TYPES: ReadonlySet<string> = new Set<LogEntry["type"]>(
-  ["conversation", "user", "sent", "handed", "assistant", "command", "harness", "title", "compacted", "handoff"]);
+  ["conversation", "user", "sent", "handed", "assistant", "command", "harness", "title", "compacted"]);
+const USER_ORIGINS: ReadonlySet<unknown> = new Set([undefined, "follow_up", "hook", "peer"]);
 
 function parseEntry(bytes: Buffer): LogEntry | null {
   try {
     const entry = JSON.parse(bytes.toString("utf8")) as LogEntry;
-    return entry && typeof entry === "object" && ENTRY_TYPES.has(entry.type) ? entry : null;
+    if (!entry || typeof entry !== "object" || !ENTRY_TYPES.has(entry.type)) return null;
+    return entry.type !== "user" || USER_ORIGINS.has(entry.origin) ? entry : null;
   } catch {
     return null;
   }

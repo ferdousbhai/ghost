@@ -486,7 +486,7 @@ records, `harness` records naming the harness that took over and the
 session id it reported, `compacted` records of a
 harness compacting its own context (its `trigger` and `preTokens`, as far as it
 says: Claude Code's `compact_boundary` and pi's `compaction_end` stream one, and a
-Codex compaction is read from its rollout after the pass), and historical `handoff` records. A torn last line is skipped, and so is a record of a type ghostd no longer writes (the per-run `resources` records of earlier versions); logs are never rewritten. ghostd is the log's
+Codex compaction is read from its rollout after the pass). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, and `origin: "auto"` prompts); logs are never rewritten. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never
@@ -720,8 +720,7 @@ its continuations.
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
 schedules, explicit owner command hooks, and messages from peers the owner
-listed initiate work. Historical `handoff` and `auto` log entries remain
-readable.
+listed initiate work.
 
 ## Daemon HTTP API
 
@@ -773,10 +772,10 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, source, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not; `source` is the external event source that opened an `event-` conversation (null otherwise); `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, source, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry; `source` is the external event source that opened an `event-` conversation (null otherwise); `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; A `compacted` message marks where the harness compacted its context; historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; A `compacted` message marks where the harness compacted its context. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |

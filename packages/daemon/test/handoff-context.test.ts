@@ -8,12 +8,11 @@ describe("handoff context", () => {
     expect(handoffContext([
       user("hello"),
       { type: "user", at: "now", text: "continue", origin: "hook" },
-      { type: "user", at: "now", text: "old auto turn", origin: "auto" },
       { type: "assistant", at: "now", harness: "pi", content: [{ type: "text", text: " answer " }, { type: "toolCall", id: "1", name: "read", arguments: {} }] },
       { type: "title", at: "now", title: "ignored" },
       { type: "command", at: "now", command: "pwd", output: "/tmp", exitCode: 0, excluded: false },
       { type: "command", at: "now", command: "secret", output: "ignored", exitCode: 0, excluded: true },
-    ])).toBe("Owner: hello\n\nHook: continue\n\nGhost: old auto turn\n\nYou: answer \n[ran read]\n\nOwner ran `pwd`:\n/tmp");
+    ])).toBe("Owner: hello\n\nHook: continue\n\nYou: answer \n[ran read]\n\nOwner ran `pwd`:\n/tmp");
     expect(handoffContext([])).toBeNull();
   });
 

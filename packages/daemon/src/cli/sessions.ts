@@ -27,8 +27,6 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
   return body.messages.map((message) => {
     const heading = message.role === "user" ? "you"
       : message.role === "hook" ? "Stop hook"
-      : message.role === "handoff" ? "Handoff"
-      : message.role === "auto" ? "Auto"
       : message.role === "compacted" ? "Context compacted"
       : ghost;
     const lines = message.content.map((part) => part.type === "toolCall"

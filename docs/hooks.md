@@ -117,8 +117,8 @@ latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 object per line, so a hook can review the whole owner turn, not just the
 current pass: an owner message is `{"type":"user","text"}` with no `origin`; a
 follow-up or hook continuation carries `origin` `"follow_up"` or `"hook"`.
-Historical logs may also contain `origin: "auto"` or `{"type":"handoff"}`. It
-is untrusted content exactly like `messages`.
+Logs from earlier versions may also hold record types ghostd no longer writes;
+skip any type you do not know. It is untrusted content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
 continuation:

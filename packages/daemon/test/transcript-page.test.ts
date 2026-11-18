@@ -11,7 +11,7 @@ describe("transcript pages", () => {
       command,
       { ...command, excluded: true },
       { type: "assistant", at: "now", harness: "pi", content: [{ type: "text", text: "answer" }] },
-      { type: "handoff", at: "now", harness: "pi", text: "historical" },
+      { type: "sent", at: "now", peer: "ana", text: "hi" },
     ];
     const all = transcriptPage(entries);
     expect(all.total).toBe(5);

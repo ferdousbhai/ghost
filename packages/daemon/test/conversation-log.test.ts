@@ -24,12 +24,14 @@ describe("conversation log reads", () => {
     expect(await readLog(root, "missing")).toBeNull();
   });
 
-  it("skips record types it does not write, such as the retired per-run resources", async () => {
+  it("skips records it does not write: retired resources, idle handoffs and auto prompts, or a later version's", async () => {
     const root = await scratch();
     const owner = { type: "user", at: "2026-10-15T00:00:00Z", text: "hello" };
     const retired = { type: "resources", at: "2026-10-15T00:01:00Z", run: "r1", harness: "codex",
       resources: { skills: ["mail"], extensions: [], mcpServers: [] }, supplied: { instructions: [], mcpServers: [] }, summary: "legacy" };
-    await writeFile(logPath(root, "s"), `${JSON.stringify(owner)}\n${JSON.stringify(retired)}\n${JSON.stringify({ type: "future", at: "later" })}\n`);
+    const handoff = { type: "handoff", at: "2026-10-12T00:00:00Z", harness: "pi", text: "idle reply" };
+    const auto = { type: "user", at: "2026-10-12T00:00:00Z", text: "next work", origin: "auto" };
+    await writeFile(logPath(root, "s"), [owner, retired, handoff, auto, { type: "future", at: "later" }].map((line) => `${JSON.stringify(line)}\n`).join(""));
     expect(await readLog(root, "s")).toEqual([owner]);
     expect((await listedLog(root, "s"))?.state).toMatchObject({ activeAt: owner.at, messageCount: 1 });
     expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage([owner as LogEntry]));
@@ -66,7 +68,6 @@ describe("indexed conversation reads", () => {
       { type: "assistant", at, harness: "codex", content: [{ type: "text", text: "answer" }], model: "model" },
       { type: "command", at, command: "private", output: "hidden", exitCode: 0, excluded: true },
       { type: "title", at, title: "Custom title" },
-      { type: "handoff", at, harness: "codex", text: "handoff" },
     ];
     for (const entry of entries) {
       await appendLog(root, "s", [entry]);
