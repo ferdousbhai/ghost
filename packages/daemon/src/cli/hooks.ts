@@ -1,7 +1,7 @@
 import { parseHooksDocument, type GhostHookCommandConfig } from "../hook-policy.js";
 import { ArgsError } from "./args.js";
 import { readArgumentJson } from "./common.js";
-import { emit, table } from "./output.js";
+import { emit, primary, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
 /** `ghost hooks [status|show|set <file>]` over the daemon's `hooks.json`. */
@@ -24,12 +24,16 @@ export async function hooksCommand(ctx: CliContext): Promise<number> {
       throw new ArgsError(`ghost hooks does not know "${action}"; use status, show, or set.`);
   }
   emit(ctx, body, (result) => {
-    if (action !== "status") return `${JSON.stringify(result, null, 2)}\n`;
+    if (action === "set") return `${JSON.stringify(result, null, 2)}\n`;
+    if (action === "show") return primary(`${JSON.stringify(result, null, 2)}\n`);
     const { path, document } = result as GhostHookCommandConfig;
     const hooks = parseHooksDocument(document, path);
-    return hooks.length > 0
-      ? `${table(hooks.map((hook) => [hook.eventName, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
-      : "No hooks configured.\n";
+    return {
+      human: hooks.length > 0
+        ? `${table(hooks.map((hook) => [hook.eventName, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
+        : "No hooks configured.\n",
+      quiet: hooks.map((hook) => `${hook.name}\n`).join(""),
+    };
   });
   return 0;
 }

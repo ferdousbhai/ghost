@@ -33,6 +33,9 @@ export async function mcpCommand(ctx: CliContext): Promise<number> {
   else if (action === "set") body = await ctx.client.request("PUT", server, { config });
   else if (action === "rm") body = await ctx.client.request("DELETE", server);
   else body = await ctx.client.request("PUT", `${server}/enabled`, { enabled: action === "enable" });
-  emit(ctx, body, renderSnapshot);
+  // A change's snapshot is its acknowledgement; only `list` keeps names under -q.
+  emit(ctx, body, (snapshot) => action === "list"
+    ? { human: renderSnapshot(snapshot), quiet: (snapshot as McpCatalogSnapshot).servers.map((row) => `${row.name}\n`).join("") }
+    : renderSnapshot(snapshot));
   return 0;
 }

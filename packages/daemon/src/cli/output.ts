@@ -22,6 +22,12 @@ export interface RenderedOutput {
   quiet?: string;
 }
 
+/** Output that is all primary: `-q` keeps it whole. */
+export function primary(text: string): RenderedOutput {
+  return { human: text, quiet: text };
+}
+
+/** A plain-string render is secondary (an acknowledgement) and `-q` drops it. */
 type OutputRenderer<T> = (body: T) => string | RenderedOutput;
 
 export function emit<T>(

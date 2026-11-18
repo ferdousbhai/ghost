@@ -62,7 +62,8 @@ export async function showCommand(ctx: CliContext): Promise<number> {
     const trailer = body.truncated && body.messages.length > 0
       ? `(messages ${first + 1}–${first + body.messages.length} of ${body.total}; --offset/--limit for others)\n`
       : "";
-    return `${markdown ? `${markdown}\n` : ""}${trailer && markdown ? "\n" : ""}${trailer}`;
+    const quiet = markdown ? `${markdown}\n` : "";
+    return { human: `${quiet}${trailer && markdown ? "\n" : ""}${trailer}`, quiet };
   });
   return 0;
 }

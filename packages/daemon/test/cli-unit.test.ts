@@ -154,6 +154,28 @@ describe("a ghost's own shell addresses its conversation", () => {
     expect(whole.stdout).not.toContain("(messages");
   });
 
+  it("-q keeps a read verb's primary output: the transcript without its paging note, the character body", async () => {
+    const fetch: CliFetch = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (url.pathname === "/api/ghosts/casper/character") return jsonResponse({ body: "# Casper\nFriendly.\n" });
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      return jsonResponse({
+        id: "conv-mine",
+        messages: [{ role: "user", entryId: `e${offset}`, content: [{ type: "text", text: `message ${offset + 1}` }] }],
+        total: 3,
+        truncated: true,
+        readThrough: null,
+      });
+    };
+    const show = await runCli(["show", "-q", "--limit", "1"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(show.code).toBe(0);
+    expect(show.stdout).toContain("message 3");
+    expect(show.stdout).not.toContain("(messages");
+    const character = await runCli(["character", "show", "-q"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(character).toMatchObject({ code: 0, stdout: "# Casper\nFriendly.\n" });
+  });
+
   it("still fails a follow-up on any other conflict", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;

@@ -686,7 +686,10 @@ named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), MCP, hooks, remote, and status), so a
-ghost can drive and verify itself from Bash without raw HTTP. `ghost help
+ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
+a verb's primary output: what a read prints (a transcript without its paging
+note, a character, ids or names, `ok` for status), and nothing for a change.
+`ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost the shell's `$GHOST` names and needing no daemon; they

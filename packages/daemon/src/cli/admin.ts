@@ -1,6 +1,6 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
-import { emit } from "./output.js";
+import { emit, primary } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
@@ -26,7 +26,7 @@ export async function characterCommand(ctx: CliContext): Promise<number> {
   if (action === "show") {
     if (file) throw new ArgsError("ghost character show takes no further arguments");
     const body = await ctx.client.request<{ body: string }>("GET", ghostPath(await resolveGhost(ctx), "/character"));
-    emit(ctx, body, (result) => result.body);
+    emit(ctx, body, (result) => primary(result.body));
     return 0;
   }
   if (action !== "set" || !file) throw new ArgsError("ghost character takes `show` or `set <file>`");
@@ -57,9 +57,10 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
   emit(ctx, body, (result) => {
     const status = result as Pick<RemoteStatus, "state" | "hostname" | "app" | "problem">;
     const line = `${status.state === "on" ? `on ${status.hostname}` : status.state}${status.problem ? ` (${status.problem.message})` : ""}\n`;
-    if (status.state !== "on") return line;
-    if (!status.app) return line + "no app: remote.apps is empty, so nothing can reach Ghost remotely\n";
-    return line + (status.app.url ? `app ${status.app.url}\n` : "");
+    const human = status.state !== "on" ? line
+      : !status.app ? `${line}no app: remote.apps is empty, so nothing can reach Ghost remotely\n`
+      : `${line}${status.app.url ? `app ${status.app.url}\n` : ""}`;
+    return action === "status" ? { human, quiet: `${status.state}\n` } : human;
   });
   return 0;
 }
@@ -85,7 +86,10 @@ export async function harnessCommand(ctx: CliContext): Promise<number> {
   const body = id || flagBoolean(parsed, "none")
     ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
     : await ctx.client.request("GET", ghostPath(name, "/harness"));
-  emit(ctx, body, (result) => harnessChoicesText(name, result as HarnessChoices));
+  emit(ctx, body, (result) => {
+    const text = harnessChoicesText(name, result as HarnessChoices);
+    return id || flagBoolean(parsed, "none") ? text : primary(text);
+  });
   return 0;
 }
 
@@ -137,17 +141,23 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
   const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
   if (action === "list") {
     const body = await request<{ routines: Routine[] }>("GET", path);
-    emit(ctx, body, () => body.routines.length ? body.routines.map((r) =>
-      `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n");
+    emit(ctx, body, () => ({ quiet: body.routines.map((r) => `${r.slug}\n`).join(""), human: body.routines.length ? body.routines.map((r) =>
+      `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n" }));
   } else if (action === "logs") {
     const result = await request<{ text: string; truncated: boolean; sessions: string[] }>("GET", `${target}/logs`);
-    emit(ctx, result, () => `${result.truncated ? "(older log text truncated)\n" : ""}${result.text}\n${result.sessions.map(id => `Conversation: ghost show -g ${ghost} -s ${id}`).join("\n")}\n`);
+    emit(ctx, result, () => ({
+      human: `${result.truncated ? "(older log text truncated)\n" : ""}${result.text}\n${result.sessions.map(id => `Conversation: ghost show -g ${ghost} -s ${id}`).join("\n")}\n`,
+      quiet: `${result.text}\n`,
+    }));
   } else if (action === "config") {
     const result = await request("GET", `${target}/config`);
-    emit(ctx, result, () => `${JSON.stringify(result, null, 2)}\n`);
+    emit(ctx, result, () => primary(`${JSON.stringify(result, null, 2)}\n`));
   } else if (action === "recoveries") {
     const { recoveries } = await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path), result = { recoveries };
-    emit(ctx, result, () => result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}`).join("\n") + "\n");
+    emit(ctx, result, () => ({
+      human: result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}\n`).join(""),
+      quiet: result.recoveries.map(r => `${r.id}\n`).join(""),
+    }));
   } else {
     let result: unknown;
     if (action === "edit") {
