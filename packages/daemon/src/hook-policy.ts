@@ -74,6 +74,13 @@ const HOOK_EVENTS: Record<GhostHookEvent["type"], { name: string; description: s
   turn_end: { name: "Turn-end command hook", description: "Observes final turn success or failure without continuing it." },
 };
 
+/**
+ * Events earlier versions ran. At startup a `hooks.json` naming one is
+ * admitted without it, so an upgrade never stops the daemon; a write through
+ * `PUT /api/hooks/config` still refuses it.
+ */
+const RETIRED_HOOK_EVENTS: ReadonlySet<string> = new Set(["before_prompt"]);
+
 function displayText(value: unknown, fallback: string, label: string, maximum: number): string {
   if (value === undefined) return fallback;
   if (typeof value !== "string" || !value.trim() || value.trim().length > maximum) {
@@ -86,15 +93,23 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-export function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
+export function parseHooksDocument(
+  parsed: unknown,
+  path: string,
+  /** Given at startup: told of each retired event skipped instead of refused. */
+  onRetired?: (eventName: string) => void,
+): CommandHook[] {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
   for (const eventName of Object.keys(hooks)) {
-    if (!Object.hasOwn(HOOK_EVENTS, eventName)) {
+    if (Object.hasOwn(HOOK_EVENTS, eventName)) continue;
+    if (!RETIRED_HOOK_EVENTS.has(eventName)) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
     }
+    if (!onRetired) throw new Error(`${path}: hook event ${JSON.stringify(eventName)} was retired; remove it.`);
+    onRetired(eventName);
   }
 
   const result: CommandHook[] = [];

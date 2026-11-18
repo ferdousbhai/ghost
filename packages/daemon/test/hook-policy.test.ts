@@ -39,9 +39,18 @@ describe("shared hook policy", () => {
     expect(commands[4]?.name).toBe("Named notice");
     for (const invalid of [
       { hooks: { other: [] } },
-      { hooks: { before_prompt: [] } },
       { hooks: { session_stop: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },
     ]) expect(() => parseHooksDocument(invalid, path)).toThrow();
+  });
+
+  it("skips a retired event only where told of it, and refuses it otherwise", () => {
+    const retired = { hooks: { ...config.hooks, before_prompt: [{ hooks: [{ type: "command", command: "old" }] }] } };
+    const skipped: string[] = [];
+    expect(parseHooksDocument(retired, path, (name) => skipped.push(name)).map((hook) => hook.command))
+      .toEqual(parseHooksDocument(config, path).map((hook) => hook.command));
+    expect(skipped).toEqual(["before_prompt"]);
+    expect(() => parseHooksDocument(retired, path)).toThrow(/"before_prompt" was retired/u);
+    expect(() => parseHooksDocument({ hooks: { other: [] } }, path, () => {})).toThrow(/unsupported hook event "other"/u);
   });
 
   it("stops at the first real continuation", async () => {

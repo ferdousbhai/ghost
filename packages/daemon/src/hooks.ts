@@ -86,9 +86,13 @@ export class GhostHookRunner {
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
     const document = readCommandHooksDocument(path);
+    const logger = options.logger ?? silentLogger;
+    const commands = parseHooksDocument(document, path, (eventName) => {
+      logger.warn("skipping a retired hook event; remove it from hooks.json", { path, event: eventName });
+    });
     return new GhostHookRunner({
       ...options,
-      commands: parseHooksDocument(document, path),
+      commands,
       commandConfig: { path, document: document as Record<string, unknown> },
     });
   }

@@ -39,7 +39,10 @@ names this file alone.
 Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
 replaces it; the shell's Hooks pane edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
-needs a restart. Groups and handlers run in file order.
+needs a restart. Groups and handlers run in file order. An event earlier
+versions ran (`before_prompt`) is skipped at startup with a warning in the
+journal, so an upgrade never stops the daemon; `PUT /api/hooks/config` refuses
+a document that still names it.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
@@ -53,7 +56,7 @@ Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
 `ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
 document with the file, which must be the document itself (`hooks` at its top level), so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
-awaited command hooks. They run for every principal conversation, above the
+awaited command hooks. They run for every conversation, above the
 harness, and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.

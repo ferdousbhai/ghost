@@ -330,6 +330,18 @@ describe("GhostHookRunner", () => {
     }
   }, 10_000);
 
+  it("starts past a retired event with a warning, and refuses to write one", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "hooks.json");
+    const document = { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }] } };
+    writeFileSync(config, JSON.stringify(document));
+    const logger = recordingLogger("warn");
+    const runner = GhostHookRunner.fromConfig(config, { logger });
+    expect(runner.hasHandlers("session_stop")).toBe(false);
+    expect(logger.records).toMatchObject([{ message: "skipping a retired hook event; remove it from hooks.json", fields: { event: "before_prompt" } }]);
+    await expect(runner.replaceConfig(document)).rejects.toThrow(/was retired/u);
+  });
+
   it("rejects NUL commands and fails every command event open on execution rejection", async () => {
     const directory = temporaryDirectory();
     const nulConfig = join(directory, "nul-hooks.json");
