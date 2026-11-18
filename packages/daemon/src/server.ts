@@ -774,6 +774,15 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("PUT", "api/ghosts/:ghost/harness", async (context) => {
       jsonResponse(context.response, 200, await options.host.setGhostHarness(context.ghost, await readHarnessBody(context, true)));
     }),
+    route("POST", "api/ghosts/:ghost/complete", ownerOnly(async ({ ghost, request, response, body }) => {
+      const prompt = stringField(await body(), "prompt");
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        jsonResponse(response, 200, { text: await options.host.complete(ghost, prompt, signal) });
+      } finally {
+        release();
+      }
+    })),
     route("POST", "api/ghosts/:ghost/messages", handleMessages),
     route("POST", "api/ghosts/:ghost/events", ownerOnly(async ({ ghost, body, response }) => {
       const accepted = await options.host.admitEvent(ghost, parseExternalEvent(await body()));

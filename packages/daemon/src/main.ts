@@ -40,8 +40,9 @@ Subcommands:
                            itself; this is for curl, scripts, and diagnosing a
                            401. To replace it, delete the file and restart.
   hook-complete            Command-hook bridge. Reads ghost_home and prompt as
-                           JSON on stdin and writes one completion from the
-                           ghost's preferred harness as JSON on stdout.
+                           JSON on stdin, asks the running daemon, and writes
+                           one completion from the ghost's preferred harness
+                           or the local model as JSON on stdout.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)

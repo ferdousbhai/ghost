@@ -179,13 +179,19 @@ describe("tailnet identity", () => {
     expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
   });
 
-  it("refuses guests the hook commands and MCP configuration", async () => {
+  it("refuses guests the hook commands, MCP configuration, and hook completions", async () => {
     const base = await serve();
     for (const path of ["/api/hooks/config", "/api/ghosts/casper/mcp"]) {
       const guest = await fetch(`${base}${path}`, { headers: asTailnet("guest@example.com") });
       expect(guest.status).toBe(403);
       expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
     }
+    const complete = await fetch(`${base}/api/ghosts/casper/complete`, {
+      method: "POST",
+      headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "Spend the owner's subscription." }),
+    });
+    expect(complete.status).toBe(403);
   });
 
   it("reports an unknown source when the daemon was started without one", async () => {

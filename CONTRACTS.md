@@ -569,9 +569,10 @@ Their JSON protocol, failure behavior, and settings are defined in
 Ghost sets `stop_hook_active` on hook continuation passes and does not impose
 a host bound; `owner_prompt` and `turn_id` identify one owner request across
 its continuations.
-`ghostd hook-complete` gives a hook one completion from the ghost's
-preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)),
-or from the local model where a turn would run on it, never then a cloud one.
+`ghostd hook-complete` gives a hook one completion by asking its own daemon
+(`POST /api/ghosts/:name/complete`, below), from the harness a new
+conversation would start on, or from ghostd's loaded local model where a turn
+would run on it, never then a cloud one.
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
 schedules, and explicit owner command hooks initiate work.
 
@@ -624,6 +625,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), Omarchy's default, and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which the HUD's and `ghost harness`'s "automatic" name. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
+| `POST /api/ghosts/:name/complete` | Owner-only `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the harness a new conversation would start on, in a scratch directory with no persona, conversation, or Ghost tools, a failing harness handing it to the next (resting ones last); on the local model when a turn would run there, never then a cloud one (`409 harness_not_installed` for a ghost set to `local` with none configured). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. `502 completion_failed` names each harness's failure. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |

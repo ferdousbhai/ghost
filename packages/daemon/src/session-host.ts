@@ -10,8 +10,8 @@ import { type DesktopContext, renderDesktopContext } from "./desktop-context.js"
 import { eventConversationId, eventPrompt, eventPromptLead, type ExternalEvent } from "./external-events.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { buildGhostSystemPrompt, characterSection, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
 import { readCharacter } from "./home.js";
@@ -74,7 +74,7 @@ import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecover
 import type { CommandRunner } from "./command-runner.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
-import { runLocalTurn, type DelegateResult } from "./local-turn.js";
+import { completeLocally, runLocalTurn, type DelegateResult } from "./local-turn.js";
 import { TOOL_RESULT_CHARS } from "./local-tools.js";
 
 
@@ -1022,6 +1022,62 @@ export class SessionHost {
       if (error) this.rest(harness, error);
     }
     return { harness: null, text: `No cloud agent could take the task. ${lastError}`, isError: true };
+  }
+
+  /**
+   * One completion for a trusted command hook (`ghostd hook-complete`), on the
+   * harness a new conversation would start on, in a scratch directory with no
+   * persona, conversation, or Ghost tools; on the local model, this daemon's
+   * own copy, never then a cloud one. It takes no ghost lease, admission, or
+   * conversation lock: the turn awaiting the `session_stop` hook that asks
+   * holds its own, and waiting for it would deadlock.
+   */
+  async complete(ghostName: string, prompt: string, signal: AbortSignal): Promise<string> {
+    if (!prompt.trim()) throw new GhostError("invalid_request", "prompt must be a non-empty string.", 400);
+    const ghost = this.registry.get(ghostName);
+    const candidates = await this.harnessCandidates(ghost, null);
+    if (candidates[0] === LOCAL_HARNESS && this.localModel) {
+      const text = (await completeLocally(this.localModel, prompt, signal)).trim();
+      if (!text) throw new GhostError("completion_failed", "The local model returned no text for the prompt.", 502);
+      return text;
+    }
+    if (candidates.length === 0 && readHarnessSetting(ghost.dir) === LOCAL_HARNESS) {
+      throw new GhostError("harness_not_installed", "This ghost runs on the local model, and none is configured.", 409);
+    }
+    const failures: string[] = [];
+    for (const harness of candidates) {
+      const row = this.rowOf(harness) as HarnessRow;
+      const dir = await mkdtemp(join(tmpdir(), "ghost-hook-"));
+      try {
+        const launch = row.launch({ prompt, resume: false, sessionId: null, persona: "", mcp: [] });
+        await writeLaunchFiles(dir, launch.files);
+        let text = "";
+        let error: string | null = null;
+        const exit = await runHarness({
+          // `GHOST` names the ghost, as in a turn, so a harness stop hook that
+          // stands down inside Ghost runs does not review this completion.
+          launch, cwd: dir, env: { ...this.env, GHOST: ghost.name, ...(await accountEnv(harness, this.env)) }, signal, parse: row.parser(),
+          onEvent: (event) => {
+            if (event.type === "text") text += event.delta;
+            else if (event.type === "error") error = event.message;
+            else if (event.type === "retry") error = null;
+          },
+        });
+        if (signal.aborted) throw new Error("The completion was cancelled.");
+        error ??= exit.spawnError ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").at(-1) || `exit ${exit.code}`);
+        if (text.trim() && error === null) {
+          this.resting.delete(harness);
+          return text.trim();
+        }
+        failures.push(`${harness}: ${error ?? "no answer"}`);
+        if (error) this.rest(harness, error);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+    throw new GhostError("completion_failed", failures.length > 0
+      ? `No harness completed the prompt (${failures.join("; ")}).`
+      : "No harness is eligible to complete the prompt.", 502);
   }
 
   private failure(stream: AdmittedTurnOptions, harness: string, message: string, aborted: boolean): TerminalError {

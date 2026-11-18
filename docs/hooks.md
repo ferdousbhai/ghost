@@ -154,19 +154,22 @@ informational notification alone is not.
 
 Trusted command hooks that need a classifier can invoke
 `ghostd hook-complete`. It reads
-`{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin and returns
-`{ "text": "..." }`: one headless run of the ghost's preferred eligible
-harness, in the order a turn would pick, in a scratch directory with no
-persona, conversation, or Ghost tools; a harness that fails hands the prompt
-to the next. It runs the same model and effort a turn does, with the owner's
-own CLI configuration, hooks included, and the caller's environment: a
-stop-hook reviewer marks its call (keep-going sets `KEEP_GOING_REVIEWING`) so
-the harness's own stop hook does not review the review. When the
-[local model](../CONTRACTS.md#local-model) is configured and the ghost's
-`harness` is `local` or unset, the prompt runs on it instead, as a turn would:
-one completion without tools, on a `llama-server` this command starts and
-stops itself, never falling through to a cloud harness. A ghost whose
-`harness` is `local` with no local model configured is refused.
+`{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin, asks the
+daemon that owns that home (`POST /api/ghosts/:name/complete`, at the port and
+token a hook's environment names), and returns `{ "text": "..." }`: one
+headless run of the harness a new conversation would start on, in a scratch
+directory with no persona, conversation, or Ghost tools; a harness that fails
+hands the prompt to the next. It runs the same model and effort a turn does,
+with the owner's own CLI configuration, hooks included, and the daemon's
+environment plus `GHOST` naming the ghost (no `GHOST_SESSION`), as a turn's
+harness has: a harness stop hook that stands down inside Ghost runs (as
+keep-going's does) does not review the review. The hook's own environment
+does not reach the harness. When the [local model](../CONTRACTS.md#local-model) is configured and
+the ghost's `harness` is `local` or unset, the prompt runs on the daemon's own
+loaded model instead, as a turn would: one completion without tools, never
+falling through to a cloud harness. A ghost whose `harness` is `local` with no
+local model configured is refused, and so is a call when the daemon is not
+running.
 
 ## Status and editing
 

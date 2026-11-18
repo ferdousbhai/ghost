@@ -120,6 +120,7 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   writeFileSync(tokenFile, `${apiToken}\n`, { mode: 0o600 });
   const env = {
     GHOSTD_PORT: String(listening.port),
+    GHOSTS_ROOT: temp.root,
     GHOSTD_API_TOKEN_FILE: tokenFile,
     XDG_CONFIG_HOME: join(temp.root, ".config"),
   };
