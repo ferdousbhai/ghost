@@ -97,11 +97,6 @@ export function ghostCliPath(env: NodeJS.ProcessEnv): string {
   return which("ghost", env) ?? "/usr/bin/ghost";
 }
 
-export const SCHEDULED_WORK_POLICY = [
-  "## Scheduled work",
-  "Clock work is a systemd user timer you write from Bash; Ghost has no scheduler. Read `ghost help timers` first. Timers fire only while the owner is logged in, so promise no check-ins while they are away.",
-].join("\n");
-
 /**
  * The units belonging to one ghost. A name must start with that ghost's exact
  * prefix, contain a valid slug, and end in a unit suffix Ghost creates, so a

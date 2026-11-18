@@ -219,7 +219,6 @@ async function serveDaemon(
     registry,
     ownerHome,
     scheduleUnitDir,
-    runningSource,
     bundledSkills: bundledSkillsDir(runningSource),
     viewerUrl: async () => (await remoteServe.status()).url,
     logger,

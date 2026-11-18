@@ -13,7 +13,6 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "../src/persona.js";
-import type { RunningSource } from "../src/running-source.js";
 import { stablePolicySections } from "../src/session-host.js";
 import { LOCAL_SECTION } from "../src/local-turn.js";
 
@@ -21,12 +20,6 @@ import { LOCAL_SECTION } from "../src/local-turn.js";
 const GHOST_NAME = "casper";
 const HOME_DIR = "/home/owner/ghosts/casper";
 const DOCUMENTS = "/home/owner/Documents";
-/** A packaged install, as Omarchy users run Ghost: its Self-maintenance is the longer of the two. */
-const RUNNING: RunningSource = {
-  version: "0.0.1",
-  commit: null,
-  root: null,
-};
 
 /**
  * `characterPolicySection` is internal to the prompt builder, so it is measured
@@ -46,9 +39,9 @@ function promptSection(heading: string): string {
   return section;
 }
 
-/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting, Recall installed, a peer listed whose key expires soon). */
+/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting, a Tailscale key about to expire). */
 function renderStablePolicy(): Record<string, string> {
-  const sections = stablePolicySections({ documents: DOCUMENTS, recall: true, runningSource: RUNNING, firstMeeting: true, peers: ["wife"], keyExpiresOn: "2027-04-11" });
+  const sections = stablePolicySections({ documents: DOCUMENTS, firstMeeting: true, keyExpiresOn: "2027-04-11" });
   return Object.fromEntries([promptSection("## Character file"), ...sections]
     .map((section) => [section.slice("## ".length, section.indexOf("\n")), section]));
 }
@@ -56,18 +49,13 @@ function renderStablePolicy(): Record<string, string> {
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
   "Character file": 560,
-  "Computer use": 404,
-  "Other harnesses": 273,
-  "Background work": 216,
-  "Asking the owner": 257,
-  "Owner context": 887,
-  "Scheduled work": 221,
-  "Self-maintenance": 427,
-  "Peers": 299,
+  "Computer use": 301,
+  "Ghost": 586,
+  "Owner context": 675,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 3865;
+const TOTAL_CEILING = 2443;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

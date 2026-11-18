@@ -7,7 +7,6 @@ import {
   ghostCliPath,
   isValidScheduleSlug,
   listGhostScheduleUnits,
-  SCHEDULED_WORK_POLICY,
   resolveScheduleUnitDirectory,
   scheduleUnitPrefix,
   sweepGhostSchedules,
@@ -103,10 +102,6 @@ describe("which units belong to a ghost", () => {
     }
   });
 
-  it("points the prompt at `ghost help timers`, which carries the unit names", () => {
-    expect(SCHEDULED_WORK_POLICY).toContain("`ghost help timers`");
-    expect(SCHEDULED_WORK_POLICY).not.toContain("ghost-timer-v1");
-  });
 });
 
 describe("sweeping a deleted ghost's schedules", () => {

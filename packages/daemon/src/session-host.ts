@@ -43,7 +43,7 @@ import {
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, which, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles, type HarnessExit } from "./harness-process.js";
 import {
   harnessRow,
@@ -56,21 +56,16 @@ import {
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
-  ASKING_POLICY,
-  BACKGROUND_WORK_POLICY,
-  HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
+  renderGhostPolicy,
   renderOwnerContextPolicy,
-  renderPeersPolicy,
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, isUnreachableMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
-import type { RunningSource } from "./running-source.js";
 import {
-  SCHEDULED_WORK_POLICY,
   listGhostRoutines,
   readRoutineLogs,
   controlGhostRoutine,
@@ -79,7 +74,6 @@ import {
 } from "./schedules.js";
 import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, discardRoutineRecoveries, type RoutineConfig } from "./routine-config.js";
 import type { CommandRunner } from "./tailscale-identity.js";
-import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
 import { runLocalTurn, type DelegateResult } from "./local-turn.js";
@@ -123,7 +117,6 @@ export interface SessionHostOptions {
   registry: GhostRegistry;
   ownerHome?: string;
   scheduleUnitDir?: string;
-  runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
   scheduleVerifyRunner?: CommandRunner;
   scheduleJournalRunner?: CommandRunner;
@@ -324,24 +317,14 @@ function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: Abo
  */
 export function stablePolicySections(options: {
   documents: string;
-  /** Recall is installed, so Owner context names its search. */
-  recall: boolean;
-  runningSource: RunningSource | null;
   firstMeeting: boolean;
-  /** The owner's peers by name, which their section lists. */
-  peers: readonly string[];
   /** This machine's Tailscale key expiry date, set only when peers would soon lose it. */
   keyExpiresOn?: string | null;
 }): string[] {
   return [
     OMARCHY_COMPUTER_USE_POLICY,
-    HARNESS_LIMITS_POLICY,
-    BACKGROUND_WORK_POLICY,
-    ASKING_POLICY,
-    renderOwnerContextPolicy(options.documents, options.recall),
-    SCHEDULED_WORK_POLICY,
-    renderSelfMaintenancePolicy(options.runningSource),
-    renderPeersPolicy(options.peers, options.keyExpiresOn ?? null),
+    renderGhostPolicy(options.keyExpiresOn ?? null),
+    renderOwnerContextPolicy(options.documents),
     ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
   ];
 }
@@ -367,7 +350,6 @@ export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
-  private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly scheduleVerifyRunner: CommandRunner | undefined;
   private readonly scheduleJournalRunner: CommandRunner | undefined;
@@ -405,7 +387,6 @@ export class SessionHost {
     this.registry = options.registry;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     this.scheduleUnitDir = resolve(options.scheduleUnitDir ?? resolveScheduleUnitDirectory(this.ownerHome, {}));
-    this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.scheduleVerifyRunner = options.scheduleVerifyRunner;
     this.scheduleJournalRunner = options.scheduleJournalRunner;
@@ -489,11 +470,7 @@ export class SessionHost {
       homeDir: ghost.dir,
       extraSections: stablePolicySections({
         documents: this.documentsDir(),
-        // Checked each turn, like the character: installing Recall needs no restart.
-        recall: which("recall", this.env) !== null,
-        runningSource: this.runningSource,
         firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
-        peers: (this.peers?.list() ?? []).map((peer) => peer.name),
         keyExpiresOn: await this.keyExpiresSoon(),
       }),
     });

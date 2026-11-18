@@ -1,10 +1,11 @@
 /**
  * The long recipes a ghost needs only when it does one particular thing:
  * writing a timer, editing or restarting itself, handing work to another
- * harness, finding a note, transcribing audio. The system prompt points at
- * them by name and `ghost help <topic>` prints them, so their cost lands on the turn that needs them and not on
- * every turn of every ghost. The text is still contract text the ghost acts
- * on: keep it exact, and keep the prompt's pointer sentences in step.
+ * harness, finding a note, transcribing audio. The `ghost` skill
+ * (skills/ghost/SKILL.md) indexes them by name and `ghost help <topic>` prints
+ * them, so their cost lands on the turn that needs them and not on every turn
+ * of every ghost. The text is still contract text the ghost acts on: keep it
+ * exact, and keep the skill's index in step (prompt-policy.test.ts checks).
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 

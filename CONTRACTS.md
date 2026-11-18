@@ -572,12 +572,18 @@ backup: Trash and snapper are undo, not retention.
 
 Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
-[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two sections carry contract the rest of this file
-relies on: the other-harnesses policy sends a task to an agent run in its
-project (`ghost delegate`, which runs an installed harness) only when it
-needs that project's instructions, settings, or MCP servers; the owner-context
-policy names the Documents directory as where finished work, notes, and the
-board live. Owner documents are read only when
+[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). They hold only what a ghost must follow
+before it would look anything up: the owner-context section names the
+Documents directory as where finished work, notes, and the board live, and
+the Ghost section has a ghost ask the owner with `ghost ask` and load the
+`ghost` skill for everything else the CLI does. That skill,
+[`skills/ghost`](skills/ghost/SKILL.md), linked into every conversation like
+Ghost's other bundled skills and installable for the owner's own agents with
+`ghost skill install`, indexes the `ghost help` recipes and states the rules
+they assume: a task goes to an agent run in its project (`ghost delegate`,
+which runs an installed harness) only when it needs that project's
+instructions, settings, or MCP servers; work that outlives a turn ends with
+`ghost say --follow-up`; Ghost has no scheduler. Owner documents are read only when
 relevant, with the harness's own file and search tools, never injected
 automatically. The prompt is rendered before every turn, so a character the
 ghost rewrote is who it is on the next one.
@@ -880,12 +886,13 @@ the owner, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), MCP, hooks, remote, peers and
 `ghost message`, and status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
-<topic>` prints the recipes the system prompt only points at (`timers`,
-`self`, `harnesses`, `background`, `machine`, `memory`) and ones it does not
-(`dictation`, `events`, `notifications`, `peers`;
-[`help-topics.ts`](packages/daemon/src/help-topics.ts)),
-rendered for the ghost the shell's `$GHOST` names and needing no daemon; they are prompt-visible contract text like the policy
-sections. `ghost harnesses` also reads locally, never through the daemon: the
+<topic>` prints the recipes the `ghost` skill indexes, every one of them
+([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+rendered for the ghost the shell's `$GHOST` names and needing no daemon; they
+and the skill are prompt-visible contract text like the policy sections.
+`ghost skill` prints that skill; `install` copies it to
+`~/.agents/skills/ghost/` and links it from `~/.claude/skills/ghost` when
+`~/.claude` exists; `remove` takes away only that file and link. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
 --json`; without `omarchy` on `PATH`, the ids Ghost has a row for) that
 Omarchy's own `agent_present` test would call installed, in that order: an `omarchy-install-<id>-cli --check` decides when that installer

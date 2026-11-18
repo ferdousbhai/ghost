@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { handoffContext, readLog, transcriptPage, unhandedPeerMessages, type LogEntry } from "../src/conversation-log.js";
 import { loadConfig } from "../src/config.js";
-import { renderPeersPolicy } from "../src/prompt-policy.js";
+import { renderGhostPolicy } from "../src/prompt-policy.js";
 import type { RemoteServe } from "../src/remote-serve.js";
 import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
@@ -158,8 +158,8 @@ describe("peer records", () => {
   });
 
   it("warns, two weeks out, that the machine's Tailscale key will cut its peers off", async () => {
-    expect(renderPeersPolicy(["wife"], "2027-04-11")).toContain("Tailscale key expires 2027-04-11");
-    expect(renderPeersPolicy(["wife"])).not.toContain("expires");
+    expect(renderGhostPolicy("2027-04-11")).toContain("Tailscale key expires 2027-04-11");
+    expect(renderGhostPolicy()).not.toContain("expires");
     const status = (expiry: string | undefined) => async () => ({
       stdout: JSON.stringify({ BackendState: "Running", Self: { UserID: 1, DNSName: "m.ts.net.", ...(expiry ? { KeyExpiry: expiry } : {}) }, User: { 1: { LoginName: OWNER } } }),
       stderr: "", code: 0,

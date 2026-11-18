@@ -55,6 +55,7 @@ if [[ "$component" == runtime ]]; then
     /usr/lib/ghost/runtime/ghost.js
     /usr/share/doc/ghost/docs/events.md
     /usr/share/doc/ghost/docs/hooks.md
+    /usr/lib/ghost/skills/ghost/SKILL.md
     /usr/lib/ghost/skills/ghost-products/SKILL.md
   )
   executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop

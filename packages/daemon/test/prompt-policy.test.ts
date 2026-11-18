@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isHelpTopic } from "../src/help-topics.js";
-import { renderOwnerContextPolicy, renderPeersPolicy } from "../src/prompt-policy.js";
+import { HELP_TOPICS, isHelpTopic } from "../src/help-topics.js";
+import { renderGhostPolicy, renderOwnerContextPolicy } from "../src/prompt-policy.js";
+
+const SKILL = readFileSync(new URL("../../../skills/ghost/SKILL.md", import.meta.url), "utf8");
 
 describe("owner context policy", () => {
   it("names the owner's documents directory and keeps skill paths out of the policy", () => {
@@ -10,30 +13,27 @@ describe("owner context policy", () => {
     expect(policy).not.toContain("SKILL.md");
     expect(policy).not.toContain(".agents/skills");
   });
+});
 
-  it("names Recall's search only when it is installed", () => {
-    expect(renderOwnerContextPolicy("/home/owner/Documents")).not.toContain("recall");
-    const policy = renderOwnerContextPolicy("/home/owner/Documents", true);
-    expect(policy).toContain('`recall search "<meaning>"`');
-    expect(policy).toContain("`--code`");
+describe("the Ghost section", () => {
+  it("keeps asking the owner in the prompt and sends the rest of the CLI to the ghost skill", () => {
+    const policy = renderGhostPolicy();
+    expect(policy).toContain("`ghost ask");
+    expect(policy).toContain("then end your turn");
+    expect(policy).toContain("Load the `ghost` skill");
+    expect(policy).not.toContain("ghost help");
   });
 
-  it("points at a lookup recipe `ghost help` prints", () => {
-    const pointer = /`ghost help (\w+)`/u.exec(renderOwnerContextPolicy("/home/owner/Documents"))?.[1];
-    expect(pointer).toBe("memory");
-    expect(isHelpTopic(pointer ?? "")).toBe(true);
+  it("warns, only when it is near, that the Tailscale key will cut the peers off", () => {
+    expect(renderGhostPolicy("2027-04-11")).toContain("Tailscale key expires 2027-04-11");
+    expect(renderGhostPolicy()).not.toContain("expires");
   });
 });
 
-describe("peers policy", () => {
-  it("tells a ghost with no peers they exist, and that only its owner adds or removes one", () => {
-    const none = renderPeersPolicy([]);
-    expect(none).toContain("once your owner adds them");
-    expect(none).toContain("only when your owner asks");
-    expect(none).toContain("`ghost help peers`");
-    const some = renderPeersPolicy(["wife", "brother"]);
-    expect(some).toContain("message: wife, brother");
-    expect(some).toContain("ghost message <peer>");
-    expect(some).toContain("only when your owner asks");
+describe("the ghost skill", () => {
+  it("lists every help topic, and every topic it names is one `ghost help` prints", () => {
+    const named = [...SKILL.matchAll(/`ghost help (\w+)`/gu)].map((match) => match[1] as string);
+    expect(named.filter((topic) => !isHelpTopic(topic))).toEqual([]);
+    expect(HELP_TOPICS.filter((topic) => !named.includes(topic))).toEqual([]);
   });
 });
