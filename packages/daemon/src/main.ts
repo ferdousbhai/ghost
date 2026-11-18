@@ -41,8 +41,9 @@ Subcommands:
                            401. To replace it, delete the file and restart.
   hook-complete            Command-hook bridge. Reads ghost_home and prompt as
                            JSON on stdin, asks the running daemon, and writes
-                           one completion from the ghost's preferred harness
-                           or the local model as JSON on stdout.
+                           one completion as JSON on stdout, from the harness
+                           a new conversation would start on (or the local
+                           model).
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -110,36 +111,29 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
   }
 }
 
-class UsageError extends Error {}
-
 export function parseArgs(argv: string[]): ParsedArgs {
-  let values: { help?: boolean; version?: boolean; port?: string; "ghosts-root"?: string; config?: string; "log-level"?: string };
-  try {
-    ({ values } = parseNodeArgs({
-      args: argv,
-      options: {
-        help: { type: "boolean", short: "h" },
-        version: { type: "boolean", short: "v" },
-        port: { type: "string", short: "p" },
-        "ghosts-root": { type: "string" },
-        config: { type: "string" },
-        "log-level": { type: "string" },
-      },
-      strict: true,
-    }));
-  } catch (error) {
-    throw new UsageError(errorMessage(error));
-  }
+  const { values } = parseNodeArgs({
+    args: argv,
+    options: {
+      help: { type: "boolean", short: "h" },
+      version: { type: "boolean", short: "v" },
+      port: { type: "string", short: "p" },
+      "ghosts-root": { type: "string" },
+      config: { type: "string" },
+      "log-level": { type: "string" },
+    },
+    strict: true,
+  });
   const overrides: DaemonConfigOverrides = {};
   if (values.port !== undefined) {
     const port = Number(values.port);
-    if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new UsageError(`Invalid port: ${values.port}`);
+    if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error(`Invalid port: ${values.port}`);
     overrides.port = port;
   }
   if (values["ghosts-root"] !== undefined) overrides.ghostsRoot = values["ghosts-root"];
   if (values.config !== undefined) overrides.configPath = values.config;
   const logLevel = values["log-level"] ?? "info";
-  if (!["info", "warn", "error"].includes(logLevel)) throw new UsageError(`Invalid log level: ${logLevel}`);
+  if (!["info", "warn", "error"].includes(logLevel)) throw new Error(`Invalid log level: ${logLevel}`);
   return { overrides, logLevel: logLevel as LogLevel, help: values.help === true, version: values.version === true };
 }
 
