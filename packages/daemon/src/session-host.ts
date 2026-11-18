@@ -553,8 +553,17 @@ export class SessionHost {
     if (current === LOCAL_HARNESS || (current === null && (setting === LOCAL_HARNESS || (setting === null && this.localModel)))) {
       return this.localModel ? [LOCAL_HARNESS] : [];
     }
+    return this.cloudHarnesses([current, setting]);
+  }
+
+  /**
+   * The cloud harnesses Ghost has a row for, best first: `preferred`, then
+   * Omarchy's default agent, then every other eligible one. Turns and the
+   * local model's `delegate` share this order.
+   */
+  private async cloudHarnesses(preferred: readonly (string | null)[]): Promise<string[]> {
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
-    const ordered = orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, setting, omarchyDefault]);
+    const ordered = orderHarnesses(eligible.filter((id) => id !== LOCAL_HARNESS && this.rowOf(id) !== null), [...preferred, omarchyDefault]);
     // A harness that just failed before answering goes to the back, not out:
     // if everything ahead of it fails too, it is still tried.
     return [...ordered.filter((id) => !this.restingFor(id)), ...ordered.filter((id) => this.restingFor(id))];
@@ -984,12 +993,9 @@ export class SessionHost {
   private async delegateTask(
     ghost: Ghost, dir: string, env: NodeJS.ProcessEnv, persona: string, task: string, signal: AbortSignal,
   ): Promise<DelegateResult> {
-    const setting = readHarnessSetting(ghost.dir);
-    const [eligible, omarchyDefault, mcp] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness(), this.mcpServers(ghost)]);
-    const ordered = orderHarnesses(eligible.filter((harness) => harness !== LOCAL_HARNESS && this.rowOf(harness) !== null),
-      [setting === LOCAL_HARNESS ? null : setting, omarchyDefault]);
+    const [ordered, mcp] = await Promise.all([this.cloudHarnesses([readHarnessSetting(ghost.dir)]), this.mcpServers(ghost)]);
     let lastError = "No cloud agent is installed to delegate to.";
-    for (const harness of [...ordered.filter((h) => !this.restingFor(h)), ...ordered.filter((h) => this.restingFor(h))]) {
+    for (const harness of ordered) {
       const row = this.rowOf(harness) as HarnessRow;
       const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
       const launch = row.launch({ prompt, resume: false, sessionId: null, persona, mcp });
@@ -1006,7 +1012,11 @@ export class SessionHost {
       });
       if (signal.aborted) return { harness, text: "Stopped.", isError: true };
       error ??= exit.spawnError ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").slice(-4).join("\n") || `${harness} exited with ${exit.code}.`);
-      if (text.trim() && error === null) return { harness, text: text.trim().slice(0, TOOL_RESULT_CHARS), isError: false };
+      if (text.trim() && error === null) {
+        // Answering ends a rest, as it does for a turn's pass.
+        this.resting.delete(harness);
+        return { harness, text: text.trim().slice(0, TOOL_RESULT_CHARS), isError: false };
+      }
       if (text.trim()) return { harness, text: `${text.trim().slice(0, TOOL_RESULT_CHARS)}\n(${harness} then failed: ${error})`, isError: true };
       lastError = `${harness}: ${error ?? "no answer"}`;
       if (error) this.rest(harness, error);

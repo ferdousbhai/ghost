@@ -144,6 +144,18 @@ describe("the local model", () => {
     expect(server.requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", content: untrusted("cloud answered:\nfrom the cloud") });
   });
 
+  it("rests a cloud agent that refuses a delegated task, and ends the rest once it answers one", async () => {
+    const delegate = { call: { name: "delegate", args: { task: "Check the weather." } } };
+    const cloud = fakeHarness([{ exit: 1, stderr: "not signed in" }, ...replies("Sunny.")], "cloud");
+    const { sessions } = host([delegate, { text: "No agent." }, delegate, { text: "Sunny." }], cloud);
+    const resting = async () => (await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "cloud")?.resting;
+
+    expect(text(await turn(sessions, "Weather?"))).toBe("No agent.");
+    expect(await resting()).toMatchObject({ reason: expect.stringContaining("not signed in") });
+    expect(text(await turn(sessions, "Weather now?"))).toBe("Sunny.");
+    expect(await resting()).toBeNull();
+  });
+
   it("labels every tool result as data, not instructions", async () => {
     const { sessions, server } = host([
       { call: { name: "search", args: { query: "boat" } } },
