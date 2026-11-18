@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { logState, transcriptPage, type LogEntry } from "../src/conversation-log.js";
+import { logState, type LogEntry } from "../src/conversation-log.js";
+import { transcriptPage } from "./helpers/transcript-oracle.js";
 
 const command: LogEntry = { type: "command", at: "now", command: "pwd", output: "```\n/tmp", exitCode: 1, excluded: false };
 

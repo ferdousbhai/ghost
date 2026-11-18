@@ -313,7 +313,7 @@ function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
  * One entry's renderable messages from its `skip`th, at most `take` of them;
  * `entryId` names the entry, e<ordinal>.
  */
-function entryMessages(entry: LogEntry, entryId: string, skip: number, take: number): TranscriptMessage[] {
+export function entryMessages(entry: LogEntry, entryId: string, skip: number, take: number): TranscriptMessage[] {
   if (entry.type === "user") {
     return [{
       role: entry.origin === "hook" ? "hook" : "user",
@@ -346,20 +346,6 @@ function entryMessages(entry: LogEntry, entryId: string, skip: number, take: num
 /** What a compaction notice says after "Context compacted": `auto · 288k tokens`. */
 export function compactedText(event: { readonly trigger: string; readonly preTokens?: number }): string {
   return event.preTokens === undefined ? event.trigger : `${event.trigger} · ${Math.round(event.preTokens / 1000)}k tokens`;
-}
-
-/** The renderable messages, in order; harness and title records are not messages. */
-export function transcriptPage(entries: readonly LogEntry[], offset = 0, limit = Infinity): { messages: TranscriptMessage[]; total: number } {
-  const messages: TranscriptMessage[] = [];
-  let total = 0;
-  entries.forEach((entry, index) => {
-    const count = messageCount(entry);
-    const first = total;
-    total += count;
-    if (count === 0 || first >= offset + limit || total <= offset) return;
-    messages.push(...entryMessages(entry, `e${index}`, Math.max(0, offset - first), offset + limit - Math.max(offset, first)));
-  });
-  return { messages, total };
 }
 
 function assistantText(content: readonly AssistantPart[]): string {
@@ -432,7 +418,7 @@ function sameFile(a: Stats, b: Stats): boolean {
   return a.ino === b.ino && a.dev === b.dev;
 }
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
-function messageCount(entry: LogEntry): number {
+export function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
     : entry.type === "user" || entry.type === "assistant" || entry.type === "compacted" ? 1 : 0;
 }

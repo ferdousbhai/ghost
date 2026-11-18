@@ -2,7 +2,8 @@ import { appendFile, mkdir, mkdtemp, rename, rm, stat, utimes, writeFile } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendLog, listedLog, logPath, logState, readLog, readTranscriptPage, transcriptPage, type LogEntry } from "../src/conversation-log.js";
+import { appendLog, listedLog, logPath, logState, readLog, readTranscriptPage, type LogEntry } from "../src/conversation-log.js";
+import { transcriptPage } from "./helpers/transcript-oracle.js";
 
 const roots: string[] = [];
 afterEach(async () => {
