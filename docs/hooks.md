@@ -97,7 +97,6 @@ contains the same message directly:
     "content": [{ "type": "text", "text": "The answer." }]
   },
   "session_id": "conversation-a",
-  "session_file": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
   "transcript_path": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
   "stop_hook_active": false,
   "ghost_name": "casper",
@@ -204,7 +203,7 @@ source service or CLI.
 ## `turn_end` protocol
 
 An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
-`conversation_id`, `session_id`, `session_file`, and `turn_id` fields (the
+`conversation_id`, `session_id`, `transcript_path`, and `turn_id` fields (the
 `turn_id` of the owner request the final pass answered), plus:
 
 ```json

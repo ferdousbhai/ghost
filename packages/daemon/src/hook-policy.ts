@@ -3,7 +3,8 @@ const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 
 export interface GhostHookEventBase {
   session_id: string;
-  session_file: string;
+  /** The conversation log on disk (docs/hooks.md). */
+  transcript_path: string;
   signal: AbortSignal;
   ghost_name: string;
   ghost_home: string;
@@ -18,8 +19,6 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   turn_id: string;
   last_assistant_message: unknown;
   stop_hook_active: boolean;
-  /** The conversation log on disk; `messages` carries only the current pass. */
-  transcript_path: string;
   /** The harness that answered the pass. */
   harness: string;
 }

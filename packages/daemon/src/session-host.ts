@@ -307,7 +307,7 @@ function ghostOfKey(key: string): string {
 /** The fields every hook event carries (docs/hooks.md). */
 function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: AbortSignal): GhostHookEventBase {
   return {
-    session_id: id, session_file: logPath(sessionDir, id), signal, ghost_name: ghost.name,
+    session_id: id, transcript_path: logPath(sessionDir, id), signal, ghost_name: ghost.name,
     ghost_home: ghost.dir, cwd: conversationDir(sessionDir, id), conversation_id: id,
   };
 }
@@ -1264,7 +1264,6 @@ export class SessionHost {
       turn_id: turnId,
       last_assistant_message: message,
       ...hookEventBase(ghost, id, sessionDir, signal),
-      transcript_path: logPath(sessionDir, id),
       stop_hook_active: active,
       owner_prompt: ownerPrompt,
       harness,
