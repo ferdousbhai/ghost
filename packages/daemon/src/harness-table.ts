@@ -176,7 +176,7 @@ function mcpServersToml(servers: readonly HarnessMcpServer[]): string {
 /**
  * Claude Code's `stream-json` and Grok's `streaming-messages-json` (Anthropic
  * message events wrapped as `stream_event`, plus whole `assistant`/`user`
- * messages and a final `result`). Cursor prints the same envelope.
+ * messages and a final `result`).
  */
 function anthropicStreamParser(): (line: string) => HarnessEvent[] {
   let message = 0;
@@ -240,18 +240,6 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
         if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
           out.push({ type: "tool_end", id: block.tool_use_id, isError: block.is_error === true, output: outputText(block.content) });
         }
-      }
-      return out;
-    }
-    if (event.type === "tool_call") {
-      // Cursor reports tool calls as their own events.
-      const id = str(event.call_id);
-      const call = record(event.tool_call);
-      const name = Object.keys(call)[0] ?? "tool";
-      if (event.subtype === "started") out.push({ type: "tool_start", id, name, args: record(call[name]).args ?? {} });
-      if (event.subtype === "completed") {
-        const result = record(record(call[name]).result);
-        out.push({ type: "tool_end", id, isError: result.error !== undefined, output: outputText(result.success ?? result.error) });
       }
       return out;
     }
@@ -649,38 +637,6 @@ function copilotParser(): (line: string) => HarnessEvent[] {
   };
 }
 
-/** Muse `exec --json`: a durable record stream; text arrives as run output deltas. */
-function museParser(): (line: string) => HarnessEvent[] {
-  return (line) => {
-    const event = json(line);
-    if (!event) return [];
-    const payload = record(event.payload);
-    const out: HarnessEvent[] = [];
-    if (event.payload_type === "session.run.linked") {
-      const stream = record(event.stream);
-      if (typeof stream.id === "string") out.push({ type: "session", id: stream.id });
-    }
-    if (event.payload_type === "run.model.configured" && typeof payload.model_id === "string") {
-      out.push({ type: "model", model: payload.model_id, ...(typeof payload.provider_id === "string" ? { provider: payload.provider_id } : {}) });
-    }
-    if (event.payload_type === "run.output.delta") {
-      out.push({ type: "text", block: str(record(payload.run_stream).id), delta: str(payload.text) });
-    }
-    if (event.payload_type === "tool.result") {
-      const facts = record(payload.correlation_facts);
-      const id = str(payload.call_id);
-      out.push(
-        { type: "tool_start", id, name: str(facts.tool_name), args: {} },
-        { type: "tool_end", id, isError: facts.outcome !== "success" },
-      );
-    }
-    if (event.payload_type === "run.terminal.failed") {
-      out.push({ type: "error", message: str(payload.reason) || str(payload.text) || "The turn failed." });
-    }
-    return out;
-  };
-}
-
 /** A harness with no structured output: stdout is the reply. */
 function textParser(): (line: string) => HarnessEvent[] {
   let first = true;
@@ -697,9 +653,8 @@ function writeJson(value: unknown): string {
 
 // Rows that can set reasoning effort per run ask for low: a ghost is a
 // conversation, and the owner's own setting is tuned for coding. Copilot's
-// `auto` model refuses an effort, opencode's variants are provider-specific,
-// and cursor-agent sets effort only inside a model name, so those keep the
-// owner's; so does omp, whose effort flag has not been checked.
+// `auto` model refuses an effort and opencode's variants are provider-specific,
+// so those keep the owner's; so does omp, whose effort flag has not been checked.
 const EFFORT = "low";
 
 const ROWS: readonly HarnessRow[] = [
@@ -821,20 +776,6 @@ const ROWS: readonly HarnessRow[] = [
     parser: agyParser,
   },
   {
-    id: "cursor-agent",
-    launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
-      argv: [
-        "cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output",
-        "--yolo", "--trust", "--approve-mcps",
-        ...(turn.resume ? ["--continue"] : []),
-        turn.prompt,
-      ],
-      files: turn.mcp.length > 0 ? { ".cursor/mcp.json": writeJson(mcpServersJson(turn.mcp)) } : {},
-    }),
-    parser: anthropicStreamParser,
-  },
-  {
     id: "crush",
     effort: EFFORT,
     // Crush keeps its sessions in the directory it runs in.
@@ -849,20 +790,6 @@ const ROWS: readonly HarnessRow[] = [
         : {},
     }),
     parser: textParser,
-  },
-  {
-    id: "muse",
-    effort: EFFORT,
-    // `muse exec` starts fresh unless named; the first turn reports its session.
-    // Ghost's MCP servers are not forwarded.
-    launch: (turn) => ({
-      argv: [
-        "muse", "exec", "--json", "--yolo", "--reasoning-effort", EFFORT,
-        ...(turn.resume && turn.sessionId ? ["--session-id", turn.sessionId] : []),
-        turn.prompt,
-      ],
-    }),
-    parser: museParser,
   },
 ];
 

@@ -578,7 +578,7 @@ A turn is one headless run of an agent CLI, a row of
 non-interactively with permissions pre-approved, how to resume, how it takes
 MCP servers, and a parser from its JSON output to text, reasoning, tool
 start/end, session, model, and error events. Rows exist for claude, codex, grok,
-copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
+copilot, opencode, pi, omp, agy, and crush; their parsers
 are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. The one deliberate exception: display-only facts absent from stdout are read
@@ -624,8 +624,8 @@ identity (`GHOST`, `GHOST_SESSION`) in its environment. Ghost writes the
 persona there as `AGENTS.md`, with `CLAUDE.md` and `GEMINI.md` linking to it;
 grok, which reads none of them, gets it as `--rules`. Because the directory is
 the conversation's own, a harness's "continue the most recent session here" is
-the conversation's resume; opencode and muse, whose continue is not
-cwd-scoped, are resumed by the session id they reported. Each turn also
+the conversation's resume; opencode, whose continue is not
+cwd-scoped, is resumed by the session id it reported. Each turn also
 receives the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
@@ -633,7 +633,7 @@ mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
 in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
-carries it. The pi, omp, and muse rows forward none of these; Pi 1.2 itself
+carries it. The pi and omp rows forward none of these; Pi 1.2 itself
 supports MCP configured by the owner. Ghost has no screen control: desktop
 work goes through Omarchy's commands, app CLIs, and config files, on the bet
 that Omarchy's command line keeps growing toward full coverage.

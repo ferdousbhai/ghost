@@ -101,7 +101,7 @@ function harnesses(): string[] {
     "",
     "## Long-lived sessions in herdr",
     "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, after `ghost harnesses` confirms it is installed. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
-    "Install only harnesses the owner names, with `mise use -g <harness>` (mise registry names: claude, codex, grok, muse, pi, omp, opencode, crush, copilot, cursor-agent). Each uses the owner's own account: start it, ask the owner to sign in, and never read, type, or store a credential. Then `herdr integration install <harness>` lets herdr resume it; tell the owner you did.",
+    "Install only harnesses the owner names, with `mise use -g <package>`, as `omarchy default agent` installs them (claude, codex, pi, opencode, crush, copilot; `github:can1357/oh-my-pi` for omp, `github:OpenRouterLabs/ori-releases` for ori, `npm:@xai-official/grok` for grok, `antigravity-cli` for agy). Each uses the owner's own account: start it, ask the owner to sign in, and never read, type, or store a credential. Then `herdr integration install <harness>` lets herdr resume it; tell the owner you did.",
     "`herdr --session ghost workspace create --cwd <project-dir> --label <label>` returns a root pane; `herdr --session ghost agent start <name> --kind <harness> --pane <id>` starts the harness there; `agent prompt <name> \"<task>\"` hands it work. Confirm submission and read results with `agent read <name> --source recent-unwrapped`: `--wait` alone is not proof. `blocked` means it is asking something: read it, and ask the owner unless the answer is plainly within the task they gave. `agent send-keys <name> ctrl+c` stops it. To be woken when it settles, detach `herdr --session ghost agent wait <name>` with the `ghost help background` recipe. The owner can watch with `herdr session attach ghost`.",
   ];
 }
@@ -156,7 +156,7 @@ function machine(input: HelpTopicInput): string[] {
     "      parent=$pid",
     "      while parent=$(ps -o ppid= -p \"$parent\" 2>/dev/null | tr -d ' ') && [[ -n $parent && $parent != 0 && $parent != 1 ]]; do",
     "        comm=$(ps -o comm= -p \"$parent\" 2>/dev/null)",
-    "        [[ $comm =~ ^(claude|codex|pi|omp|grok|agy|opencode|crush|copilot|cursor-agent|muse)$ ]] && { owner=\"$comm pid $parent\"; break; }",
+    "        [[ $comm =~ ^(claude|codex|pi|omp|grok|agy|opencode|crush|copilot|ori)$ ]] && { owner=\"$comm pid $parent\"; break; }",
     "      done",
     "    fi",
     "    [[ -n $owner ]] && echo \"$owner: $(ps -o pid=,pcpu=,args= -p \"$pid\" 2>/dev/null | cut -c1-200)\"",

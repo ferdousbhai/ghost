@@ -35,11 +35,11 @@ const TURN: HarnessTurnInput = {
 };
 
 describe("resource provenance", () => {
-  it.each(["claude", "codex", "grok", "copilot", "opencode", "agy", "cursor-agent", "crush"])("%s reports only forwarded MCP names", id => {
+  it.each(["claude", "codex", "grok", "copilot", "opencode", "agy", "crush"])("%s reports only forwarded MCP names", id => {
     const launch = harnessRow(id)!.launch(TURN);
     expect(launch.suppliedMcp).toEqual(["notes"]);
   });
-  it.each(["pi", "omp", "muse"])("%s does not claim to forward Ghost MCP", id => {
+  it.each(["pi", "omp"])("%s does not claim to forward Ghost MCP", id => {
     expect(harnessRow(id)!.launch(TURN).suppliedMcp ?? []).toEqual([]);
   });
 });
@@ -86,7 +86,6 @@ describe("parsers over recorded output", () => {
     ["codex", "codex.jsonl"],
     ["copilot", "copilot.jsonl"],
     ["grok", "grok.jsonl"],
-    ["muse", "muse.jsonl"],
     ["pi", "pi.jsonl"],
   ])("%s: every tool that starts ends", (id, fixture) => {
     const events = parse(id, fixture);
@@ -257,7 +256,7 @@ describe("parsers over recorded output", () => {
   });
 
   // Lines trimmed from 2026-10-05 probes.
-  it("copilot and muse: the model their streams name, with copilot's vendor and effort", () => {
+  it("copilot: the model its stream names, with its vendor and effort", () => {
     const copilot = (harnessRow("copilot") ?? { parser: () => () => [] }).parser();
     expect(copilot(JSON.stringify({ type: "model.call_start", data: { turnId: "0", model: "mai-code-1.1-flash" } })))
       .toEqual([{ type: "model", model: "mai-code-1.1-flash" }]);
@@ -266,11 +265,6 @@ describe("parsers over recorded output", () => {
       data: { promptCacheBreakState: [{ conversation: "main", lastActiveModel: "mai-code-1.1-flash",
         models: { "mai-code-1.1-flash": { model: "mai-code-1.1-flash", vendor: "openai", reasoning_effort: "medium" } } }] },
     }))).toEqual([{ type: "model", model: "mai-code-1.1-flash", provider: "openai", effort: "medium" }]);
-    const muse = (harnessRow("muse") ?? { parser: () => () => [] }).parser();
-    expect(muse(JSON.stringify({
-      payload_type: "run.model.configured",
-      payload: { kind: "run_model_configured", model_id: "muse-spark-1.3-contributor", provider_id: "meta" },
-    }))).toEqual([{ type: "model", model: "muse-spark-1.3-contributor", provider: "meta" }]);
   });
 
   it("claude, grok and copilot: inventories captured in native 2026-10-13 probes", () => {
@@ -282,9 +276,7 @@ describe("parsers over recorded output", () => {
       .toEqual([{ type: "resources", resources: { skills: null, extensions: null, mcpServers: ["github-mcp-server"] } }]);
   });
 
-  it("cursor and omp: authenticated startup headers carry no inventory", () => {
-    expect(parse("cursor-agent", "cursor-init-no-inventory.jsonl"))
-      .toEqual([{ type: "session", id: "cursor-probe" }, { type: "model", model: "Auto" }]);
+  it("omp: an authenticated startup header carries no inventory", () => {
     expect(parse("omp", "omp-header-no-inventory.jsonl"))
       .toEqual([{ type: "session", id: "omp-probe" }]);
   });
@@ -374,12 +366,6 @@ describe("parsers over recorded output", () => {
     }
   });
 
-  it("muse: run output deltas and a tool result", () => {
-    const events = parse("muse", "muse.jsonl");
-    expect(reply(events)).toContain("Muse");
-    expect(tools(events)).toEqual([["start", "bash"], ["end", false]]);
-  });
-
   it("opencode: a provider error becomes the turn's error, with the session it opened", () => {
     const events = parse("opencode", "opencode-error.jsonl");
     expect(events).toEqual([
@@ -401,7 +387,6 @@ describe("launch lines", () => {
       grok: ["--reasoning-effort", "low"],
       pi: ["--thinking", "low"],
       crush: ["--reasoning-effort", "low"],
-      muse: ["--reasoning-effort", "low"],
       agy: ["--effort", "low"],
     };
     for (const [id, pair] of Object.entries(flags)) {

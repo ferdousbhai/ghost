@@ -25,8 +25,8 @@ function commandsJson(args: string): string {
 
 describe("parseOmarchyAgents", () => {
   it("reads the default-agent choices in Omarchy's order", () => {
-    expect(parseOmarchyAgents(commandsJson("[pi|omp|claude|codex|cursor-agent]")))
-      .toEqual(["pi", "omp", "claude", "codex", "cursor-agent"]);
+    expect(parseOmarchyAgents(commandsJson("[pi|omp|claude|codex|ori]")))
+      .toEqual(["pi", "omp", "claude", "codex", "ori"]);
   });
 
   it("fails loudly when Omarchy stops naming them", () => {
