@@ -154,12 +154,6 @@ const turnBody = (sessionId: string, prompt = "Who are you?") => ({
   sessionId,
 });
 
-/** A runner built without a hooks.json: nothing to read, nothing to replace. */
-const noHooksFile = {
-  config: () => undefined,
-  replaceConfig: async (): Promise<never> => { throw new Error("This hook runner has no configuration file."); },
-};
-
 describe("GET /api/ghosts", () => {
   it("lists ghosts with name and dir", async () => {
     const base = await serve();
@@ -172,12 +166,6 @@ describe("GET /api/ghosts", () => {
 });
 
 describe("/api/hooks/config", () => {
-  it("is absent when the runner has no configuration file", async () => {
-    const base = await serve(undefined, { hooks: noHooksFile });
-    const response = await fetch(`${base}/api/hooks/config`);
-    expect(response.status).toBe(404);
-  });
-
   it("reads and replaces the whole document through the runner", async () => {
     const path = join(temp?.root ?? "", "hooks.json");
     let document: Record<string, unknown> = { hooks: {} };
@@ -1410,7 +1398,7 @@ describe("GET /api/status", () => {
     const base = await serve();
     const status = await fetch(`${base}/api/status`);
     expect(status.status).toBe(200);
-    expect(await status.json()).toEqual({ version: null, source: { commit: null, root: null }, startedAt: null, restartNeeded: false });
+    expect(await status.json()).toEqual({ version: "0.0.0-test", source: { commit: null, root: null }, startedAt: null, restartNeeded: false });
   });
 });
 

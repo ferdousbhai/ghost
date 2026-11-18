@@ -160,15 +160,6 @@ export class DaemonClient {
     return parsed as T;
   }
 
-  async optional<T = unknown>(method: string, path: string): Promise<T | null> {
-    try {
-      return await this.request<T>(method, path);
-    } catch (error) {
-      if (error instanceof CliError && error.exitCode === EXIT_CODE.notFound) return null;
-      throw error;
-    }
-  }
-
   async stream(
     path: string,
     body: unknown | undefined,

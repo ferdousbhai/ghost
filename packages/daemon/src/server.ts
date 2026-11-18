@@ -18,7 +18,7 @@ import { MAX_CHARACTER_BODY_LENGTH } from "./persona.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { isRecord } from "./record.js";
 import type { GhostRegistry } from "./ghosts.js";
-import type { GhostHookRunner } from "./hooks.js";
+import type { ConfiguredHookRunner } from "./hooks.js";
 import type { GhostHookCommandConfig } from "./hook-policy.js";
 import { DAEMON_HOST } from "./loopback.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -37,10 +37,11 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
-  /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
-  runningSource?: RunningSource;
+  /** What runs this daemon, as `GET /api/status` reports it. */
+  runningSource: RunningSource;
   mcp: McpCatalog;
-  hooks?: Pick<GhostHookRunner, "config" | "replaceConfig">;
+  /** The owner's `hooks.json`, as `GhostHookRunner.fromConfig` admitted it. */
+  hooks: Pick<ConfiguredHookRunner, "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
   /**
@@ -414,10 +415,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
    */
   const handleHookConfig = async ({ method, request, response }: RequestContext): Promise<void> => {
     const hooks = options.hooks;
-    const config = hooks?.config();
-    if (!hooks || !config) {
-      throw new GhostError("not_found", "Hook configuration is not available.", 404);
-    }
+    const config = hooks.config();
     if (method === "GET") {
       jsonResponse(response, 200, { path: config.path, document: config.document });
       return;
@@ -716,10 +714,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/status", ownerOnly(({ response }) => {
       const running = options.runningSource;
       jsonResponse(response, 200, {
-        version: running?.version ?? null,
-        source: { commit: running?.commit ?? null, root: running?.root ?? null },
-        startedAt: running?.startedAt === undefined ? null : new Date(running.startedAt).toISOString(),
-        restartNeeded: running ? replacedSinceStart(running) : false,
+        version: running.version,
+        source: { commit: running.commit, root: running.root },
+        startedAt: running.startedAt === undefined ? null : new Date(running.startedAt).toISOString(),
+        restartNeeded: replacedSinceStart(running),
       });
     })),
     route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,

@@ -9,7 +9,8 @@ import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
 import { RemoteServe } from "../../src/remote-serve.js";
 import type { TurnEvent } from "../../src/turn-events.js";
-import { startDaemonServer, type ListeningServer } from "../../src/server.js";
+import { startDaemonServer, type ListeningServer, type ServerOptions } from "../../src/server.js";
+import { GhostHookRunner } from "../../src/hooks.js";
 import { SessionHost } from "../../src/session-host.js";
 import { fakeTailscale } from "./fake-tailscale.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./fake-harness.js";
@@ -160,7 +161,16 @@ export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): voi
   return { path, cleanup: () => rmSync(path, { recursive: true, force: true }) };
 }
 
-/** The services every daemon server holds, with Serve answered by a fake `tailscale` so no test reaches the real one. */
-export function serverServices(registry: GhostRegistry): { mcp: McpCatalog; remoteServe: RemoteServe } {
-  return { mcp: new McpCatalog({ registry }), remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }) };
+/**
+ * The services every daemon server holds, with Serve answered by a fake
+ * `tailscale` so no test reaches the real one, and a `hooks.json` in the
+ * ghosts root that the registry skips as a dotfile.
+ */
+export function serverServices(registry: GhostRegistry): Pick<ServerOptions, "mcp" | "remoteServe" | "hooks" | "runningSource"> {
+  return {
+    mcp: new McpCatalog({ registry }),
+    remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
+    hooks: GhostHookRunner.fromConfig(join(registry.root, ".hooks.json")),
+    runningSource: { version: "0.0.0-test", commit: null, root: null },
+  };
 }

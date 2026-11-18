@@ -6,19 +6,18 @@ import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
 interface DaemonStatus {
-  version: RunningSource["version"] | null;
-  source?: { commit: RunningSource["commit"]; root: RunningSource["root"] };
+  version: RunningSource["version"];
+  source: { commit: RunningSource["commit"]; root: RunningSource["root"] };
   /** When the running daemon started, and whether the code on disk has changed since. */
-  startedAt?: string | null;
-  restartNeeded?: boolean;
+  startedAt: string | null;
+  restartNeeded: boolean;
 }
 
 export async function statusCommand(ctx: CliContext): Promise<number> {
   const [ghosts, remote, daemon] = await Promise.all([
     listGhosts(ctx.client),
-    ctx.client.optional<RemoteStatus>("GET", "/api/remote"),
-    // A daemon older than this route 404s; the rest of status still prints.
-    ctx.client.optional<DaemonStatus>("GET", "/api/status"),
+    ctx.client.request<RemoteStatus>("GET", "/api/remote"),
+    ctx.client.request<DaemonStatus>("GET", "/api/status"),
   ]);
   const defaultGhost = readDefaultGhost(ctx.runtime) ?? null;
   const result = {
@@ -30,15 +29,11 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
     ghostCount: ghosts.length,
     defaultGhost,
     version: ctx.version,
-    ...(daemon
-      ? {
-        daemonVersion: daemon.version,
-        source: daemon.source ?? null,
-        daemonStartedAt: daemon.startedAt ?? null,
-        restartNeeded: daemon.restartNeeded === true,
-      }
-      : {}),
-    remote: remote ?? { state: "unavailable" },
+    daemonVersion: daemon.version,
+    source: daemon.source,
+    daemonStartedAt: daemon.startedAt,
+    restartNeeded: daemon.restartNeeded,
+    remote,
   };
   emit(ctx, result, () => {
     const lines = [
@@ -50,20 +45,15 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
       `default ghost  ${defaultGhost ?? "—"}`,
       `version        ${ctx.version}`,
     ];
-    if (daemon) {
-      lines.push(`daemon version ${daemon.version ?? "unknown"}`);
-      lines.push(`daemon commit  ${daemon.source?.commit ?? "unknown"}`);
-      lines.push(`daemon source  ${daemon.source?.root ?? "packaged install"}`);
-      if (daemon.startedAt) lines.push(`daemon started ${daemon.startedAt}`);
-      // The code changed under a running daemon: what is on disk is not what answers.
-      if (daemon.restartNeeded === true)
-        lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
-    }
-    if (remote) {
-      const url = remote.state === "on" && remote.hostname ? ` ${remote.hostname}` : "";
-      const problem = remote.problem ? ` (${remote.problem.message})` : "";
-      lines.push(`remote         ${remote.state}${url}${problem}`);
-    } else lines.push("remote         unavailable");
+    lines.push(`daemon version ${daemon.version}`);
+    lines.push(`daemon commit  ${daemon.source.commit ?? "unknown"}`);
+    lines.push(`daemon source  ${daemon.source.root ?? "packaged install"}`);
+    if (daemon.startedAt) lines.push(`daemon started ${daemon.startedAt}`);
+    // The code changed under a running daemon: what is on disk is not what answers.
+    if (daemon.restartNeeded) lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
+    const url = remote.state === "on" && remote.hostname ? ` ${remote.hostname}` : "";
+    const problem = remote.problem ? ` (${remote.problem.message})` : "";
+    lines.push(`remote         ${remote.state}${url}${problem}`);
     return { human: `${lines.join("\n")}\n`, quiet: "ok\n" };
   });
   return 0;

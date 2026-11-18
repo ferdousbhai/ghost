@@ -14,7 +14,6 @@ describe("RemoteServe status", () => {
       enabled: true,
       state: "on",
       hostname: "ghostbox.example.ts.net",
-      tailscale: { installed: true, running: true, loggedIn: true, operator: true },
       guests: "none",
       owner: "owner@example.com",
       app: null,
@@ -53,7 +52,6 @@ describe("RemoteServe status", () => {
     expect(status).toMatchObject({
       enabled: false,
       state: "unavailable",
-      tailscale: { installed: true, running: false },
       problem: { code: "tailscale_stopped" },
     });
   });
@@ -62,7 +60,6 @@ describe("RemoteServe status", () => {
     const status = await new RemoteServe(7717, { run: missingBinary() }).status();
     expect(status).toMatchObject({
       state: "unavailable",
-      tailscale: { installed: false },
       problem: { code: "tailscale_missing", action: "omarchy-install-service-tailscale" },
     });
   });
@@ -132,12 +129,11 @@ describe("RemoteServe mutations", () => {
       : fake.run(args));
     const remote = new RemoteServe(7717, { run });
     expect(await remote.enable()).toMatchObject({
-      tailscale: { operator: false },
       problem: { code: "operator_required", message: "Access denied.", action: "sudo tailscale set --operator=$USER" },
     });
-    expect(await remote.status()).toMatchObject({ state: "off", tailscale: { operator: false }, problem: { code: "operator_required" } });
+    expect(await remote.status()).toMatchObject({ state: "off", problem: { code: "operator_required" } });
     denied = false;
-    expect(await remote.enable()).toMatchObject({ state: "on", tailscale: { operator: true }, problem: null });
+    expect(await remote.enable()).toMatchObject({ state: "on", problem: null });
   });
 
 });

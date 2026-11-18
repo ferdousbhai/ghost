@@ -131,7 +131,7 @@ describe("GhostHookRunner", () => {
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
     expect(runner.hasHandlers("session_stop")).toBe(true);
     expect(ghostSessionStopContinuation(await runner.emitSessionStop(event()))).toBe("Revise.");
-    expect(runner.config()?.document).toEqual(first);
+    expect(runner.config().document).toEqual(first);
 
     const invalid = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } };
     await expect(runner.replaceConfig(invalid)).rejects.toThrow(/non-empty NUL-free command/u);
@@ -343,11 +343,11 @@ describe("GhostHookRunner", () => {
       { message: "skipping a retired hook event; the next edit drops it from hooks.json", fields: { event: "before_prompt" } },
       { message: "ignoring top-level keys; the next edit drops them from hooks.json", fields: { keys: ["builtin"] } },
     ]);
-    expect(runner.config()?.document).toEqual({ hooks: { session_stop: stop } });
+    expect(runner.config().document).toEqual({ hooks: { session_stop: stop } });
     await expect(runner.replaceConfig(document)).rejects.toThrow(/was retired/u);
 
     // A client editing what the daemon serves (the HUD clones it) writes it clean.
-    const served = structuredClone(runner.config()!.document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };
+    const served = structuredClone(runner.config().document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };
     served.hooks.session_stop[0]!.hooks[0]!.name = "Reviewer";
     await expect(runner.replaceConfig(served)).resolves.toMatchObject({ document: served });
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(served);

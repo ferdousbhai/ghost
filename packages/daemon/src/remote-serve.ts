@@ -24,13 +24,6 @@ export interface RemoteStatus {
   enabled: boolean;
   state: "on" | "off" | "unavailable";
   hostname: string | null;
-  tailscale: {
-    installed: boolean;
-    running: boolean;
-    loggedIn: boolean;
-    /** False after Tailscale refused a Serve change for lack of the operator right. */
-    operator: boolean;
-  };
   guests: "read-only" | "none";
   owner: string | null;
   /**
@@ -152,11 +145,11 @@ export class RemoteServe {
     if (status.state === "unavailable") return status;
     if (http) {
       const problem = await this.change(["serve", HTTP, "off"]);
-      if (problem) return this.refused(status, problem);
+      if (problem) return { ...status, problem };
     }
     if (!certs) return { ...(await this.status()), problem: this.operatorProblem ?? HTTPS_REQUIRED };
     const problem = await this.change(["serve", "--bg", HTTPS, this.target]);
-    return problem ? this.refused(status, problem) : this.status();
+    return problem ? { ...status, problem } : this.status();
   }
 
   /** Turn off each listener Ghost has on, the plain-HTTP one an earlier version wrote included. */
@@ -166,7 +159,7 @@ export class RemoteServe {
     if (listeners.length === 0) return status;
     for (const listener of listeners) {
       const problem = await this.change(["serve", listener, "off"]);
-      if (problem) return this.refused(status, problem);
+      if (problem) return { ...status, problem };
     }
     return this.status();
   }
@@ -217,7 +210,6 @@ export class RemoteServe {
       enabled: false,
       state: "off",
       hostname: null,
-      tailscale: { installed: true, running: false, loggedIn: false, operator: this.operatorProblem === null },
       guests: this.guests,
       owner: this.owner,
       app: this.app ? { origin: this.app, url: null } : null,
@@ -229,22 +221,17 @@ export class RemoteServe {
     try {
       node = await readTailscaleNode(this.run);
     } catch (error) {
-      return isMissingBinary(error)
-        ? unavailable({ ...off, tailscale: { ...off.tailscale, installed: false } }, TAILSCALE_MISSING)
-        : unavailable(off, { code: "tailscale_stopped", message: firstLine(errorMessage(error)) });
+      return unavailable(off, isMissingBinary(error)
+        ? TAILSCALE_MISSING
+        : { code: "tailscale_stopped", message: firstLine(errorMessage(error)) });
     }
     const known: RemoteStatus = {
       ...off,
       hostname: node.hostname,
       owner: this.owner ?? node.login?.toLowerCase() ?? null,
-      tailscale: {
-        ...off.tailscale,
-        running: node.backendState === "Running",
-        loggedIn: node.backendState !== "NeedsLogin" && node.hostname !== null,
-      },
     };
-    if (!known.tailscale.loggedIn) return unavailable(known, NOT_LOGGED_IN);
-    if (!known.tailscale.running) return unavailable(known, { code: "tailscale_stopped", message: "Tailscale is not running." });
+    if (node.backendState === "NeedsLogin" || node.hostname === null) return unavailable(known, NOT_LOGGED_IN);
+    if (node.backendState !== "Running") return unavailable(known, { code: "tailscale_stopped", message: "Tailscale is not running." });
     const inspection = (status: RemoteStatus, http = false): Inspection => ({ status, certs: node.certs, http });
     let result: CommandResult;
     try {
@@ -266,11 +253,6 @@ export class RemoteServe {
       app: known.app && { ...known.app, url: served.https ? `${known.app.origin}/#add=${known.hostname}` : null },
       problem: this.operatorProblem,
     }, served.http);
-  }
-
-  /** `status` with a refused change's problem. */
-  private refused(status: RemoteStatus, problem: RemoteProblem): RemoteStatus {
-    return { ...status, tailscale: { ...status.tailscale, operator: this.operatorProblem === null }, problem };
   }
 
   /** Ask Tailscale for one Serve change; a refusal is returned, and remembered when it is the operator right. */

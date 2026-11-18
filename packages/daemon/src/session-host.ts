@@ -224,8 +224,6 @@ export interface HarnessChoices {
   harnesses: (Harness & { effort: string | null; resting: HarnessRest | null })[];
   /** The ghost's `settings.yml` `harness`, or null for automatic. */
   ghostDefault: string | null;
-  /** Omarchy's default agent, the next preference after the ghost's own. */
-  omarchyDefault: string | null;
   /**
    * What a new conversation would start on now: the first harness
    * `harnessCandidates` would try (the local model when it is the default),
@@ -598,12 +596,10 @@ export class SessionHost {
     }
   }
 
-  /** Installed agents Ghost can run on, with Omarchy's usage, and both defaults. */
+  /** Installed agents Ghost can run on, with Omarchy's usage, the ghost's preference, and what runs automatically. */
   async listHarnesses(ghostName: string): Promise<HarnessChoices> {
     const ghost = this.registry.get(ghostName);
-    const [report, omarchyDefault, [automatic]] = await Promise.all([
-      this.cachedReport(), this.defaultHarness(), this.harnessCandidates(ghost, null),
-    ]);
+    const [report, [automatic]] = await Promise.all([this.cachedReport(), this.harnessCandidates(ghost, null)]);
     return {
       harnesses: [
         ...report.harnesses.flatMap((harness) => {
@@ -613,7 +609,6 @@ export class SessionHost {
         ...(this.localModel ? [{ id: LOCAL_HARNESS, usage: null, effort: null, resting: null }] : []),
       ],
       ghostDefault: readHarnessSetting(ghost.dir),
-      omarchyDefault,
       automatic: automatic ?? null,
     };
   }

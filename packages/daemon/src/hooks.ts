@@ -84,7 +84,7 @@ export class GhostHookRunner {
     this.commandRunner = options.commandRunner ?? runCommandHook;
   }
 
-  static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
+  static fromConfig(path: string, options: GhostHookRunnerOptions = {}): ConfiguredHookRunner {
     const document = readCommandHooksDocument(path);
     const logger = options.logger ?? silentLogger;
     const commands = parseHooksDocument(document, path, (eventName) => {
@@ -93,7 +93,7 @@ export class GhostHookRunner {
     const admitted = admittedHooksDocument(document as Record<string, unknown>);
     const dropped = Object.keys(document as Record<string, unknown>).filter((key) => key !== "hooks");
     if (dropped.length > 0) logger.warn("ignoring top-level keys; the next edit drops them from hooks.json", { path, keys: dropped });
-    return new GhostHookRunner({
+    return new ConfiguredHookRunner({
       ...options,
       commands,
       commandConfig: { path, document: admitted },
@@ -171,4 +171,13 @@ export class GhostHookRunner {
     return runSessionStopHooks(this.commands, event, this.observed(onHook));
   }
 
+}
+
+/** A runner read from a `hooks.json`, so it always has one to serve and replace. */
+export class ConfiguredHookRunner extends GhostHookRunner {
+  override config(): GhostHookCommandConfig {
+    const config = super.config();
+    if (!config) throw new Error("A configured hook runner has no hooks.json.");
+    return config;
+  }
 }

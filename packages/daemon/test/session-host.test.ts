@@ -687,7 +687,7 @@ describe("owner commands and hooks", () => {
 });
 
 describe("choosing the agent", () => {
-  it("lists the agents with both defaults, and sets and clears the ghost's own", async () => {
+  it("lists the agents with the automatic choice, and sets and clears the ghost's own", async () => {
     const first = harness(replies("from first"), "first");
     const second = harness(replies("from second"), "second");
     const sessions = host({ harnesses: [first, second], defaultHarness: async () => "first" });
@@ -697,7 +697,6 @@ describe("choosing the agent", () => {
     expect(await sessions.listHarnesses("casper")).toMatchObject({
       harnesses: [{ id: "first", effort: null }, { id: "second", effort: null }],
       ghostDefault: null,
-      omarchyDefault: "first",
       automatic: "first",
     });
     expect(await sessions.setGhostHarness("casper", "second")).toMatchObject({ ghostDefault: "second", automatic: "second" });
@@ -712,7 +711,7 @@ describe("choosing the agent", () => {
   it("reports the local model as the automatic choice when it is configured, as turns run", async () => {
     const first = harness(replies("unused"), "first");
     const sessions = host({ harnesses: [first], defaultHarness: async () => "first", localModel: {} as LocalModel });
-    expect(await sessions.listHarnesses("casper")).toMatchObject({ ghostDefault: null, omarchyDefault: "first", automatic: "local" });
+    expect(await sessions.listHarnesses("casper")).toMatchObject({ ghostDefault: null, automatic: "local" });
     expect((await sessions.setGhostHarness("casper", "first")).automatic).toBe("first");
   });
 

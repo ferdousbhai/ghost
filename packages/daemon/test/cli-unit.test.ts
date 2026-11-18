@@ -301,39 +301,6 @@ describe("ghost help", () => {
 });
 
 describe("CLI API adaptation", () => {
-  it("still prints against a daemon too old to answer /api/status", async () => {
-    const paths: string[] = [];
-    const fetch: CliFetch = async (input) => {
-      const path = new URL(input).pathname;
-      paths.push(path);
-      if (path === "/api/ghosts") return jsonResponse([]);
-      if (path === "/api/remote") {
-        return jsonResponse({
-          enabled: false,
-          state: "off",
-          hostname: null,
-          tailscale: { installed: false, running: false, loggedIn: false, operator: false },
-          guests: "read-only",
-          owner: null,
-          problem: null,
-        });
-      }
-      if (path === "/api/status") {
-        return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
-      }
-      return jsonResponse({ error: { message: "unexpected request" } }, 500);
-    };
-    const response = await runCli(["status", "--json"], {
-      env: { GHOSTD_PORT: "7718", GHOSTD_VERSION: "3.2.1" },
-      home: "/tmp/ghost-cli-unit",
-      fetch,
-    });
-    const body = JSON.parse(response.stdout);
-    expect(body).toMatchObject({ version: "3.2.1", ghostCount: 0 });
-    expect(body).not.toHaveProperty("source");
-    expect(paths.sort()).toEqual(["/api/ghosts", "/api/remote", "/api/status"]);
-  });
-
   it("ghost remote prints a problem's message, not the object", async () => {
     const fetch: CliFetch = async () => jsonResponse({
       enabled: false,
@@ -377,41 +344,43 @@ describe("CLI API adaptation", () => {
     ]);
   });
 
-  it("reports the running daemon's version, commit, and source root", async () => {
-    const fetch: CliFetch = async (input) => {
-      const path = new URL(input).pathname;
-      if (path === "/api/ghosts") return jsonResponse([]);
-      if (path === "/api/status") {
-        return jsonResponse({
-          version: "1.4.0",
-          source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
-        });
-      }
-      return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
-    };
+  /** A daemon answering `ghost status`'s three reads, `/api/status` with `daemon`. */
+  const statusDaemon = (daemon: Record<string, unknown>): CliFetch => async (input) => {
+    const path = new URL(input).pathname;
+    if (path === "/api/ghosts") return jsonResponse([]);
+    if (path === "/api/status") return jsonResponse(daemon);
+    if (path === "/api/remote") {
+      return jsonResponse({
+        enabled: false, state: "off", hostname: null, guests: "read-only", owner: null, app: null,
+        problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." },
+      });
+    }
+    return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
+  };
+
+  it("reports the running daemon's version, commit, and source root, and remote access", async () => {
     const response = await runCli(["status"], {
       env: { GHOSTD_PORT: "7718", GHOSTD_VERSION: "3.2.1" },
       home: "/tmp/ghost-cli-unit",
-      fetch,
+      fetch: statusDaemon({
+        version: "1.4.0",
+        source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
+        startedAt: null,
+        restartNeeded: false,
+      }),
     });
     expect(response.stdout).toContain("daemon version 1.4.0");
     expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
     expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
+    expect(response.stdout).toContain("remote         off (This tailnet has no HTTPS certificates.)\n");
     expect(response.stdout).not.toContain("restart needed");
   });
 
   // An update that was not restarted into still answers under the same
   // version; status says so, and points at the safe way to restart.
   it("says when the code on disk is newer than the running daemon", async () => {
-    const fetch: CliFetch = async (input) => {
-      const path = new URL(input).pathname;
-      if (path === "/api/ghosts") return jsonResponse([]);
-      if (path === "/api/status") {
-        return jsonResponse({ version: "1.4.0", source: { commit: null, root: null },
-          startedAt: "2026-10-28T12:40:53.000Z", restartNeeded: true });
-      }
-      return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
-    };
+    const fetch = statusDaemon({ version: "1.4.0", source: { commit: null, root: null },
+      startedAt: "2026-10-28T12:40:53.000Z", restartNeeded: true });
     const response = await runCli(["status"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect(response.stdout).toContain("daemon started 2026-10-28T12:40:53.000Z");
     expect(response.stdout).toContain("restart needed code on disk is newer than this daemon (ghost help self)");

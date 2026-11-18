@@ -57,12 +57,6 @@ function remoteStatus(enabled: boolean): RemoteStatus {
     enabled,
     state: enabled ? "on" : "off",
     hostname: "ghostbox.example.ts.net",
-    tailscale: {
-      installed: true,
-      running: true,
-      loggedIn: true,
-      operator: true,
-    },
     guests: "read-only",
     owner: "owner@example.com",
     app: null,
@@ -192,12 +186,6 @@ describe("tailnet identity", () => {
       body: JSON.stringify({ prompt: "Spend the owner's subscription." }),
     });
     expect(complete.status).toBe(403);
-  });
-
-  it("reports an unknown source when the daemon was started without one", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${TOKEN}` } });
-    expect(await response.json()).toEqual({ version: null, source: { commit: null, root: null }, startedAt: null, restartNeeded: false });
   });
 
   it("honours guests: none and a configured owner login", async () => {

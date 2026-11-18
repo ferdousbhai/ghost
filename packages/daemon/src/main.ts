@@ -12,7 +12,7 @@ import {
 import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
 import { GhostRegistry } from "./ghosts.js";
-import { GhostHookRunner } from "./hooks.js";
+import { ConfiguredHookRunner, GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { LocalModel } from "./local-model.js";
@@ -186,7 +186,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1;
   }
 
-  let hooks: GhostHookRunner;
+  let hooks: ConfiguredHookRunner;
   try {
     hooks = GhostHookRunner.fromConfig(config.hooksPath, { logger });
   } catch (error) {
@@ -203,7 +203,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 async function serveDaemon(
   config: DaemonConfig,
   logger: ReturnType<typeof createLogger>,
-  hooks: GhostHookRunner,
+  hooks: ConfiguredHookRunner,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
