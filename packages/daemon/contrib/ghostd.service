@@ -1,8 +1,8 @@
 [Unit]
 Description=Ghost daemon (ghostd)
 Documentation=https://github.com/ferdousbhai/ghost
-# The daemon and the commands a ghost runs (hyprctl, gio, wl-clipboard, the
-# browser CLI) inherit the compositor environment from the user manager. Keep
+# The daemon and the commands a ghost runs (hyprctl, gio, the browser CLI)
+# inherit the compositor environment from the user manager. Keep
 # the daemon in the graphical session so it cannot start early with a
 # permanently incomplete WAYLAND_DISPLAY/Hyprland environment.
 PartOf=graphical-session.target

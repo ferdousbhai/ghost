@@ -78,7 +78,7 @@ function statusError(status: number, body: unknown, tokenPath: string): CliError
   const { message = `daemon returned HTTP ${status}`, code } = daemonError(body);
   if (status === 403) return new CliError(EXIT_CODE.unauthorized, message, code);
   if (status === 404) return new CliError(EXIT_CODE.notFound, message, code);
-  if (status === 409 || status === 429) return new CliError(EXIT_CODE.conflict, message, code);
+  if (status === 409) return new CliError(EXIT_CODE.conflict, message, code);
   return new CliError(EXIT_CODE.failure, message, code);
 }
 

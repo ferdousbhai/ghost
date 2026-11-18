@@ -22,7 +22,7 @@ export function renderUsage(commands: readonly CommandDocumentation[]): string {
 
 Usage:
   ghost <verb> [args] [flags]
-  ghost help [command|exit-codes]
+  ghost help [command|exit-codes|<topic>]
 
 Commands:
 ${plainRows(commands)}

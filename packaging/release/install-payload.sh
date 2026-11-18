@@ -33,7 +33,6 @@ install_tree() {
   done < <(find "$source_dir" -type f -print0)
 }
 
-appdir="$pkgdir/usr/lib/ghost"
 sharedir="$pkgdir/usr/share/ghost"
 
 if [[ "$component" == runtime ]]; then

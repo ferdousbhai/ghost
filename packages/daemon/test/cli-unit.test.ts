@@ -261,7 +261,8 @@ describe("ghost help", () => {
         [["mcp", "set", "github", missing], "ENOENT"],
         [["hooks", "set", malformed], `${malformed} is not valid JSON`],
         [["character", "set", missing], "ENOENT"],
-        [["routines", "edit", "daily", missing], "Edit expects the JSON"],
+        [["routines", "edit", "daily", missing], "ENOENT"],
+        [["routines", "edit", "daily", malformed], `${malformed} is not valid JSON`],
       ] as const) {
         const result = await runCli([...argv], { env: { GHOST: "casper" }, home: dir, fetch });
         expect(result.code, argv.join(" ")).toBe(2);

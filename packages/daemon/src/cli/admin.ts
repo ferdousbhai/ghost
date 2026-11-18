@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { readArgumentFile, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
@@ -131,8 +130,10 @@ export async function routinesCommand(ctx: CliContext): Promise<number> {
   }
   let config: unknown;
   if (action === "edit") {
-    try { config = JSON.parse(file === "-" ? await stdinText(ctx.runtime.stdin) : readFileSync(file as string, "utf8")); }
-    catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
+    if (file === "-") {
+      try { config = JSON.parse(await stdinText(ctx.runtime.stdin)); }
+      catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
+    } else config = readArgumentJson(file as string);
   }
   const ghost = await resolveGhost(ctx);
   const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
