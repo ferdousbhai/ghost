@@ -57,7 +57,11 @@ interface GhostSystemPromptInput {
   readonly extraSections?: readonly string[];
 }
 
-function characterSection(input: GhostSystemPromptInput): string {
+/**
+ * The character alone, or its unwritten stand-in: all a local pass gets, since
+ * the policy sections after it are for a harness with a shell and file tools.
+ */
+export function characterSection(input: Pick<GhostSystemPromptInput, "ghostName" | "character">): string {
   const body = input.character?.body;
   if (body?.trim()) return body;
   return [

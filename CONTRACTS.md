@@ -858,7 +858,9 @@ own copy; Ghost does not stop it, and frees its own when idle.
 
 A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) first
 searches the owner's message and opens its first three file or library
-hits (up to 2000 characters each), then sends the rendered persona plus the
+hits (up to 2000 characters each), then sends the ghost's character alone
+(not the stable policy sections, which direct a shell, file tools, and the
+`ghost` CLI it has not; a delegated task gets the whole persona) plus the
 "Running locally" section and the current time, and, as the user message,
 the conversation so far (`HANDOFF_CONTEXT_CHARS`), the prompt, and the hits
 and opened text in a `<found>` block marked as reference text. Thinking is

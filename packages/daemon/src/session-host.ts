@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { buildGhostSystemPrompt, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
+import { buildGhostSystemPrompt, characterSection, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
 import { readCharacter } from "./home.js";
 import { findSourceRoot } from "./running-source.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
@@ -440,21 +440,25 @@ export class SessionHost {
   }
 
   /**
-   * The ghost's whole system prompt: its character and the stable policy
-   * sections. Rendered before every turn, so a character the ghost (or the
-   * owner) rewrote is who it is on the next one.
+   * The ghost's whole system prompt (`persona`: its character and the stable
+   * policy sections) and the character alone, which is what a local pass gets.
+   * Rendered before every turn, so a character the ghost (or the owner)
+   * rewrote is who it is on the next one.
    */
-  async renderPersona(ghost: Ghost): Promise<string> {
+  async renderPersona(ghost: Ghost): Promise<{ persona: string; character: string }> {
     const character = await readCharacter(ghost.dir);
-    return buildGhostSystemPrompt({
-      ghostName: ghost.name,
-      character,
-      homeDir: ghost.dir,
-      extraSections: stablePolicySections({
-        documents: this.documentsDir(),
-        firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
+    return {
+      persona: buildGhostSystemPrompt({
+        ghostName: ghost.name,
+        character,
+        homeDir: ghost.dir,
+        extraSections: stablePolicySections({
+          documents: this.documentsDir(),
+          firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
+        }),
       }),
-    });
+      character: characterSection({ ghostName: ghost.name, character }),
+    };
   }
 
   /** The MCP servers a turn loads: the ghost's enabled `mcp.json` rows. */
@@ -1028,7 +1032,7 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
-    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), "run" in row ? [] : this.mcpServers(ghost)]);
+    const [{ persona, character }, mcp] = await Promise.all([this.renderPersona(ghost), "run" in row ? [] : this.mcpServers(ghost)]);
     await this.prepareDirectory(ghost.dir, dir, persona);
     const launch = "run" in row ? null : row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch?.files);
@@ -1116,7 +1120,7 @@ export class SessionHost {
     const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
     const exit: HarnessExit = "run" in row
       ? await row.run({
-        prompt: turn.prompt, message: turn.message ?? turn.prompt, persona, cwd: dir, home: this.ownerHome, env, signal, onEvent,
+        prompt: turn.prompt, message: turn.message ?? turn.prompt, character, cwd: dir, home: this.ownerHome, env, signal, onEvent,
         delegate: (task) => this.delegateTask(ghost, dir, env, persona, task, signal),
       }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
         if (!signal.aborted) error = errorMessage(failure);

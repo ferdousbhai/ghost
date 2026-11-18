@@ -111,7 +111,12 @@ describe("the local model", () => {
     // The top hit's own text is in the prompt before the model asks for it.
     expect(server.requests[0]?.messages[1]?.content).toContain("[S1] in full:");
     expect(server.requests[0]?.messages[1]?.content).toContain("north pier");
-    expect(server.requests[0]?.messages[0]?.content).toContain("## Running locally");
+    // The character and the local section, not the policy a shell-less model cannot follow.
+    const system = String(server.requests[0]?.messages[0]?.content);
+    expect(system).toMatch(/^# Casper\n\n## Running locally\n/u);
+    for (const absent of ["## Character file", "## Computer use", "## Ghost", "## Owner context", "## First meeting"]) {
+      expect(system).not.toContain(absent);
+    }
     // A short file is read whole, not as Recall's passage.
     expect(server.requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", content: expect.stringContaining("north pier") });
     expect(cloud.calls()).toHaveLength(0);
