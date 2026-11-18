@@ -70,11 +70,8 @@ bash "$source_root/packaging/release/render-arch-package.sh" "$work/recipe-stabl
   "$(printf '%064d' 0)" "$(printf '%064d' 0)"
 verify_recipe "$work/recipe-stable/PKGBUILD" ''
 
-for hook in "$source_root/packaging/arch/ghost-dev.install" \
-  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"; do
-  output="$(bash -c 'source "$1"; pre_remove' split-hook "$hook")"
-  [[ "$output" == *'omarchy plugin remove'* && "$output" != *'systemctl'* ]]
-done
+output="$(bash -c 'source "$1"; pre_remove' split-hook "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install")"
+[[ "$output" == *'omarchy plugin remove'* && "$output" != *'systemctl'* ]]
 printf 'Split runtime/UI packaging regression passed\n'
 
 # Exercise the menu's removal with command doubles. pkg-drop's pacman -Rns

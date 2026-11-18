@@ -57,8 +57,8 @@ command -v jq >/dev/null || {
   printf 'jq is required by the Omarchy contribution regression but is not installed\n' >&2
   exit 1
 }
-# makepkg needs each recipe's hooks as regular files beside it, so the two
-# recipes keep identical copies.
+# The checkout recipe's hooks are links to the Omarchy recipe's; cmp proves
+# each link still resolves to its hook.
 cmp "$script_dir/ghost-dev.install" \
   "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"
 cmp "$script_dir/ghost-runtime-dev.install" \
