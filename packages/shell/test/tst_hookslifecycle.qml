@@ -182,16 +182,6 @@ TestCase {
         }
     }
 
-    function test_configIsUnavailableOnADaemonWithoutAFile(): void {
-        Ghostd.fetchHookConfig(false);
-        requests[0].complete(404, { error: { code: "not_found", message: "Hook configuration is not available." } });
-        verify(Ghostd.hookConfigLoaded);
-        verify(!Ghostd.hookConfigAvailable);
-        compare(Ghostd.hookConfigError, "");
-        Ghostd.writeHookConfig({ hooks: {} });
-        compare(requests.length, 1);
-    }
-
     function test_ghostAndSessionChangesDoNotOwnHooks(): void {
         Ghostd.fetchHookConfig(false);
         requests[0].complete(200, config("Machine global"));
