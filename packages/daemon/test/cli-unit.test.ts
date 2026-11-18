@@ -184,6 +184,10 @@ describe("a ghost's own shell addresses its conversation", () => {
     const whole = await runCli(["show"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(queries).toEqual([""]);
     expect(whole.stdout).not.toContain("(messages");
+
+    const past = await runCli(["show", "--offset", "9"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(past).toMatchObject({ code: 0, stdout: "(no messages from 10; 5 in all)\n" });
+    expect(await runCli(["show", "--offset", "9", "-q"], { env, home: "/tmp/ghost-cli-unit", fetch })).toMatchObject({ code: 0, stdout: "" });
   });
 
   it("-q keeps a read verb's primary output: the transcript without its paging note, the character body", async () => {

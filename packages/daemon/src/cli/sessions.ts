@@ -59,11 +59,13 @@ export async function showCommand(ctx: CliContext): Promise<number> {
   }
   emit(ctx, response, (body) => {
     const markdown = transcriptMarkdown(body, name);
-    const trailer = body.truncated && body.messages.length > 0
+    if (body.total === 0) return { human: "No messages.\n", quiet: "" };
+    if (body.messages.length === 0) return { human: `(no messages from ${first + 1}; ${body.total} in all)\n`, quiet: "" };
+    const trailer = body.truncated
       ? `(messages ${first + 1}–${first + body.messages.length} of ${body.total}; --offset/--limit for others)\n`
       : "";
-    const quiet = markdown ? `${markdown}\n` : "";
-    return { human: markdown ? `${quiet}${trailer ? "\n" : ""}${trailer}` : "No messages.\n", quiet };
+    const quiet = `${markdown}\n`;
+    return { human: `${quiet}${trailer ? "\n" : ""}${trailer}`, quiet };
   });
   return 0;
 }

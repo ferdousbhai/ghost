@@ -33,9 +33,18 @@ export async function mcpCommand(ctx: CliContext): Promise<number> {
   else if (action === "set") body = await ctx.client.request("PUT", server, { config });
   else if (action === "rm") body = await ctx.client.request("DELETE", server);
   else body = await ctx.client.request("PUT", `${server}/enabled`, { enabled: action === "enable" });
-  // A change's snapshot is its acknowledgement; only `list` keeps names under -q.
-  emit(ctx, body, (snapshot) => action === "list"
-    ? { human: renderSnapshot(snapshot), quiet: (snapshot as McpCatalogSnapshot).servers.map((row) => `${row.name}\n`).join("") }
-    : renderSnapshot(snapshot));
+  if (action === "list") {
+    emit(ctx, body, (snapshot) => ({
+      human: renderSnapshot(snapshot),
+      quiet: (snapshot as McpCatalogSnapshot).servers.map((row) => `${row.name}\n`).join(""),
+    }));
+  } else {
+    const added = (body as McpCatalogSnapshot).servers.find((row) => row.name === name);
+    const sentence = action === "add" ? added?.enabled ? `Added ${name}.` : `Added ${name}, disabled until \`ghost mcp enable ${name}\`.`
+      : action === "set" ? `Replaced ${name}.`
+      : action === "rm" ? `Removed ${name}.`
+      : `${action === "enable" ? "Enabled" : "Disabled"} ${name}.`;
+    emit(ctx, body, () => `${sentence}\n`);
+  }
   return 0;
 }
