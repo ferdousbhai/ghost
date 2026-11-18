@@ -99,7 +99,7 @@ describe("the stable prompt policy budget", () => {
 });
 
 /** Only a local pass adds it, after the stable policy; it has its own ceiling. */
-const LOCAL_CEILING = 593;
+const LOCAL_CEILING = 651;
 
 describe("the local model's section", () => {
   it("stays at or below its ceiling", () => {

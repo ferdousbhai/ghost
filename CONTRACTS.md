@@ -890,7 +890,8 @@ rounds, then makes one more call without them:
   The task leaves the machine; the section tells the model to send only
   what it needs.
 
-Results are cut at 8000 characters. Owner content reaches a cloud model only
+Results are cut at 8000 characters, and each reaches the model in a
+`<result>` block marked, like `<found>`, as reference text, not instructions. Owner content reaches a cloud model only
 through a delegated task or a conversation the owner moved to a harness.
 Recall's coverage is its own configuration: on the owner's machine its root
 is the home folder, minus code and scratch folders it lists as excluded, so a
