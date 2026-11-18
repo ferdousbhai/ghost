@@ -119,8 +119,9 @@ Confirm the client can reach and authenticate to the daemon:
 ghost status
 ```
 
-It prints the daemon URL, `reachable yes`, `authenticated yes`, the token file
-path, the ghost count, and remote-access state. The bearer token is minted on
+It prints the daemon URL, the token file path, the ghost count, and
+remote-access state; that it prints at all means the daemon answered and
+accepted the token (otherwise it exits 3 or 4). The bearer token is minted on
 first run at `~/.local/state/ghost/api-token` (mode 0600); the HUD and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
 To replace it, delete the file and `systemctl --user restart ghostd`.

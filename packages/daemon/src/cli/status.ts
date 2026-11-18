@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
 import { listGhosts, readDefaultGhost } from "./common.js";
@@ -22,10 +21,7 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
   const defaultGhost = readDefaultGhost(ctx.runtime) ?? null;
   const result = {
     daemon: ctx.client.baseUrl,
-    reachable: true,
-    authenticated: true,
     tokenFile: ctx.client.tokenPath,
-    tokenFileExists: existsSync(ctx.client.tokenPath),
     ghostCount: ghosts.length,
     defaultGhost,
     version: ctx.version,
@@ -38,8 +34,6 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
   emit(ctx, result, () => {
     const lines = [
       `daemon         ${ctx.client.baseUrl}`,
-      "reachable      yes",
-      "authenticated  yes",
       `token file     ${ctx.client.tokenPath}`,
       `ghosts         ${ghosts.length}`,
       `default ghost  ${defaultGhost ?? "—"}`,

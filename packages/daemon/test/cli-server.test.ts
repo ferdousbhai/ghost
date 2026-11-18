@@ -73,7 +73,7 @@ describe("ghost CLI against a real daemon server", () => {
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
       daemon: `http://127.0.0.1:${listening!.port}`,
-      authenticated: true,
+      tokenFile,
       version: expect.any(String),
     });
   });
