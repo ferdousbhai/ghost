@@ -523,7 +523,7 @@ describe("what a peer may reach", () => {
     expect(await (await asTailnet(mine, WIFE, "GET", "/api/peer/outbox")).json()).toEqual({ messages: [{ id: "for-her", text: "Hi" }] });
     expect(await (await asTailnet(mine, WIFE, "DELETE", "/api/peer/outbox/for-him")).json()).toEqual({ removed: false });
     expect(mine.peers.outbox.list("brother@example.com")).toHaveLength(1);
-    for (const [method, path] of [["GET", "/api/ghosts"], ["GET", "/api/board"], ["GET", "/api/peers"], ["POST", "/api/peers/check"], ["POST", "/api/ghosts/casper/messages"]] as const) {
+    for (const [method, path] of [["GET", "/api/ghosts"], ["GET", "/api/peers"], ["POST", "/api/peers/check"], ["POST", "/api/ghosts/casper/messages"]] as const) {
       const response = await asTailnet(mine, WIFE, method, path, method === "POST" ? { prompt: "hi" } : undefined);
       expect(response.status, `${method} ${path}`).toBe(403);
       expect(await response.json()).toMatchObject({ error: { code: "peer_only" } });

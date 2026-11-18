@@ -452,8 +452,8 @@ export class SessionHost {
 
   // ── Persona and harness configuration ─────────────────────────────────
 
-  /** The owner's Documents folder, where board.md lives. */
-  documentsDir(): string {
+  /** The owner's Documents folder, which the prompt names. */
+  private documentsDir(): string {
     return resolveDocumentsDirectory(this.env, this.ownerHome);
   }
 

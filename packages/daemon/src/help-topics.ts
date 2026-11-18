@@ -285,7 +285,7 @@ function crashes(input: HelpTopicInput): string[] {
 function memory(): string[] {
   return [
     "# Memory",
-    "Your durable memory is the owner's documents directory (Owner context): Markdown in its existing project and topic folders, with `board.md` at its root. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
+    "Your durable memory is the owner's documents directory (Owner context): Markdown in its existing project and topic folders. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
     "Known names or terms: guess the folder from its name, then `rg -n -i '<term>' <folder>`, widening to the whole directory only if that finds nothing.",
     "Unknown wording or location: search by meaning with Recall through its `recall` skill (`ghost help products` gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
     "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",

@@ -12,7 +12,6 @@ import {
 import {
   characterCommand,
   readCommand,
-  boardCommand,
   routinesCommand,
   eventCommand,
   remoteCommand,
@@ -195,14 +194,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost read -s cli-abc",
     positionals: [0, 0],
     run: readCommand,
-  },
-  {
-    verb: "board",
-    usage: "board [--json] [-q]",
-    summary: "Show the owner's board (Documents/board.md) as columns and cards.",
-    example: "ghost board",
-    positionals: [0, 0],
-    run: boardCommand,
   },
   {
     verb: "routines",

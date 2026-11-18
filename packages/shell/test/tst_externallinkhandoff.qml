@@ -20,7 +20,7 @@ TestCase {
 
     function test_anOpenedLinkOrPathHandsOff(): void {
         ExternalLinks.openModelUrl("https://example.com/docs");
-        ExternalLinks.openPath("/home/u/notes/board.md");
+        ExternalLinks.openPath("/home/u/notes/todo.md");
         compare(handoffs.count, 2);
     }
 

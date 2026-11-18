@@ -28,7 +28,7 @@ file tools, in the owner's own project and topic folders. Ghost names that
 directory in the prompt but neither indexes it nor injects its contents; a
 ghost searches it when a task needs it. Recall, an optional separate product,
 can index chosen folders, but its hits only point at the source files, which
-stay authoritative. The board renders `board.md` read-only.
+stay authoritative.
 
 A conversation has its own working directory. A delegated harness run can
 use a project's directory and discover that project's instructions normally.

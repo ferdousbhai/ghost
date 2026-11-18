@@ -6,8 +6,6 @@
 
 /** Every HUD section but chat, which a conversation row opens. */
 var PLACES = [
-    { id: "board", label: "Board", hint: "board.md",
-        icon: "M9 6h12M9 12h12M9 18h12M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17" },
     { id: "routines", label: "Routines", hint: "timers",
         icon: "M12 8v4l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0" },
     { id: "character", label: "Character", hint: "persona",

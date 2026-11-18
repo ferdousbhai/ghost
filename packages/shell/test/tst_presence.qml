@@ -59,7 +59,7 @@ TestCase {
         verify(Presence.composing);
         compare(Presence.screenName, "DP-1");
 
-        Presence.send("what's on my board?");
+        Presence.send("what's on my plate?");
         verify(!Presence.composing);
         compare(Presence.phase, "working");
         compare(posts().length, 1);

@@ -5,7 +5,6 @@ import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
-import type { Board } from "../board.js";
 import { acceptedEventLine } from "../external-events.js";
 import type { HarnessChoices } from "../session-host.js";
 
@@ -45,28 +44,6 @@ export async function readCommand(ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx);
   const body = await ctx.client.request("PUT", `${path}/read`, {});
   emit(ctx, body, () => `Marked ${session.id} read.\n`);
-  return 0;
-}
-
-/** `ghost board`: the owner's board, read through the daemon. */
-export async function boardCommand(ctx: CliContext): Promise<number> {
-  const body = await ctx.client.request("GET", "/api/board");
-  emit(ctx, body, (result) => {
-    const board = result as Board;
-    if (!board.exists) return `no board yet: create ${board.path} with ## columns and - cards\n`;
-    const lines: string[] = [];
-    if (board.title) lines.push(board.title);
-    for (const column of board.columns) {
-      lines.push(`## ${column.title} (${column.cards.length})`);
-      for (const card of column.cards) {
-        const box = card.done === undefined ? "" : card.done ? "[x] " : "[ ] ";
-        lines.push(`  ${box}${card.text}`);
-        for (const note of card.notes) lines.push(`      ${note}`);
-      }
-    }
-    if (board.truncated) lines.push("(board truncated)");
-    return `${lines.join("\n")}\n`;
-  });
   return 0;
 }
 

@@ -27,7 +27,7 @@ TestCase {
         const hud = findChild(panel, "hud");
         panel.open('{"section":"home"}');
         verify(hud.listening);
-        hud.showSection("board");
+        hud.showSection("routines");
         verify(!hud.listening);
     }
 
@@ -47,7 +47,7 @@ TestCase {
         Ghostd.activeGhost = "dous";
         Dictation.state = "idle";
         const panel = createTemporaryObject(panelComponent, this);
-        panel.open('{"section":"board"}');
+        panel.open('{"section":"routines"}');
         verify(!findChild(panel, "hud").listening);
     }
 

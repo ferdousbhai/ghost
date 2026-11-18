@@ -402,18 +402,6 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
-/** `GET /api/board`: readBoard's shape for a small Documents/board.md. */
-const MOCK_BOARD = {
-  path: join(homedir(), "Documents", "board.md"),
-  exists: true,
-  modified: new Date().toISOString(),
-  title: "Board",
-  columns: [
-    { title: "Doing", cards: [{ text: "Draft the project brief", done: false, notes: ["owner reviews Friday"] }] },
-    { title: "Done", cards: [{ text: "Set up the ghost", done: true, notes: [] }, { text: "A plain card", notes: [] }] },
-  ],
-  truncated: false,
-};
 
 // The daemon's hooks.json, kept as one document the way ghostd does. The
 // loader's shape check is the small subset a pane edit can plausibly trip,
@@ -787,10 +775,6 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     return svg(res, REMOTE_QR_SVG);
-  }
-
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "board" && req.method === "GET") {
-    return json(res, 200, MOCK_BOARD);
   }
 
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: { code: "not_found", message: "Not found." } });

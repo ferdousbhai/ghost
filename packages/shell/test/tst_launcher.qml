@@ -21,7 +21,7 @@ TestCase {
     readonly property var sessions: [
         { id: "a", title: "Fix the README", preview: "can you fix the readme", pinned: true,
             updatedAt: "2026-10-20T12:00:00Z" },
-        { id: "b", title: null, preview: "what's on my board?", unread: true,
+        { id: "b", title: null, preview: "what's on my plate?", unread: true,
             updatedAt: "2026-10-28T11:30:00Z" },
         { id: "c", title: "Taxes", preview: "", running: true, updatedAt: "2026-10-28T11:59:30Z" }
     ]
@@ -38,7 +38,7 @@ TestCase {
         compare(rows[4].kind, "header");
         compare(rows[4].label, "casper");
         compare(rows.filter(row => row.kind === "place").map(row => row.id),
-            ["board", "routines", "character", "ghosts", "hooks", "mcp", "remote"]);
+            ["routines", "character", "ghosts", "hooks", "mcp", "remote"]);
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 
@@ -109,7 +109,7 @@ TestCase {
     function test_aConversationRowSaysWhatItIs(): void {
         const rows = Launcher.rows("", sessions, "casper", now, 0);
         const untitled = rows.find(row => row.id === "b");
-        compare(untitled.label, "what's on my board?");
+        compare(untitled.label, "what's on my plate?");
         compare(untitled.title, "");
         compare(untitled.meta, "30m");
         verify(untitled.unread);

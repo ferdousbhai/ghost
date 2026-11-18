@@ -96,10 +96,6 @@ try {
   assert.equal(badPin.status, 400);
   assert.equal((await badPin.json()).error.code, "invalid_request");
 
-  const board = await (await fetch(`http://127.0.0.1:${port}/api/board`)).json();
-  assert.deepEqual(Object.keys(board), ["path", "exists", "modified", "title", "columns", "truncated"]);
-  assert.ok(board.columns.every((column) => column.cards.every((card) => Array.isArray(card.notes))));
-
   const harnessUrl =`http://127.0.0.1:${port}/api/ghosts/casper/harness`;
   const putJson = (url, body) => fetch(url, {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body),

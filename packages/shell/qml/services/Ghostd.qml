@@ -656,58 +656,6 @@ Singleton {
         });
     }
 
-    // The owner's board: Documents/board.md, parsed by the daemon and shown
-    // read-only. Polled while its pane is up; edits happen in the file.
-    property var board: null
-    property string boardError: ""
-    readonly property bool boardLoading: root.boardRequest !== null
-    property var boardRequest: null
-
-    /** The daemon's Board, or null when the body is not one. */
-    function boardFrom(body: var): var {
-        if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-        if (typeof body.path !== "string" || typeof body.exists !== "boolean"
-                || !Array.isArray(body.columns)) return null;
-        const columns = [];
-        for (const column of body.columns) {
-            if (!column || typeof column.title !== "string" || !Array.isArray(column.cards)) return null;
-            const cards = [];
-            for (const card of column.cards) {
-                if (!card || typeof card.text !== "string") return null;
-                cards.push({
-                    text: card.text,
-                    done: card.done === true ? true : (card.done === false ? false : null),
-                    notes: Array.isArray(card.notes) ? card.notes.filter(n => typeof n === "string") : []
-                });
-            }
-            columns.push({ title: column.title, cards: cards });
-        }
-        return {
-            path: body.path,
-            exists: body.exists,
-            title: typeof body.title === "string" ? body.title : "",
-            modified: typeof body.modified === "string" ? body.modified : "",
-            truncated: body.truncated === true,
-            columns: columns
-        };
-    }
-
-    function refreshBoard(): void {
-        if (root.boardRequest) return;
-        root.request(root, "boardRequest", "GET", "/api/board", null, function (xhr, body) {
-            const parsed = xhr.status === 200 ? root.boardFrom(body) : null;
-            if (parsed !== null) {
-                // The pane polls every few seconds; an unchanged board keeps its cards.
-                if (JSON.stringify(parsed) !== JSON.stringify(root.board)) root.board = parsed;
-                root.boardError = "";
-                root.reachable = true;
-            } else {
-                root.boardError = xhr.status === 200 ? "ghostd sent a malformed board"
-                    : root.describeError(xhr, "GET board");
-            }
-        });
-    }
-
     function refresh(): void {
         root.fetchHookConfig(false);
         root.retire(root, "listRequest");

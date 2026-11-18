@@ -62,12 +62,8 @@ uninstalling a ghost.
 
 There is no Ghost plan mode, todo store, or plan/todo API. Harness native
 planning may exist, but durable owner-visible plans and tasks belong in the
-owner's documents. The one owner-visible view of them is the board:
-`board.md` in the documents directory, `##` headings as columns and list items
-as cards, edited by the owner and every harness with file tools and rendered
-read-only by the HUD, the tailnet viewer, and `ghost board` through
-`GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background work
-is the shell's: Ghost keeps no job table (see "Background work and hooks").
+owner's documents. Background work is the shell's: Ghost keeps no job table
+(see "Background work and hooks").
 
 ### Routine inspection and controls
 
@@ -564,7 +560,7 @@ Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
 [`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). They hold only what a ghost must follow
 before it would look anything up: the owner-context section names the
-Documents directory as where finished work, notes, and the board live, and
+Documents directory as where finished work and notes live, and
 the Ghost section has a ghost ask the owner with `ghost ask`, says its
 harness's background jobs end with the turn, and indexes the `ghost help`
 recipes by when to read one, so the CLI is the documentation: a task goes to
@@ -764,7 +760,7 @@ boundary. The configured owner has full access; a listed [peer](#peers) may
 only deliver messages; any other login is refused unless `remote.guests` in
 the config is `"read-only"` (the default is `"none"`). Admitted guests are read-only,
 are refused the routes marked owner-only, which show file paths, hook
-commands, or MCP credentials, and see no path in the ghost list or board;
+commands, or MCP credentials, and see no path in the ghost list;
 conversations, tool calls included, are shown to them as recorded.
 Remote access never broadens a ghost's local tool authority.
 
@@ -789,7 +785,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
 | `POST /api/ghosts/:ghost/events` | Owner-only [external event intake](#external-events); the GET event stream remains conversation invalidations. |
-| `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests, without its `path`; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs, and unknown is false. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |

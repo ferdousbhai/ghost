@@ -253,7 +253,7 @@ filter on top and the ghost's conversations and places under it.
 | `Ctrl+R` / `Ctrl+P` / `Delete` | rename, pin, or trash the selected conversation |
 | `Esc` | close |
 
-A row grows the card into its view: a conversation, **Board**, **Routines**,
+A row grows the card into its view: a conversation, **Routines**,
 **Character**, **Hooks**, **MCP servers**, or **Remote access**; `‹` or `Esc`
 goes back to the list. **Ghosts** stays a list of the same size. An empty conversation shows the ghost's
 glyph, its name, and the static line `What's on your mind?`.

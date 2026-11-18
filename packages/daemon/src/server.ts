@@ -4,7 +4,6 @@ import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { apiTokenPath, ensureApiToken, tokenMatches } from "./token-store.js";
@@ -947,13 +946,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, await (booleanField(await body(), "enabled") ? remote.enable() : remote.disable()));
     }),
     route("GET PUT", "api/hooks/config", ownerOnly(handleHookConfig)),
-    // The owner's board.md, parsed. Guests may read it: it is the one owner
-    // document meant to be looked at, and it is read-only here. A guest is
-    // shown no filesystem path.
-    route("GET", "api/board", async (context) => {
-      const { path, ...board } = await readBoard(options.host.documentsDir());
-      jsonResponse(context.response, 200, isGuest(context) ? board : { path, ...board });
-    }),
     route("GET", "api/status", ownerOnly(({ response }) => {
       const running = options.runningSource;
       jsonResponse(response, 200, {

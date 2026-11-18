@@ -18,7 +18,7 @@ TestCase {
         Ghostd.hudChatFocused = false;
         Ghostd.requestFactory = null;
     }
-    function test_visibleBoardDoesNotMarkRead(): void {
+    function test_onlyAFocusedChatMarksRead(): void {
         compare(reads.length, 0);
         verify(Ghostd.sessions[0].unread);
         Ghostd.hudChatFocused = true;

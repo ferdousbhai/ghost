@@ -44,7 +44,7 @@ TestCase {
 
         Ghostd.activity = "thinking:";
         compare(line.phrase, "Thinking");
-        Ghostd.activity = "thinking:**Reading the board**\n\nThe owner wants\n\n**Drafting a reply**\n\nShort";
+        Ghostd.activity = "thinking:**Reading the notes**\n\nThe owner wants\n\n**Drafting a reply**\n\nShort";
         compare(line.phrase, "Drafting a reply");
         // Unheaded reasoning is prose; it never lands on the line.
         Ghostd.activity = "thinking:the repo has a clear technical identity: a local omarchy ghost that";

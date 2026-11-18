@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// GhostHud — history, the board, routines and settings, the way the desktop
+// GhostHud — history, routines and settings, the way the desktop
 // shows its own menu: a card over everything on the focused monitor, on the
 // theme's [menu] scrim. It is a window shaped by DesktopKeys' rules, so
 // SUPER+W closes it rather than the app behind. It opens on the
@@ -38,7 +38,7 @@ FloatingWindow {
     /** "home" or "ghosts" (the launcher's two lists), or one of `sections`. */
     property string currentSection: "home"
     /** The views a row opens, in the body stack's order. */
-    readonly property var sections: ["chat", "board", "routines", "character", "hooks", "mcp", "remote"]
+    readonly property var sections: ["chat", "routines", "character", "hooks", "mcp", "remote"]
     /** The card is a list: the launcher, over conversations or over ghosts. */
     readonly property bool home: hud.currentSection === "home" || hud.currentSection === "ghosts"
 
@@ -603,10 +603,6 @@ FloatingWindow {
                             onClosed: Workbench.close()
                         }
                     }
-                }
-
-                Board {
-                    onCloseRequested: hud.showSection("home")
                 }
 
                 Routines {

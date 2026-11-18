@@ -15,7 +15,7 @@
 // (Arch Linux ARM still ships 6.11).
 //
 // Inline code is the same face as the prose (the whole interface is
-// monospace), so Qt's own rendering leaves `ghost board` indistinguishable
+// monospace), so Qt's own rendering leaves `ghost status` indistinguishable
 // from the sentence around it; a code span is drawn in `codeColor` instead,
 // when one is given.
 //

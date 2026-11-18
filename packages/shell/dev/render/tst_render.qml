@@ -18,7 +18,6 @@ TestCase {
 
     readonly property string out: "dev/render/out/"
     property var sent: []
-    property bool boardMissing: false
 
     Rectangle { id: stage; anchors.fill: parent; color: Theme.background }
 
@@ -43,14 +42,6 @@ TestCase {
                 lastRun: "Wed 2026-10-28 00:00:03 EET", enabled: "enabled", active: "active",
                 command: "/usr/bin/ghost say --new --ghost dous \"Tidy my notes\"", result: "success", serviceActive: "inactive"
             }], recoveries: [] });
-            else if (/\/api\/board$/.test(url) && tc.boardMissing) xhr.complete(200, { path: "/home/owner/Documents/board.md",
-                exists: false, title: "", modified: "", truncated: false, columns: [] });
-            else if (/\/api\/board$/.test(url)) xhr.complete(200, { path: "/home/owner/Documents/board.md", exists: true,
-                title: "Board", modified: "2026-10-28T10:00:00Z", truncated: false, columns: [
-                    { title: "Now", cards: [{ text: "Ship the launcher redesign", done: false, notes: ["design pass done"] },
-                        { text: "Weekly review routine", notes: [] }] },
-                    { title: "Next", cards: [{ text: "Recall in the launcher", notes: [] }] },
-                    { title: "Done", cards: [{ text: "Bar mark in herdr's states", done: true, notes: [] }] }] });
             else if (/\/character$/.test(url)) xhr.complete(200, { body: "# Dous\n\nYou are Dous, the owner's ghost. Short answers, plain words.\n", limit: 16000 });
             else if (/\/harness$/.test(url)) xhr.complete(200, { harnesses: [
                 { id: "claude", usage: { status: null, stale: false, updatedAt: null, windows: [
@@ -155,7 +146,7 @@ TestCase {
     Component { id: toolC; ToolCard { width: 640 } }
     function test_toolCards(): void {
         snap(toolC, { x: 20, y: 20, activity: { id: "1", name: "bash", status: "running", arguments: { command: "cloud-tasks lists --json" } } }, "tool-running");
-        snap(toolC, { x: 20, y: 20, activity: { id: "2", name: "edit", status: "complete", arguments: { path: "/home/owner/Documents/board.md" }, summary: "1 edit" } }, "tool-complete");
+        snap(toolC, { x: 20, y: 20, activity: { id: "2", name: "edit", status: "complete", arguments: { path: "/home/owner/Documents/notes.md" }, summary: "1 edit" } }, "tool-complete");
         snap(toolC, { x: 20, y: 20, activity: { id: "3", name: "read", status: "failed", arguments: { path: "/home/owner/notes/plan.md" }, summary: "ENOENT: no such file or directory" } }, "tool-failed");
     }
 
@@ -164,9 +155,9 @@ TestCase {
         Bubble { width: 760; activities: []; failure: ""; busy: false; rowIndex: 0 }
     }
     function test_bubbles(): void {
-        snap(bubbleC, { x: 20, y: 20, speaker: "user", body: "What's on my board today?" }, "bubble-user");
+        snap(bubbleC, { x: 20, y: 20, speaker: "user", body: "What's on my plate today?" }, "bubble-user");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant",
-            body: "Two cards are in **Now**:\n\n- Ship the launcher redesign\n- Weekly review routine\n\nRun `ghost board` to see the rest, or open [the board](https://example.com/board)." }, "bubble-assistant");
+            body: "Two things are open:\n\n- Ship the launcher redesign\n- Weekly review routine\n\nRun `ghost routines` to see the timers, or open [the notes](https://example.com/notes)." }, "bubble-assistant");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant",
             body: "Here is the timer:\n\n```ini\n[Timer]\nOnCalendar=Fri 16:00\nPersistent=true\n```" }, "bubble-code");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant", body: "",
@@ -191,7 +182,6 @@ TestCase {
         snap(headerC, { x: 20, y: 20 }, "hud-header");
     }
 
-    Component { id: boardC; Board { width: 900; height: 520 } }
     Component { id: routinesC; Routines { width: 900; height: 520 } }
     Component { id: hooksC; HooksBrowser { width: 900; height: 520 } }
     Component { id: mcpC; McpBrowser { width: 900; height: 520 } }
@@ -199,8 +189,6 @@ TestCase {
     Component { id: remoteC; RemoteAccess { width: 900; height: 1040 } }
     Component { id: characterC; CharacterPane { width: 900; height: 520 } }
     function test_panes(): void {
-        Ghostd.refreshBoard();
-        snap(boardC, { x: 20, y: 20 }, "pane-board");
         Ghostd.refreshRoutines();
         snap(routinesC, { x: 20, y: 20 }, "pane-routines");
         snap(hooksC, { x: 20, y: 20 }, "pane-hooks");
@@ -279,11 +267,6 @@ TestCase {
         tc.shot(routines, "pane-routines-editing");
         routines.destroy();
         wait(30);
-
-        tc.boardMissing = true;
-        Ghostd.refreshBoard();
-        snap(boardC, {}, "pane-board-empty");
-        tc.boardMissing = false;
 
         const sessions = Ghostd.sessions;
         Ghostd.sessions = [];

@@ -263,7 +263,6 @@ describe("ghost help topics", () => {
 
   it("memory: exact search first, Recall for unknown wording, the source file over any index", () => {
     const text = renderHelpTopic("memory", INPUT);
-    expect(text).toContain("`board.md` at its root");
     expect(text).toContain("rg -n -i '<term>' <folder>");
     expect(text).toContain("Recall through its `recall` skill");
     expect(text).toContain("without it, use filenames and `rg`");
