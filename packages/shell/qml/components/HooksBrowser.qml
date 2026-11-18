@@ -28,7 +28,7 @@ Rectangle {
     readonly property var cards: root.editing ? root.frozenCards : root.liveCards
     readonly property var rows: root.drafting ? [HookConfig.draftCard()].concat(root.cards) : root.cards
     readonly property bool busy: Ghostd.hookConfigBusy
-    readonly property bool editable: Ghostd.hookConfigLoaded && Ghostd.hookConfigAvailable
+    readonly property bool editable: Ghostd.hookConfigAvailable
     readonly property string error: Ghostd.hookConfigError
 
     implicitWidth: Theme.pad * 48
@@ -256,7 +256,7 @@ Rectangle {
         anchors.rightMargin: Theme.pad * 2
         anchors.top: errorBanner.bottom
         anchors.topMargin: Theme.pad * 2
-        visible: !Ghostd.hookConfigLoaded && root.rows.length === 0
+        visible: !Ghostd.hookConfigAvailable && root.rows.length === 0
         text: Ghostd.hookConfigLoading ? "Loading lifecycle hooks…"
             : (Ghostd.hookConfigError === ""
                 ? "Hooks have not loaded yet."
@@ -276,7 +276,7 @@ Rectangle {
         anchors.rightMargin: Theme.pad * 2
         anchors.top: errorBanner.bottom
         anchors.topMargin: Theme.pad * 2
-        visible: Ghostd.hookConfigLoaded && root.rows.length === 0
+        visible: Ghostd.hookConfigAvailable && root.rows.length === 0
         text: root.editable
             ? "No lifecycle hooks are loaded. Add a command hook with + New."
             : "No lifecycle hooks are loaded by the daemon."

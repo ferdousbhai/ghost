@@ -60,7 +60,17 @@ try {
     headers: { authorization: "Bearer mock-parity" },
   });
   assert.equal(hooksResponse.status, 200);
-  assert.deepEqual(Object.keys(await hooksResponse.json()), ["path", "document"]);
+  const hooksReply = await hooksResponse.json();
+  assert.deepEqual(Object.keys(hooksReply), ["path", "document"]);
+  // Like ghostd's parseHooksDocument, a PUT of the reply itself (stray top-level keys) is refused, not admitted as no hooks.
+  const pastedReply = await fetch(`http://127.0.0.1:${port}/api/hooks/config`, {
+    method: "PUT", headers: { authorization: "Bearer mock-parity", "content-type": "application/json" }, body: JSON.stringify(hooksReply),
+  });
+  assert.equal(pastedReply.status, 400);
+  assert.deepEqual((await pastedReply.json()).error, {
+    code: "invalid_request",
+    message: `${hooksReply.path} has no top-level "path", "document"; send the document itself.`,
+  });
   const mcpResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/mcp`);
   assert.equal(mcpResponse.status, 200);
   const mcp = await mcpResponse.json();

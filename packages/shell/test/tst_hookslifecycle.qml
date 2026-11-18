@@ -60,20 +60,20 @@ TestCase {
         verify(requests[0].url.endsWith("/api/hooks/config"));
         compare(requests[0].headers.Authorization, "Bearer test-token");
         verify(Ghostd.hookConfigLoading);
-        verify(!Ghostd.hookConfigLoaded);
+        verify(!Ghostd.hookConfigAvailable);
         compare(Ghostd.currentSessionId, "");
         compare(Object.keys(Ghostd.sessionIds).length, 0);
 
         requests[0].complete(200, config("Prompt policy"));
         verify(!Ghostd.hookConfigLoading);
-        verify(Ghostd.hookConfigLoaded);
+        verify(Ghostd.hookConfigAvailable);
         compare(Ghostd.activeHookCount, 2);
         compare(firstName(), "Prompt policy");
 
         Ghostd.fetchHookConfig(true);
         compare(requests.length, 2);
         requests[1].complete(200, { path: tc.path, document: { hooks: {} } });
-        verify(Ghostd.hookConfigLoaded);
+        verify(Ghostd.hookConfigAvailable);
         compare(Ghostd.activeHookCount, 0);
     }
 
@@ -83,7 +83,7 @@ TestCase {
 
         Ghostd.fetchHookConfig(true);
         requests[1].complete(503, { error: { code: "shutting_down", message: "Try again." } });
-        verify(Ghostd.hookConfigLoaded);
+        verify(Ghostd.hookConfigAvailable);
         compare(firstName(), "Verified");
         verify(Ghostd.hookConfigError.indexOf("503") >= 0);
 
@@ -111,7 +111,7 @@ TestCase {
         stale.complete(0, "");
         compare(Ghostd.hooksEpoch, before + 1);
         compare(Ghostd.hookConfigRequest, null);
-        verify(!Ghostd.hookConfigLoaded);
+        verify(!Ghostd.hookConfigAvailable);
         compare(Ghostd.hookConfig, null);
 
         stale.complete(200, config("Too late"));
@@ -128,7 +128,7 @@ TestCase {
             return requests.length === 2;
         }, 30000, "reachability should start exactly one fresh hooks read");
         requests[1].complete(200, config("After reconnect"));
-        verify(Ghostd.hookConfigLoaded);
+        verify(Ghostd.hookConfigAvailable);
         compare(firstName(), "After reconnect");
     }
 
@@ -146,7 +146,6 @@ TestCase {
             verify(requests[0].url.endsWith("/api/hooks/config"));
             verify(Ghostd.hookConfigLoading);
             requests[0].complete(200, { path: "/owner/.config/ghost/hooks.json", document });
-            verify(Ghostd.hookConfigLoaded);
             verify(Ghostd.hookConfigAvailable);
             compare(Ghostd.hookConfigPath, "/owner/.config/ghost/hooks.json");
             compare(Ghostd.hookConfig.hooks.turn_end[0].hooks[0].command, "/bin/true");

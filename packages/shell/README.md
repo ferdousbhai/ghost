@@ -136,8 +136,7 @@ font fontconfig hands us, so a theme that raises `font.base-size` widens
 reading columns and panels with it instead of clipping them.
 
 Only the ghost's own identity is fixed: the amber presence and rose failure
-colours, the spectral orb, and the code view, which stays dark in both Omarchy
-modes because a syntax palette tuned for dark ink turns to mud on paper.
+colours, and the spectral orb.
 
 `OrbSeed.js` derives the phosphor orb's identity from the ghost's name and
 animation from the turn. Keep those functions deterministic so redraws do not

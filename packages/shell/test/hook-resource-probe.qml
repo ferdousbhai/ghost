@@ -31,7 +31,6 @@ Window {
                 + "![data](data:image/svg+xml,<svg onload='fetch(1)'/>) "
                 + "[local](file:///etc/shadow)"
         }] }] } };
-        Ghostd.hookConfigLoaded = true;
         Ghostd.hookConfigError = "<img src=\"" + root.fixtureUrl + "/raw-error.png\">";
         browserLoader.active = true;
     }

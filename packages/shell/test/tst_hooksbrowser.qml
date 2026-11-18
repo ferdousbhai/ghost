@@ -48,7 +48,6 @@ TestCase {
             }
         };
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
-        Ghostd.hookConfigLoaded = true;
         Ghostd.hookConfigError = "";
     }
 
@@ -57,7 +56,6 @@ TestCase {
         Ghostd.retire(Ghostd, "hookConfigMutation");
         Ghostd.requestFactory = null;
         Ghostd.hookConfig = null;
-        Ghostd.hookConfigLoaded = false;
         Ghostd.hookConfigError = "";
     }
 

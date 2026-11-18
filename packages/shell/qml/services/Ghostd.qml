@@ -162,7 +162,6 @@ Singleton {
         root.retire(root, "hookConfigRequest");
         root.hookConfig = null;
         root.hookConfigPath = "";
-        root.hookConfigLoaded = false;
         root.hookConfigError = "";
     }
 
@@ -176,14 +175,13 @@ Singleton {
 
     /** Read the owner's hooks.json through the daemon. */
     function fetchHookConfig(force: bool): void {
-        if (!force && (root.hookConfigLoaded || root.hookConfigLoading)) return;
+        if (!force && (root.hookConfigAvailable || root.hookConfigLoading)) return;
         root.retire(root, "hookConfigRequest");
         const epoch = root.hooksEpoch;
         root.hookConfigError = "";
         root.request(root, "hookConfigRequest", "GET", "/api/hooks/config", null, function (xhr, body) {
             if (xhr.status === 200) {
                 if (!root.adoptHookConfig(body)) return;
-                root.hookConfigLoaded = true;
                 root.reachable = true;
             } else if (xhr.status === 0) {
                 root.failHooksTransport(epoch);
@@ -250,7 +248,6 @@ Singleton {
     property string hookConfigPath: ""
     /** The document has been read, so an edit has something to replace. */
     readonly property bool hookConfigAvailable: root.hookConfig !== null
-    property bool hookConfigLoaded: false
     readonly property bool hookConfigLoading: root.hookConfigRequest !== null
     readonly property bool hookConfigBusy: root.hookConfigMutation !== null
     property string hookConfigError: ""

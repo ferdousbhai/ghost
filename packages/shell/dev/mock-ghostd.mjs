@@ -430,6 +430,8 @@ function hooksDocumentProblem(document) {
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
     return `${path} must contain a JSON object.`;
   }
+  const stray = Object.keys(document).filter((key) => key !== "hooks");
+  if (stray.length > 0) return `${path} has no top-level ${stray.map((key) => JSON.stringify(key)).join(", ")}; send the document itself.`;
   const hooks = document.hooks;
   if (hooks === undefined) return null;
   if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return `${path}: "hooks" must be an object.`;
