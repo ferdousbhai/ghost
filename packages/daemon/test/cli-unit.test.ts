@@ -121,6 +121,19 @@ describe("a ghost's own shell addresses its conversation", () => {
     expect(turn?.body).toMatchObject({ sessionId: "conv-mine" });
   });
 
+  it("acknowledges a follow-up queued into a live turn in words, and -q prints nothing", async () => {
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/queue")) return jsonResponse({ streaming: true, followUp: ["job finished"] });
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const human = await runCli(["say", "--follow-up", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(human).toMatchObject({ code: 0, stdout: "queued for conv-mine\n" });
+    const quiet = await runCli(["say", "--follow-up", "-q", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(quiet).toMatchObject({ code: 0, stdout: "" });
+  });
+
   it("`ghost show` prints a long conversation's newest page and says which messages it is", async () => {
     const total = 5;
     const queries: string[] = [];

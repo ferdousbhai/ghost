@@ -194,7 +194,7 @@ inspect and control systemd timers, as specified in
 routine inspection nor pause/resume sends a prompt or runs a lifecycle hook;
 run now queues the existing service. If it starts a Ghost turn, normal hooks apply.
 
-External events enter through the owner-only delivery contract in
+External events enter through the delivery contract in
 [docs/events.md](events.md), not a hook boundary. Each accepted event starts a
 normal conversation turn with the normal hooks; duplicate delivery runs no
 hook or harness. Provider authentication/retries belong to the installed

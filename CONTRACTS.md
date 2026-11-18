@@ -126,7 +126,7 @@ An installed authenticated CLI/service selects events and calls
 `POST /api/ghosts/:ghost/events` accepts `{ source, id, thread?, instructions, payload }`
 (strings; source 1–128, id and thread 1–512, instructions 1–16384, payload at most 131072
 characters; the rendered prompt must also fit the 200000-character log bound).
-This owner-only intake reuses conversations because `ghost say`
+This intake reuses conversations because `ghost say`
 has no atomic deduplication; it adds no public listener or provider credential
 store. Each source/id hashes to one `event-<sha256>` conversation; with a
 `thread`, source/thread hashes to the one its events share, so a ghost sees what
@@ -594,9 +594,10 @@ Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary. The configured owner has full access; any other login is refused
 unless `remote.guests` in the config is `"read-only"` (the default is
 `"none"`). Admitted guests are read-only,
-are refused the routes marked owner-only, which show file paths, hook
+are refused the reads marked owner-only, which show file paths, hook
 commands, or MCP credentials, and see no path in the ghost list;
-conversations, tool calls included, are shown to them as recorded.
+conversations, tool calls included, are shown to them as recorded. Every
+guest write is `403 read_only`.
 Remote access never broadens a ghost's local tool authority.
 
 `remote.apps` lists `https://` web app origins admitted past the Origin check
@@ -619,8 +620,8 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
-| `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
-| `POST /api/ghosts/:ghost/events` | Owner-only [external event intake](#external-events); the GET event stream remains conversation invalidations. |
+| `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | [Routine inspection and controls](#routine-inspection-and-controls); the GET is owner-only. |
+| `POST /api/ghosts/:ghost/events` | [External event intake](#external-events); the GET event stream remains conversation invalidations. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
@@ -629,7 +630,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, usage, effort, resting}], ghostDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which the HUD's and `ghost harness`'s "automatic" name. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
-| `POST /api/ghosts/:name/complete` | Owner-only `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the harness a new conversation would start on, in a scratch directory with no persona, conversation, or Ghost tools, a failing harness handing it to the next (resting ones last); on the local model when a turn would run there, never then a cloud one (`409 harness_not_installed` for a ghost set to `local` with none configured). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. `502 completion_failed` names each harness's failure. |
+| `POST /api/ghosts/:name/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the harness a new conversation would start on, in a scratch directory with no persona, conversation, or Ghost tools, a failing harness handing it to the next (resting ones last); on the local model when a turn would run there, never then a cloud one (`409 harness_not_installed` for a ghost set to `local` with none configured). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. `502 completion_failed` names each harness's failure. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |

@@ -1,6 +1,6 @@
 # External events
 
-Ghost accepts selected external events through `ghost event` or the owner-only
+Ghost accepts selected external events through `ghost event` or the
 `POST /api/ghosts/:ghost/events` route. Existing CLIs and services own provider
 authentication, subscriptions, filtering, and catch-up. Ghost adds no public
 webhook, provider tokens, or polling daemon.
