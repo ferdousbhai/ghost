@@ -5,6 +5,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
 import { RemoteServe } from "../../src/remote-serve.js";
@@ -171,6 +172,6 @@ export function serverServices(registry: GhostRegistry): Pick<ServerOptions, "mc
     mcp: new McpCatalog({ registry }),
     remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
     hooks: GhostHookRunner.fromConfig(join(registry.root, ".hooks.json")),
-    runningSource: { version: "0.0.0-test", commit: null, root: null },
+    runningSource: { version: "0.0.0-test", commit: null, root: null, entry: fileURLToPath(import.meta.url), startedAt: Date.now() },
   };
 }

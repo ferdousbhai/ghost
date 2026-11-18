@@ -124,7 +124,7 @@ describe("replacedSinceStart", () => {
     expect(replacedSinceStart({ ...running, entry: join(base, "missing.js") })).toBe(true);
   });
 
-  it("goes by what runs, not what is committed, and knows nothing without an entry", () => {
+  it("goes by what runs, not what is committed", () => {
     const base = tempRoot();
     const root = workspace(join(base, "checkout"));
     gitCommit(root);
@@ -135,6 +135,5 @@ describe("replacedSinceStart", () => {
     expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(false);
     // A build rewrote the entry it runs from: stale, checkout or not.
     expect(replacedSinceStart({ ...running, entry, startedAt: Date.now() - 60_000 })).toBe(true);
-    expect(replacedSinceStart({ version: "1", root: null, commit: null })).toBe(false);
   });
 });

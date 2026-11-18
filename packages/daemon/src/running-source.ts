@@ -11,9 +11,9 @@ export interface RunningSource {
   readonly version: string;
   readonly commit: string | null;
   readonly root: string | null;
-  /** The file this process was started from, and when it started; unknown in fixtures. */
-  readonly entry?: string;
-  readonly startedAt?: number;
+  /** The file this process was started from, and when it started. */
+  readonly entry: string;
+  readonly startedAt: number;
 }
 
 const WORKSPACE_PACKAGE_NAME = "ghost-workspace";
@@ -57,10 +57,9 @@ export function resolveRunningSource(version: string, entry: string): RunningSou
  * restart to run it: an install or a build rewrote the entry file after this
  * process started. The file's ctime says when it was written here; a package
  * cannot backdate it the way it carries its build time as the mtime, and a
- * commit that was not built changes nothing that runs. Unknown is false.
+ * commit that was not built changes nothing that runs.
  */
 export function replacedSinceStart(running: RunningSource): boolean {
-  if (running.entry === undefined || running.startedAt === undefined) return false;
   try {
     return statSync(running.entry).ctimeMs > running.startedAt;
   } catch {

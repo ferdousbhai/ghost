@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
@@ -156,6 +157,8 @@ describe("tailnet identity", () => {
       version: "1.4.0",
       commit: "0123456789abcdef0123456789abcdef01234567",
       root: "/home/owner/src/ghost",
+      entry: fileURLToPath(import.meta.url),
+      startedAt: Date.now(),
     };
     const base = await serve({}, undefined, runningSource);
 
@@ -164,7 +167,7 @@ describe("tailnet identity", () => {
     expect(await owner.json()).toEqual({
       version: "1.4.0",
       source: { commit: runningSource.commit, root: runningSource.root },
-      startedAt: null,
+      startedAt: new Date(runningSource.startedAt).toISOString(),
       restartNeeded: false,
     });
 

@@ -365,7 +365,7 @@ describe("CLI API adaptation", () => {
       fetch: statusDaemon({
         version: "1.4.0",
         source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
-        startedAt: null,
+        startedAt: "2026-10-28T12:40:53.000Z",
         restartNeeded: false,
       }),
     });

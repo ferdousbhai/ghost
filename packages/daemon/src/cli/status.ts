@@ -9,7 +9,7 @@ interface DaemonStatus {
   version: RunningSource["version"];
   source: { commit: RunningSource["commit"]; root: RunningSource["root"] };
   /** When the running daemon started, and whether the code on disk has changed since. */
-  startedAt: string | null;
+  startedAt: string;
   restartNeeded: boolean;
 }
 
@@ -48,7 +48,7 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
     lines.push(`daemon version ${daemon.version}`);
     lines.push(`daemon commit  ${daemon.source.commit ?? "unknown"}`);
     lines.push(`daemon source  ${daemon.source.root ?? "packaged install"}`);
-    if (daemon.startedAt) lines.push(`daemon started ${daemon.startedAt}`);
+    lines.push(`daemon started ${daemon.startedAt}`);
     // The code changed under a running daemon: what is on disk is not what answers.
     if (daemon.restartNeeded) lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
     const url = remote.state === "on" && remote.hostname ? ` ${remote.hostname}` : "";

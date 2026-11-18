@@ -712,7 +712,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, {
         version: running.version,
         source: { commit: running.commit, root: running.root },
-        startedAt: running.startedAt === undefined ? null : new Date(running.startedAt).toISOString(),
+        startedAt: new Date(running.startedAt).toISOString(),
         restartNeeded: replacedSinceStart(running),
       });
     })),

@@ -1400,7 +1400,7 @@ describe("GET /api/status", () => {
     const base = await serve();
     const status = await fetch(`${base}/api/status`);
     expect(status.status).toBe(200);
-    expect(await status.json()).toEqual({ version: "0.0.0-test", source: { commit: null, root: null }, startedAt: null, restartNeeded: false });
+    expect(await status.json()).toEqual({ version: "0.0.0-test", source: { commit: null, root: null }, startedAt: expect.any(String), restartNeeded: false });
   });
 });
 
