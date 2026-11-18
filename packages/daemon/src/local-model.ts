@@ -97,14 +97,17 @@ export class LocalModel {
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => { this.stderr = (this.stderr + chunk).slice(-STDERR_TAIL); });
     let exited: string | null = null;
-    child.once("error", (error) => { exited = error.message; });
-    child.once("exit", (code, signal) => {
-      exited ??= `exited with ${code === null ? `signal ${signal}` : `status ${code}`}`;
+    // Under Bun a spawn that fails (ENOENT) emits `error` and never `exit`, so
+    // either one ends this child.
+    const ended = (why: string) => {
+      exited ??= why;
       if (this.child === child) {
         this.child = null;
         this.endpoint = null;
       }
-    });
+    };
+    child.once("error", (error) => ended(error.message));
+    child.once("exit", (code, signal) => ended(`exited with ${code === null ? `signal ${signal}` : `status ${code}`}`));
     this.logger.info("local model starting", { model: this.config.model, pid: child.pid });
     const started = Date.now();
     while (Date.now() - started < LOAD_TIMEOUT_MS) {
@@ -133,7 +136,8 @@ export class LocalModel {
     const child = this.child;
     this.child = null;
     this.endpoint = null;
-    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    // No pid: the spawn itself failed, and no `exit` will ever come.
+    if (!child || child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
     this.logger.info("local model stopping", { why, pid: child.pid });
     const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     child.kill("SIGTERM");
