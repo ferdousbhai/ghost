@@ -1994,7 +1994,7 @@ Singleton {
                 // A failed call stays failed on reload so Bubble keeps it in the reading column.
                 status: part.failed === true ? "failed" : "complete",
                 arguments: part.arguments || ({}),
-                // A stored call keeps no cwd, so a relative path offers no file chip.
+                // A stored call keeps no cwd, so so its trace shows the path as the tool gave it.
                 cwd: ""
             });
         });

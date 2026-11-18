@@ -778,7 +778,7 @@ const mockServer = createServer(async (req, res) => {
     const status = remoteSnapshot();
     if (status.state !== "on" || !status.app.url) {
       return json(res, 404, {
-        error: { code: "not_found", message: "The app needs Remote access on HTTPS." },
+        error: { code: "not_found", message: "Remote access is off, or remote.apps names no app." },
       });
     }
     return svg(res, REMOTE_QR_SVG);
