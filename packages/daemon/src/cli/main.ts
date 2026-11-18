@@ -32,7 +32,6 @@ import { messageCommand, peersCommand } from "./peers.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
-import { skillCommand } from "./skill.js";
 import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
@@ -290,14 +289,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost switch codex",
     positionals: [1, 1],
     run: switchCommand,
-  },
-  {
-    verb: "skill",
-    usage: "skill [install|remove] [--json] [-q]",
-    summary: "Print the ghost skill, or install it for your other agents (~/.agents/skills, ~/.claude/skills).",
-    example: "ghost skill install",
-    positionals: [0, 1],
-    run: skillCommand,
   },
   {
     verb: "delegate",

@@ -578,8 +578,8 @@ Documents directory as where finished work, notes, and the board live, and
 the Ghost section has a ghost ask the owner with `ghost ask` and load the
 `ghost` skill for everything else the CLI does. That skill,
 [`skills/ghost`](skills/ghost/SKILL.md), linked into every conversation like
-Ghost's other bundled skills and installable for the owner's own agents with
-`ghost skill install`, indexes the `ghost help` recipes and states the rules
+Ghost's other bundled skills and written for a ghost only (another agent is
+not one: it has no conversation to ask in or follow up), indexes the `ghost help` recipes and states the rules
 they assume: a task goes to an agent run in its project (`ghost delegate`,
 which runs an installed harness) only when it needs that project's
 instructions, settings, or MCP servers; work that outlives a turn ends with
@@ -889,10 +889,7 @@ ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the `ghost` skill indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost the shell's `$GHOST` names and needing no daemon; they
-and the skill are prompt-visible contract text like the policy sections.
-`ghost skill` prints that skill; `install` copies it to
-`~/.agents/skills/ghost/` and links it from `~/.claude/skills/ghost` when
-`~/.claude` exists; `remove` takes away only that file and link. `ghost harnesses` also reads locally, never through the daemon: the
+and the skill are prompt-visible contract text like the policy sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
 --json`; without `omarchy` on `PATH`, the ids Ghost has a row for) that
 Omarchy's own `agent_present` test would call installed, in that order: an `omarchy-install-<id>-cli --check` decides when that installer

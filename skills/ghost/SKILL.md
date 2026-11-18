@@ -1,6 +1,6 @@
 ---
 name: ghost
-description: The `ghost` CLI, for a ghost and for any agent working with Ghost on this machine. Use before running an agent in another project, starting work that must outlive the turn, scheduling work, answering an external event, notifications, peers, hooks or MCP servers, a hot or struggling machine, crashes, tidying notes, or editing, restarting or updating Ghost itself.
+description: The `ghost` CLI, for a ghost running under Ghost. Use before running an agent in another project, starting work that must outlive the turn, scheduling work, answering an external event, notifications, peers, hooks or MCP servers, a hot or struggling machine, crashes, tidying notes, or editing, restarting or updating Ghost itself.
 ---
 
 # Ghost
