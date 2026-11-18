@@ -1,8 +1,8 @@
 /**
  * The stable policy sections every ghost's system prompt carries, beside the
  * character's own. Each holds only what a ghost must follow before it would
- * think to look anything up; how to use the `ghost` CLI is the `ghost`
- * skill's (`skills/ghost`), whose recipes are `ghost help <topic>`.
+ * think to look anything up; the `ghost` CLI documents itself: `ghost help
+ * <topic>` prints each recipe the Ghost section indexes.
  */
 
 export const OMARCHY_COMPUTER_USE_POLICY = [
@@ -13,11 +13,10 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 ].join("\n");
 
 /**
- * What the `ghost` skill cannot carry because it loads only when looked for:
- * asking the owner (harnesses withhold their own question tools when run
+ * Asking the owner (harnesses withhold their own question tools when run
  * headless, and `ghost ask` marks the conversation as waiting), that the
- * harness's own background jobs die with the turn, and a key expiry that is
- * about to cut off the owner's peers.
+ * harness's own background jobs die with the turn, the index of `ghost help`
+ * recipes, and a key expiry that is about to cut off the owner's peers.
  */
 export function renderGhostPolicy(keyExpiresOn: string | null = null): string {
   return [
@@ -25,8 +24,11 @@ export function renderGhostPolicy(keyExpiresOn: string | null = null): string {
     "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
       + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
       + "next message is the answer. One question at a time. Your harness's own background jobs end "
-      + "with the turn. Load the `ghost` skill before work in another project, work that outlives "
-      + "this turn, timers, events, peers, hooks, or changing or restarting yourself.",
+      + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
+      + "work (harnesses), work outliving this turn (background), clock work (timers), external events "
+      + "(events), reaching the owner away (notifications), peers, heat or a full disk (machine), "
+      + "crashes, notes (memory), audio (dictation), changing or restarting yourself (self). "
+      + "`ghost --help` lists every command.",
     ...(keyExpiresOn
       ? [`This machine's Tailscale key expires ${keyExpiresOn}, which cuts off its peers: tell your owner to sign in again or disable its key expiry.`]
       : []),

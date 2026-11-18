@@ -57,10 +57,8 @@ rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
 
 ### Product skills through Bash
 
-Nothing to install: every conversation already has Ghost's own skill,
-[`skills/ghost`](../skills/ghost/SKILL.md), which teaches a ghost its
-`ghost` CLI, and its product index,
-[`skills/ghost-products`](../skills/ghost-products/SKILL.md). The index lists the
+Nothing to install: every conversation already has Ghost's product index,
+[`skills/ghost-products`](../skills/ghost-products/SKILL.md). It lists the
 recommended products; the ghost installs a product when needed, and the product installs its own skill
 (`<cli> skill install`). Ghost uses
 these product CLIs through the harness's Bash/shell tool and native skill

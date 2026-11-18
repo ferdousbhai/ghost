@@ -226,7 +226,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("refuses an uninstalled harness (exit 5)");
     expect(text).toContain("exits with its status");
     expect(text).toContain("`ghost harnesses` lists installed agents and informational usage");
-    expect(text).toContain("`ghost delegate` gives claude and codex runs your desktop tools");
+    expect(text).toContain("its `computer-use` commands share this conversation's hold on the desktop");
     expect(text).toContain("--owner-named");
     expect(text).toContain("--permission-mode acceptEdits");
     expect(text).toContain("--allowedTools Bash");

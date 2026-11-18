@@ -38,10 +38,10 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, HUD (QML), the local model's tools, and the bundled `ghost` skill. A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, HUD (QML), and the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
-- **Prompt-visible policy.** The system prompt's policy sections, the `ghost` skill (`skills/ghost/SKILL.md`), and the `ghost help <topic>` recipes it indexes (`help-topics.ts`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
+- **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help-topics.ts`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
 - **Docs.** Protocol changes land in `docs/hooks.md`.
 
 ## Commands

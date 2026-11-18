@@ -1,11 +1,11 @@
 /**
  * The long recipes a ghost needs only when it does one particular thing:
  * writing a timer, editing or restarting itself, handing work to another
- * harness, finding a note, transcribing audio. The `ghost` skill
- * (skills/ghost/SKILL.md) indexes them by name and `ghost help <topic>` prints
- * them, so their cost lands on the turn that needs them and not on every turn
- * of every ghost. The text is still contract text the ghost acts on: keep it
- * exact, and keep the skill's index in step (prompt-policy.test.ts checks).
+ * harness, finding a note, transcribing audio. The prompt's Ghost section
+ * indexes them by name and `ghost help <topic>` prints them, so their cost
+ * lands on the turn that needs them and not on every turn of every ghost. The
+ * text is still contract text the ghost acts on: keep it exact, and keep the
+ * index in step (prompt-policy.test.ts checks).
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
@@ -37,6 +37,7 @@ function timers(input: HelpTopicInput): string[] {
   const unit = `${unitPrefix(input)}<slug>`;
   return [
     "# Timers",
+    "Ghost has no scheduler: clock work is a systemd user timer you write. Timers fire only while the owner is logged in, so promise no check-ins while they are away.",
     "A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
     `Write both units in ${JSON.stringify(input.unitDir)}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`${SCHEDULE_SLUG_GRAMMAR}\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
     "The `ghost` CLI authenticates itself:",
@@ -66,7 +67,7 @@ function timers(input: HelpTopicInput): string[] {
 function self(): string[] {
   return [
     "# Self-maintenance",
-    "Any part of your code is yours to change to fit the owner. From a packaged install, first run yourself from your own clone: `git clone https://github.com/ferdousbhai/ghost ~/src/ghost`, then `pnpm install && pnpm build` in it (without pnpm, run `omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-add pnpm'` alone in the foreground and the owner types their password there), then switch over as /usr/share/doc/ghost/docs/self-maintenance.md shows; its \"Back to the package\" undoes it. Tell the owner before you switch.",
+    "Any part of your code is yours to change to fit the owner. `ghost status` says whether the daemon runs from the package (which you cannot write) or a checkout. From a packaged install, first run yourself from your own clone: `git clone https://github.com/ferdousbhai/ghost ~/src/ghost`, then `pnpm install && pnpm build` in it (without pnpm, run `omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-add pnpm'` alone in the foreground and the owner types their password there), then switch over as /usr/share/doc/ghost/docs/self-maintenance.md shows; its \"Back to the package\" undoes it. Tell the owner before you switch.",
     "Read the checkout's AGENTS.md and CONTRACTS.md; follow its authorized branch, commit, and push workflow. Edit, test the affected package, typecheck, commit with the reason, build, and restart.",
     "Commit your own changes; preserve other sessions' edits. Never restore, stash, or discard changes you did not make.",
     "The checkout is shared by every ghost. CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",
@@ -92,7 +93,7 @@ function harnesses(): string[] {
     "Run each handoff with the project directory as its cwd, `cd <project-dir> && ghost delegate <harness> -- <args>` (e.g. `ghost delegate claude -- -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "`claude -p` edits files only with `--permission-mode acceptEdits` and runs commands (tests) only with `--allowedTools Bash`; put the task right after `-p`, since `--allowedTools`, `--add-dir`, and other list flags would swallow a task after them.",
     "`ghost delegate` refuses an uninstalled harness (exit 5), else runs it here, streams its output, and exits with its status. `ghost harnesses` lists installed agents and informational usage. Every attempt is recorded for the owner.",
-    "`ghost delegate` gives claude and codex runs your desktop tools; browser automation uses agent-browser through Bash.",
+    "A delegated harness runs in your environment, so its `computer-use` commands share this conversation's hold on the desktop; browser automation uses agent-browser through Bash.",
     "When the owner named the harness (\"have codex do it\"), pass `--owner-named` before it: `ghost delegate --owner-named codex -- exec \"<task>\"`. The receipts record who picked.",
     "Your own turns run on one of these agents too. `ghost harness` shows which this ghost prefers; `ghost harness <agent>` sets it (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
