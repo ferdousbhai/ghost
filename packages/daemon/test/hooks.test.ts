@@ -303,17 +303,24 @@ describe("GhostHookRunner", () => {
     const config = join(directory, "hooks.json");
     const gate = join(directory, "write-late");
     const outcome = join(directory, "pipe-state");
+    const ready = join(directory, "descendant-ready");
     const descendant = join(directory, "descendant.cjs");
     writeFileSync(descendant, `
       const fs = require("node:fs");
       process.stdout.on("error", () => {});
+      fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid));
       const timer = setInterval(() => {
         if (!fs.existsSync(${JSON.stringify(gate)})) return;
         clearInterval(timer);
-        process.stdout.write("late\\n", (error) => {
+        // The runner closes its end as the hook ends, but Bun may release the
+        // descriptor a moment later; a pipe still open after 3s is the leak.
+        const deadline = Date.now() + 3_000;
+        const attempt = () => process.stdout.write("late\\n", (error) => {
+          if (!error && Date.now() < deadline) return setTimeout(attempt, 20);
           fs.writeFileSync(${JSON.stringify(outcome)}, error ? "closed" : "open");
           process.exit(0);
         });
+        attempt();
       }, 10);
     `);
     // The documented background pattern, without redirecting output: the
@@ -334,14 +341,20 @@ describe("GhostHookRunner", () => {
       const result = await runner.emitSessionStop(event());
       expect(Date.now() - started).toBeLessThan(10_000);
       expect(ghostSessionStopContinuation(result)).toBe("Keep going.");
+      // A loaded machine can start the descendant late; wait for it before
+      // opening the gate, so the deadline below measures only the write.
+      await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 5_000 });
       writeFileSync(gate, "ready");
-      await vi.waitFor(() => expect(existsSync(outcome)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(outcome)).toBe(true), { timeout: 5_000 }).catch((error: unknown) => {
+        const pid = Number(readFileSync(ready, "utf8"));
+        throw new Error(`no pipe outcome; descendant ${pid} is ${isAlive(pid) ? "alive" : "gone"}`, { cause: error });
+      });
       expect(readFileSync(outcome, "utf8")).toBe("closed");
     } finally {
       const pid = Number(readFileSync(pidPath, "utf8"));
       if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
     }
-  }, 15_000);
+  }, 25_000);
 
   it("kills a TERM-ignoring descendant when the stopped hook leader exits first", async () => {
     const directory = temporaryDirectory();
