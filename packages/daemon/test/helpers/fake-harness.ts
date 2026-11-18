@@ -16,6 +16,8 @@ export interface FakeTurn {
   readonly events?: readonly HarnessEvent[];
   readonly exit?: number;
   readonly stderr?: string;
+  /** End the turn by this signal instead of an exit status. */
+  readonly kill?: NodeJS.Signals;
   /** Hold the turn until this file exists (see `release`). */
   readonly gate?: string;
 }
@@ -64,6 +66,7 @@ for (const event of turn.events ?? []) {
 if (turn.stderr) process.stderr.write(turn.stderr);
 // process.exit drops whatever the pipes have not taken yet: let both flush first.
 await Promise.all([process.stdout, process.stderr].map((pipe) => new Promise((r) => pipe.write("", r))));
+if (turn.kill) process.kill(process.pid, turn.kill);
 process.exit(turn.exit ?? 0);
 `;
 

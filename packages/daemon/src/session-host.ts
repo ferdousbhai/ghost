@@ -285,6 +285,17 @@ function ownerCommand(prompt: string): { command: string; excluded: boolean } | 
   return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
 }
 
+/**
+ * Why a harness run failed, as far as its exit says: it could not start, the
+ * tail of its stderr, or its status or signal; null for a clean exit.
+ */
+function exitError(id: string, exit: HarnessExit): string | null {
+  if (exit.spawnError !== undefined) return `${id} could not start: ${exit.spawnError}`;
+  if (exit.code === 0) return null;
+  return exit.stderr.trim().split("\n").slice(-6).join("\n")
+    || `${id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
+}
+
 function keyOf(ghostName: string, id: string): string {
   return JSON.stringify([ghostName, id]);
 }
@@ -1025,8 +1036,7 @@ export class SessionHost {
       },
     });
     if (run.signal.aborted) return null;
-    error ??= exit.spawnError
-      ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").slice(-4).join("\n") || `${harness} exited with ${exit.code}.`);
+    error ??= exitError(harness, exit);
     text = text.trim();
     if (text && error === null) this.resting.delete(harness);
     else if (!text && error !== null) this.rest(harness, error);
@@ -1045,8 +1055,9 @@ export class SessionHost {
     if (!prompt.trim()) throw new GhostError("invalid_request", "prompt must be a non-empty string.", 400);
     const ghost = this.registry.get(ghostName);
     const candidates = await this.harnessCandidates(ghost, null);
-    if (candidates[0] === LOCAL_HARNESS && this.localModel) {
-      const text = (await completeLocally(this.localModel, prompt, signal)).trim();
+    if (candidates[0] === LOCAL_HARNESS) {
+      // harnessCandidates names the local model only while one is configured.
+      const text = (await completeLocally(this.localModel as LocalModel, prompt, signal)).trim();
       if (!text) throw new GhostError("completion_failed", "The local model returned no text for the prompt.", 502);
       return text;
     }
@@ -1204,11 +1215,8 @@ export class SessionHost {
       await Promise.all(writes);
     }
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
-    if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
-    if (error === null && exit.code !== 0) {
-      const stderr = exit.stderr.trim().split("\n").slice(-6).join("\n");
-      error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
-    }
+    if (exit.spawnError !== undefined) return { content, error: exitError(row.id, exit), aborted: false, produced, model };
+    error ??= exitError(row.id, exit);
     return { content, error, aborted: false, produced, model };
   }
 

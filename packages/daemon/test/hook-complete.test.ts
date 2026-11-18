@@ -6,7 +6,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hookCompleteCommand, parseHookCompleteInput } from "../src/hook-complete.js";
 import { parseHooksDocument } from "../src/hook-policy.js";
 import { GhostHookRunner } from "../src/hooks.js";
@@ -117,12 +117,14 @@ describe("SessionHost.complete", () => {
   it("reports an exit by its stderr tail or status and rests the harness, as a delegated task does", async () => {
     const noisy = harness([{ exit: 1, stderr: "warming up\nnot signed in\nrun login" }], "noisy");
     const quiet = harness([{ exit: 3 }], "quiet");
-    const { sessions } = host([noisy, quiet]);
+    const killed = harness([{ kill: "SIGKILL" }], "killed");
+    const { sessions } = host([noisy, quiet, killed]);
 
-    await expect(sessions.complete("casper", "Classify.", signal()))
-      .rejects.toThrow("noisy: warming up\nnot signed in\nrun login; quiet: quiet exited with 3.");
+    await expect(sessions.complete("casper", "Classify.", signal())).rejects.toThrow(
+      "noisy: warming up\nnot signed in\nrun login; quiet: quiet exited with status 3.; killed: killed exited with signal SIGKILL.",
+    );
     const resting = (await sessions.listHarnesses("casper")).harnesses.filter((row) => row.resting).map((row) => row.id);
-    expect(resting.sort()).toEqual(["noisy", "quiet"]);
+    expect(resting.sort()).toEqual(["killed", "noisy", "quiet"]);
   });
 
   it("completes on the daemon's own local model, as a turn would, never falling through to a cloud harness", async () => {
@@ -204,6 +206,27 @@ describe("ghostd hook-complete", () => {
     expect((await run(JSON.stringify({ ghost_home: home, prompt: "Review this." }), daemon.env, through)).code).toBe(0);
     // Bun's own 5-minute idle timer is off too; a hook may allow up to 600 s.
     expect(inits).toMatchObject([{ timeout: false }]);
+  });
+
+  it("stops the completion when its request closes, as when the hook's timeout kills it", async () => {
+    daemon = await startTestDaemon();
+    const gate = daemon.harness.gate("held");
+    daemon.harness.setTurns([{ gate: gate.path, events: [{ type: "text", block: "a", delta: "too late" }] }]);
+    const host = daemon.host;
+    const complete = host.complete.bind(host);
+    let outcome: Promise<string> | null = null;
+    host.complete = (ghost, prompt, signal) => (outcome = complete(ghost, prompt, signal));
+    const hang = new AbortController();
+    const through = ((input: string | URL | Request, init?: RequestInit) => fetch(input, { ...init, signal: hang.signal })) as typeof fetch;
+
+    const asked = run(JSON.stringify({ ghost_home: join(daemon.temp.root, "casper"), prompt: "Review this." }), daemon.env, through);
+    await vi.waitFor(() => expect(daemon?.harness.calls()).toHaveLength(1));
+    hang.abort();
+
+    // The held harness is killed rather than left to answer: the gate never opens.
+    await expect(outcome).rejects.toThrow(/cancelled/u);
+    expect((await asked).code).toBe(1);
+    expect(existsSync(daemon.harness.calls()[0]!.cwd)).toBe(false);
   });
 
   it("rejects a non-ghost home, a relative path, and an empty prompt before asking", async () => {
