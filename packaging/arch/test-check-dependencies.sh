@@ -99,6 +99,8 @@ cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends jq "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-dev.SRCINFO"
+# The HUD runs jq (DesktopContext.js) to find the focused window's directory.
+require_srcinfo_entry depends jq "$work/ghost-dev.SRCINFO"
 
 bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost" \

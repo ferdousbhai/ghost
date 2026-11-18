@@ -17,7 +17,7 @@ _runtime_depends=(
   'qrencode'
   'systemd'
 )
-_ui_depends=('libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
+_ui_depends=('jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
 makedepends=(
   'bun>=1.4.0'
