@@ -45,6 +45,13 @@ TestCase {
         }
     }
 
+    function test_localModelToolsShowTheirQueryAndHit(): void {
+        const search = { name: "search", status: "running", arguments: { query: "passport" }, summary: "" };
+        compare(ToolTrace.text(search, false, false), "search “passport”");
+        const read = { name: "read", status: "completed", arguments: { id: "S3" }, summary: "" };
+        compare(ToolTrace.text(read, true, false), "read S3");
+    }
+
     function test_desktopToolsSayWhatTheyDid(): void {
         const look = { name: "desktop_look", status: "completed", arguments: { window: "firefox", image: true }, summary: "" };
         compare(ToolTrace.text(look, true, false), "Checked what’s on screen");

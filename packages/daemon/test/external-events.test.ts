@@ -23,7 +23,7 @@ async function serve(turns: FakeTurn[] = replies("Handled event"), eventRetryDel
   return restart(eventRetryDelays);
 }
 async function restart(eventRetryDelays?: number[]) {
-  host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(harness!), env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" }, ...(eventRetryDelays ? { eventRetryDelays } : {}) });
+  host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(harness!), ...(eventRetryDelays ? { eventRetryDelays } : {}) });
   server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token", remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
   return `http://127.0.0.1:${server.port}/api/ghosts/casper`;
 }

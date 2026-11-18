@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { freePort, waitUntilServing } from "../loopback.js";
@@ -105,8 +105,14 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
   const scratch = mkdtempSync(join(tmpdir(), "ghost-smoke-"));
   const port = await freePort();
   const tokenFile = join(scratch, "state", "ghost", "api-token");
+  // A smoke check cannot act on the owner's desktop, even if a model tries:
+  // a `computer-use` that always refuses comes first on PATH.
+  const bin = join(scratch, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "computer-use"), "#!/bin/sh\necho '{\"error\":{\"code\":\"unavailable\",\"message\":\"Desktop control is off in ghost smoke.\"}}'\nexit 1\n", { mode: 0o755 });
   const env: NodeJS.ProcessEnv = {
     ...ctx.runtime.env,
+    PATH: `${bin}:${ctx.runtime.env.PATH ?? ""}`,
     GHOSTS_ROOT: join(scratch, "ghosts"),
     GHOSTD_PORT: String(port),
     GHOSTD_HOST: "127.0.0.1",
@@ -116,8 +122,6 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
     // directories, so only Ghost's config moves into the scratch tree.
     GHOSTD_CONFIG: join(scratch, "config", "ghost", "config.json"),
     GHOSTD_HOOKS: join(scratch, "config", "ghost", "hooks.json"),
-    // A smoke check cannot act on the owner's desktop, even if a model tries.
-    GHOST_DESKTOP: "/usr/bin/false",
   };
   const command = daemonCommand(ctx);
   const child = spawn(command[0] as string, [...command.slice(1), "--port", String(port)], {

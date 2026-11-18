@@ -101,7 +101,6 @@ describe("systemd routine inspection and controls", () => {
     const started = new Promise<void>((resolve) => { entered = resolve; });
     const blocked = new Promise<void>((resolve) => { release = resolve; });
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
-      env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" },
       scheduleCommandRunner: async (args) => {
         if (args.includes("enable")) { entered(); await blocked; }
         return ok;
@@ -118,7 +117,7 @@ describe("systemd routine inspection and controls", () => {
   it("retires a renamed ghost's checkpoints with its units", async () => {
     const unitDir = await setup();
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
-      env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" }, scheduleCommandRunner: manager([]), scheduleVerifyRunner: async () => ok });
+      scheduleCommandRunner: manager([]), scheduleVerifyRunner: async () => ok });
     const config = await host.routineConfig("casper", "daily");
     await host.removeRoutine("casper", "daily", config.revision);
     expect(await listRoutineRecoveries("casper", { unitDir })).toHaveLength(1);
@@ -157,7 +156,7 @@ describe("systemd routine inspection and controls", () => {
   it("exposes owner inspection/control through HTTP and refuses guest access", async () => {
     const unitDir = await setup(), calls: string[][] = [];
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
-      scheduleCommandRunner: manager(calls), scheduleVerifyRunner: async () => ok, scheduleJournalRunner: async () => ({ ...ok, stdout: "Finished routine" }), env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" } });
+      scheduleCommandRunner: manager(calls), scheduleVerifyRunner: async () => ok, scheduleJournalRunner: async () => ({ ...ok, stdout: "Finished routine" }), env: { ...process.env } });
     server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token",
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
     const path = `http://127.0.0.1:${server.port}/api/ghosts/casper/routines`;

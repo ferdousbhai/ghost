@@ -99,8 +99,8 @@ The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into
 `~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
 Browser automation uses the optional agent-browser CLI through Bash. Computer use is
-`ghost-desktop`, a stdio MCP server bundled like `ghostd`; any MCP client can run
-it, not only Ghost.
+[computer-use-for-omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy),
+a separate CLI and skill any agent can use; Ghost does not bundle it.
 
 ## Desktop boundary
 
@@ -144,7 +144,7 @@ If only the runtime is installed, name only `ghost-runtime`.
 That removes package-owned files only.
 
 `smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
-the ghost-desktop bundle, desktop entry, Quickshell assets,
+desktop entry, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive. `pnpm verify` is the gate: the pre-push hook refuses a master push
 until it has passed on that exact tree, and the `Native packages` workflow

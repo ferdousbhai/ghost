@@ -58,7 +58,6 @@ require_identical "$temporary/top-level.expected" "$temporary/top-level.actual" 
 ) > "$temporary/bin.actual"
 printf '%s\n' \
   $'f\tghost' \
-  $'f\tghost-desktop' \
   $'f\tghostd' \
   | LC_ALL=C sort > "$temporary/bin.expected"
 require_identical "$temporary/bin.expected" "$temporary/bin.actual" \
@@ -69,7 +68,6 @@ require_identical "$temporary/bin.expected" "$temporary/bin.actual" \
   find . -maxdepth 1 -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
 ) > "$temporary/lib.actual"
 printf '%s\n' \
-  $'f\tghost-desktop.js' \
   $'f\tghost.js' \
   $'f\tghostd.js' \
   | LC_ALL=C sort > "$temporary/lib.expected"
@@ -90,7 +88,7 @@ if find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" ! -perm 644 -pr
   exit 1
 fi
 
-for path in bin/ghost bin/ghostd bin/ghost-desktop; do
+for path in bin/ghost bin/ghostd; do
   [[ -f "$runtime_root/$path" && -x "$runtime_root/$path" \
     && "$(stat -c '%a' "$runtime_root/$path")" == 755 ]] || {
     printf 'runtime launcher is missing or unsafe: %s\n' "$path" >&2

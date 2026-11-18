@@ -14,8 +14,9 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
 - **daemon** (`ghostd`) — the HTTP API that owns conversations; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
-- **ghost-desktop** — the computer-use MCP server (`desktop_look`,
-  `desktop_act`); any MCP client can run it.
+- **computer-use** — desktop control for any agent: the
+  `computer-use` CLI and skill from the separate computer-use-for-omarchy
+  repo. Ghost neither bundles nor calls it.
 
 ## Taste
 
@@ -28,7 +29,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 ## The four ways to hurt yourself
 
-1. **Testing against the live install.** Tests use scratch ghost homes, never `~/ghosts`, port 7717, or the owner's desktop. Daemon tests set `GHOST_DESKTOP=/usr/bin/false`; desktop checks use nested Hyprland with private runtime, D-Bus, and AT-SPI buses. The live install need not use this checkout: discover `systemctl --user cat ghostd.service`, `command -v ghostd ghost-desktop`, and `readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost` before deploying. A packaged daemon and HUD must be installed together; a checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes and omarchy-shell for QML changes. Rescans and plugin disable/enable can reuse loaded Components, so they are not proof a change is live. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version), installed artifacts, and the running shell's `debugBarGeometry`.
+1. **Testing against the live install.** Tests use scratch ghost homes, never `~/ghosts`, port 7717, or the owner's desktop. Fake harnesses never run `computer-use`, and `ghost smoke` puts a refusing stub first on PATH; desktop checks use nested Hyprland with private runtime, D-Bus, and AT-SPI buses. The live install need not use this checkout: discover `systemctl --user cat ghostd.service`, `command -v ghostd`, and `readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost` before deploying. A packaged daemon and HUD must be installed together; a checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes and omarchy-shell for QML changes. Rescans and plugin disable/enable can reuse loaded Components, so they are not proof a change is live. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version), installed artifacts, and the running shell's `debugBarGeometry`.
 2. **Driving the HUD on the owner's desktop.** Enabling the plugin in the live `omarchy-shell`, or a plain `quickshell -p`, puts a mock ghost in the owner's real desktop. Verify shell changes only through `packages/shell/dev/preview.sh`, which runs a nested Hyprland and a nested omarchy-shell with private HOME, XDG dirs, and dbus, seeds the plugin there, and refuses the live port and `~/ghosts`. No headless QML platform either — window and bar behavior is what is being verified.
 3. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
 4. **Touching a peer's git state.** The same shared checkout means `git stash` pops someone else's stash, so never stash here; commit or branch instead. A worktree and branch outlive their PR only while it is open: after the merge, `git worktree remove`, delete the branch locally and on origin, `git worktree prune`.
@@ -37,11 +38,11 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, HUD (QML), `ghost-desktop` (its own repo; bump the pin in the root `package.json`). A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, HUD (QML), the local model's tools, and the bundled `ghost` skill. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The system prompt's policy sections, the `ghost` skill (`skills/ghost/SKILL.md`), and the `ghost help <topic>` recipes it indexes (`help-topics.ts`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
-- **Docs.** Protocol changes land in `docs/hooks.md`, or in ghost-desktop's README for its host contract.
+- **Docs.** Protocol changes land in `docs/hooks.md`.
 
 ## Commands
 

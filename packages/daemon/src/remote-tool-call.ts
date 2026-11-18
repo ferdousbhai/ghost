@@ -3,8 +3,9 @@
  * HUD's activity line shows it (packages/shell ToolTrace.js): the call itself,
  * never what came back. `$ git status`, `read ~/notes/plan.md:10-40`,
  * `edit src/app.ts`, `grep /retry/ in src (*.ts)`, `find *.md in docs`, any
- * other tool as its name and arguments; Ghost's desktop tools, which carry no
- * command or path, keep a plain phrase. Embedded in the page by source
+ * other tool as its name and arguments; the local model's `search` and `read`
+ * their query and hit id; the retired desktop tools, still in old
+ * transcripts, a plain phrase. Embedded in the page by source
  * (`toolCall.toString()`), so it must stay self-contained: no imports, no
  * closures over module scope.
  */
@@ -37,6 +38,7 @@ export function toolCall(toolName: string, args: unknown, cwd: string): string {
     const line = typeof command === "string" ? command.trim() : "";
     return "$ " + (line !== "" ? compact(line, limit) : "…");
   }
+  if (name === "read" && filePath() === "" && text("id") !== "") return compact("read " + text("id"), limit);
   if (["read", "view", "read_file"].includes(name)) {
     const offset = fields.offset, count = fields.limit;
     let range = "";
@@ -59,12 +61,14 @@ export function toolCall(toolName: string, args: unknown, cwd: string): string {
       return compact("ls " + short(text("path"), "."), limit);
     case "grep":
     case "search": {
+      if (text("pattern") === "" && text("query") !== "") return compact("search “" + text("query") + "”", limit);
       const glob = text("glob") || text("include");
       return compact("grep /" + text("pattern") + "/ in " + short(text("path"), ".") + (glob ? " (" + glob + ")" : ""), limit);
     }
     case "find":
     case "glob":
       return compact("find " + text("pattern") + " in " + short(text("path"), "."), limit);
+    // Historical transcripts still carry the retired desktop tools.
     case "desktop_look":
       if (fields.image === true || fields.region || fields.monitor) return "Checking what’s on screen";
       return fields.ui === true ? "Looking through a window" : "Checking the desktop";

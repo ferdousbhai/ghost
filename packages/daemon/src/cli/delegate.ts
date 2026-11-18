@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
-import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
-import { GHOST_MCP_SERVER } from "../mcp-config-policy.js";
+import { eligibleIds, readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
@@ -77,35 +76,6 @@ function run(id: string, args: string[], ctx: CliContext): Promise<RunResult> {
 }
 
 /**
- * The harness's arguments plus `ghost-desktop` (the `desktop` command) as its
- * `ghost` MCP server, for the harnesses whose way to load one is known. Left
- * alone without `ghost-desktop`, when the run already configures it (claude:
- * any `--mcp-config`; codex: an `mcp_servers.ghost` override), or (claude)
- * when a `--` would make the flags text.
- */
-export function withGhostTools(id: string, args: readonly string[], desktop: string | null): string[] {
-  if (!desktop) return [...args];
-  const terminator = args.indexOf("--");
-  const options = terminator < 0 ? args : args.slice(0, terminator);
-  if (id === "claude" && terminator < 0
-    && !options.some((arg) => arg === "--mcp-config" || arg.startsWith("--mcp-config="))) {
-    // Both flags take a list, so they go last, after the task.
-    return [...args, "--allowedTools", `mcp__${GHOST_MCP_SERVER}`, "--mcp-config", JSON.stringify({ mcpServers: { [GHOST_MCP_SERVER]: { command: desktop } } })];
-  }
-  const hasGhostConfig = options.some((arg, index) => {
-    const value = arg === "-c" || arg === "--config"
-      ? options[index + 1]
-      : /^(?:-c|--config)=(.*)$/u.exec(arg)?.[1];
-    return value !== undefined && new RegExp(`^mcp_servers\\.${GHOST_MCP_SERVER}(?:\\.|\\s*=)`, "u").test(value);
-  });
-  if (id === "codex" && !hasGhostConfig) {
-    // A JSON string is a TOML basic string.
-    return ["-c", `mcp_servers.${GHOST_MCP_SERVER}.command=${JSON.stringify(desktop)}`, ...args];
-  }
-  return [...args];
-}
-
-/**
  * `ghost delegate <harness> -- <args>` runs an installed harness and returns
  * its status. Each attempt appends one receipt to the handoff log.
  */
@@ -149,7 +119,7 @@ export async function delegateCommand(ctx: CliContext): Promise<number> {
   }
 
   const launched = Date.now();
-  const result = await run(id, withGhostTools(id, args, desktopCommand(ctx.runtime.env)), ctx);
+  const result = await run(id, [...args], ctx);
   const failed = result.exit !== 0;
   record({
     exit: result.exit,

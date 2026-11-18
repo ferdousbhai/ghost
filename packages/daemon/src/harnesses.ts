@@ -97,11 +97,6 @@ export function which(name: string, env: NodeJS.ProcessEnv): string | null {
 }
 
 
-/** `ghost-desktop` as a turn's MCP server runs it: `$GHOST_DESKTOP`, else from PATH; null means no desktop tools. */
-export function desktopCommand(env: NodeJS.ProcessEnv): string | null {
-  return env.GHOST_DESKTOP || which("ghost-desktop", env);
-}
-
 async function succeeds(file: string, args: string[], env: NodeJS.ProcessEnv): Promise<boolean> {
   try {
     await exec(file, args, { env, timeout: 10_000 });

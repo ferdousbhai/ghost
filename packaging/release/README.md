@@ -11,7 +11,7 @@ The inputs:
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
 2. `ghost-runtime-<version>-linux-any.tar.zst` (one archive for every Linux
    architecture Bun runs on; the payload has no native code), containing the ordinary
-   Bun-target `ghostd`, `ghost`, and `ghost-desktop` bundles, fixed launchers,
+   Bun-target `ghostd` and `ghost` bundles, fixed launchers,
    and exact bundled-package license closure; and
 3. `SHA256SUMS`.
 

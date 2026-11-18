@@ -76,20 +76,19 @@ describe("a turn", () => {
       cwd: conversationDir(sessionDir(), "c1"),
       ghost: "casper",
       session: "c1",
-      mcp: ["ghost"],
+      mcp: [],
     });
     expect(call?.agents).toContain("You are Casper, a letterpress printer.");
     expect(call?.agents).toContain("## Character file");
     expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(true);
   });
 
-  it("serves ghost-desktop as the turn's ghost server, and no desktop tools without it", async () => {
-    const fake = harness(replies("one", "two"));
-    const sessions = host({ harnesses: [fake], env: { ...process.env, GHOST_DESKTOP: "/opt/ghost-desktop" } });
+  it("loads no MCP server of its own, and names the conversation as computer-use's caller", async () => {
+    const fake = harness(replies("one"));
+    const sessions = host({ harnesses: [fake] });
     await turn(sessions, "first");
-    const without = host({ harnesses: [fake], env: { PATH: "/nonexistent" } });
-    await turn(without, "second");
-    expect(fake.calls().map((call) => call.mcp)).toEqual([["ghost"], []]);
+    expect(fake.calls()[0]?.mcp).toEqual([]);
+    expect(fake.calls()[0]?.caller).toBe("ghost casper/c1");
   });
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {

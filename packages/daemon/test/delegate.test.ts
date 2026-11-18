@@ -2,7 +2,6 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { withGhostTools } from "../src/cli/delegate.js";
 import { appendHandoff, HANDOFF_LOG_LIMIT_BYTES, type HandoffReceipt } from "../src/handoffs.js";
 import { runCli } from "./helpers/cli.js";
 
@@ -42,7 +41,6 @@ function machine(): { env: NodeJS.ProcessEnv; log: string; calls: string } {
     "exit 3",
   ].join("\n"));
   executable("codex", "echo codex-ran; exit 0");
-  executable("ghost-desktop", "exit 0");
   // Installed by every test Omarchy applies, yet its interpreter is gone: spawn fails.
   executable("broken", "exit 0", "#!/nonexistent/interpreter");
   const fresh = new Date().toISOString();
@@ -132,7 +130,7 @@ describe("ghost delegate", () => {
     mkdirSync(join(root as string, "state"), { recursive: true });
     writeFileSync(join(root as string, "state", "ghost"), "");
     const run = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
-    expect(run).toMatchObject({ code: 3, stdout: expect.stringMatching(/^claude got: hi /u) });
+    expect(run).toMatchObject({ code: 3, stdout: "claude got: hi\n" });
     expect(run.stderr).toMatch(/^ghost: cannot record the handoff in .*handoffs\.jsonl: /u);
     const refusal = await runCli(["delegate", "grok", "--", "hi"], { env, home: root });
     expect(refusal.code).toBe(5);
@@ -162,10 +160,10 @@ describe("ghost delegate", () => {
     expect(receipts(log)[0]).toMatchObject({ harness: "codex", windows: [{ percent: 0.99 }], outcome: { exit: 0 } });
   });
 
-  it("runs claude with the ghost's tools and records who picked it", async () => {
+  it("runs claude with its own arguments and records who picked it", async () => {
     const { env, log } = machine();
     const ghostPick = await runCli(["delegate", "claude", "--", "-p", "fix it"], { env, home: root });
-    expect(ghostPick.stdout).toBe(`claude got: -p fix it --allowedTools mcp__ghost --mcp-config {"mcpServers":{"ghost":{"command":"${join(String(root), "bin", "ghost-desktop")}"}}}\n`);
+    expect(ghostPick.stdout).toBe("claude got: -p fix it\n");
     await runCli(["delegate", "--owner-named", "claude", "--", "-p", "fix it"], { env, home: root });
     const { GHOST: _ghost, ...ownerShell } = env;
     await runCli(["delegate", "claude", "--", "-p", "fix it"], { env: ownerShell, home: root });
@@ -184,61 +182,6 @@ describe("ghost delegate", () => {
     const { env } = machine();
     const result = await runCli(["delegate"], { env, home: root });
     expect(result.code).toBe(2);
-  });
-});
-
-describe("withGhostTools", () => {
-  const desktop = "/usr/bin/ghost-desktop";
-  const config = '{"mcpServers":{"ghost":{"command":"/usr/bin/ghost-desktop"}}}';
-  const override = 'mcp_servers.ghost.command="/usr/bin/ghost-desktop"';
-
-  it("gives claude the ghost server after the task, and allows its tools", () => {
-    expect(withGhostTools("claude", ["-p", "fix it"], desktop))
-      .toEqual(["-p", "fix it", "--allowedTools", "mcp__ghost", "--mcp-config", config]);
-  });
-
-  it("gives codex the ghost server as config overrides ahead of its subcommand", () => {
-    expect(withGhostTools("codex", ["exec", "fix it"], desktop)).toEqual([
-      "-c", override, "exec", "fix it",
-    ]);
-  });
-
-  it("recognizes config flags with separate and equals values", () => {
-    for (const flag of ["-c", "--config"]) {
-      const value = 'mcp_servers.ghost.command="custom"';
-      for (const args of [[flag, value, "exec", "x"], [`${flag}=${value}`, "exec", "x"]]) {
-        expect(withGhostTools("codex", args, desktop)).toEqual(args);
-      }
-    }
-    const claude = ["-p", "x", "--mcp-config={}"];
-    expect(withGhostTools("claude", claude, desktop)).toEqual(claude);
-  });
-
-  it("does not mistake prompt text or another server's config for ghost config", () => {
-    for (const args of [
-      ["exec", "explain mcp_servers.ghost"],
-      ["exec", "--", "-c", 'mcp_servers.ghost.command="custom"'],
-      ["-c", 'mcp_servers.ghostly.command="custom"', "exec", "x"],
-    ]) {
-      expect(withGhostTools("codex", args, desktop)).toEqual([
-        "-c", override, ...args,
-      ]);
-    }
-    const claude = ["-p", "x", "--", "--mcp-config={}"];
-    expect(withGhostTools("claude", claude, desktop)).toEqual(claude);
-  });
-
-  it("leaves every run alone without ghost-desktop", () => {
-    expect(withGhostTools("claude", ["-p", "x"], null)).toEqual(["-p", "x"]);
-    expect(withGhostTools("codex", ["exec", "x"], null)).toEqual(["exec", "x"]);
-  });
-
-  it("leaves a run that names its own MCP config, a claude run with `--`, and other harnesses alone", () => {
-    expect(withGhostTools("claude", ["-p", "x", "--mcp-config", "{}"], desktop)).toEqual(["-p", "x", "--mcp-config", "{}"]);
-    expect(withGhostTools("claude", ["-p", "--", "x"], desktop)).toEqual(["-p", "--", "x"]);
-    expect(withGhostTools("codex", ["-c", "mcp_servers.ghost.command=\"x\"", "exec", "y"], desktop))
-      .toEqual(["-c", "mcp_servers.ghost.command=\"x\"", "exec", "y"]);
-    expect(withGhostTools("pi", ["-p", "x"], "/usr/bin/ghost-desktop")).toEqual(["-p", "x"]);
   });
 });
 

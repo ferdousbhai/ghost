@@ -293,7 +293,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "delegate",
     usage: "delegate [--owner-named] <harness> -- <args...>",
-    summary: "Run an installed harness here and record the handoff; claude and codex runs get the ghost's desktop tools.",
+    summary: "Run an installed harness here and record the handoff.",
     example: "cd ~/code/app && ghost delegate claude -- -p \"Fix the failing test\"",
     flags: { boolean: ["owner-named"] },
     positionals: [1, Number.POSITIVE_INFINITY],

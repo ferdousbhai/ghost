@@ -210,7 +210,7 @@ async function machine(self: string, turns: FakeTurn[], options: { rateLimit?: P
   const peers = new PeerBook(join(temp.ownerHome, "config.json"), [], state.path);
   const host = new SessionHost({
     registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(harness),
-    env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" }, peers, ...(options.rateLimit ? { peerRateLimit: options.rateLimit } : {}),
+    peers, ...(options.rateLimit ? { peerRateLimit: options.rateLimit } : {}),
   });
   const made = { temp, state, harness, host, peers, reachable: true } as Machine;
   const remoteServe = { status: async () => ({ url: options.remoteOff ? null : `${made.base}/` }) } as unknown as RemoteServe;

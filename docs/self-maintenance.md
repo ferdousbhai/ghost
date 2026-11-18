@@ -21,7 +21,7 @@ Before deploying, inspect the actual paths:
 
 ```sh
 systemctl --user cat ghostd.service
-command -v ghostd ghost-desktop
+command -v ghostd computer-use
 readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost
 ghost status
 ```
@@ -84,22 +84,12 @@ The empty `ExecStart=` is required: without it systemd appends rather than
 replaces. Restart into it the way `ghost help self` does, from a transient
 unit, so the restart survives the daemon it stops.
 
-Computer use is a separate executable each harness pass runs as its `ghost`
-MCP server: `$GHOST_DESKTOP` when set, else `ghost-desktop` on PATH. It is its own repository,
-[ghost-desktop](https://github.com/ferdousbhai/ghost-desktop); to run a clone of it (Bun runs the source directly,
-no build), clone it to `~/src/ghost-desktop` and add a second launcher,
-
-```sh
-cat > ~/.local/bin/ghost-desktop-dev <<'EOF'
-#!/usr/bin/env bash
-exec /usr/bin/bun \
-  /home/<owner>/src/ghost-desktop/src/main.ts "$@"
-EOF
-chmod 755 ~/.local/bin/ghost-desktop-dev
-```
-
-and `Environment=GHOST_DESKTOP=%h/.local/bin/ghost-desktop-dev` under the same
-`[Service]` override. The next turn picks up a pull of that clone.
+Computer use is not part of Ghost: it is the separate
+[computer-use-for-omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy)
+CLI, which a harness runs from its shell. Change it in its own clone; Bun
+runs the source directly, so `bun install -g` from that clone, or a
+`~/.local/bin/computer-use` launcher ahead of Bun's on PATH, takes effect on
+the next command.
 
 `ghostd.service` sets `ProtectSystem=strict` with `ReadWritePaths=%h %t`, so the
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is
@@ -177,12 +167,17 @@ non-live port (7799 below):
 
 ```sh
 task_canary_dir=$(mktemp -d /tmp/ghost-canary.XXXXXX)
+# The canary's models may not steer the owner's desktop: a refusing stub
+# `computer-use` comes first on its PATH.
+mkdir -p "$task_canary_dir/bin"
+printf '#!/bin/sh\nexit 1\n' > "$task_canary_dir/bin/computer-use"
+chmod 755 "$task_canary_dir/bin/computer-use"
 printf '{}\n' > "$task_canary_dir/hooks.json"
 GHOSTS_ROOT="$task_canary_dir/ghosts" \
 GHOSTD_CONFIG="$task_canary_dir/config.json" \
 GHOSTD_HOOKS="$task_canary_dir/hooks.json" \
 XDG_STATE_HOME="$task_canary_dir/state" \
-GHOST_DESKTOP=/usr/bin/false \
+PATH="$task_canary_dir/bin:$PATH" \
   bun packages/daemon/dist/main.js --port 7799
 ```
 
@@ -220,7 +215,7 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 
 ```sh
 rm -f ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev \
-  ~/.local/bin/ghost ~/.local/bin/ghost-desktop-dev
+  ~/.local/bin/ghost
 systemctl --user daemon-reload
 ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
 ```

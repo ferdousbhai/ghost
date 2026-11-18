@@ -1,6 +1,6 @@
 ---
 name: ghost-products
-description: Index of the recommended products for mail, calendars, contacts, tasks/reminders, iCloud, file sync, AirDrop, WhatsApp, Google Drive/Docs/Sheets, local file search by meaning, and keeping agents working until done. Use when the owner needs one of these and its product skill is not loaded, to pick, install, or diagnose the product and have it install its own skill.
+description: Index of the recommended products for mail, calendars, contacts, tasks/reminders, iCloud, file sync, AirDrop, WhatsApp, Google Drive/Docs/Sheets, local file search by meaning, seeing and steering the desktop, and keeping agents working until done. Use when the owner needs one of these and its product skill is not loaded, to pick, install, or diagnose the product and have it install its own skill.
 ---
 
 # Ghost products
@@ -33,6 +33,7 @@ that command in their terminal.
 | Your files and settings on every Omarchy computer, end to end encrypted, with versions and machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) (`omacloud`) | `curl -fsSL https://omacloud.computer/install.sh \| sudo bash` |
 | Your WhatsApp chats kept as folders on your computer, and messages sent when you ask | [wacli](https://github.com/ferdousbhai/wacli) (`wacli`) | `curl -fsSL https://ferdousbhai.com/wacli/install.sh \| sudo bash`; see [wacli](#wacli) |
 | Search your documents, screenshots, photos, recordings and code by meaning, locally | [Recall](https://github.com/ferdousbhai/recall-for-omarchy) (`recall`) | `curl -fsSL https://ferdousbhai.com/recall/install.sh \| sudo bash`; see [Recall](#recall) |
+| See and steer the desktop for any agent: windows, their controls, screenshots, clicks, typing and keys | [Computer use for Omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy) (`computer-use`) | `bun install -g github:ferdousbhai/computer-use-for-omarchy && computer-use skill install` |
 | Keeps your coding agents working until the job is done | [keep-going](https://github.com/ferdousbhai/keep-going) (`keep-going`) | `curl -fsSL https://ferdousbhai.com/keep-going/install.sh \| sudo bash`; see [keep-going](#keep-going) |
 | AirDrop with nearby Apple devices | [Omdrop](https://github.com/brentkearney/omdrop-plugin) (`omdrop`) | see [Omdrop](#omdrop) |
 | Google Drive, Docs, Sheets | [gws](https://github.com/googleworkspace/cli) (`gws`, skill `gws-*`) | `npm install -g @googleworkspace/cli`; see [gws](#gws) |

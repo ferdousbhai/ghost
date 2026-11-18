@@ -12,15 +12,12 @@ pkgbase = ghost-dev
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
-	depends = at-spi2-core>=2.58
 	depends = bun>=1.3.14
 	depends = glib2
-	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = qrencode
 	depends = systemd
 	depends = wl-clipboard
-	depends = wtype>=0.4
 	depends = libnotify>=0.8
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
@@ -33,15 +30,12 @@ pkgbase = ghost-dev
 pkgname = ghost-runtime-dev
 	pkgdesc = Ghost daemon, API, CLI, and desktop/browser automation without the HUD
 	install = ghost-runtime-dev.install
-	depends = at-spi2-core>=2.58
 	depends = bun>=1.3.14
 	depends = glib2
-	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = qrencode
 	depends = systemd
 	depends = wl-clipboard
-	depends = wtype>=0.4
 	optdepends = chromium: optional signed-in browser automation with agent-browser
 	optdepends = npm: npx-launched MCP servers
 	provides = ghost-runtime=0.0.1.r100.g0c04ce7-1

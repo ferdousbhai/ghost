@@ -43,7 +43,7 @@ import {
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles, type HarnessExit } from "./harness-process.js";
 import {
   harnessRow,
@@ -60,7 +60,7 @@ import {
   renderGhostPolicy,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
+import { expandMcpServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, isUnreachableMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
@@ -484,10 +484,9 @@ export class SessionHost {
     return expiry.slice(0, 10);
   }
 
-  /** The MCP servers a turn loads: `ghost-desktop` when installed, then the ghost's enabled `mcp.json` rows. */
+  /** The MCP servers a turn loads: the ghost's enabled `mcp.json` rows. */
   private async mcpServers(ghost: Ghost): Promise<HarnessMcpServer[]> {
-    const desktop = desktopCommand(this.env);
-    const servers: HarnessMcpServer[] = desktop ? [{ name: GHOST_MCP_SERVER, config: { command: desktop } }] : [];
+    const servers: HarnessMcpServer[] = [];
     // An unreadable file or row is skipped, not thrown; GET …/mcp shows why.
     for (const server of readEnabledMcp(ghost.dir)) {
       const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);

@@ -25,7 +25,12 @@ describe("remote viewer tool call", () => {
     expect(toolCall("read", { path: "/home/owner/.config/hypr/bindings.lua" }, "/work/repo")).toBe("read ~/.config/hypr/bindings.lua");
   });
 
-  test("Ghost's desktop tools keep a phrase; anything else shows its name and arguments", () => {
+  test("the local model's search and read show their query and hit id", () => {
+    expect(toolCall("search", { query: "passport" }, "")).toBe("search “passport”");
+    expect(toolCall("read", { id: "S3" }, "")).toBe("read S3");
+  });
+
+  test("the retired desktop tools keep a phrase; anything else shows its name and arguments", () => {
     expect(toolCall("mcp__ghost__desktop_look", { image: true }, "")).toBe("Checking what’s on screen");
     expect(toolCall("ghost.desktop_act", { steps: [{ do: "type" }] }, "")).toBe("Typing on the desktop");
     expect(toolCall("todo", { action: "add", text: "ship it" }, "")).toBe("todo action: add, text: ship it");

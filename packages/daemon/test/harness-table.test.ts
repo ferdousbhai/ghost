@@ -31,13 +31,13 @@ const TURN: HarnessTurnInput = {
   resume: false,
   sessionId: null,
   persona: "You are Casper.",
-  mcp: [{ name: "ghost", config: { command: "/usr/bin/ghost-desktop" } }],
+  mcp: [{ name: "notes", config: { command: "/usr/bin/notes-mcp" } }],
 };
 
 describe("resource provenance", () => {
   it.each(["claude", "codex", "grok", "copilot", "opencode", "agy", "cursor-agent", "crush"])("%s reports only forwarded MCP names", id => {
     const launch = harnessRow(id)!.launch(TURN);
-    expect(launch.suppliedMcp).toEqual(["ghost"]);
+    expect(launch.suppliedMcp).toEqual(["notes"]);
   });
   it.each(["pi", "omp", "muse"])("%s does not claim to forward Ghost MCP", id => {
     expect(harnessRow(id)!.launch(TURN).suppliedMcp ?? []).toEqual([]);
@@ -415,14 +415,14 @@ describe("launch lines", () => {
     expect(launch?.argv).toContain("--continue");
     expect(launch?.argv.slice(-2)).toEqual(["--mcp-config", ".ghost-mcp.json"]);
     expect(JSON.parse(launch?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({
-      mcpServers: { ghost: { command: "/usr/bin/ghost-desktop", args: [] } },
+      mcpServers: { notes: { command: "/usr/bin/notes-mcp", args: [] } },
     });
   });
 
   it("codex resumes the directory's last session and takes MCP as config overrides", () => {
     const argv = harnessRow("codex")?.launch({ ...TURN, resume: true }).argv ?? [];
     expect(argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "--last"]);
-    expect(argv).toContain('mcp_servers.ghost.command="/usr/bin/ghost-desktop"');
+    expect(argv).toContain('mcp_servers.notes.command="/usr/bin/notes-mcp"');
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
   });
 
@@ -435,7 +435,7 @@ describe("launch lines", () => {
   it("grok gets the persona as --rules, since it reads no AGENTS.md", () => {
     const launch = harnessRow("grok")?.launch(TURN);
     expect(launch?.argv).toEqual(expect.arrayContaining(["--rules", "You are Casper."]));
-    expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.ghost]\ncommand = "/usr/bin/ghost-desktop"');
+    expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.notes]\ncommand = "/usr/bin/notes-mcp"');
   });
 
   it("opencode resumes by the session id it reported, not by directory", () => {
@@ -444,7 +444,7 @@ describe("launch lines", () => {
     const resumed = harnessRow("opencode")?.launch({ ...TURN, resume: true, sessionId: "ses_1" });
     expect(resumed?.argv).toEqual(expect.arrayContaining(["--session", "ses_1"]));
     expect(JSON.parse(resumed?.env?.OPENCODE_CONFIG_CONTENT ?? "{}")).toEqual({
-      mcp: { ghost: { type: "local", command: ["/usr/bin/ghost-desktop"], enabled: true } },
+      mcp: { notes: { type: "local", command: ["/usr/bin/notes-mcp"], enabled: true } },
     });
   });
 });

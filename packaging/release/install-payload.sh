@@ -43,9 +43,6 @@ if [[ "$component" == runtime ]]; then
     "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
   install -Dm644 "$runtime_root/lib/ghost.js" \
     "$pkgdir/usr/lib/ghost/runtime/ghost.js"
-  install -Dm755 "$runtime_root/bin/ghost-desktop" "$pkgdir/usr/bin/ghost-desktop"
-  install -Dm644 "$runtime_root/lib/ghost-desktop.js" \
-    "$pkgdir/usr/lib/ghost/runtime/ghost-desktop.js"
 
   install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
     "$pkgdir/usr/lib/systemd/user/ghostd.service"

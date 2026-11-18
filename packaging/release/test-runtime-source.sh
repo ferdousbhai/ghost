@@ -23,8 +23,7 @@ mkdir -p "$runtime_root/bin" "$runtime_root/lib" "$runtime_root/licenses/ghost" 
   "$runtime_root/licenses/npm/yaml/2.9.0"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost"
-cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"
-chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$runtime_root/bin/ghost-desktop"
+chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost"
 
 cat > "$runtime_root/lib/ghostd.js" <<EOF
 if (process.argv.includes("--help")) {
@@ -43,10 +42,6 @@ if (process.argv.includes("--help")) {
 } else {
   process.exitCode = 2;
 }
-EOF
-cat > "$runtime_root/lib/ghost-desktop.js" <<EOF
-if (process.argv.includes("--version")) console.log("$version");
-else process.exitCode = 2;
 EOF
 cp "$source_root/LICENSE" "$runtime_root/licenses/ghost/LICENSE"
 cp "$source_root/THIRD_PARTY_NOTICES.md" \
@@ -109,7 +104,7 @@ assert_rejected "$non_executable" 'runtime launcher is missing or unsafe'
 
 missing_asset="$work/missing-asset"
 cp -a "$runtime_root" "$missing_asset"
-rm "$missing_asset/lib/ghost-desktop.js"
+rm "$missing_asset/lib/ghost.js"
 refresh_payload "$missing_asset"
 assert_rejected "$missing_asset" 'exact v3 library closure'
 

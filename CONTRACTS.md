@@ -25,8 +25,7 @@ Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
-`ghostd` owns sessions and state transitions; HUD, CLI, and
-`ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
+`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon is loopback-only; remote
 access is the explicit Tailscale Serve viewer, the summonghost.com app over the
 same address, and, for named peers, a message inbox there. The app is a static
 page, not a backend: it has no server, accounts, or storage; the browser calls
@@ -518,8 +517,8 @@ directory to recoverable Trash in one rename; there is no fork.
 
 ### Machine-owned artifacts
 
-- Desktop screenshots follow ghost-desktop's host contract. Bash browser
-  screenshots use the owner's requested destination or XDG Pictures directory.
+- Desktop screenshots are `computer-use`'s, under its own runtime directory.
+  Bash browser screenshots use the owner's requested destination or XDG Pictures directory.
   Ghost keeps no browser screenshot retention manager.
 - Browser downloads belong to agent-browser and Chromium; the Bash caller
   chooses the owner's requested destination or XDG Downloads directory.
@@ -643,16 +642,17 @@ grok, which reads none of them, gets it as `--rules`. Because the directory is
 the conversation's own, a harness's "continue the most recent session here" is
 the conversation's resume; opencode and muse, whose continue is not
 cwd-scoped, are resumed by the session id they reported. Each turn also
-receives `ghost-desktop` as its `ghost` MCP server, when installed (the
-desktop tools), and the ghost's enabled `mcp.json` rows,
+receives the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
 mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
 in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
-carries it. The pi, omp, and muse rows forward none of these, `ghost-desktop`
-included; Pi 1.2 itself supports MCP configured by the owner.
+carries it. The pi, omp, and muse rows forward none of these; Pi 1.2 itself
+supports MCP configured by the owner. Desktop control is not an MCP server:
+it is the separate [computer-use](#computer-use) CLI, which a harness runs
+from its shell like any command.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already
@@ -724,16 +724,9 @@ its pipes have been idle for 100ms, so a descendant holding them cannot hang
 the call. The verb exits with the harness's status (128 plus the signal number
 when a signal ended it, 127 when it could not start).
 
-A delegated harness gets the same `ghost` server: `ghost delegate` adds
-`ghost-desktop` to the two harnesses whose flags for it are known, unless it
-is not installed or the run already configures it (claude: any
-`--mcp-config`; codex: an `mcp_servers.ghost` override): `claude` gets
-`--allowedTools mcp__ghost --mcp-config <ghost server>` after its own
-arguments (both flags take lists, and a `--` in them leaves the run alone),
-`codex` gets a `-c mcp_servers.ghost.command` override ahead of them. That table is a deliberate exception to
-the harness table's being the one adapter: two flags per harness, and it
-replaces a recipe every model had to copy exactly. Other harnesses load it
-themselves (an omp `mcp.json` row, or Pi's native MCP settings).
+A delegated harness runs with its own arguments only, in the ghost's
+environment, so its `computer-use` commands share the conversation's
+desktop lease.
 
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
@@ -816,7 +809,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the name `ghost` is reserved for `ghost-desktop` and refused; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
+| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage, resting}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
@@ -933,26 +926,23 @@ that could not reach its model or that a daemon stop cut off ([External events](
 informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
 peer inbox's hourly limit and outbox bound ([Peers](#peers)) bound another
 owner's ghost, not this one's. The one deliberate exception for its own ghosts is the
-desktop lease (ghost-desktop's [`lease.ts`](https://github.com/ferdousbhai/ghost-desktop/blob/master/src/lease.ts)): there is one
-pointer and one focus, so every `desktop_act` call claims the desktop for its
-caller, and another caller's call fails `busy` naming the holder until the
-holder has been idle 15 s. The lease is a file under
-`$XDG_RUNTIME_DIR/ghost-desktop/`, shared by every `ghost-desktop` process of
-the user, so two turns and a separately launched MCP client (Claude Code)
-take turns too. A caller is one `ghost-desktop` process, named after its
-client, so each harness pass is its own caller.
-`desktop_look` never claims and reports a foreign holder as `heldBy`.
+desktop lease, `computer-use`'s own: there is one pointer and one focus, so
+every `computer-use act` claims the desktop for its caller, and another
+caller's fails `busy` until the holder has been idle 15 s. Ghost names each
+conversation's caller in the turn's environment as
+`COMPUTER_USE_CALLER=ghost <ghost>/<conversation>`, so a conversation's
+commands, and a harness it delegates to, share one claim, and two
+conversations or another agent take turns.
 
 ## Package boundaries
 
 **ghost-core** is `packages/daemon`.
-**ghost-omarchy** is `packages/shell` (`@ghost/omarchy`) plus the separate
-`ghost-desktop` repository. Core never imports the Omarchy side;
-`scripts/check-core-boundary.sh` proves this during lint. Their seams are the
-authenticated HTTP/SSE API and desktop MCP stdio.
+**ghost-omarchy** is `packages/shell` (`@ghost/omarchy`). Core never imports
+the Omarchy side; `scripts/check-core-boundary.sh` proves this during lint.
+Their seam is the authenticated HTTP/SSE API.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
-owns the daemon, CLI, `ghost-desktop`, user unit, and runtime docs/licenses;
+owns the daemon, CLI, user unit, and runtime docs/licenses;
 `ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
 that exact runtime version. The checkout variants are `ghost-runtime-dev` and
 `ghost-dev`. Installing only the runtime keeps desktop/browser automation in the
@@ -1022,17 +1012,14 @@ runtime preserves owner data.
     `omarchy plugin add` checkout: the HUD and the daemon are one product
     and must be the same version, and a second channel cannot hold that lock.
     Setup ends with `ghost new <name>`; harness sign-in is external.
-- [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server
-  with two tools, `desktop_look` (never changes the desktop) and `desktop_act`
-  (ordered steps); any MCP client can run it. It is its own repository with
-  its own version, pinned by tag in the root `package.json` and bundled into
-  the runtime as `ghost-desktop` by
-  [`build-runtime.sh`](packages/daemon/scripts/build-runtime.sh), so the
-  package still ships it. What Ghost relies on is its README's host contract:
-  the two tool names, its untrusted-content fence, and errors written for the
-  model. Each harness pass runs its own, as the turn's `ghost` MCP server
-  (`$GHOST_DESKTOP`, else `ghost-desktop` from PATH); ghostd never calls it.
-  No `ghost-desktop` means no desktop tools.
+- <a id="computer-use"></a>[computer-use-for-omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy)
+  is desktop control for any agent: the `computer-use` CLI (`look`, which
+  never changes the desktop, and `act`, ordered steps) and the skill it
+  installs (`computer-use skill install`). It is a separate product with its
+  own version, listed in `ghost-products`; Ghost neither bundles nor calls
+  it. What a ghost relies on is its skill: JSON arguments, screenshots
+  printed as file paths, the untrusted-content fence, and errors written for
+  the agent. Without it a ghost has no desktop control.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   prints the daemon restart that loads the new bundle. A release is cut locally
@@ -1048,7 +1035,7 @@ runtime preserves owner data.
   own steps (`omarchy-install-ai-ghost`, also attached to the release).
 
 Protocols implemented by a sidecar have one detailed document:
-[`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).
+[`docs/hooks.md`](docs/hooks.md).
 
 Browser automation belongs to the installed `agent-browser` CLI and its skill,
 invoked through the harness's Bash tool. Ghost exposes no browser MCP tool,

@@ -28,6 +28,7 @@ export interface FakeCall {
   readonly cwd: string;
   readonly ghost: string | null;
   readonly session: string | null;
+  readonly caller: string | null;
   readonly agents: string | null;
   readonly mcp: readonly string[];
 }
@@ -52,6 +53,7 @@ writeFileSync(counterPath, String(n + 1));
 appendFileSync(logPath, JSON.stringify({
   n, prompt, resume: resume === "resume", sessionId: sessionId || null, cwd: process.cwd(),
   ghost: process.env.GHOST ?? null, session: process.env.GHOST_SESSION ?? null,
+  caller: process.env.COMPUTER_USE_CALLER ?? null,
   agents: existsSync("AGENTS.md") ? readFileSync("AGENTS.md", "utf8") : null,
   mcp: mcp ? mcp.split(",") : [],
 }) + "\\n");

@@ -49,7 +49,6 @@ data_files=()
 executables=()
 if [[ "$component" == runtime ]]; then
   data_files=(
-    /usr/lib/ghost/runtime/ghost-desktop.js
     /usr/lib/systemd/user/ghostd.service
     /usr/lib/ghost/runtime/ghostd.js
     /usr/lib/ghost/runtime/ghost.js
@@ -58,7 +57,7 @@ if [[ "$component" == runtime ]]; then
     /usr/lib/ghost/skills/ghost/SKILL.md
     /usr/lib/ghost/skills/ghost-products/SKILL.md
   )
-  executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop
+  executables=(/usr/bin/ghostd /usr/bin/ghost
     /usr/lib/ghost/package-smoke/service-smoke.sh)
   absent=(/usr/share/ghost/plugin /usr/share/applications/ghost.desktop
     /usr/share/icons /usr/share/doc/ghost/shell-contrib)
@@ -101,8 +100,6 @@ if [[ "$component" == ui ]]; then
 else
   GHOST_BUN_EXECUTABLE="$(command -v bun)" \
     "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-  GHOST_BUN_EXECUTABLE="$(command -v bun)" \
-    "$root/usr/bin/ghost-desktop" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
   mapfile -t runtime_license_manifests < <(
     find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print

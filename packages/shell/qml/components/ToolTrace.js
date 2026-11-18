@@ -22,8 +22,8 @@ function pathArgument(activity) {
 
 /**
  * The tool's name, lowercased: harnesses spell the same tool `Read` or `read`,
- * and the ghost's own tools `mcp__ghost__desktop_look` (Claude) or
- * `ghost.desktop_look` (Codex).
+ * and historical transcripts the retired desktop tools `mcp__ghost__desktop_look`
+ * (Claude) or `ghost.desktop_look` (Codex).
  */
 function toolName(activity) {
     return String(activity.name || "").toLowerCase().replace(/^(?:mcp__ghost__|ghost\.)/, "");
@@ -110,8 +110,8 @@ function fileCwd(activity) {
  * A call as pi shows it: what is being done, never what came back. `$ git
  * status`, `read ~/notes/plan.md:10-40`, `edit src/app.ts`, `grep /retry/ in
  * src (*.ts)`, `find *.md in docs`, and any other tool as its name and
- * arguments. Ghost's own desktop tools carry no command or path to show, so
- * they keep a plain phrase, running or done.
+ * arguments. The local model's `search` and `read` show their query and hit
+ * id; the retired desktop tools, still in old transcripts, a plain phrase.
  */
 function call(activity, completed, limit) {
     var name = toolName(activity);
@@ -124,6 +124,8 @@ function call(activity, completed, limit) {
         var command = shellCommand(activity);
         return "$ " + (command !== "" ? compact(command, limit) : "…");
     }
+    if (name === "read" && pathArgument(activity) === "" && argument(activity, "id") !== "")
+        return compact("read " + argument(activity, "id"), limit);
     if (READ_TOOLS[name]) return compact("read " + path(pathArgument(activity), "…") + lineRange(activity), limit);
     if (WRITE_TOOLS[name]) return compact("write " + path(pathArgument(activity), "…"), limit);
     if (EDIT_TOOLS[name]) return compact("edit " + path(editedPath(activity), "…"), limit);
@@ -135,6 +137,8 @@ function call(activity, completed, limit) {
         return compact("ls " + path(argument(activity, "path"), "."), limit);
     case "grep":
     case "search": {
+        if (argument(activity, "pattern") === "" && argument(activity, "query") !== "")
+            return "search " + quoted(argument(activity, "query"), limit);
         var glob = argument(activity, "glob") || argument(activity, "include");
         return compact("grep /" + argument(activity, "pattern") + "/ in " + path(argument(activity, "path"), ".")
             + (glob !== "" ? " (" + glob + ")" : ""), limit);
@@ -142,6 +146,7 @@ function call(activity, completed, limit) {
     case "find":
     case "glob":
         return compact("find " + argument(activity, "pattern") + " in " + path(argument(activity, "path"), "."), limit);
+    // Historical transcripts still carry the retired desktop tools.
     case "desktop_look":
         if (args.image === true || args.region || args.monitor)
             return completed ? "Checked what’s on screen" : "Checking what’s on screen";

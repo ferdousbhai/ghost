@@ -1,6 +1,6 @@
 #!/bin/sh
-# One launcher for every runtime command: installed as ghostd, ghost, and
-# ghost-desktop, it runs the bundle named after itself.
+# One launcher for every runtime command: installed as ghostd and ghost, it
+# runs the bundle named after itself.
 set -eu
 
 case $0 in
