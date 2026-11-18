@@ -58,11 +58,9 @@ view, and Enter with nothing matching asks the ghost. Opened on its list, it
 listens as the prompt does: Voxtype types into the filter, Enter while
 listening asks the ghost what was said, and arrowing to a row or leaving the
 list stops it; a restore after a reload neither listens nor ignites. Esc
-steps back (a standing question, the workbench, the view, then out), as do
-the toggle and a scrim click; a turn runs on behind it, and Shift+Esc stops
-one. Handing something to another app (a link, a file, the external editor)
-closes it. A workbench conflict or failed save blocks closing, switching
-files, and the external editor until it is resolved.
+steps back (a standing question, the view, then out), as do the toggle and
+a scrim click; a turn runs on behind it, and Shift+Esc stops one. Handing
+something to another app (a link, an attached image) closes it.
 
 **The bar mark** is the ghost glyph in herdr's agent states over every
 conversation of the selected ghost, most urgent first: filled red while one
@@ -96,8 +94,8 @@ Integration samples: [contrib](contrib/README.md).
 Preview and focused checks: [dev](dev/README.md).
 
 The `Ghostd` singleton serves HUD and bar state over authenticated HTTP/SSE.
-Durable state changes use the daemon API; the workbench editor alone writes
-ordinary files at the owner's direction. Preview those writes in isolation.
+Durable state changes use the daemon API; the shell writes no ghost files
+itself.
 
 ## Theme
 

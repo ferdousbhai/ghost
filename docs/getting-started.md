@@ -259,7 +259,7 @@ In a conversation, type, and:
 | `Enter` | send |
 | `Shift+Enter` | newline |
 | `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
-| `Esc` | dismiss a pending confirmation, then close the workbench, then back to the list; a running turn keeps going |
+| `Esc` | dismiss a pending confirmation, then back to the list; a running turn keeps going |
 | `Shift+Esc` | stop a running turn |
 | `Ctrl+N` | start a new conversation (the composer's `+`) |
 | `PageUp` / `PageDown` | scroll the transcript a page |

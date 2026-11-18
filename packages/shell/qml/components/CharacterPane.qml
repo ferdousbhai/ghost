@@ -1,10 +1,10 @@
 pragma ComponentBehavior: Bound
 
-// The persona file (character.md), edited through the daemon rather than the
-// workbench's direct file editor: the daemon validates the write and owns the
-// size cap, so a refused save is a visible error here instead of a broken
-// cold session start later. Save is explicit — a persona is not a scratch
-// buffer — and a refused save keeps the draft under the daemon's reason.
+// The persona file (character.md), edited through the daemon: the daemon
+// validates the write and owns the size cap, so a refused save is a visible
+// error here instead of a broken cold session start later. Save is explicit —
+// a persona is not a scratch buffer — and a refused save keeps the draft under
+// the daemon's reason.
 import QtQuick
 import "../services"
 

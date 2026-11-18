@@ -792,8 +792,8 @@ runtime preserves owner data.
     `turn_end` command hook.
   - **State** moves only through the authenticated HTTP/SSE API; the shell
     never edits daemon-validated ghost state (character, control files)
-    directly. The one exception is the workbench file editor, which writes
-    ordinary files at the owner's explicit direction.
+    directly, and it has no file editor: a tool call that wrote a file
+    shows its path in the transcript and opens nothing.
   - **Dictation** is Omarchy's Voxtype: the shell reads
     `$XDG_RUNTIME_DIR/voxtype/state` and runs `voxtype record
     start|stop|cancel`. Ghost ships no speech stack of its own.

@@ -40,7 +40,7 @@ Item {
             : root.promptParts.text;
         // A trailing newline is a POSIX terminator, not a blank line. Qt's
         // PlainText path paints it as one, which is the empty band under a
-        // prompt (CodeView already strips the same thing for the gutter).
+        // prompt.
         return root.plainBody
             ? String(raw).replace(/\r\n/gu, "\n").replace(/\n$/u, "")
             : raw;
@@ -340,7 +340,7 @@ Item {
 
                         required property string modelData
                         // An attached image, read from the conversation directory.
-                        readonly property string path: Workbench.sessionFile(Ghostd.currentSessionId, picture.modelData)
+                        readonly property string path: Ghostd.sessionFile(Ghostd.currentSessionId, picture.modelData)
 
                         source: picture.path === "" ? "" : "file://" + picture.path
                         width: Math.min(root.imageSize, pictures.width)

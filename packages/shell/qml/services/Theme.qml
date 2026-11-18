@@ -292,31 +292,6 @@ Singleton {
         return Qt.rgba(0.984, 0.443, 0.522, alpha);
     }
 
-    // Deliberately dark in *both* Omarchy modes. A code view is editor chrome,
-    // not a reading surface: VS Code, Xcode and Zed all keep a dark editor in a
-    // light shell because a syntax palette tuned for contrast on dark ink turns
-    // to mud on paper, and re-tuning six token colours per mode would be a
-    // second palette to maintain. The surface is cooled toward the ghost canvas
-    // so an open file reads as part of this app rather than an embedded IDE.
-    readonly property color editorBackground: "#131720"
-    readonly property color editorGutterBackground: "#0f131b"
-    readonly property color editorGutterText: "#7a8496"
-    readonly property color editorBorder: "#1d232e"
-    readonly property color editorForeground: "#d3d8e0"
-    readonly property color editorSelection: "#2a3a55"
-
-    // The syntax palette: five roles, plus editorForeground for everything
-    // else. Strings rather than colours because Highlighter.js interpolates
-    // them straight into rich-text markup, where only a hex literal is valid.
-    // VS Code Dark+ adjacent, pulled a step toward the ghost's warm chrome —
-    // and no token is allowed to be brighter or more saturated than ghostAmber,
-    // which has to stay the most present colour on screen.
-    readonly property string synComment: "#5f8c69"
-    readonly property string synString: "#d99a6c"
-    readonly property string synNumber: "#b5cea8"
-    readonly property string synKeyword: "#9d8cf5"
-    readonly property string synFunction: "#d9c98a"
-
     // Omarchy's chrome rounds as Hyprland's windows do: its Style.cornerRadius
     // mirrors `decoration:rounding` (0, square, by default). Ghost's cards,
     // panels and rows follow the same number so they sit beside Omarchy's menu

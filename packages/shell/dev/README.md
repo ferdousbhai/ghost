@@ -182,18 +182,14 @@ can prevent notifications from loading even when the panel itself opens.
 
 ## Manual verification
 
-Use this preview for changes involving focus, layout, notifications, or file
-writes; mocked unit tests alone cannot prove those behaviors. Check the
+Use this preview for changes involving focus, layout, or notifications;
+mocked unit tests alone cannot prove those behaviors. Check the
 surfaces affected by the change:
 
 - Chat in the HUD and the presence card mark replies read; the launcher,
-  Routines, a closed HUD, and a narrow workbench hiding Chat preserve unread
-  state.
+  Routines, and a closed HUD preserve unread state.
 - Notifications replace their prior server ID and open the originating
   conversation when clicked.
-- File edits preserve Markdown, merge disjoint external edits, and block
-  close/switch on conflicts or failed saves. Include an empty external file
-  and recovery after a permission-denied save.
 - The bar widget fills its host slot; hover, exit, and clicks use host APIs.
 - Test theme changes and multiple outputs in an isolated environment when
   the change affects them; do not infer coverage from a single-output run.

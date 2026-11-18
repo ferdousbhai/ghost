@@ -9,7 +9,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Qt5Compat.GraphicalEffects
 import "../services"
-import "Highlighter.js" as Highlighter
 import "ToolTrace.js" as ToolTrace
 
 Rectangle {
@@ -32,13 +31,6 @@ Rectangle {
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticOutput: root.presentation.diagnosticOutput
 
-    // Paths resolve against the cwd captured when that exact call began; a
-    // relative path with no cwd offers no chip rather than silently opening a
-    // similarly named file in the wrong directory.
-    readonly property string workbenchPath: root.completed || root.running
-        ? Workbench.absoluteFrom(root.presentation.fileTarget, root.presentation.fileCwd) : ""
-    readonly property bool openable: Workbench.canOpen(root.workbenchPath)
-
     // #fde68a at 90% — the old card's amber-100 label. On paper that wash is
     // unreadable, so light mode keeps the amber fills and takes a plain ink.
     readonly property color labelColor: Theme.light
@@ -46,10 +38,6 @@ Rectangle {
     readonly property color detailColor: Theme.light ? Theme.foreground : Theme.foregroundDim
     // Rose, the failure temperature, rather than the ordinary amber.
     readonly property color glyphTint: root.failed ? Theme.ghostRose : Theme.ghostAmberBright
-
-    // 16 glyph + the trace Row's own spacing: rows under the trace line up
-    // under its words.
-    readonly property real indent: 16 + Theme.gap / 2
 
     visible: root.trace !== ""
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
@@ -127,51 +115,6 @@ Rectangle {
                 font.letterSpacing: 0.5
                 wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
                 elide: root.expanded ? Text.ElideNone : Text.ElideRight
-            }
-        }
-
-        // Open-the-file affordance, indented under the trace line rather than
-        // beside it: the trace is a full-width elided line, so a sibling in
-        // that Row would be the thing that gets elided away.
-        Rectangle {
-            id: fileChip
-
-            readonly property bool current: Workbench.filePath === root.workbenchPath
-
-            visible: root.openable
-            x: root.indent
-            width: Math.min(parent.width - x, chipLabel.implicitWidth + Theme.gap * 1.5)
-            height: visible ? chipLabel.implicitHeight + 6 : 0
-            radius: Theme.controlRadius
-            color: fileChip.current || chipArea.containsMouse
-                ? Theme.amber(0.16) : Theme.amber(0.08)
-            border.width: 1
-            border.color: fileChip.current ? Theme.amber(0.35) : Theme.amber(0.18)
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
-            }
-
-            Text {
-                id: chipLabel
-                anchors.centerIn: parent
-                width: parent.width - Theme.gap
-                text: Highlighter.baseName(root.workbenchPath)
-                color: Theme.ghostAmber
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-                elide: Text.ElideMiddle
-            }
-
-            // Smaller than cardHover and declared after it, so a click here
-            // opens the file instead of toggling the diagnostics.
-            MouseArea {
-                id: chipArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: Workbench.open(root.workbenchPath)
             }
         }
 

@@ -171,7 +171,7 @@ TestCase {
 
     function test_aTrailingNewlineDoesNotAddAPhantomLineToAPrompt(): void {
         // POSIX text ends in a newline. Qt PlainText paints that as a blank
-        // line, the same phantom CodeView already strips for the gutter.
+        // line.
         prompt.body = "why did you reply 4 times";
         wait(120);
         waitForRendering(prompt);

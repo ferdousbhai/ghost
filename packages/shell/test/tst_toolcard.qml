@@ -1,42 +1,9 @@
 import QtQuick
 import QtTest
-import "../qml/services"
 import "../qml/components/ToolTrace.js" as ToolTrace
 
 TestCase {
     name: "ToolTrace"
-
-    function test_nativeWriterUsesItsCapturedCwd(): void {
-        const activity = {
-            name: "write",
-            status: "complete",
-            cwd: "/home/owner/projects/one",
-            arguments: { path: "notes/today.md" },
-            summary: ""
-        };
-        const view = ToolTrace.view(activity, true, false);
-        compare(view.fileCwd, "/home/owner/projects/one");
-        compare(
-            Workbench.absoluteFrom(view.fileTarget, view.fileCwd),
-            "/home/owner/projects/one/notes/today.md"
-        );
-    }
-
-    function test_relativeNativeWriterWithoutRecordedCwdIsRefused(): void {
-        compare(Workbench.absoluteFrom("notes/today.md", ""), "");
-        // Absolute historical arguments remain unambiguous without the new field.
-        compare(Workbench.absoluteFrom("/srv/archive/today.md", ""),
-            "/srv/archive/today.md");
-    }
-
-    function test_resolutionUsesTheCallCwdNotCurrentGhostOrLaterCd(): void {
-        compare(Workbench.absoluteFrom("same.md", "/home/owner"),
-            "/home/owner/same.md");
-        compare(Workbench.absoluteFrom("same.md", "/home/owner/code/project"),
-            "/home/owner/code/project/same.md");
-        compare(Workbench.absoluteFrom("../shared.md", "/home/owner/code/project"),
-            "/home/owner/code/shared.md");
-    }
 
     function test_ghostToolsReadTheSameUnderAnyHarnessNamespace(): void {
         for (const name of ["desktop_look", "mcp__ghost__desktop_look", "ghost.desktop_look"]) {
@@ -78,7 +45,6 @@ TestCase {
         compare(call("ls", ({})), "ls .");
         compare(call("grep", { pattern: "retry", path: "src", glob: "*.ts" }), "grep /retry/ in src (*.ts)");
         compare(call("find", { pattern: "*.qml" }), "find *.qml in .");
-        compare(ToolTrace.fileTarget({ name: "edit", arguments: { path: "notes.md" } }), "notes.md");
     }
 
     // Each harness spells the same tools its own way.
@@ -91,9 +57,7 @@ TestCase {
         // Codex wraps its command; the script is the command.
         compare(call("shell", { command: ["bash", "-lc", "git status"] }), "$ git status");
         compare(call("apply_patch", { input: "*** Begin Patch\n*** Update File: src/app.ts\n@@" }), "edit src/app.ts");
-        compare(ToolTrace.fileTarget({ name: "Write", arguments: { file_path: "/tmp/a.md" } }), "/tmp/a.md");
-        // Whatever the trace calls an edit offers its file, a patch's included.
-        compare(ToolTrace.fileTarget({ name: "apply_patch", arguments: { input: "*** Update File: src/app.ts\n" } }), "src/app.ts");
+        compare(call("Write", { file_path: "/tmp/a.md" }), "write /tmp/a.md");
     }
 
     // Paths read short: inside the call's directory, relative; home as ~.

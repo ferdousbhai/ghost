@@ -83,7 +83,7 @@ rg -q 'onLinkActivated: link => ExternalLinks\.openModelUrl\(link\)' qml/compone
 # Hook labels originate in trusted machine configuration but still remain
 # display-only text. AutoText must never turn them into a resource surface.
 hooks_view=qml/components/HooksBrowser.qml
-if rg -q 'Text\.(MarkdownText|RichText)|TextEdit\.(MarkdownText|RichText)|onLinkActivated|\b(Image|AnimatedImage|BorderImage|CodeView|FileView|FilePane)\s*\{' "$hooks_view"; then
+if rg -q 'Text\.(MarkdownText|RichText)|TextEdit\.(MarkdownText|RichText)|onLinkActivated|\b(Image|AnimatedImage|BorderImage|FileView)\s*\{' "$hooks_view"; then
   echo "HooksBrowser must expose only literal Text.PlainText labels" >&2
   exit 1
 fi

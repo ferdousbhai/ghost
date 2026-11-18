@@ -16,12 +16,12 @@ pragma ComponentBehavior: Bound
 //   the list's place      a fixed top a fifth of the way down, so filtering
 //                         shortens the card without moving the field; a view
 //                         grows from there to most of the screen.
-//   leaving               Esc after a standing question, the workbench and the
-//                         view, the summon toggle, a click on the scrim, or the
+//   leaving               Esc after a standing question and the view, the
+//                         summon toggle, a click on the scrim, or the
 //                         compositor closing the window (SUPER+W). A turn keeps
 //                         running when it closes; Shift+Esc stops one.
-//   hand-offs             opening a link, a file or the external editor closes
-//                         it, or the app it opened would sit underneath.
+//   hand-offs             opening a link or a file closes it, or the app it
+//                         opened would sit underneath.
 import Quickshell
 import QtQuick
 import QtQuick.Layouts
@@ -51,20 +51,6 @@ FloatingWindow {
     property var pending: null
     readonly property string pendingSession: hud.pendingId("conversation")
     readonly property string pendingGhost: hud.pendingId("ghost")
-
-    // The file pane sits beside the chat when both columns can still be read,
-    // and takes the chat's place when they cannot.
-    readonly property int chatMinimumWidth: 380
-    readonly property int paneMinimumWidth: 320
-    readonly property int bodyWidth: card.width - Theme.pad * 2
-    readonly property bool workbenchOpen: Workbench.filePath !== ""
-    readonly property bool workbenchSplit: hud.workbenchOpen
-        && hud.bodyWidth >= hud.chatMinimumWidth + hud.paneMinimumWidth + Theme.sectionGap
-    readonly property int workbenchWidth: {
-        const region = hud.bodyWidth - Theme.sectionGap;
-        return Math.max(hud.paneMinimumWidth,
-            Math.min(Math.round(region * 0.55), region - hud.chatMinimumWidth));
-    }
 
     visible: hud.shown
     // DesktopKeys' rules find it by this title (a plugin's windows carry the
@@ -169,12 +155,9 @@ FloatingWindow {
         } else if (row.kind === "place") {
             hud.showSection(row.id);
         } else if (row.kind === "ghost") {
-            // The open file lives in the ghost being left.
-            if (row.id !== Ghostd.activeGhost) Workbench.close();
             Ghostd.selectGhost(row.id);
             hud.showSection("home");
         } else if (row.kind === "summon") {
-            Workbench.close();
             Ghostd.createGhost(row.title);
             hud.showSection("home");
         }
@@ -224,7 +207,6 @@ FloatingWindow {
         target: Ghostd
         property: "hudChatFocused"
         value: hud.shown && hud.focused() && hud.currentSection === "chat"
-            && (!hud.workbenchOpen || hud.workbenchSplit)
     }
 
     Connections {
@@ -341,14 +323,13 @@ FloatingWindow {
         }
 
         focus: true
-        // Esc steps back out: a standing question, then the workbench, then
-        // the view back to the list, then the HUD itself. A turn runs on
+        // Esc steps back out: a standing question, then the view back to the
+        // list, then the HUD itself. A turn runs on
         // behind it; Shift+Esc stops one.
         Keys.onEscapePressed: event => {
             event.accepted = true;
             if (hud.pending !== null) hud.dismissPending();
             else if ((event.modifiers & Qt.ShiftModifier) && Ghostd.working) Ghostd.cancel();
-            else if (hud.workbenchOpen) Workbench.close();
             else if (hud.currentSection !== "home") hud.showSection("home");
             else hud.close();
         }
@@ -488,119 +469,94 @@ FloatingWindow {
                 Layout.fillHeight: true
                 currentIndex: hud.sections.indexOf(hud.currentSection)
 
-                RowLayout {
-                    spacing: Theme.sectionGap
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    spacing: Theme.gap
 
-                    ColumnLayout {
-                        // A narrow window has room for one column, so the file pane
-                        // takes this one's place until it closes.
-                        visible: !hud.workbenchOpen || hud.workbenchSplit
+                    FollowingList {
+                        id: transcriptView
+
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        clip: true
                         spacing: Theme.gap
+                        model: Ghostd.transcript
+                        cacheBuffer: 400
+                        isMarked: index => Ghostd.transcript.get(index).role === "user"
 
-                        FollowingList {
-                            id: transcriptView
+                        delegate: Bubble {
+                            // One required property per ListModel role. A
+                            // dynamically-filled ListModel has no schema, so
+                            // test/fixtures/transcript-role-probe.mjs checks
+                            // these against Ghostd.cloneTranscriptRow.
+                            required property string role
+                            required property string text
+                            required property var toolActivity
+                            required property string error
+                            required property bool pending
+                            required property int index
 
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            clip: true
-                            spacing: Theme.gap
-                            model: Ghostd.transcript
-                            cacheBuffer: 400
-                            isMarked: index => Ghostd.transcript.get(index).role === "user"
-
-                            delegate: Bubble {
-                                // One required property per ListModel role. A
-                                // dynamically-filled ListModel has no schema, so
-                                // test/fixtures/transcript-role-probe.mjs checks
-                                // these against Ghostd.cloneTranscriptRow.
-                                required property string role
-                                required property string text
-                                required property var toolActivity
-                                required property string error
-                                required property bool pending
-                                required property int index
-
-                                width: transcriptView.width
-                                rowIndex: index
-                                speaker: role
-                                body: text
-                                activities: toolActivity
-                                failure: error
-                                busy: pending
-                            }
-
-                            // A declared child of a ListView lands in the scrolling
-                            // contentItem, whose height is 0 while the list is
-                            // empty — so centre against the *view* explicitly
-                            // rather than against `parent`.
-                            Welcome {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                y: Math.max(0, (transcriptView.height - height) / 2)
-                                visible: transcriptView.count === 0
-                                // As wide as a line reads well, in columns. A
-                                // narrow HUD gives it the whole column: a fraction
-                                // of one would wrap every third word.
-                                width: Math.min(transcriptView.width - Theme.pad * 2,
-                                    Theme.ch(46) + Theme.pad * 2)
-                            }
+                            width: transcriptView.width
+                            rowIndex: index
+                            speaker: role
+                            body: text
+                            activities: toolActivity
+                            failure: error
+                            busy: pending
                         }
 
-                        ActivityLine {
-                            Layout.fillWidth: true
-                            maxHeight: Math.max(90, Math.floor(card.height * 0.28))
-                        }
-
-                        // What the ghost asked here and waits on; any message
-                        // answers it, a button just saves typing.
-                        QuestionLine {
-                            Layout.fillWidth: true
-                            question: Ghostd.currentSessionRow ? Ghostd.currentSessionRow.question || null : null
-                            onAnswered: text => {
-                                transcriptView.toEnd();
-                                Ghostd.send(text);
-                            }
-                            onDismissed: Ghostd.dismissQuestion(Ghostd.currentSessionId)
-                        }
-
-                        QueueLine {
-                            Layout.fillWidth: true
-                            followUps: Ghostd.followUpQueue
-                            error: Ghostd.queueError
-                        }
-
-                        Composer {
-                            id: composer
-                            Layout.fillWidth: true
-                            // Room for a real draft before it scrolls, never the
-                            // whole pane: the transcript above must stay in view.
-                            maxHeight: Math.max(160, Math.floor(card.height * 0.4))
-                            transcript: transcriptView
-                            onNewConversationRequested: hud.startConversation()
-
-                            onSubmitted: prompt => {
-                                transcriptView.toEnd();
-                                Ghostd.send(prompt);
-                            }
+                        // A declared child of a ListView lands in the scrolling
+                        // contentItem, whose height is 0 while the list is
+                        // empty — so centre against the *view* explicitly
+                        // rather than against `parent`.
+                        Welcome {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: Math.max(0, (transcriptView.height - height) / 2)
+                            visible: transcriptView.count === 0
+                            // As wide as a line reads well, in columns. A
+                            // narrow HUD gives it the whole column: a fraction
+                            // of one would wrap every third word.
+                            width: Math.min(transcriptView.width - Theme.pad * 2,
+                                Theme.ch(46) + Theme.pad * 2)
                         }
                     }
 
-                    // The workbench: a file the ghost wrote, opened from its tool
-                    // card. Nothing is instantiated while it is closed, and while
-                    // it is open it either takes the larger half of the body or,
-                    // on a narrow window, the whole of it.
-                    Loader {
-                        active: hud.workbenchOpen
-                        visible: hud.workbenchOpen
-                        Layout.fillHeight: true
-                        Layout.fillWidth: !hud.workbenchSplit
-                        Layout.preferredWidth: hud.workbenchSplit ? hud.workbenchWidth : 0
-                        Layout.minimumWidth: hud.workbenchSplit ? hud.paneMinimumWidth : 0
+                    ActivityLine {
+                        Layout.fillWidth: true
+                        maxHeight: Math.max(90, Math.floor(card.height * 0.28))
+                    }
 
-                        sourceComponent: FilePane {
-                            filePath: Workbench.filePath
-                            onClosed: Workbench.close()
+                    // What the ghost asked here and waits on; any message
+                    // answers it, a button just saves typing.
+                    QuestionLine {
+                        Layout.fillWidth: true
+                        question: Ghostd.currentSessionRow ? Ghostd.currentSessionRow.question || null : null
+                        onAnswered: text => {
+                            transcriptView.toEnd();
+                            Ghostd.send(text);
+                        }
+                        onDismissed: Ghostd.dismissQuestion(Ghostd.currentSessionId)
+                    }
+
+                    QueueLine {
+                        Layout.fillWidth: true
+                        followUps: Ghostd.followUpQueue
+                        error: Ghostd.queueError
+                    }
+
+                    Composer {
+                        id: composer
+                        Layout.fillWidth: true
+                        // Room for a real draft before it scrolls, never the
+                        // whole pane: the transcript above must stay in view.
+                        maxHeight: Math.max(160, Math.floor(card.height * 0.4))
+                        transcript: transcriptView
+                        onNewConversationRequested: hud.startConversation()
+
+                        onSubmitted: prompt => {
+                            transcriptView.toEnd();
+                            Ghostd.send(prompt);
                         }
                     }
                 }
@@ -609,10 +565,9 @@ FloatingWindow {
                     onCloseRequested: hud.showSection("home")
                 }
 
-                // The persona edits through the
-                // daemon's validating writer rather than the workbench's direct
-                // file editor: the daemon owns the size cap, so a bad edit is
-                // refused at Save instead of breaking the next cold start.
+                // The persona edits through the daemon's validating writer: the
+                // daemon owns the size cap, so a bad edit is refused at Save
+                // instead of breaking the next cold start.
                 CharacterPane {
                     onClosed: hud.showSection("home")
                 }

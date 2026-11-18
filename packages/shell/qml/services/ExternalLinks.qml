@@ -23,8 +23,8 @@ Singleton {
 
     /**
      * Hand an absolute local path — a file or a directory — to whatever the
-     * desktop has registered for it. Used by Workbench's editor fallback and
-     * for a prompt's attached image; model-authored strings never reach here.
+     * desktop has registered for it: a prompt's attached image. Model-authored
+     * strings never reach here.
      */
     function openPath(path: string): void {
         if (!Policy.isLocalPath(path)) {

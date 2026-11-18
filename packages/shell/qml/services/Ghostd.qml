@@ -282,10 +282,23 @@ Singleton {
     property string sessionsError: ""
     property string deletingSessionId: ""
     /** The active ghost's listing row for `id`, or undefined. */
+    /** `name` in conversation `sessionId`'s directory, or "" while either is unknown. */
+    function sessionFile(sessionId: string, name: string): string {
+        return root.activeGhostDir === "" || sessionId === ""
+            ? "" : root.activeGhostDir + "/sessions/" + sessionId + "/" + name;
+    }
+
     function sessionRow(id: string): var {
         return root.sessions.find(session => session && session.id === id);
     }
     readonly property var currentSessionRow: root.sessionRow(root.currentSessionId)
+    /** The active ghost's home directory, or "" until the roster names it. */
+    readonly property string activeGhostDir: {
+        for (const row of root.ghosts) {
+            if (row && row.name === root.activeGhost) return String(row.dir || "");
+        }
+        return "";
+    }
     /** The agent CLI carrying the open conversation: the owner's unconfirmed
         pick, else its listing row; "" when unknown (a draft runs on whatever
         the daemon picks). */

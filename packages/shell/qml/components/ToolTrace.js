@@ -90,18 +90,6 @@ var READ_TOOLS = { read: true, view: true, read_file: true };
 var WRITE_TOOLS = { write: true, write_file: true, create: true };
 var EDIT_TOOLS = { edit: true, multiedit: true, str_replace: true, apply_patch: true, patch: true };
 
-/**
- * The file a call wrote, named the way the tool named it. Writers only — a
- * read changed nothing worth opening. Native file tools resolve relative paths
- * against the cwd captured on that activity.
- */
-function fileTarget(activity) {
-    var name = toolName(activity);
-    if (WRITE_TOOLS[name]) return pathArgument(activity);
-    if (EDIT_TOOLS[name]) return editedPath(activity);
-    return "";
-}
-
 function fileCwd(activity) {
     return typeof activity.cwd === "string" ? activity.cwd.trim() : "";
 }
@@ -184,8 +172,6 @@ function output(activity) {
 function view(activity, completed, expanded) {
     return {
         trace: text(activity, completed, expanded),
-        diagnosticOutput: output(activity),
-        fileTarget: fileTarget(activity),
-        fileCwd: fileCwd(activity)
+        diagnosticOutput: output(activity)
     };
 }
