@@ -1,6 +1,7 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { conversationId, readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
-import { emit, primary } from "./output.js";
+import { emit, primary, writeJson } from "./output.js";
+import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
@@ -46,22 +47,31 @@ export async function readCommand(ctx: CliContext): Promise<number> {
   return 0;
 }
 
+/** `ghost remote [status|on|off]`: a change that leaves the state other than asked exits 1, saying why. */
 export async function remoteCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
   const [action = "status"] = parsed.positionals;
-  let body: unknown;
-  if (action === "status") body = await ctx.client.request("GET", "/api/remote");
-  else if (action === "on" || action === "off") {
-    body = await ctx.client.request("POST", "/api/remote", { enabled: action === "on" });
-  } else throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
-  emit(ctx, body, (result) => {
-    const status = result as Pick<RemoteStatus, "state" | "hostname" | "app" | "problem">;
-    const line = `${status.state === "on" ? `on ${status.hostname}` : status.state}${status.problem ? ` (${status.problem.message})` : ""}\n`;
-    const human = status.state !== "on" ? line
-      : !status.app ? `${line}no app: remote.apps is empty, so nothing can reach Ghost remotely\n`
-      : `${line}${status.app.url ? `app ${status.app.url}\n` : ""}`;
-    return action === "status" ? { human, quiet: `${status.state}\n` } : human;
-  });
+  if (!["status", "on", "off"].includes(action)) throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
+  const status = action === "status"
+    ? await ctx.client.request<RemoteStatus>("GET", "/api/remote")
+    : await ctx.client.request<RemoteStatus>("POST", "/api/remote", { enabled: action === "on" });
+  const appLines = status.state !== "on" ? ""
+    : !status.app ? "no app: remote.apps is empty, so nothing can reach Ghost remotely\n"
+    : status.app.url ? `app ${status.app.url}\n` : "";
+  if (action === "status") {
+    emit(ctx, status, () => ({
+      human: `${status.state === "on" ? `on ${status.hostname}` : status.state}${status.problem ? ` (${status.problem.message})` : ""}\n${appLines}`,
+      quiet: `${status.state}\n`,
+    }));
+    return 0;
+  }
+  if (status.problem || status.state !== action) {
+    if (flagBoolean(parsed, "json")) writeJson(ctx.runtime.stdout, status);
+    const why = status.problem ? `${status.problem.message}${status.problem.action ? ` (${status.problem.action})` : ""}` : `ghostd did not turn it ${action}`;
+    ctx.runtime.stderr.write(`ghost: remote access is ${status.state}: ${why}\n`);
+    return EXIT_CODE.failure;
+  }
+  emit(ctx, status, () => `Remote access is ${action === "on" ? `on at ${status.hostname}` : "off"}.\n${appLines}`);
   return 0;
 }
 

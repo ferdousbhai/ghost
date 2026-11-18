@@ -408,13 +408,24 @@ describe("CLI API adaptation", () => {
     };
     const fetch: CliFetch = async () => jsonResponse(body);
     const run = () => runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
-    expect((await run()).stdout).toBe("on box.tail.ts.net\napp https://summonghost.com/#add=box.tail.ts.net\n");
+    expect(await run()).toMatchObject({ code: 0, stdout: "Remote access is on at box.tail.ts.net.\napp https://summonghost.com/#add=box.tail.ts.net\n" });
+    body = { ...body, app: null };
+    expect((await run()).stdout).toBe("Remote access is on at box.tail.ts.net.\nno app: remote.apps is empty, so nothing can reach Ghost remotely\n");
+  });
+
+  it("ghost remote on|off exits 1 on stderr when the state is not what was asked", async () => {
+    const remote = (action: string, body: unknown, ...flags: string[]) =>
+      runCli(["remote", action, ...flags], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch: async () => jsonResponse(body) });
     const refused = { state: "off", hostname: "box.tail.ts.net", app: { origin: "https://summonghost.com", url: null },
       problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." } };
-    expect((await runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch: async () => jsonResponse(refused) })).stdout)
-      .toBe("off (This tailnet has no HTTPS certificates.)\n");
-    body = { ...body, app: null };
-    expect((await run()).stdout).toBe("on box.tail.ts.net\nno app: remote.apps is empty, so nothing can reach Ghost remotely\n");
+    expect(await remote("on", refused)).toEqual({ code: 1, stdout: "", stderr: "ghost: remote access is off: This tailnet has no HTTPS certificates.\n" });
+    const json = await remote("on", refused, "--json");
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.stdout)).toEqual(refused);
+    // No problem named, but still on after `off`.
+    const stillOn = { state: "on", hostname: "box.tail.ts.net", app: null, problem: null };
+    expect(await remote("off", stillOn)).toEqual({ code: 1, stdout: "", stderr: "ghost: remote access is on: ghostd did not turn it off\n" });
+    expect(await remote("off", { ...stillOn, state: "off" })).toEqual({ code: 0, stdout: "Remote access is off.\n", stderr: "" });
   });
 
   it("ghost hooks status prints each hook's event, name, and description", async () => {
