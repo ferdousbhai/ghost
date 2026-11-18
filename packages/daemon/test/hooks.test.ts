@@ -364,11 +364,14 @@ describe("GhostHookRunner", () => {
     const runner = GhostHookRunner.fromConfig(config, { logger });
     expect(runner.hasHandlers("session_stop")).toBe(true);
     expect(logger.records).toMatchObject([
-      { message: "skipping a retired hook event; the next edit drops it from hooks.json", fields: { event: "before_prompt" } },
-      { message: "ignoring top-level keys; the next edit drops them from hooks.json", fields: { keys: ["builtin"] } },
+      { message: "skipping what hooks.json no longer admits; the next edit drops it", fields: { field: "builtin" } },
+      { message: "skipping what hooks.json no longer admits; the next edit drops it", fields: { field: "hooks.before_prompt" } },
     ]);
     expect(runner.config().document).toEqual({ hooks: { session_stop: stop } });
-    await expect(runner.replaceConfig(document)).rejects.toThrow(/was retired/u);
+    await expect(runner.replaceConfig(document)).rejects.toThrow(/no top-level "builtin"; send the document itself/u);
+    await expect(runner.replaceConfig({ hooks: document.hooks })).rejects.toThrow(/was retired/u);
+    // replaceConfig itself, not only the HTTP route, refuses a pasted reply.
+    await expect(runner.replaceConfig(runner.config())).rejects.toThrow(/no top-level "path", "document"/u);
 
     // A client editing what the daemon serves (the HUD clones it) writes it clean.
     const served = structuredClone(runner.config().document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };

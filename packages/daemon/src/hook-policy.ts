@@ -75,9 +75,9 @@ const HOOK_EVENTS: Record<GhostHookEvent["type"], { name: string; description: s
 };
 
 /**
- * Events earlier versions ran. At startup a `hooks.json` naming one is
- * admitted without it, so an upgrade never stops the daemon; a write through
- * `PUT /api/hooks/config` still refuses it.
+ * Events earlier versions ran. At startup a `hooks.json` naming one, or a
+ * top-level key other than `hooks`, is admitted without it, so an upgrade
+ * never stops the daemon; a write through `PUT /api/hooks/config` refuses both.
  */
 const RETIRED_HOOK_EVENTS: ReadonlySet<string> = new Set(["before_prompt"]);
 
@@ -106,10 +106,20 @@ export function admittedHooksDocument(document: Record<string, unknown>): Record
 export function parseHooksDocument(
   parsed: unknown,
   path: string,
-  /** Given at startup: told of each retired event skipped instead of refused. */
-  onRetired?: (eventName: string) => void,
+  /**
+   * Given at startup: told of each stray top-level key (`"builtin"`) or
+   * retired event (`"hooks.before_prompt"`) skipped instead of refused.
+   */
+  onSkipped?: (field: string) => void,
 ): CommandHook[] {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
+  const stray = Object.keys(parsed).filter((key) => key !== "hooks");
+  // A document names only `hooks`, so a pasted `{ path, document }` reply is
+  // refused instead of silently disabling every hook.
+  if (stray.length > 0 && !onSkipped) {
+    throw new Error(`${path} has no top-level ${stray.map((key) => JSON.stringify(key)).join(", ")}; send the document itself.`);
+  }
+  for (const key of stray) onSkipped?.(key);
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
@@ -118,8 +128,8 @@ export function parseHooksDocument(
     if (!RETIRED_HOOK_EVENTS.has(eventName)) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
     }
-    if (!onRetired) throw new Error(`${path}: hook event ${JSON.stringify(eventName)} was retired; remove it.`);
-    onRetired(eventName);
+    if (!onSkipped) throw new Error(`${path}: hook event ${JSON.stringify(eventName)} was retired; remove it.`);
+    onSkipped(`hooks.${eventName}`);
   }
 
   const result: CommandHook[] = [];

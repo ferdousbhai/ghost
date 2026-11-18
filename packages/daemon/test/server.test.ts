@@ -17,6 +17,7 @@ import type { ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { parseHooksDocument } from "../src/hook-policy.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
 import type { TurnEvent, TurnResumeEvent } from "../src/turn-events.js";
 import {
@@ -169,10 +170,9 @@ describe("/api/hooks/config", () => {
   it("reads and replaces the whole document through the runner", async () => {
     const path = join(temp?.root ?? "", "hooks.json");
     let document: Record<string, unknown> = { hooks: {} };
+    // The runner's own admission, so the route's 400s are the loader's messages.
     const replaceConfig = vi.fn(async (next: unknown) => {
-      if (typeof next !== "object" || next === null || Array.isArray(next)) {
-        throw new Error(`${path} must contain a JSON object.`);
-      }
+      parseHooksDocument(next, path);
       document = next as Record<string, unknown>;
       return { path, document };
     });
@@ -209,13 +209,15 @@ describe("/api/hooks/config", () => {
       body: JSON.stringify({ path, document: next, hooks: {} }),
     });
     expect(wrapped.status).toBe(400);
+    expect((await wrapped.json() as { error: { message: string } }).error.message)
+      .toBe(`${path} has no top-level "path", "document"; send the document itself.`);
     const legacy = await fetch(`${base}/api/hooks/config`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ hooks: {}, builtin: { next_work_turns: 1 } }),
     });
     expect(legacy.status).toBe(400);
-    expect(replaceConfig).toHaveBeenCalledTimes(2);
+    expect(document).toEqual(next);
 
     const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });
     expect(posted.status).toBe(405);

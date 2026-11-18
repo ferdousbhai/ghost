@@ -87,12 +87,10 @@ export class GhostHookRunner {
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): ConfiguredHookRunner {
     const document = readCommandHooksDocument(path);
     const logger = options.logger ?? silentLogger;
-    const commands = parseHooksDocument(document, path, (eventName) => {
-      logger.warn("skipping a retired hook event; the next edit drops it from hooks.json", { path, event: eventName });
+    const commands = parseHooksDocument(document, path, (field) => {
+      logger.warn("skipping what hooks.json no longer admits; the next edit drops it", { path, field });
     });
     const admitted = admittedHooksDocument(document as Record<string, unknown>);
-    const dropped = Object.keys(document as Record<string, unknown>).filter((key) => key !== "hooks");
-    if (dropped.length > 0) logger.warn("ignoring top-level keys; the next edit drops them from hooks.json", { path, keys: dropped });
     return new ConfiguredHookRunner({
       ...options,
       commands,

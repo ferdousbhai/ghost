@@ -409,9 +409,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   /**
    * The owner's `hooks.json`, read and replaced whole. Whole-document
    * replacement keeps "groups run in file order" honest: there are no per-hook
-   * ids to invent for a file that has none. The daemon's loader validates the
-   * schema, after this route refuses stray top-level keys; a client shows the
-   * message rather than re-implementing either.
+   * ids to invent for a file that has none. The daemon's loader admits the
+   * document (`parseHooksDocument`); a client shows its message rather than
+   * re-implementing it.
    */
   const handleHookConfig = async ({ method, request, response }: RequestContext): Promise<void> => {
     const hooks = options.hooks;
@@ -421,10 +421,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       return;
     }
     const document = await readJsonBody(request, maxBodyBytes);
-    // A replacement names only `hooks`, so a pasted `{ path, document }` reply
-    // is refused instead of silently disabling every hook.
-    const stray = isRecord(document) ? Object.keys(document).filter(key => key !== "hooks") : [];
-    if (stray.length > 0) throw new GhostError("invalid_request", `hooks.json has no top-level ${stray.map(key => JSON.stringify(key)).join(", ")}; send the document itself.`, 400);
     let replaced: GhostHookCommandConfig;
     try {
       replaced = await hooks.replaceConfig(document);
