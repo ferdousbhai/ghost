@@ -158,8 +158,12 @@ persona, conversation, or Ghost tools; a harness that fails hands the prompt
 to the next. It runs the same model and effort a turn does, with the owner's
 own CLI configuration, hooks included, and the caller's environment: a
 stop-hook reviewer marks its call (keep-going sets `KEEP_GOING_REVIEWING`) so
-the harness's own stop hook does not review the review. An older `role` field
-is ignored.
+the harness's own stop hook does not review the review. When the
+[local model](../CONTRACTS.md#local-model) is configured and the ghost's
+`harness` is `local` or unset, the prompt runs on it instead, as a turn would:
+one completion without tools, on a `llama-server` this command starts and
+stops itself, never falling through to a cloud harness. A ghost whose
+`harness` is `local` with no local model configured is refused.
 
 ## Status and editing
 

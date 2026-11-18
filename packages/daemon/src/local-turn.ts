@@ -75,7 +75,7 @@ async function complete(
   messages: ChatMessage[],
   tools: boolean,
   round: number,
-  input: NativeTurnInput,
+  input: Pick<NativeTurnInput, "signal" | "onEvent">,
 ): Promise<{ content: string; calls: ToolCall[] }> {
   const response = await fetch(`${endpoint.url}/v1/chat/completions`, {
     method: "POST",
@@ -154,6 +154,20 @@ async function runTool(call: ToolCall, args: Record<string, unknown>, hits: Hits
     }
     default:
       return { text: `There is no tool named ${call.function.name}.`, isError: true };
+  }
+}
+
+/**
+ * One completion with no tools, character, or search: `ghostd hook-complete`
+ * on a ghost whose turns run locally, so a hook's prompt stays on the machine.
+ */
+export async function completeLocally(model: LocalModel, prompt: string, signal: AbortSignal): Promise<string> {
+  const endpoint = await model.acquire();
+  try {
+    const { content } = await complete(model, endpoint, [{ role: "user", content: prompt }], false, 1, { signal, onEvent: () => {} });
+    return content;
+  } finally {
+    model.release();
   }
 }
 

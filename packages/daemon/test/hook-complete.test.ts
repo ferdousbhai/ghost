@@ -2,19 +2,22 @@
  * `ghostd hook-complete`: one completion for an owner command hook, run
  * on the first harness that answers, in a scratch directory.
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { completeForHook, parseHookCompleteInput } from "../src/hook-complete.js";
+import type { LocalModel } from "../src/local-model.js";
 import { fakeHarness, type FakeHarness } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
 const harnesses: FakeHarness[] = [];
 const dirs: string[] = [];
+const closers: Array<() => void> = [];
 
 afterEach(() => {
+  for (const close of closers.splice(0)) close();
   for (const harness of harnesses.splice(0)) harness.cleanup();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   temp?.cleanup();
@@ -33,7 +36,29 @@ function seams(...fakes: FakeHarness[]) {
     harnesses: async () => fakes.map((fake) => fake.id),
     rows: (id: string) => rows.get(id) ?? null,
     env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    local: null as LocalModel | null,
   };
+}
+
+/** A local model whose chat server answers every request with `reply`, keeping each prompt. */
+function localModel(reply: string) {
+  const prompts: unknown[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      prompts.push(((await request.json()) as { messages: unknown[] }).messages);
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: reply } }] })}\n\ndata: [DONE]\n\n`);
+    },
+  });
+  closers.push(() => server.stop(true));
+  const model = {
+    name: "gemma-test",
+    acquire: async () => ({ url: `http://127.0.0.1:${server.port}`, key: "k" }),
+    release: () => {},
+    stop: async () => {},
+  } as unknown as LocalModel;
+  return { model, prompts };
 }
 
 function ghostHome(): string {
@@ -74,6 +99,29 @@ describe("completeForHook", () => {
       .rejects.toThrow(/broken: not signed in.*refused: usage limit reached/u);
     await expect(completeForHook({ ghost_home: home, prompt: "Classify." }, seams()))
       .rejects.toThrow(/No harness is eligible/u);
+  });
+
+  it("completes on the local model, as a turn would, never falling through to a cloud harness", async () => {
+    const cloud = harness([{ events: [{ type: "text", block: "a", delta: "from the cloud" }] }], "cloud");
+    const home = ghostHome();
+    const local = localModel(" APPROVE ");
+
+    await expect(completeForHook({ ghost_home: home, prompt: "Review this." }, { ...seams(cloud), local: local.model }))
+      .resolves.toBe("APPROVE");
+    expect(local.prompts).toEqual([[{ role: "user", content: "Review this." }]]);
+    expect(cloud.calls()).toEqual([]);
+
+    // A ghost that prefers a cloud harness keeps it.
+    writeFileSync(join(home, "settings.yml"), "harness: cloud\n");
+    await expect(completeForHook({ ghost_home: home, prompt: "Review this." }, { ...seams(cloud), local: local.model }))
+      .resolves.toBe("from the cloud");
+    expect(local.prompts).toHaveLength(1);
+
+    // One that prefers the local model with none configured is refused, not sent to the cloud.
+    writeFileSync(join(home, "settings.yml"), "harness: local\n");
+    await expect(completeForHook({ ghost_home: home, prompt: "Review this." }, seams(cloud)))
+      .rejects.toThrow(/none is configured/u);
+    expect(cloud.calls()).toHaveLength(1);
   });
 
   it("rejects a non-ghost home, a relative path, and an empty prompt before running anything", async () => {

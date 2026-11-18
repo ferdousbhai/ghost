@@ -575,7 +575,8 @@ Ghost sets `stop_hook_active` on hook continuation passes and does not impose
 a host bound; `owner_prompt` and `turn_id` identify one owner request across
 its continuations.
 `ghostd hook-complete` gives a hook one completion from the ghost's
-preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
+preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)),
+or from the local model where a turn would run on it, never then a cloud one.
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
 schedules, and explicit owner command hooks initiate work.
 
