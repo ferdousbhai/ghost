@@ -86,6 +86,7 @@ const harnessSnapshot = (name) => ({
   harnesses: MOCK_HARNESSES,
   ghostDefault: ghostDefaultHarness.get(name) ?? null,
   omarchyDefault: OMARCHY_DEFAULT_HARNESS,
+  automatic: ghostDefaultHarness.get(name) ?? DEFAULT_RUNTIME,
 });
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT

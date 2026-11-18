@@ -11,6 +11,7 @@ import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
+import type { LocalModel } from "../src/local-model.js";
 import { readPins, readReads } from "../src/sidecars.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
@@ -697,14 +698,22 @@ describe("choosing the agent", () => {
       harnesses: [{ id: "first", effort: null }, { id: "second", effort: null }],
       ghostDefault: null,
       omarchyDefault: "first",
+      automatic: "first",
     });
-    expect((await sessions.setGhostHarness("casper", "second")).ghostDefault).toBe("second");
+    expect(await sessions.setGhostHarness("casper", "second")).toMatchObject({ ghostDefault: "second", automatic: "second" });
     expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\nharness: second\n");
     expect(text(await turn(sessions, "hi"))).toBe("from second");
 
     expect((await sessions.setGhostHarness("casper", null)).ghostDefault).toBeNull();
     expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\n");
     await expect(sessions.setGhostHarness("casper", "nope")).rejects.toMatchObject({ code: "unknown_harness" });
+  });
+
+  it("reports the local model as the automatic choice when it is configured, as turns run", async () => {
+    const first = harness(replies("unused"), "first");
+    const sessions = host({ harnesses: [first], defaultHarness: async () => "first", localModel: {} as LocalModel });
+    expect(await sessions.listHarnesses("casper")).toMatchObject({ ghostDefault: null, omarchyDefault: "first", automatic: "local" });
+    expect((await sessions.setGhostHarness("casper", "first")).automatic).toBe("first");
   });
 
   it("switches one conversation, handing the new agent the conversation so far", async () => {

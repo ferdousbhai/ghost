@@ -31,7 +31,8 @@ TestCase {
                 { id: "pi", usage: null }
             ],
             ghostDefault: null,
-            omarchyDefault: "claude"
+            omarchyDefault: "pi",
+            automatic: "claude"
         }, overrides || {});
     }
 
@@ -86,7 +87,7 @@ TestCase {
         verify(tc.requests[0].url.endsWith("/api/ghosts/casper/harness"));
         tc.requests[0].complete(200, tc.choice());
         compare(Ghostd.harnessChoice.harnesses.length, 3);
-        compare(Ghostd.harnessChoice.omarchyDefault, "claude");
+        compare(Ghostd.harnessChoice.automatic, "claude");
         verify(findChild(header, "harnessPicker").visible);
         verify(findChild(header, "harnessChoose-codex") !== null);
     }

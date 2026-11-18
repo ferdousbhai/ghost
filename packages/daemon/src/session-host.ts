@@ -234,6 +234,12 @@ export interface HarnessChoices {
   ghostDefault: string | null;
   /** Omarchy's default agent, the next preference after the ghost's own. */
   omarchyDefault: string | null;
+  /**
+   * What a new conversation would start on now: the first harness
+   * `harnessCandidates` would try (the local model when it is the default),
+   * or null when none can run.
+   */
+  automatic: string | null;
 }
 
 /** The owner's own queued messages, which the HUD shows and hands back on a stop; a peer's are not theirs. */
@@ -612,7 +618,9 @@ export class SessionHost {
   /** Installed agents Ghost can run on, with Omarchy's usage, and both defaults. */
   async listHarnesses(ghostName: string): Promise<HarnessChoices> {
     const ghost = this.registry.get(ghostName);
-    const [report, omarchyDefault] = await Promise.all([this.cachedReport(), this.defaultHarness()]);
+    const [report, omarchyDefault, [automatic]] = await Promise.all([
+      this.cachedReport(), this.defaultHarness(), this.harnessCandidates(ghost, null),
+    ]);
     return {
       harnesses: [
         ...report.harnesses.flatMap((harness) => {
@@ -623,6 +631,7 @@ export class SessionHost {
       ],
       ghostDefault: readHarnessSetting(ghost.dir),
       omarchyDefault,
+      automatic: automatic ?? null,
     };
   }
 

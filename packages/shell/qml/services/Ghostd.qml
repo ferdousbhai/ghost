@@ -318,7 +318,7 @@ Singleton {
         return row && typeof row.harness === "string" ? row.harness : "";
     }
     /** What a conversation not yet bound starts on: the ghost's default, else
-        "auto (<Omarchy's default>)", each with the effort its launch asks for. */
+        "auto (<what ghostd's automatic choice picks>)", each with the effort its launch asks for. */
     readonly property string draftHarness: {
         const choice = root.harnessChoice;
         const named = harness => {
@@ -326,7 +326,7 @@ Singleton {
             return harness + (row && row.effort ? " • " + row.effort : "");
         };
         if (choice && choice.ghostDefault) return named(choice.ghostDefault);
-        return choice && choice.omarchyDefault ? "auto (" + named(choice.omarchyDefault) + ")" : "automatic";
+        return choice && choice.automatic ? "auto (" + named(choice.automatic) + ")" : "automatic";
     }
     /** What that harness last ran on, pi-style — "(provider) model • effort" —
         or "" when it is a pick not yet run or said nothing. */
@@ -339,7 +339,7 @@ Singleton {
 
     // The agent picker: GET /harness for the active ghost, the ghost's default
     // (PUT /harness), and one conversation's next agent (PUT .../harness).
-    /** `{ harnesses: [{ id, effort }], ghostDefault, omarchyDefault }`, or null until read. */
+    /** `{ harnesses: [{ id, effort }], ghostDefault, omarchyDefault, automatic }`, or null until read. */
     property var harnessChoice: null
     property string harnessError: ""
     /** conversationKey -> the agent the owner picked, until a listing reports it. */
@@ -893,7 +893,8 @@ Singleton {
                 resting: root.restingUntil(h) !== null
             })),
             ghostDefault: name(body.ghostDefault),
-            omarchyDefault: name(body.omarchyDefault)
+            omarchyDefault: name(body.omarchyDefault),
+            automatic: name(body.automatic)
         };
     }
 

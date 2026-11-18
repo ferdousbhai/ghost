@@ -66,15 +66,14 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
   return 0;
 }
 
-type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault" | "omarchyDefault"> & Partial<Pick<HarnessChoices, "harnesses">>;
+type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault"> & Partial<Pick<HarnessChoices, "harnesses" | "automatic">>;
 
 /**
  * The preference, and any agent a recent failure keeps at the back;
  * `ghost harnesses` lists installed agents and usage.
  */
 function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
-  const preferred = body.ghostDefault
-    ?? (body.omarchyDefault ? `automatic (Omarchy default: ${body.omarchyDefault})` : "automatic");
+  const preferred = body.ghostDefault ?? (body.automatic ? `automatic (now ${body.automatic})` : "automatic");
   const resting = (body.harnesses ?? []).flatMap((harness) => harness.resting
     ? [`${harness.id} is tried last until ${new Date(harness.resting.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${harness.resting.reason}\n`]
     : []);
