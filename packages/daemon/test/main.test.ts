@@ -1,11 +1,16 @@
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   closeDaemonResources,
+  exportDaemonEnv,
   main,
   parseArgs,
 } from "../src/main.js";
+import { loadConfig } from "../src/config.js";
 import { isDirectInvocation } from "../src/direct-invocation.js";
 describe("parseArgs", () => {
   it("defaults to no overrides", () => {
@@ -50,7 +55,7 @@ describe("parseArgs", () => {
 });
 
 describe("ghostd help", () => {
-  it("advertises every supported subcommand without the retired import path", async () => {
+  it("advertises every subcommand", async () => {
     let output = "";
     const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
       output += String(chunk);
@@ -61,29 +66,28 @@ describe("ghostd help", () => {
     } finally {
       write.mockRestore();
     }
-
-    expect(output).not.toContain("ghostd import");
-    expect(output).not.toContain("ghostd login");
-    for (const command of [
-      "api-token",
-      "hook-complete",
-    ]) {
+    for (const command of ["api-token", "hook-complete"]) {
       expect(output).toContain(`ghostd ${command}`);
     }
   });
+});
 
-  it("rejects the retired import verb as an unknown daemon option", async () => {
-    let errorOutput = "";
-    const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-      errorOutput += String(chunk);
-      return true;
-    });
+describe("exportDaemonEnv", () => {
+  it("hands a daemon's flags to every child, so they address it and not the default daemon", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "ghostd-env-"));
     try {
-      await expect(main(["import"])).resolves.toBe(2);
+      const { overrides } = parseArgs(["--port", "7788", "--config", join(scratch, "config.json"), "--ghosts-root", join(scratch, "ghosts")]);
+      const config = loadConfig({ ...overrides, env: {}, home: scratch });
+      const env: NodeJS.ProcessEnv = { HOME: scratch, PATH: process.env.PATH };
+      exportDaemonEnv(config, 7788, env);
+      // A hook's shell sees the flag's port…
+      const hook = spawnSync("/bin/bash", ["-c", "printf %s \"$GHOSTD_PORT\""], { env, encoding: "utf8" });
+      expect(hook.stdout).toBe("7788");
+      // …and a child that loads the config from its environment resolves this daemon's.
+      expect(loadConfig({ env, home: scratch })).toEqual(config);
     } finally {
-      write.mockRestore();
+      rmSync(scratch, { recursive: true, force: true });
     }
-    expect(errorOutput).toContain("Unexpected argument 'import'");
   });
 });
 

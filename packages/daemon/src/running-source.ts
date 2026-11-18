@@ -11,7 +11,7 @@ export interface RunningSource {
   readonly version: string;
   readonly commit: string | null;
   readonly root: string | null;
-  /** The file this process was started from, and when it started. */
+  /** The file this process was started from, and when it started; unknown in fixtures. */
   readonly entry?: string;
   readonly startedAt?: number;
 }
@@ -46,11 +46,10 @@ export function readHeadCommit(root: string): string | null {
   }
 }
 
-/** What is running: `version` plus the checkout behind it when there is one. */
-export function resolveRunningSource(version: string, startDir: string, entry?: string): RunningSource {
-  const root = findSourceRoot(startDir);
-  const running = { version, root, commit: root === null ? null : readHeadCommit(root) };
-  return entry === undefined ? running : { ...running, entry, startedAt: Date.now() };
+/** What is running from `entry`: `version` plus the checkout behind it when there is one. */
+export function resolveRunningSource(version: string, entry: string): RunningSource {
+  const root = findSourceRoot(dirname(entry));
+  return { version, root, commit: root === null ? null : readHeadCommit(root), entry, startedAt: Date.now() };
 }
 
 /**

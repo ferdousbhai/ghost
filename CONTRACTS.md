@@ -446,7 +446,10 @@ Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
 The harness runs in the conversation directory with the conversation's
-identity (`GHOST`, `GHOST_SESSION`) in its environment. Ghost writes the
+identity (`GHOST`, `GHOST_SESSION`) in its environment, beside the daemon's
+resolved `GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOSTS_ROOT`, and `GHOSTD_HOOKS`,
+which every child of ghostd (turn, hook, `ghost`) inherits, so a daemon
+started with flags is the one they address. Ghost writes the
 persona there as `AGENTS.md`, with `CLAUDE.md` and `GEMINI.md` linking to it;
 grok, which reads none of them, gets it as `--rules`, and ori, which reads
 none and takes no system prompt, gets it ahead of every prompt. Because the directory is

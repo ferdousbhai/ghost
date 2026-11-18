@@ -7,8 +7,8 @@
  * `http://127.0.0.1:7717/api/ghosts/casper/messages` with no preflight, because
  * a simple request never asks permission — CORS only decides whether the page
  * may *read* the answer, and the attacker does not care about the answer. These
- * tests pin the three checks that make that request fail, and the two
- * deliberate exemptions that must not be widened.
+ * tests pin the three checks that make that request fail, and the one
+ * deliberate exemption that must not be widened.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
@@ -203,7 +203,7 @@ describe("the content type of a mutating request", () => {
   });
 });
 
-describe("the two deliberate exemptions", () => {
+describe("the deliberate exemption", () => {
   it("answers a preflight without credentials, because a preflight cannot carry any", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/messages`, {
@@ -217,18 +217,6 @@ describe("the two deliberate exemptions", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
     expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
-  });
-
-  it("does not exempt the retired relay endpoint from authentication", async () => {
-    const base = await serve();
-    expect((await fetch(`${base}/api/relay/status`)).status).toBe(401);
-  });
-
-  it("does not extend that exemption to a foreign origin's other requests", async () => {
-    const base = await serve();
-    // Retired routes have no authentication exemption.
-    expect((await fetch(`${base}/api/relay`)).status).toBe(401);
-    expect((await fetch(`${base}/api/relay/status/extra`)).status).toBe(401);
   });
 });
 

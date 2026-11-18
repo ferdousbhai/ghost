@@ -2,7 +2,6 @@
 import { apiTokenCommand } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RemoteAccess } from "./tailscale-identity.js";
 import {
@@ -143,6 +142,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { overrides, logLevel: logLevel as LogLevel, help: values.help === true, version: values.version === true };
 }
 
+/**
+ * Point every child — a harness turn, a hook, `ghostd hook-complete`, `ghost`
+ * — at this daemon: a `--port`, `--config`, or `--ghosts-root` flag is
+ * otherwise invisible to them, and they would address the default daemon.
+ */
+export function exportDaemonEnv(config: DaemonConfig, port: number, env: NodeJS.ProcessEnv = process.env): void {
+  env.GHOSTD_PORT = String(port);
+  env.GHOSTD_CONFIG = config.configPath;
+  env.GHOSTS_ROOT = config.ghostsRoot;
+  env.GHOSTD_HOOKS = config.hooksPath;
+}
+
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state.
@@ -197,11 +208,7 @@ async function serveDaemon(
   const ownerHome = homedir();
   const scheduleUnitDir = resolveScheduleUnitDirectory(ownerHome);
   // What is running: the source checkout behind this process, if it has one.
-  const runningSource = resolveRunningSource(
-    DAEMON_VERSION,
-    dirname(fileURLToPath(import.meta.url)),
-    fileURLToPath(import.meta.url),
-  );
+  const runningSource = resolveRunningSource(DAEMON_VERSION, fileURLToPath(import.meta.url));
   registry.ensureRoot();
 
   const remoteServe = new RemoteServe(config.port, config.remote);
@@ -238,6 +245,7 @@ async function serveDaemon(
     await host.disposeAll();
     return 1;
   }
+  exportDaemonEnv(config, listening.port);
 
   logger.info("listening", {
     url: `http://${DAEMON_HOST}:${listening.port}`,

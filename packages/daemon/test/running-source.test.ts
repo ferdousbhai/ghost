@@ -85,10 +85,13 @@ describe("reading the head commit", () => {
 describe("resolveRunningSource", () => {
   it("carries the version even when there is no checkout", () => {
     const base = tempRoot();
-    expect(resolveRunningSource("1.2.3", base)).toEqual({
+    const entry = join(base, "main.js");
+    expect(resolveRunningSource("1.2.3", entry)).toEqual({
       version: "1.2.3",
       root: null,
       commit: null,
+      entry,
+      startedAt: expect.any(Number),
     });
   });
 
@@ -96,7 +99,7 @@ describe("resolveRunningSource", () => {
     const base = tempRoot();
     const root = workspace(join(base, "checkout"));
     const commit = gitCommit(root);
-    expect(resolveRunningSource("0.0.1", join(root, "packages", "daemon"))).toEqual({
+    expect(resolveRunningSource("0.0.1", join(root, "packages", "daemon", "dist", "main.js"))).toMatchObject({
       version: "0.0.1",
       root,
       commit,
@@ -111,7 +114,7 @@ describe("replacedSinceStart", () => {
     const base = tempRoot();
     const entry = join(base, "ghostd.js");
     writeFileSync(entry, "old");
-    const running = resolveRunningSource("1.0.0", base, entry);
+    const running = resolveRunningSource("1.0.0", entry);
     expect(running.entry).toBe(entry);
     // Started after the file was written: current.
     expect(replacedSinceStart({ ...running, startedAt: Date.now() + 60_000 })).toBe(false);
@@ -126,11 +129,11 @@ describe("replacedSinceStart", () => {
     const root = workspace(join(base, "checkout"));
     gitCommit(root);
     // A checkout's commit moving without a build changes nothing that runs.
-    const running = resolveRunningSource("0.0.1", join(root, "packages", "daemon"));
-    expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(false);
-    // A build rewrote the entry it runs from: stale, checkout or not.
     const entry = join(base, "main.js");
     writeFileSync(entry, "built");
+    const running = { ...resolveRunningSource("0.0.1", join(root, "packages", "daemon", "main.js")), entry, startedAt: Date.now() + 60_000 };
+    expect(replacedSinceStart({ ...running, commit: "0".repeat(40) })).toBe(false);
+    // A build rewrote the entry it runs from: stale, checkout or not.
     expect(replacedSinceStart({ ...running, entry, startedAt: Date.now() - 60_000 })).toBe(true);
     expect(replacedSinceStart({ version: "1", root: null, commit: null })).toBe(false);
   });
