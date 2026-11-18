@@ -11,9 +11,9 @@ import { BROWSER_LINES, productsLines } from "./help-guides.js";
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
 export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers", "browser", "products"] as const;
-export type HelpTopic = (typeof HELP_TOPICS)[number];
+type HelpTopic = (typeof HELP_TOPICS)[number];
 
-export interface HelpTopicInput {
+interface HelpTopicInput {
   /** The ghost the recipe is for; placeholders stand in when none is named. */
   readonly ghostName: string | undefined;
   /** Where the ghost's systemd user units go. */
@@ -293,7 +293,7 @@ function memory(): string[] {
     "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the existing folder it belongs to, updating the note that covers it and dating what you add; start a folder only for a new project or topic.",
     "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
     "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked.",
-    "A workflow you finished and will repeat (its steps, commands, and pitfalls) is a skill, not a note: write `skills/<name>/SKILL.md`, with `name` and `description` frontmatter, beside your character file; it is available from your next turn.",
+    "A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to in the folder it belongs to.",
   ];
 }
 

@@ -8,8 +8,8 @@ set -euo pipefail
 echo "Installing Ghost..."
 omarchy-pkg-add ghost
 
-# The package carries the daemon, the HUD plugin, the CLI, and the computer-use
-# helper; browser automation uses the optional agent-browser CLI through Bash.
+# The package carries the daemon, the HUD plugin, and the CLI; browser
+# automation uses the optional agent-browser CLI through Bash.
 # Two things need this login's hand: the daemon is a user unit, and the HUD is
 # an omarchy-shell plugin, so it is linked into this user's plugins directory
 # and enabled in the shell already running.

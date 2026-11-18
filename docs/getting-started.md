@@ -85,7 +85,7 @@ ghost can offer to install Recall, which indexes only the folders you choose.
 ### Bring your own UI
 
 For a remote desktop with an app-provided UI, install `ghost-runtime` instead of
-`ghost`. It includes the daemon/API, CLI, and a Bash browser skill,
+`ghost`. It includes the daemon/API and CLI,
 without Ghost's HUD, launcher, icons, or Quickshell dependency. Start only
 `ghostd.service`; the graphical-session and authentication requirements below
 still apply. See [runtime install and UI removal](../packaging/arch/README.md#runtime-with-your-own-ui).
@@ -321,7 +321,7 @@ codes.
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
-| XDG Pictures | screenshots (desktop host contract; browser destinations chosen through Bash) |
+| XDG Pictures | browser screenshots, unless you name another destination |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` the API token file.

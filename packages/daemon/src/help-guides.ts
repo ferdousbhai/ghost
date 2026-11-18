@@ -7,7 +7,7 @@
  */
 import catalog from "./products.json" with { type: "json" };
 
-export interface Product {
+interface Product {
   readonly id: string;
   readonly need: string;
   readonly name: string;
@@ -26,7 +26,7 @@ export const PRODUCTS: readonly Product[] = (catalog as { products: Product[] })
 /** Inline code in a table cell: a pipe would end the cell. */
 const code = (s: string) => `\`${s.replaceAll("|", "\\|")}\``;
 
-export function productTable(products: readonly Product[] = PRODUCTS): string[] {
+function productTable(products: readonly Product[] = PRODUCTS): string[] {
   const rows = products.filter((p) => !p.host).map((p) => {
     const ids = p.skill && p.skill !== p.cli ? `${code(p.cli)}, skill ${code(p.skill)}` : code(p.cli);
     const install = [
@@ -78,7 +78,7 @@ const PRODUCTS_AFTER = [
   "or doctor command they name tell a missing binary or skill (install above)",
   "from expired auth or a stopped service, whose remedy the product's skill owns.",
   "Use the CLI for structured work, an already configured MCP server where it",
-  "fits better, the browser for what neither covers, desktop control last. Before",
+  "fits better, and the browser for what neither covers. Before",
   "retrying a failed change through another interface, check whether it took",
   "effect, so it never happens twice.",
   "",

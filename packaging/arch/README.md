@@ -1,7 +1,7 @@
 # Checkout package recipe
 
-`PKGBUILD` builds two rolling packages: `ghost-runtime-dev` (daemon, CLI,
-desktop automation) and `ghost-dev` (the Omarchy UI). They provide
+`PKGBUILD` builds two rolling packages: `ghost-runtime-dev` (daemon, API,
+CLI) and `ghost-dev` (the Omarchy UI). They provide
 and conflict with stable `ghost-runtime` and `ghost`, respectively. The UI
 requires the exact matching runtime version.
 `/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
@@ -42,9 +42,9 @@ sudo pacman -S ghost
 ```
 
 The runtime package has no Ghost QML, desktop entry, icons, or Quickshell
-requirement. It retains screen/desktop tools and Bash browser automation, so
-it still requires the supported Hyprland graphical environment. This is an
-install without the Ghost HUD, not a replacement desktop-automation backend.
+requirement. The commands a ghost runs (Hyprland, clipboard, and browser CLIs)
+still need the supported Hyprland graphical environment. This is an install
+without the Ghost HUD, nothing more.
 The daemon remains bound to the graphical session and loopback. An app uses the
 existing bearer-authenticated HTTP/SSE API; it must render and answer pending
 questions through conversation replies.

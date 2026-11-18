@@ -86,7 +86,7 @@ TestCase {
         verify(header.resourcesOpen);
         compare(tc.requests.length, 2);
         verify(tc.requests[1].url.endsWith("/sessions/a/transcript?limit=1"));
-        tc.requests[1].complete(200, { resources: { summary: "Supplied by Ghost\nMCP toolsets: ghost\n\nReported by harness\nSkills: mail" } });
+        tc.requests[1].complete(200, { resources: { summary: "Supplied by Ghost\nMCP toolsets: local-files\n\nReported by harness\nSkills: mail" } });
         verify(findChild(header, "resourceInspectorText").text.includes("Skills: mail"));
         tc.click(header, "resourcesRefresh");
         const oldRequest = tc.requests[2];

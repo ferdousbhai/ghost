@@ -470,7 +470,8 @@ which installs its own skill; `ghost help browser` adds the owner-wide session
 and task-tab locking recipe to agent-browser's own skills), and skills are
 whatever each harness discovers itself, the owner's included. A conversation
 directory's `.claude/skills` and `.agents/skills` lose, on its next turn, the
-links earlier versions put there. `mcp.json`
+links earlier versions put there (those pointing into `/usr/lib/ghost/skills`,
+a checkout's `skills/`, or the ghost home's `skills/`); any other link stays. `mcp.json`
 rows that are enabled and valid are handed to the harness each turn (see
 "Harnesses"). A ghost home carries no executable extension code; the only
 hooks are the owner's `hooks.json` commands. Nothing is discovered from any
@@ -928,8 +929,8 @@ The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, user unit, and runtime docs/licenses;
 `ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
 that exact runtime version. The checkout variants are `ghost-runtime-dev` and
-`ghost-dev`. Installing only the runtime keeps desktop/browser automation in the
-existing graphical session without requiring Quickshell or installing Ghost UI.
+`ghost-dev`. Installing only the runtime keeps the daemon in the existing
+graphical session without requiring Quickshell or installing Ghost UI.
 An app supplies its own UI over the same authenticated HTTP/SSE API. Adding or
 removing the UI neither stops the runtime nor changes ghost homes; removing the
 runtime preserves owner data.

@@ -6,7 +6,7 @@ current graphical session with:
   systemctl --user enable --now ghostd.service
   ghost status
 
-The runtime keeps the CLI, authenticated API, and desktop helper.
+The runtime keeps the CLI and authenticated API.
 Browser automation uses the optional agent-browser CLI through Bash.
 An app can supply its own UI.
 See /usr/share/doc/ghost/ARCH.md for UI installation and removal.

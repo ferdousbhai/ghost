@@ -55,9 +55,11 @@ const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 /** Each scripted pass begins with the harness compacting its context, as Claude Code reports. */
 const COMPACT = flag("--compact");
 /**
- * The agent CLIs the mock pretends are installed, in Omarchy's order; codex
- * reports a full usage window, which is informational. A turn runs on the conversation's chosen
- * agent, then the ghost's default, then Omarchy's.
+ * The agent CLIs the mock pretends are installed, in Omarchy's order, then the
+ * configured local model; codex reports a full usage window, which is
+ * informational. A turn runs on the conversation's chosen agent, then the
+ * ghost's default, then the local model, as ghostd does when `local` is
+ * configured.
  */
 const MOCK_HARNESSES = [
   {
@@ -71,8 +73,10 @@ const MOCK_HARNESSES = [
       windows: [{ label: "weekly", percent: 1, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
   },
   { id: "pi", effort: "low", usage: null },
+  { id: "local", effort: null, usage: null },
 ];
 const OMARCHY_DEFAULT_HARNESS = "claude";
+const DEFAULT_RUNTIME = "local";
 /** ghost name -> its own default agent; absent means automatic. */
 const ghostDefaultHarness = new Map();
 /** turnKey -> the agent picked for a conversation the mock has not stored yet. */
@@ -370,9 +374,9 @@ const sessionSummary = (name) => (s) => {
   };
 };
 
-/** The harness a turn runs on: the conversation's, its draft choice, the ghost's default, then Omarchy's. */
+/** The harness a turn runs on: the conversation's, its draft choice, the ghost's default, then the local model. */
 const turnHarness = (name, id, s) => s?.harness ?? draftHarness.get(turnKey(name, id))
-  ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
+  ?? ghostDefaultHarness.get(name) ?? DEFAULT_RUNTIME;
 
 /** A finished turn's conversation takes its harness, its time, and a title from its prompt. */
 function recordTurn(name, id, prompt) {
@@ -680,10 +684,10 @@ async function streamTurn(res, name, body) {
   };
   const reportResources = () => {
     const harness = turnHarness(name, sessionId, existing);
-    const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
+    const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["local-files"] };
     const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
-      supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
-      summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: ghost\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost` };
+      supplied: { instructions: ["Ghost character and policy"], mcpServers: ["local-files"] },
+      summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: local-files\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: local-files` };
     send(log, { type: "resources", ...snapshot });
     existing.resources = snapshot;
   };

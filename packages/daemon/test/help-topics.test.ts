@@ -281,7 +281,8 @@ describe("ghost help topics", () => {
     expect(text).toContain("only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked");
     expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
     expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
-    expect(text).toContain("`skills/<name>/SKILL.md`");
+    expect(text).toContain("save its steps, commands, and pitfalls as a how-to");
+    expect(text).not.toContain("SKILL.md");
   });
 
   it("dictation: transcribes audio with the installed Voxtype and toggles spoken submit only on request", () => {

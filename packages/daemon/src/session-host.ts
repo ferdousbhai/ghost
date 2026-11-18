@@ -13,9 +13,10 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { buildGhostSystemPrompt, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
 import { readCharacter } from "./home.js";
+import { findSourceRoot } from "./running-source.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { readAttachment, saveAttachment } from "./attachments.js";
@@ -86,6 +87,9 @@ const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 
 /** How long one read of Omarchy's harness report is reused. */
 const HARNESS_REPORT_TTL_MS = 60_000;
+
+/** Where earlier packages installed the skills Ghost shipped. */
+const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
 /** The live tail of a tool's output shown on its card. */
 const TOOL_SUMMARY_MAX = 800;
 /**
@@ -497,18 +501,32 @@ export class SessionHost {
    * and no skills: the `ghost` CLI is a ghost's documentation, and the owner's
    * own skills are where every harness already looks.
    */
-  private async prepareDirectory(dir: string, persona: string): Promise<void> {
+  private async prepareDirectory(ghostDir: string, dir: string, persona: string): Promise<void> {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(join(dir, "AGENTS.md"), persona, { mode: 0o600 });
     for (const alias of ["CLAUDE.md", "GEMINI.md"]) await this.ensureLink(join(dir, alias), "AGENTS.md");
     // Ghost links no skills: harnesses find the owner's own. Earlier versions
-    // linked their shipped and per-ghost skills here; take those links away.
+    // linked their shipped and per-ghost skills here; take those links away,
+    // and leave any other link alone.
+    const madeByGhost = (link: string, target: string, within: boolean): boolean => {
+      const resolved = resolve(dirname(link), target);
+      const root = within ? dirname(resolved) : resolved;
+      return root === PACKAGED_SKILLS || root === join(ghostDir, "skills") || (basename(root) === "skills" && findSourceRoot(dirname(root)) === dirname(root));
+    };
     for (const root of [".claude", ".agents"]) {
       const linked = join(dir, root, "skills");
-      await readlink(linked).then(() => rm(linked), () => undefined);
+      const whole = await readlink(linked).catch(() => null);
+      if (whole !== null) {
+        if (madeByGhost(linked, whole, false)) await rm(linked);
+        continue;
+      }
       const entries = await readdir(linked, { withFileTypes: true }).catch(() => null);
       if (entries === null) continue;
-      for (const entry of entries) if (entry.isSymbolicLink()) await rm(join(linked, entry.name));
+      for (const entry of entries) {
+        if (!entry.isSymbolicLink()) continue;
+        const link = join(linked, entry.name);
+        if (madeByGhost(link, await readlink(link), true)) await rm(link);
+      }
       if ((await readdir(linked)).length === 0) await rm(linked, { recursive: true });
     }
   }
@@ -1128,7 +1146,7 @@ export class SessionHost {
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
     const [persona, mcp] = await Promise.all([this.renderPersona(ghost), "run" in row ? [] : this.mcpServers(ghost)]);
-    await this.prepareDirectory(dir, persona);
+    await this.prepareDirectory(ghost.dir, dir, persona);
     const launch = "run" in row ? null : row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch?.files);
 

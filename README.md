@@ -17,7 +17,7 @@ ghost say "Continue that thought."
 
 What Ghost adds to a harness: the persona, a history that survives switching
 agents, browser automation through agent-browser and Bash, the ghost's MCP
-servers and skills, owner hooks, and scheduled work through systemd timers.
+servers, owner hooks, and scheduled work through systemd timers.
 Notes are Markdown in the owner's Documents directory, never indexed or
 injected. A ghost can maintain its own code
 ([docs/self-maintenance.md](docs/self-maintenance.md)), and an opt-in tailnet
@@ -34,8 +34,8 @@ start it for this login ([getting started](docs/getting-started.md#3-confirm-set
 The Install → AI menu entry, which does both, is tracked in
 [#54](https://github.com/ferdousbhai/ghost/issues/54).
 
-An app can bring its own UI: `ghost-runtime` installs the daemon/API, CLI, and
-desktop/browser automation without the HUD (`packaging/arch/README.md`,
+An app can bring its own UI: `ghost-runtime` installs the daemon/API and CLI
+without the HUD (`packaging/arch/README.md`,
 `/usr/share/doc/ghost/ARCH.md` once installed).
 
 License: Apache-2.0

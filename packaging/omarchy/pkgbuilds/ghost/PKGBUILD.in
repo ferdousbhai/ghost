@@ -117,7 +117,7 @@ check() {
 }
 
 package_ghost-runtime() {
-  pkgdesc="Ghost daemon, API, CLI, and desktop/browser automation without the HUD"
+  pkgdesc="Ghost daemon, API, and CLI without the HUD"
   depends=("${_runtime_depends[@]}")
   optdepends=("${_runtime_optdepends[@]}")
   conflicts=(ghost-runtime-dev)

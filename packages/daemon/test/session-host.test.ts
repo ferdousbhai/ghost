@@ -3,7 +3,8 @@
  * (persona, cwd, env, resume, MCP), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
@@ -348,7 +349,7 @@ describe("harness choice", () => {
     expect(second?.prompt).toContain("Owner: Who are you?");
   });
 
-  it("links no skills into a conversation, and takes away the links earlier versions made", async () => {
+  it("links no skills into a conversation, and takes away only the links earlier versions made", async () => {
     const fake = harness(replies("one", "two"));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "hi");
@@ -356,9 +357,18 @@ describe("harness choice", () => {
     expect(existsSync(join(cwd, ".claude", "skills"))).toBe(false);
     mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
     symlinkSync("/usr/lib/ghost/skills/web-browser", join(cwd, ".agents", "skills", "web-browser"));
+    symlinkSync(join(temp.root, "casper", "skills", "mine"), join(cwd, ".agents", "skills", "mine"));
+    symlinkSync(fileURLToPath(new URL("../../../skills/checkout", import.meta.url)), join(cwd, ".agents", "skills", "checkout"));
+    symlinkSync("/opt/elsewhere/theirs", join(cwd, ".agents", "skills", "theirs"));
     writeFileSync(join(cwd, ".agents", "skills", "notes.md"), "the owner's");
+    mkdirSync(join(cwd, ".claude"), { recursive: true });
+    symlinkSync(join(temp.root, "casper", "skills"), join(cwd, ".claude", "skills"));
     await sessions.runTurn("casper", { sessionId: "c1", prompt: "again", emit: () => {} });
-    expect(existsSync(join(cwd, ".agents", "skills", "web-browser"))).toBe(false);
+    expect(lstatSync(join(cwd, ".agents", "skills", "web-browser"), { throwIfNoEntry: false })).toBeUndefined();
+    expect(lstatSync(join(cwd, ".agents", "skills", "mine"), { throwIfNoEntry: false })).toBeUndefined();
+    expect(lstatSync(join(cwd, ".agents", "skills", "checkout"), { throwIfNoEntry: false })).toBeUndefined();
+    expect(lstatSync(join(cwd, ".claude", "skills"), { throwIfNoEntry: false })).toBeUndefined();
+    expect(readlinkSync(join(cwd, ".agents", "skills", "theirs"))).toBe("/opt/elsewhere/theirs");
     expect(readFileSync(join(cwd, ".agents", "skills", "notes.md"), "utf8")).toBe("the owner's");
   });
 

@@ -22,7 +22,7 @@ The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
 
 The v3 runtime archive is a package *source*, not an installed pacman package;
 its bundles are minified with function and class names preserved for
-diagnostics. The UI, unit, skills, and docs come from the source snapshot, and
+diagnostics. The UI, unit, and docs come from the source snapshot, and
 the runtime archive is verified against the same commit, so a stable package
 cannot mix an old UI with a new daemon or client.
 
