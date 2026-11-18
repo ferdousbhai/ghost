@@ -121,6 +121,39 @@ describe("a ghost's own shell addresses its conversation", () => {
     expect(turn?.body).toMatchObject({ sessionId: "conv-mine" });
   });
 
+  it("`ghost show` prints a long conversation's newest page and says which messages it is", async () => {
+    const total = 5;
+    const queries: string[] = [];
+    const fetch: CliFetch = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      queries.push(url.search);
+      const limit = Number(url.searchParams.get("limit") ?? 1000);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const messages = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, index) => ({
+        role: "user", entryId: `e${offset + index}`, content: [{ type: "text", text: `message ${offset + index + 1}` }],
+      }));
+      return jsonResponse({ id: "conv-mine", messages, total, truncated: messages.length < total, readThrough: null });
+    };
+    const newest = await runCli(["show", "--limit", "2"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(newest.code).toBe(0);
+    expect(queries).toEqual(["?limit=2", "?limit=2&offset=3"]);
+    expect(newest.stdout).toContain("message 5");
+    expect(newest.stdout).not.toContain("message 1\n");
+    expect(newest.stdout).toContain("(messages 4–5 of 5; --offset/--limit for others)");
+
+    queries.length = 0;
+    const oldest = await runCli(["show", "--limit", "2", "--offset", "0"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(queries).toEqual(["?limit=2&offset=0"]);
+    expect(oldest.stdout).toContain("message 1");
+    expect(oldest.stdout).toContain("(messages 1–2 of 5; --offset/--limit for others)");
+
+    queries.length = 0;
+    const whole = await runCli(["show"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(queries).toEqual([""]);
+    expect(whole.stdout).not.toContain("(messages");
+  });
+
   it("still fails a follow-up on any other conflict", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;

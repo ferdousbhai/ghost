@@ -36,19 +36,33 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
   }).join("\n\n");
 }
 
+/**
+ * Without --offset, the newest page: the daemon pages from the oldest, so a
+ * conversation longer than one page is fetched again from its last page.
+ */
 export async function showCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
   const { name, path } = await resolveTarget(ctx);
-  const query = new URLSearchParams();
   const limit = flagString(parsed, "limit");
   const offset = flagString(parsed, "offset");
-  if (limit) query.set("limit", limit);
-  if (offset) query.set("offset", offset);
-  const suffix = query.size ? `?${query}` : "";
-  const response = await ctx.client.request<Transcript>("GET", `${path}/transcript${suffix}`);
+  const page = (from: string | undefined) => {
+    const query = new URLSearchParams();
+    if (limit) query.set("limit", limit);
+    if (from) query.set("offset", from);
+    return ctx.client.request<Transcript>("GET", `${path}/transcript${query.size ? `?${query}` : ""}`);
+  };
+  let response = await page(offset);
+  let first = offset ? Number(offset) : 0;
+  if (!offset && response.truncated) {
+    first = Math.max(0, response.total - response.messages.length);
+    response = await page(String(first));
+  }
   emit(ctx, response, (body) => {
     const markdown = transcriptMarkdown(body, name);
-    return markdown ? `${markdown}\n` : "";
+    const trailer = body.truncated && body.messages.length > 0
+      ? `(messages ${first + 1}–${first + body.messages.length} of ${body.total}; --offset/--limit for others)\n`
+      : "";
+    return `${markdown ? `${markdown}\n` : ""}${trailer && markdown ? "\n" : ""}${trailer}`;
   });
   return 0;
 }

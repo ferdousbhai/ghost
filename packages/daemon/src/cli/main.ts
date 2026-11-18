@@ -116,7 +116,7 @@ export const COMMANDS: readonly Command[] = [
     verb: "show",
     flags: { value: ["limit", "offset"] },
     usage: "show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>] [--json] [-q]",
-    summary: "Print a conversation transcript as Markdown.",
+    summary: "Print a conversation transcript as Markdown: its newest page, or the page from --offset (counted from the oldest).",
     example: "ghost show -s cli-abc",
     positionals: [0, 0],
     run: showCommand,
