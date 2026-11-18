@@ -83,12 +83,11 @@ describe("a turn", () => {
     expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(true);
   });
 
-  it("loads no MCP server of its own, and names the conversation as computer-use's caller", async () => {
+  it("loads no MCP server of its own", async () => {
     const fake = harness(replies("one"));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "first");
     expect(fake.calls()[0]?.mcp).toEqual([]);
-    expect(fake.calls()[0]?.caller).toBe("ghost casper/c1");
   });
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {

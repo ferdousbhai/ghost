@@ -8,8 +8,8 @@
 export const OMARCHY_COMPUTER_USE_POLICY = [
   "## Computer use",
   "For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or "
-    + "`omarchy <group> --help` and run it from Bash. When Omarchy has no route, the route failed, or "
-    + "the task is inside an application, use the `computer-use` skill.",
+    + "`omarchy <group> --help` and run it from Bash; inside an app, use its CLI or config files. "
+    + "You cannot see or click the screen: when nothing reaches a task, say so.",
 ].join("\n");
 
 /**

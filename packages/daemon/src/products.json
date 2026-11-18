@@ -81,14 +81,6 @@
       "offer": "Add Recall? It adds search by meaning to these apps and to your files (about 865 MB of models)."
     },
     {
-      "id": "computer-use",
-      "need": "See and steer the desktop for any agent: windows, their controls, screenshots, clicks, typing and keys",
-      "name": "Computer use for Omarchy",
-      "source": "https://github.com/ferdousbhai/computer-use-for-omarchy",
-      "cli": "computer-use",
-      "install": "bun install -g github:ferdousbhai/computer-use-for-omarchy && computer-use skill install"
-    },
-    {
       "id": "keep-going",
       "need": "Keeps your coding agents working until the job is done",
       "name": "keep-going",

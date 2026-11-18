@@ -512,8 +512,7 @@ directory to recoverable Trash in one rename; there is no fork.
 
 ### Machine-owned artifacts
 
-- Desktop screenshots are `computer-use`'s, under its own runtime directory.
-  Bash browser screenshots use the owner's requested destination or XDG Pictures directory.
+- Bash browser screenshots use the owner's requested destination or XDG Pictures directory.
   Ghost keeps no browser screenshot retention manager.
 - Browser downloads belong to agent-browser and Chromium; the Bash caller
   chooses the owner's requested destination or XDG Downloads directory.
@@ -642,9 +641,9 @@ in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
 carries it. The pi, omp, and muse rows forward none of these; Pi 1.2 itself
-supports MCP configured by the owner. Desktop control is not an MCP server:
-it is the separate [computer-use](#computer-use) CLI, which a harness runs
-from its shell like any command.
+supports MCP configured by the owner. Ghost has no screen control: desktop
+work goes through Omarchy's commands, app CLIs, and config files, on the bet
+that Omarchy's command line keeps growing toward full coverage.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already
@@ -717,8 +716,7 @@ the call. The verb exits with the harness's status (128 plus the signal number
 when a signal ended it, 127 when it could not start).
 
 A delegated harness runs with its own arguments only, in the ghost's
-environment, so its `computer-use` commands share the conversation's
-desktop lease.
+environment.
 
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
@@ -917,14 +915,7 @@ the per-turn order of installed harnesses above and rerunning an event turn
 that could not reach its model or that a daemon stop cut off ([External events](#external-events)). Omarchy usage records are
 informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
 peer inbox's hourly limit and outbox bound ([Peers](#peers)) bound another
-owner's ghost, not this one's. The one deliberate exception for its own ghosts is the
-desktop lease, `computer-use`'s own: there is one pointer and one focus, so
-every `computer-use act` claims the desktop for its caller, and another
-caller's fails `busy` until the holder has been idle 15 s. Ghost names each
-conversation's caller in the turn's environment as
-`COMPUTER_USE_CALLER=ghost <ghost>/<conversation>`, so a conversation's
-commands, and a harness it delegates to, share one claim, and two
-conversations or another agent take turns.
+owner's ghost, not this one's.
 
 ## Package boundaries
 
@@ -1004,14 +995,6 @@ runtime preserves owner data.
     `omarchy plugin add` checkout: the HUD and the daemon are one product
     and must be the same version, and a second channel cannot hold that lock.
     Setup ends with `ghost new <name>`; harness sign-in is external.
-- <a id="computer-use"></a>[computer-use-for-omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy)
-  is desktop control for any agent: the `computer-use` CLI (`look`, which
-  never changes the desktop, and `act`, ordered steps) and the skill it
-  installs (`computer-use skill install`). It is a separate product with its
-  own version, listed in `ghost help products`; Ghost neither bundles nor calls
-  it. What a ghost relies on is its skill: JSON arguments, screenshots
-  printed as file paths, the untrusted-content fence, and errors written for
-  the agent. Without it a ghost has no desktop control.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   prints the daemon restart that loads the new bundle. A release is cut locally
@@ -1099,8 +1082,8 @@ new folder is indexed without anyone adding it.
 ## Harness and lifecycle invariants
 
 - Never start a test daemon against `~/ghosts`, the live port 7717, or the live
-  Quickshell bus. Canary/smoke daemons isolate Ghost config and owner hooks
-  and use a fake or disabled desktop. Tests use scratch homes and the shell preview's private
+  Quickshell bus. Canary/smoke daemons isolate Ghost config and owner hooks.
+  Tests use scratch homes and the shell preview's private
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.

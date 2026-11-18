@@ -97,9 +97,8 @@ build and promotion (see [the release README](../release/README.md)).
 The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into
 `~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
-Browser automation uses the optional agent-browser CLI through Bash. Computer use is
-[computer-use-for-omarchy](https://github.com/ferdousbhai/computer-use-for-omarchy),
-a separate CLI and skill any agent can use; Ghost does not bundle it.
+Browser automation uses the optional agent-browser CLI through Bash. Ghost has
+no screen control: desktop work goes through Omarchy's commands and app CLIs.
 
 ## Desktop boundary
 

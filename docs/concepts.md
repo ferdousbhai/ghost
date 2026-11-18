@@ -41,9 +41,8 @@ or todo API.
   Ghost has no second shell process or tray helper.
 - Browser automation uses the installed agent-browser CLI through Bash in
   the owner's signed-in Chromium, with separate tabs for concurrent tasks.
-- Computer use is the separate `computer-use` CLI and its skill, which any
-  agent can use. Prefer a command or browser action when available; desktop
-  input can disturb the owner's focus.
+- There is no screen control. Desktop work goes through Omarchy's commands,
+  app CLIs, and config files; what none of them reach, the ghost says so.
 - Dictation uses Omarchy's Voxtype. Ghost adds no speech stack.
 - Scheduled work uses systemd timers; background work is a shell command.
   Ghost has no job table or worker manager.

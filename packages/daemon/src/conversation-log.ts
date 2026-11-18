@@ -643,9 +643,8 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
  * `ghost` CLI reads in place of `-g` and `-s`. Every harness turn and owner
  * `!` command runs with them.
  */
-export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string; COMPUTER_USE_CALLER: string } {
-  // computer-use keys its desktop lease on this, so one conversation's commands share it.
-  return { GHOST: ghostName, GHOST_SESSION: id, COMPUTER_USE_CALLER: `ghost ${ghostName}/${id}` };
+export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string } {
+  return { GHOST: ghostName, GHOST_SESSION: id };
 }
 
 /** Latest successful pass, including legacy snapshots written before the reply. */
