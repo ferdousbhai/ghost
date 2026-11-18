@@ -133,14 +133,12 @@ function remoteSnapshot() {
   const { breaks, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
   const cut = REMOTE_LADDER.indexOf(breaks ?? "");
   const tailscale = Object.fromEntries(REMOTE_LADDER.map((rung, index) => [rung, cut < 0 || index < cut]));
-  tailscale.certs = tailscale.installed;
   const { loggedIn } = tailscale;
   const problem = REMOTE_PROBLEM === "" ? null : { code: REMOTE_PROBLEM, ...problemFields };
   const available = problem === null;
   return {
     enabled: remoteEnabled,
     state: available ? (remoteEnabled ? "on" : "off") : "unavailable",
-    scheme: loggedIn ? "https" : null,
     hostname: loggedIn ? REMOTE_HOSTNAME : null,
     tailscale,
     guests: "none",

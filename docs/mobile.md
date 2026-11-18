@@ -8,8 +8,10 @@ tailnet: the app adds this machine, then finds your other machines running
 Ghost, all in one page. The host must remain awake, logged in, and connected. A
 missing host cannot run work or deliver alerts.
 
-The app needs the tailnet's HTTPS certificates (Tailscale admin console → DNS →
-HTTPS Certificates, then `ghost remote on` again), and Chrome asks once to allow
+Remote access is served over HTTPS only, since the app is an HTTPS page: without
+the tailnet's HTTPS certificates `ghost remote on` serves nothing and says to
+turn them on (Tailscale admin console → DNS → HTTPS Certificates, then
+`ghost remote on` again). Chrome asks once to allow
 local network access. The app has no server; its page calls each machine's
 Tailscale Serve address directly, admitted by your Tailscale identity. Ghost
 itself serves no page there. Set `remote.apps` to `[]` in the config to refuse
@@ -30,7 +32,7 @@ receives the conversation title and completion/failure excerpt.
 
 Alerts link to the exact conversation in the app,
 `https://summonghost.com/#/<hostname>/<ghost>/<conversation>`, while remote
-access is on over HTTPS; the link opens on a device that has added this
+access is on; the link opens on a device that has added this
 machine. Removing the hook disables delivery; cancellations stay quiet.
 Delivery failures are logged and do not change the work's outcome. There is no
 retry queue. The subscribed phone app handles notifications with summonghost.com

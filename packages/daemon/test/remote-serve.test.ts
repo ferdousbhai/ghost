@@ -13,9 +13,8 @@ describe("RemoteServe status", () => {
     expect(status).toEqual({
       enabled: true,
       state: "on",
-      scheme: "https",
       hostname: "ghostbox.example.ts.net",
-      tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
+      tailscale: { installed: true, running: true, loggedIn: true, operator: true },
       guests: "none",
       owner: "owner@example.com",
       app: null,
@@ -44,9 +43,9 @@ describe("RemoteServe status", () => {
     ]) expect(await serve.conversationUrl("casper", "c1")).toBeNull();
   });
 
-  it("uses plain HTTP on port 80 when the tailnet has no certificates", async () => {
+  it("reports a plain-HTTP entry an earlier version wrote as off, since no app can use it", async () => {
     const status = await new RemoteServe(7717, { run: fakeTailscale({ certs: false, scheme: "http" }).run }).status();
-    expect(status).toMatchObject({ enabled: true, scheme: "http", tailscale: { certs: false } });
+    expect(status).toMatchObject({ enabled: false, state: "off", problem: null });
   });
 
   it("reports a stopped daemon as unavailable", async () => {
@@ -85,22 +84,41 @@ describe("RemoteServe machines", () => {
 });
 
 describe("RemoteServe mutations", () => {
-  it("uses the HTTPS and HTTP command lines selected by certificate availability", async () => {
-    for (const certs of [true, false]) {
-      const fake = fakeTailscale({ certs });
-      const status = await new RemoteServe(7717, { run: fake.run }).enable();
-      expect(fake.calls).toContainEqual(certs
-        ? ["serve", "--bg", "--https=443", FAKE_TARGET]
-        : ["serve", "--bg", "--http=80", FAKE_TARGET]);
-      expect(status).toMatchObject({ enabled: true, scheme: certs ? "https" : "http", problem: null });
-    }
+  it("serves over HTTPS, and without certificates writes nothing and says how to get them", async () => {
+    const served = fakeTailscale({ certs: true });
+    expect(await new RemoteServe(7717, { run: served.run }).enable()).toMatchObject({ enabled: true, state: "on", problem: null });
+    expect(served.calls).toContainEqual(["serve", "--bg", "--https=443", FAKE_TARGET]);
+
+    const refused = fakeTailscale({ certs: false });
+    expect(await new RemoteServe(7717, { run: refused.run }).enable()).toMatchObject({
+      enabled: false,
+      state: "off",
+      problem: { code: "https_required", message: expect.stringContaining("HTTPS Certificates") },
+    });
+    expect(refused.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([]);
   });
 
-  it("turns off only the listener that is on, and nothing when none is", async () => {
+  it("clears a plain-HTTP entry an earlier version wrote, on enable and on disable", async () => {
+    for (const certs of [true, false]) {
+      const fake = fakeTailscale({ certs, scheme: "http" });
+      await new RemoteServe(7717, { run: fake.run }).enable();
+      expect(fake.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([
+        ["serve", "--http=80", "off"],
+        ...(certs ? [["serve", "--bg", "--https=443", FAKE_TARGET]] : []),
+      ]);
+    }
     const fake = fakeTailscale({ certs: false, scheme: "http" });
     const remote = new RemoteServe(7717, { run: fake.run });
     expect(await remote.disable()).toMatchObject({ enabled: false, state: "off", problem: null });
     expect(fake.calls.filter((args) => args[0] === "serve" && args[2] === "off")).toEqual([["serve", "--http=80", "off"]]);
+    expect(fake.scheme).toBeNull();
+  });
+
+  it("turns off only the listener that is on, and nothing when none is", async () => {
+    const fake = fakeTailscale({ scheme: "https" });
+    const remote = new RemoteServe(7717, { run: fake.run });
+    expect(await remote.disable()).toMatchObject({ enabled: false, state: "off", problem: null });
+    expect(fake.calls.filter((args) => args[0] === "serve" && args[2] === "off")).toEqual([["serve", "--https=443", "off"]]);
     fake.calls.length = 0;
     await remote.disable();
     expect(fake.calls.some((args) => args[2] === "off")).toBe(false);
@@ -122,15 +140,6 @@ describe("RemoteServe mutations", () => {
     expect(await remote.enable()).toMatchObject({ state: "on", tailscale: { operator: true }, problem: null });
   });
 
-  it("moves an HTTP entry to HTTPS when re-enabled on a tailnet that gained certificates", async () => {
-    const fake = fakeTailscale({ certs: true, scheme: "http" });
-    const remote = new RemoteServe(7717, { run: fake.run });
-    await remote.enable();
-    expect(fake.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([
-      ["serve", "--http=80", "off"],
-      ["serve", "--bg", "--https=443", FAKE_TARGET],
-    ]);
-  });
 });
 
 describe("RemoteServe QR", () => {

@@ -335,7 +335,7 @@ function notifications(): string[] {
     '  curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --config "$HOME/.config/ghost/ntfy.curl" -H "Content-Type: application/json" --data-binary @-',
     "```",
     'Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array of the current document (`ghost hooks show | jq .document > hooks.json`); preserve existing handlers and apply with `ghost hooks set hooks.json`. Remove that handler to opt out; no restart is needed.',
-    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the conversation's app link (summonghost.com by default) while remote access is on over HTTPS (otherwise null). Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
+    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the conversation's app link (summonghost.com by default) while remote access is on (otherwise null). Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
     "The link opens the conversation in the app on a device that has added this machine. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
   ];
 }

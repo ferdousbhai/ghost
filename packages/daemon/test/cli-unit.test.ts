@@ -310,9 +310,8 @@ describe("CLI API adaptation", () => {
         return jsonResponse({
           enabled: false,
           state: "off",
-          scheme: null,
           hostname: null,
-          tailscale: { installed: false, running: false, loggedIn: false, operator: false, certs: false },
+          tailscale: { installed: false, running: false, loggedIn: false, operator: false },
           guests: "read-only",
           owner: null,
           problem: null,
@@ -344,7 +343,7 @@ describe("CLI API adaptation", () => {
     expect(response.stdout).toBe("off (Tailscale is not running)\n");
   });
 
-  it("ghost remote prints the app link on HTTPS, and how to get HTTPS without it", async () => {
+  it("ghost remote prints the app link, and how to get HTTPS without it", async () => {
     let body: Record<string, unknown> = {
       enabled: true, hostname: "box.tail.ts.net", problem: null,
       app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=box.tail.ts.net" },
@@ -352,8 +351,10 @@ describe("CLI API adaptation", () => {
     const fetch: CliFetch = async () => jsonResponse(body);
     const run = () => runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect((await run()).stdout).toBe("on box.tail.ts.net\napp https://summonghost.com/#add=box.tail.ts.net\n");
-    body = { ...body, app: { origin: "https://summonghost.com", url: null } };
-    expect((await run()).stdout).toMatch(/^on box\.tail\.ts\.net\napp https:\/\/summonghost\.com needs HTTPS: turn on HTTPS Certificates .*admin\/dns.*`ghost remote on` again\.\n$/);
+    const refused = { enabled: false, hostname: "box.tail.ts.net", app: { origin: "https://summonghost.com", url: null },
+      problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." } };
+    expect((await runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch: async () => jsonResponse(refused) })).stdout)
+      .toBe("off (This tailnet has no HTTPS certificates.)\n");
     body = { ...body, app: null };
     expect((await run()).stdout).toBe("on box.tail.ts.net\nno app: remote.apps is empty, so nothing can reach Ghost remotely\n");
   });

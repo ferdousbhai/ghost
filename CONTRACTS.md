@@ -609,7 +609,7 @@ by tailnet identity alone, with the roles above; a request from it carrying
 allows `GET, POST, PUT, DELETE, OPTIONS` and `content-type`, plus
 `Access-Control-Allow-Private-Network: true` when asked; no credentials or
 cookies. The first app's `<origin>/#add=<hostname>` link (`app` in
-`GET /api/remote`) exists only while Serve is on HTTPS.
+`GET /api/remote`) exists only while Serve is on.
 
 Route parsing, validation, status codes, and reverse states are executable in
 [`server.ts`](packages/daemon/src/server.ts) and
@@ -643,7 +643,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
-| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control (`{ enabled, state, scheme, hostname, tailscale, guests, owner, app, problem }`), with the app link (`app: { origin, url } \| null`), and that link's QR (`404` while it is null). |
+| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control (`{ enabled, state, hostname, tailscale, guests, owner, app, problem }`), with the app link (`app: { origin, url } \| null`), and that link's QR (`404` while it is null). Serve is HTTPS only (port 443), since the app is an HTTPS page: on a tailnet without HTTPS certificates `POST { enabled: true }` writes nothing and returns `problem.code` `https_required`, saying where to turn them on. Enabling and disabling also clear a plain-HTTP (port 80) entry an earlier version wrote. |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session

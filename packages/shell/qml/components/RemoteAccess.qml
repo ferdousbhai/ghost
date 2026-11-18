@@ -351,6 +351,18 @@ Rectangle {
                     }
 
                     Text {
+                        objectName: "remoteHttpsText"
+                        width: parent.width
+                        visible: root.problem !== null && root.problem.code === "https_required"
+                        text: "The app needs HTTPS. Turn on HTTPS Certificates on the DNS page of the Tailscale admin console, then flip the switch again."
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
                         objectName: "remoteNoAppText"
                         width: parent.width
                         visible: root.remoteOn && Ghostd.remoteAppOrigin === ""
@@ -403,18 +415,6 @@ Rectangle {
                         font.family: Theme.fontFamily
                         font.pixelSize: Theme.fontSizeSubtitle
                         font.weight: Font.DemiBold
-                    }
-
-                    Text {
-                        objectName: "remoteAppHttpsText"
-                        width: parent.width
-                        visible: Ghostd.remoteAppUrl === ""
-                        text: "The app needs HTTPS. Turn on HTTPS Certificates on the DNS page of the Tailscale admin console, then turn remote access off and on."
-                        textFormat: Text.PlainText
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        wrapMode: Text.WordWrap
                     }
 
                     CopyField {

@@ -27,14 +27,12 @@ TestCase {
         return Object.assign({
             enabled: false,
             state: "off",
-            scheme: "https",
             hostname: "omarchy-thinkpad.tail58bdd3.ts.net",
             tailscale: {
                 installed: true,
                 running: true,
                 loggedIn: true,
-                operator: true,
-                certs: true
+                operator: true
             },
             guests: "read-only",
             owner: "owner@example.com",
@@ -98,26 +96,24 @@ TestCase {
         verify(findChild(panel, "remoteAppCard").visible);
         compare(findChild(panel, "remoteAppUrlText").text, add);
         verify(String(findChild(panel, "remoteAppQrImage").source).startsWith("data:image/svg+xml"));
-        verify(!findChild(panel, "remoteAppHttpsText").visible);
+        verify(!findChild(panel, "remoteHttpsText").visible);
         verify(!findChild(panel, "remoteNoAppText").visible);
         verify(audience.visible);
         verify(audience.text.indexOf("owner@example.com") >= 0);
         verify(audience.text.indexOf("read-only") >= 0);
     }
 
-    function test_appCardSaysHttpsIsNeededWithoutCertificates(): void {
+    function test_saysHttpsIsNeededWhenEnablingWithoutCertificates(): void {
         const panel = createTemporaryObject(panelComponent, tc);
         requests[0].complete(200, status({
-            enabled: true,
-            state: "on",
-            scheme: "http",
-            app: { origin: "https://summonghost.com", url: null }
+            problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." }
         }));
-        // No QR code: there is no app link to encode.
+        // Off, with no app link and so no QR code to fetch.
         compare(requests.length, 1);
-        verify(findChild(panel, "remoteAppCard").visible);
-        verify(findChild(panel, "remoteAppHttpsText").visible);
-        verify(!findChild(panel, "remoteAppQrImage").visible);
+        verify(!findChild(panel, "remoteSwitch").checked);
+        verify(!findChild(panel, "remoteAppCard").visible);
+        verify(findChild(panel, "remoteHttpsText").visible);
+        verify(!findChild(panel, "remoteProblemAction").visible);
     }
 
     function test_noAppCardWithoutApps(): void {

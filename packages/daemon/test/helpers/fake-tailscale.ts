@@ -5,7 +5,7 @@ export type FakeScheme = "https" | "http" | null;
 export interface FakeTailscale {
   run: CommandRunner;
   calls: string[][];
-  /** What `tailscale serve status` reports; `serve --bg` and `serve ... off` move it. */
+  /** What `tailscale serve status` reports (`http`: an entry an earlier version wrote); `serve --bg` and `serve ... off` move it. */
   scheme: FakeScheme;
   certs: boolean;
   backendState: string;
@@ -50,7 +50,7 @@ export function fakeTailscale(initial: Partial<Pick<FakeTailscale, "scheme" | "c
         return ok();
       }
       if (args[0] === "serve" && args[2] === "off") {
-        fake.scheme = null;
+        if (args[1] === (fake.scheme === "https" ? "--https=443" : "--http=80")) fake.scheme = null;
         return ok();
       }
       throw new Error(`Unexpected command: ${line}`);

@@ -1,11 +1,12 @@
 /**
- * Ghost's Tailscale Serve exposure: `tailscale serve --bg --https=443` (or
- * `--http=80` on a tailnet without certificates) proxying to the loopback
- * daemon, so an app in `remote.apps` reaches its API at the node's tailnet
- * name with the caller's identity stamped (see tailscale-identity.ts). Status is read
- * from Tailscale on every call; the one thing remembered is an operator
- * refusal, because only a write attempt can reveal it. Tailscale keeps a
- * `--bg` Serve entry across restarts, so Ghost stores no on/off of its own.
+ * Ghost's Tailscale Serve exposure: `tailscale serve --bg --https=443`
+ * proxying to the loopback daemon, so an app in `remote.apps` reaches its API
+ * at the node's tailnet name with the caller's identity stamped (see
+ * tailscale-identity.ts). The app is an https page, which cannot call an http
+ * address, so a tailnet without HTTPS certificates gets no Serve entry at all.
+ * Status is read from Tailscale on every call; the one thing remembered is an
+ * operator refusal, because only a write attempt can reveal it. Tailscale keeps
+ * a `--bg` Serve entry across restarts, so Ghost stores no on/off of its own.
  */
 import {
   type CommandResult,
@@ -25,7 +26,6 @@ interface RemoteProblem {
 export interface RemoteStatus {
   enabled: boolean;
   state: "on" | "off" | "unavailable";
-  scheme: "https" | "http" | null;
   hostname: string | null;
   tailscale: {
     installed: boolean;
@@ -33,14 +33,12 @@ export interface RemoteStatus {
     loggedIn: boolean;
     /** False after Tailscale refused a Serve change for lack of the operator right. */
     operator: boolean;
-    certs: boolean;
   };
   guests: "read-only" | "none";
   owner: string | null;
   /**
    * The first of `remote.apps`, null when there are none, and its link adding
-   * this machine (`<origin>/#add=<hostname>`), null until Serve is on HTTPS:
-   * a page on an https origin cannot call an http address.
+   * this machine (`<origin>/#add=<hostname>`), null while Serve is off.
    */
   app: { origin: string; url: string | null } | null;
   problem: RemoteProblem | null;
@@ -62,9 +60,9 @@ interface RemoteServeOptions {
   qrRun?: CommandRunner;
 }
 
-type Scheme = "https" | "http";
-
-const PORT: Record<Scheme, number> = { https: 443, http: 80 };
+/** The listeners Ghost writes: HTTPS, and plain HTTP, which earlier versions used without certificates and are now only cleared. */
+const HTTPS = "--https=443";
+const HTTP = "--http=80";
 
 const TAILSCALE_MISSING: RemoteProblem = {
   code: "tailscale_missing",
@@ -77,6 +75,10 @@ const NOT_LOGGED_IN: RemoteProblem = {
   action: "tailscale up",
 };
 const OPERATOR_ACTION = "sudo tailscale set --operator=$USER";
+const HTTPS_REQUIRED: RemoteProblem = {
+  code: "https_required",
+  message: "This tailnet has no HTTPS certificates, which the app needs: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then turn remote access on again.",
+};
 
 function isMissingBinary(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === "ENOENT";
@@ -95,22 +97,28 @@ function serveFailed(message: string): RemoteProblem {
 }
 
 /**
- * The scheme Ghost's own entry is served on, from `tailscale serve status
- * --json`: the `Web` map is keyed by `host:port`, and Ghost only ever writes
- * ports 443 and 80. HTTPS wins while a move from HTTP is under way.
+ * Ghost's own Serve listeners, from `tailscale serve status --json`: the `Web`
+ * map is keyed by `host:port`, and Ghost only ever writes ports 443 and 80.
  */
-function servedScheme(config: unknown, target: string): Scheme | null {
+function servedListeners(config: unknown, target: string): { https: boolean; http: boolean } {
+  const served = { https: false, http: false };
   const web = (config as { Web?: unknown } | null)?.Web;
-  if (!web || typeof web !== "object") return null;
-  const schemes = new Set<Scheme>();
+  if (!web || typeof web !== "object") return served;
   for (const [hostPort, server] of Object.entries(web as Record<string, { Handlers?: Record<string, { Proxy?: unknown }> }>)) {
     const proxied = Object.values(server?.Handlers ?? {})
       .some((handler) => typeof handler?.Proxy === "string" && handler.Proxy.replace(/\/$/, "") === target);
     if (!proxied) continue;
-    if (hostPort.endsWith(":443")) schemes.add("https");
-    else if (hostPort.endsWith(":80")) schemes.add("http");
+    if (hostPort.endsWith(":443")) served.https = true;
+    else if (hostPort.endsWith(":80")) served.http = true;
   }
-  return schemes.has("https") ? "https" : schemes.has("http") ? "http" : null;
+  return served;
+}
+
+/** Status plus what only enable and disable need: certificates, and a leftover HTTP entry. */
+interface Inspection {
+  status: RemoteStatus;
+  certs: boolean;
+  http: boolean;
 }
 
 export class RemoteServe {
@@ -134,61 +142,36 @@ export class RemoteServe {
   }
 
   async status(): Promise<RemoteStatus> {
-    const off: RemoteStatus = {
-      enabled: false,
-      state: "off",
-      scheme: null,
-      hostname: null,
-      tailscale: { installed: true, running: false, loggedIn: false, operator: this.operatorProblem === null, certs: false },
-      guests: this.guests,
-      owner: this.owner,
-      app: this.app ? { origin: this.app, url: null } : null,
-      problem: null,
-    };
-    const unavailable = (status: RemoteStatus, problem: RemoteProblem): RemoteStatus =>
-      ({ ...status, state: "unavailable", problem });
-    let node: Awaited<ReturnType<typeof readTailscaleNode>>;
-    try {
-      node = await readTailscaleNode(this.run);
-    } catch (error) {
-      return isMissingBinary(error)
-        ? unavailable({ ...off, tailscale: { ...off.tailscale, installed: false } }, TAILSCALE_MISSING)
-        : unavailable(off, { code: "tailscale_stopped", message: firstLine(errorMessage(error)) });
-    }
-    const known: RemoteStatus = {
-      ...off,
-      hostname: node.hostname,
-      owner: this.owner ?? node.login?.toLowerCase() ?? null,
-      tailscale: {
-        ...off.tailscale,
-        running: node.backendState === "Running",
-        loggedIn: node.backendState !== "NeedsLogin" && node.hostname !== null,
-        certs: node.certs,
-      },
-    };
-    if (!known.tailscale.loggedIn) return unavailable(known, NOT_LOGGED_IN);
-    if (!known.tailscale.running) {
-      return unavailable(known, { code: "tailscale_stopped", message: "Tailscale is not running." });
-    }
-    return this.served(known);
+    return (await this.inspect()).status;
   }
 
-  /** Turn the exposure on for the scheme the tailnet supports, moving off the other one first. */
+  /**
+   * Turn the exposure on over HTTPS, clearing a plain-HTTP entry an earlier
+   * version left. Without certificates nothing is written and the problem
+   * says how to get them.
+   */
   async enable(): Promise<RemoteStatus> {
-    const current = await this.status();
-    if (current.state === "unavailable") return current;
-    const wanted: Scheme = current.tailscale.certs ? "https" : "http";
-    if (current.scheme && current.scheme !== wanted) {
-      const cleared = await this.write(current, ["serve", `--${current.scheme}=${PORT[current.scheme]}`, "off"]);
-      if (cleared.problem) return cleared;
+    const { status, certs, http } = await this.inspect();
+    if (status.state === "unavailable") return status;
+    if (http) {
+      const problem = await this.change(["serve", HTTP, "off"]);
+      if (problem) return this.refused(status, problem);
     }
-    return this.write(current, ["serve", "--bg", `--${wanted}=${PORT[wanted]}`, this.target]);
+    if (!certs) return { ...(await this.status()), problem: this.operatorProblem ?? HTTPS_REQUIRED };
+    const problem = await this.change(["serve", "--bg", HTTPS, this.target]);
+    return problem ? this.refused(status, problem) : this.status();
   }
 
+  /** Turn off each listener Ghost has on, the plain-HTTP one an earlier version wrote included. */
   async disable(): Promise<RemoteStatus> {
-    const current = await this.status();
-    if (!current.scheme) return current;
-    return this.write(current, ["serve", `--${current.scheme}=${PORT[current.scheme]}`, "off"]);
+    const { status, http } = await this.inspect();
+    const listeners = [...(status.enabled ? [HTTPS] : []), ...(http ? [HTTP] : [])];
+    if (listeners.length === 0) return status;
+    for (const listener of listeners) {
+      const problem = await this.change(["serve", listener, "off"]);
+      if (problem) return this.refused(status, problem);
+    }
+    return this.status();
   }
 
   /**
@@ -232,53 +215,82 @@ export class RemoteServe {
     return result.stdout;
   }
 
-  /** `known` with the Serve side read from `tailscale serve status --json`. */
-  private async served(known: RemoteStatus): Promise<RemoteStatus> {
+  private async inspect(): Promise<Inspection> {
+    const off: RemoteStatus = {
+      enabled: false,
+      state: "off",
+      hostname: null,
+      tailscale: { installed: true, running: false, loggedIn: false, operator: this.operatorProblem === null },
+      guests: this.guests,
+      owner: this.owner,
+      app: this.app ? { origin: this.app, url: null } : null,
+      problem: null,
+    };
+    const unavailable = (status: RemoteStatus, problem: RemoteProblem): Inspection =>
+      ({ status: { ...status, state: "unavailable", problem }, certs: false, http: false });
+    let node: Awaited<ReturnType<typeof readTailscaleNode>>;
+    try {
+      node = await readTailscaleNode(this.run);
+    } catch (error) {
+      return isMissingBinary(error)
+        ? unavailable({ ...off, tailscale: { ...off.tailscale, installed: false } }, TAILSCALE_MISSING)
+        : unavailable(off, { code: "tailscale_stopped", message: firstLine(errorMessage(error)) });
+    }
+    const known: RemoteStatus = {
+      ...off,
+      hostname: node.hostname,
+      owner: this.owner ?? node.login?.toLowerCase() ?? null,
+      tailscale: {
+        ...off.tailscale,
+        running: node.backendState === "Running",
+        loggedIn: node.backendState !== "NeedsLogin" && node.hostname !== null,
+      },
+    };
+    if (!known.tailscale.loggedIn) return unavailable(known, NOT_LOGGED_IN);
+    if (!known.tailscale.running) return unavailable(known, { code: "tailscale_stopped", message: "Tailscale is not running." });
+    const inspection = (status: RemoteStatus, http = false): Inspection => ({ status, certs: node.certs, http });
     let result: CommandResult;
     try {
       result = await this.run(["serve", "status", "--json"]);
     } catch (error) {
-      return { ...known, problem: serveFailed(firstLine(errorMessage(error))) };
+      return inspection({ ...known, problem: serveFailed(firstLine(errorMessage(error))) });
     }
-    if (result.code !== 0) return { ...known, problem: serveFailed(detail(result)) };
-    let scheme: Scheme | null;
+    if (result.code !== 0) return inspection({ ...known, problem: serveFailed(detail(result)) });
+    let served: { https: boolean; http: boolean };
     try {
-      scheme = servedScheme(JSON.parse(result.stdout), this.target);
+      served = servedListeners(JSON.parse(result.stdout), this.target);
     } catch (error) {
-      return { ...known, problem: serveFailed(`tailscale serve status returned invalid JSON: ${errorMessage(error)}`) };
+      return inspection({ ...known, problem: serveFailed(`tailscale serve status returned invalid JSON: ${errorMessage(error)}`) });
     }
-    return {
+    return inspection({
       ...known,
-      enabled: scheme !== null,
-      state: scheme ? "on" : "off",
-      scheme,
-      app: known.app && { ...known.app, url: scheme === "https" ? `${known.app.origin}/#add=${known.hostname}` : null },
+      enabled: served.https,
+      state: served.https ? "on" : "off",
+      app: known.app && { ...known.app, url: served.https ? `${known.app.origin}/#add=${known.hostname}` : null },
       problem: this.operatorProblem,
-    };
+    }, served.http);
   }
 
-  /** Ask Tailscale for a Serve change, then re-read the Serve side. A refusal is this call's problem. */
-  private async write(current: RemoteStatus, args: string[]): Promise<RemoteStatus> {
+  /** `status` with a refused change's problem. */
+  private refused(status: RemoteStatus, problem: RemoteProblem): RemoteStatus {
+    return { ...status, tailscale: { ...status.tailscale, operator: this.operatorProblem === null }, problem };
+  }
+
+  /** Ask Tailscale for one Serve change; a refusal is returned, and remembered when it is the operator right. */
+  private async change(args: string[]): Promise<RemoteProblem | null> {
     let result: CommandResult;
     try {
       result = await this.run(args);
     } catch (error) {
-      return {
-        ...current,
-        problem: isMissingBinary(error) ? TAILSCALE_MISSING : serveFailed(firstLine(errorMessage(error))),
-      };
+      return isMissingBinary(error) ? TAILSCALE_MISSING : serveFailed(firstLine(errorMessage(error)));
     }
     if (result.code !== 0) {
       const message = detail(result);
       const operator = /operator/i.test(`${result.stderr}\n${result.stdout}`);
       this.operatorProblem = operator ? { code: "operator_required", message, action: OPERATOR_ACTION } : null;
-      return {
-        ...current,
-        tailscale: { ...current.tailscale, operator: !operator },
-        problem: this.operatorProblem ?? serveFailed(message),
-      };
+      return this.operatorProblem ?? serveFailed(message);
     }
     this.operatorProblem = null;
-    return this.served({ ...current, tailscale: { ...current.tailscale, operator: true } });
+    return null;
   }
 }

@@ -60,9 +60,7 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
     const line = `${status.enabled ? `on ${status.hostname}` : "off"}${status.problem ? ` (${status.problem.message})` : ""}\n`;
     if (!status.enabled) return line;
     if (!status.app) return line + "no app: remote.apps is empty, so nothing can reach Ghost remotely\n";
-    return line + (status.app.url
-      ? `app ${status.app.url}\n`
-      : `app ${status.app.origin} needs HTTPS: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then run \`ghost remote on\` again.\n`);
+    return line + (status.app.url ? `app ${status.app.url}\n` : "");
   });
   return 0;
 }

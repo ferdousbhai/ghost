@@ -55,14 +55,12 @@ function remoteStatus(enabled: boolean): RemoteStatus {
   return {
     enabled,
     state: enabled ? "on" : "off",
-    scheme: enabled ? "https" : null,
     hostname: "ghostbox.example.ts.net",
     tailscale: {
       installed: true,
       running: true,
       loggedIn: true,
       operator: true,
-      certs: true,
     },
     guests: "read-only",
     owner: "owner@example.com",

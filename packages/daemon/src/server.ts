@@ -701,7 +701,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/remote/qr.svg", async ({ response }) => {
       const url = remoteServe ? (await remoteServe.status()).app?.url : null;
       if (!remoteServe || !url) {
-        throw new GhostError("not_found", "The app needs Remote access on HTTPS.", 404);
+        throw new GhostError("not_found", "Remote access is off, or remote.apps names no app.", 404);
       }
       const svg = await remoteServe.qrSvg(url);
       response.writeHead(200, {
