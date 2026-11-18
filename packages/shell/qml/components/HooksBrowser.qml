@@ -277,9 +277,7 @@ Rectangle {
         anchors.top: errorBanner.bottom
         anchors.topMargin: Theme.pad * 2
         visible: Ghostd.hookConfigAvailable && root.rows.length === 0
-        text: root.editable
-            ? "No lifecycle hooks are loaded. Add a command hook with + New."
-            : "No lifecycle hooks are loaded by the daemon."
+        text: "No lifecycle hooks are loaded. Add a command hook with + New."
         textFormat: Text.PlainText
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily

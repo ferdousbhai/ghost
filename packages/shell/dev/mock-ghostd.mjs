@@ -167,9 +167,10 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({ name, dir: join(GHO
 
 const conversationEventClients = new Map();
 
-/** The daemon's conversation-id rule: 1–128 of `[A-Za-z0-9._-]`, not led by a dot. */
+/** The daemon's conversation-id rule (CONTRACTS.md "Conversations"). */
 const validConversationId = (id) =>
-  typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id);
+  typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id)
+  && !["pins.json", "reads.json", "questions.json"].includes(id);
 
 function routeConversation(parts) {
   try {
@@ -187,33 +188,28 @@ function publishConversationUpdated(name, id, updatedAt = new Date().toISOString
   }
 }
 
-// The mock stores each server's configuration as ghostd's GET /mcp serves it.
+// The mock stores each server's mcp.json row; like ghostd, `enabled` lives in
+// that config and the listing derives it (absent means enabled).
 const mcpStore = new Map();
 
 function ghostMcp(name) {
   if (!mcpStore.has(name)) {
     mcpStore.set(name, new Map([
       ["local-files", {
-        enabled: true,
-        config: {
-          type: "stdio",
-          command: "npx",
-          args: ["-y", "@example/files-mcp", "/tmp/demo"],
-          cwd: "/tmp/demo",
-          envPolicy: "literal",
-          env: { MCP_DEMO_TOKEN: "demo-token" },
-        },
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@example/files-mcp", "/tmp/demo"],
+        cwd: "/tmp/demo",
+        envPolicy: "literal",
+        env: { MCP_DEMO_TOKEN: "demo-token" },
       }],
       ["project-api", {
-        enabled: true,
-        config: {
-          type: "http",
-          url: "https://example.com/mcp?token=demo",
-          headerPolicy: "origin-locked",
-          headers: { Authorization: "Bearer demo" },
-        },
+        type: "http",
+        url: "https://example.com/mcp?token=demo",
+        headerPolicy: "origin-locked",
+        headers: { Authorization: "Bearer demo" },
       }],
-      ["legacy-events", { enabled: false, config: { type: "sse", url: "https://example.com/events" } }],
+      ["legacy-events", { type: "sse", url: "https://example.com/events", enabled: false }],
     ]));
   }
   return mcpStore.get(name);
@@ -221,11 +217,11 @@ function ghostMcp(name) {
 
 function mcpSnapshot(name) {
   return {
-    servers: [...ghostMcp(name)].map(([serverName, server]) => ({
+    servers: [...ghostMcp(name)].map(([serverName, config]) => ({
       name: serverName,
-      enabled: server.enabled,
+      enabled: config.enabled !== false,
       path: "mcp.json",
-      config: server.config,
+      config,
     })).sort((a, b) => a.name.localeCompare(b.name)),
     skipped: [],
   };
@@ -276,11 +272,20 @@ const sessionStore = new Map();
 /** Every per-ghost store: re-keyed when a ghost is renamed, dropped when it is banished. */
 const perGhostStores = [sessionStore, writtenCharacter, mcpStore, ghostDefaultHarness];
 
-// Persisted messages carry an `entryId`; opaque and monotonic here, as in a
-// real transcript.
-let entrySeq = 0;
+// Persisted messages carry an `entryId`, `e<n>` for log entry n as
+// CONTRACTS.md's transcript row says: entries count from 0, the conversation
+// header the mock does not keep being e0, and a `!command` is one entry whose
+// output is `e<n>o`.
+function nextEntry(s) {
+  s.entries = s.entries ?? 1;
+  return `e${s.entries++}`;
+}
 function append(s, message) {
-  s.messages.push({ ...message, entryId: `entry-${++entrySeq}` });
+  s.messages.push({ ...message, entryId: nextEntry(s) });
+}
+function appendCommand(s, command, output) {
+  const entryId = nextEntry(s);
+  s.messages.push({ role: "user", content: textParts(command), entryId }, { role: "assistant", content: textParts(output), entryId: `${entryId}o` });
 }
 
 /** Message content as the daemon's transcript sends it: an ordered part list, never a bare string. */
@@ -682,10 +687,9 @@ async function streamTurn(res, name, body) {
       const ran = await pump(log, ownerCommand(command)) !== null;
       // ghostd logs the command as it ends; the transcript shows the owner's
       // `!command`, then its output as the ghost's message.
-      append(existing, { role: "user", content: textParts(prompt) });
-      append(existing, { role: "assistant", content: textParts(ran
+      appendCommand(existing, prompt, ran
         ? `\`\`\`\nmock output of ${command}\n\`\`\``
-        : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
+        : `\`\`\`\n\n\`\`\`\n\n(exit signal)`);
     } else {
       if (COMPACT) append(existing, { role: "compacted", content: textParts("auto · 288k tokens") });
       let reply = await pump(log, script(name, prompt));
@@ -1027,7 +1031,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     // Like ghostd: a newly added server starts disabled unless the row says otherwise.
-    ghostMcp(name).set(serverName, { enabled: body.config.enabled === true, config: body.config });
+    ghostMcp(name).set(serverName, "enabled" in body.config ? body.config : { ...body.config, enabled: false });
     return json(res, 201, mcpSnapshot(name));
   }
   if (parts[3] === "mcp" && parts.length >= 5) {
@@ -1046,7 +1050,7 @@ const mockServer = createServer(async (req, res) => {
         });
       }
       // Like ghostd: the written config replaces the row, `enabled` included.
-      servers.set(serverName, { enabled: body.config.enabled !== false, config: body.config });
+      servers.set(serverName, body.config);
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {
@@ -1056,7 +1060,7 @@ const mockServer = createServer(async (req, res) => {
           error: { message: '"enabled" must be a boolean', code: "invalid_request" },
         });
       }
-      servers.get(serverName).enabled = body.enabled;
+      servers.set(serverName, { ...servers.get(serverName), enabled: body.enabled });
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 5 && req.method === "DELETE") {

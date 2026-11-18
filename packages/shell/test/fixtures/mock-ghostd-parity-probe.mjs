@@ -76,6 +76,27 @@ try {
   const mcp = await mcpResponse.json();
   assert.ok(mcp.servers.length > 0);
   assert.ok(mcp.servers.every((server) => server.path === "mcp.json"));
+  // Like ghostd, `enabled` lives in the served config, and a disabled server's config says so.
+  assert.ok(mcp.servers.every((server) => server.enabled === (server.config.enabled !== false)));
+  const disabled = mcp.servers.find((server) => !server.enabled);
+  assert.ok(disabled);
+  assert.equal(disabled.config.enabled, false);
+  const mcpUrl = `http://127.0.0.1:${port}/api/ghosts/casper/mcp`;
+  const added = await fetch(mcpUrl, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "parity-added", config: { type: "http", url: "https://example.com/added" } }),
+  });
+  assert.equal(added.status, 201);
+  const addedRow = (await added.json()).servers.find((server) => server.name === "parity-added");
+  assert.equal(addedRow.enabled, false);
+  assert.equal(addedRow.config.enabled, false);
+  const enabled = await fetch(`${mcpUrl}/parity-added/enabled`, {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }),
+  });
+  const enabledRow = (await enabled.json()).servers.find((server) => server.name === "parity-added");
+  assert.equal(enabledRow.enabled, true);
+  assert.equal(enabledRow.config.enabled, true);
+  assert.equal((await fetch(`${mcpUrl}/parity-added`, { method: "DELETE" })).status, 200);
 
   const rosterResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`);
   assert.equal(rosterResponse.status, 200);
