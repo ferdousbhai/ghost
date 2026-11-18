@@ -18,7 +18,7 @@ export interface UsageWindow {
   resetsAt: string | null;
 }
 
-export interface HarnessUsage {
+interface HarnessUsage {
   updatedAt: string | null;
   stale: boolean;
   /** Omarchy's note when it could not measure the harness, e.g. "Codex limits unavailable". */

@@ -18,12 +18,12 @@ import { isRecord } from "./record.js";
 const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
 const HOOK_COMPLETE_TIMEOUT_MS = 180_000;
 
-export interface HookCompleteInput {
+interface HookCompleteInput {
   readonly ghost_home: string;
   readonly prompt: string;
 }
 
-export interface HookCompleteOptions {
+interface HookCompleteOptions {
   readonly env?: NodeJS.ProcessEnv;
   readonly signal?: AbortSignal;
   /** Test seams over harness choice. */

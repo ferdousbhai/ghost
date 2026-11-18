@@ -1,7 +1,7 @@
 /** Explicit, optional ranking through Recall. No model or index ownership here. */
 import { execFile } from "node:child_process";
 
-export interface RecallRecord { id: string; title: string; text: string }
+interface RecallRecord { id: string; title: string; text: string }
 
 export function rankRecords(collection: string, query: string, records: RecallRecord[]): Promise<string[] | null> {
   if (!records.length) return Promise.resolve([]);

@@ -9,13 +9,14 @@ import { errorMessage } from "./errors.js";
 import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
+import { LOOPBACK_ADDRESSES } from "./loopback.js";
 import { parsePeers, type Peer } from "./peers.js";
 import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, type LocalModelConfig } from "./local-model.js";
 
-export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[]; apps?: string[] };
+type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[]; apps?: string[] };
 
 /** The web apps admitted to call this daemon with a tailnet identity (CONTRACTS.md "Daemon HTTP API"). */
-export const DEFAULT_REMOTE_APPS: readonly string[] = ["https://summonghost.com"];
+const DEFAULT_REMOTE_APPS: readonly string[] = ["https://summonghost.com"];
 
 /** An `https://host[:port]` origin exactly as a browser sends it, or null. */
 function appOrigin(value: unknown): string | null {
@@ -28,7 +29,7 @@ function appOrigin(value: unknown): string | null {
   }
 }
 
-export type RemoteConfigFile = Partial<RemoteConfig>;
+type RemoteConfigFile = Partial<RemoteConfig>;
 
 export interface DaemonConfig {
   port: number;
@@ -50,7 +51,7 @@ export interface DaemonConfig {
   local: LocalModelConfig | null;
 }
 
-export interface DaemonConfigFile {
+interface DaemonConfigFile {
   port?: number;
   host?: string;
   ghostsRoot?: string;
@@ -91,10 +92,8 @@ export const DEFAULT_PORT = 7717;
 export const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_GHOSTS_DIRNAME = "ghosts";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
-
 export function assertLoopback(host: string): void {
-  if (!LOOPBACK_HOSTS.has(host)) {
+  if (host !== "localhost" && !LOOPBACK_ADDRESSES.has(host)) {
     throw new Error(
       `ghostd binds loopback only (got "${host}"). `
         + `Use the authenticated Tailscale viewer for remote access.`,

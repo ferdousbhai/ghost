@@ -15,7 +15,7 @@ import {
 } from "./tailscale-identity.js";
 import { errorMessage, GhostError } from "./errors.js";
 
-export interface RemoteProblem {
+interface RemoteProblem {
   code: string;
   message: string;
   /** A command the owner can run to clear the problem. */
@@ -48,12 +48,12 @@ export interface RemoteStatus {
 }
 
 /** One of the owner's other tailnet machines, as `GET /api/remote/machines` lists it. */
-export interface RemoteMachine {
+interface RemoteMachine {
   hostname: string;
   online: boolean;
 }
 
-export interface RemoteServeOptions {
+interface RemoteServeOptions {
   owner?: string;
   guests?: "read-only" | "none";
   /** `remote.apps`; omitted, none. */

@@ -128,7 +128,7 @@ export interface ScheduleOptions {
   readonly logger?: Logger;
 }
 
-export interface ScheduleSweepResult {
+interface ScheduleSweepResult {
   readonly removed: string[];
 }
 

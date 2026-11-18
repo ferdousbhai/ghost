@@ -143,7 +143,7 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
   "x-accel-buffering": "no",
 };
 
-export interface TurnRequest {
+interface TurnRequest {
   sessionId: string | null;
   prompt: string;
   /** The window a summon came from, when the HUD sent one. */

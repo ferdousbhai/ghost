@@ -28,7 +28,7 @@ const LOAD_TIMEOUT_MS = 10 * 60_000;
 const STDERR_TAIL = 4_096;
 const STOP_GRACE_MS = 5_000;
 
-export interface LocalEndpoint {
+interface LocalEndpoint {
   readonly url: string;
   readonly key: string;
 }
@@ -66,10 +66,6 @@ export class LocalModel {
   /** The model's name as turns report it: its file name without `.gguf`. */
   get name(): string {
     return basename(this.config.model).replace(/\.gguf$/iu, "");
-  }
-
-  get running(): boolean {
-    return this.endpoint !== null;
   }
 
   /**

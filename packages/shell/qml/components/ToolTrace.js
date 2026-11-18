@@ -153,23 +153,6 @@ function call(activity, completed, limit) {
         if (args.ui === true)
             return completed ? "Looked through a window" : "Looking through a window";
         return completed ? "Checked the desktop" : "Checking the desktop";
-    // Historical transcripts still carry this retired tool name.
-    case "ghost_browser": {
-        var action = argument(activity, "action");
-        var url = argument(activity, "url");
-        var query = argument(activity, "query");
-        if (action === "open" && url !== "")
-            return (completed ? "Opened " : "Opening ") + url;
-        if (action === "find" && query !== "")
-            return (completed ? "Looked for " : "Looking for ") + quoted(query, limit) + " on the page";
-        if (action === "read")
-            return completed ? "Read the current page" : "Reading the current page";
-        if (action === "type")
-            return completed ? "Filled in the page" : "Filling in the page";
-        if (action === "click")
-            return completed ? "Followed something on the page" : "Following something on the page";
-        return completed ? "Checked the current page" : "Checking the current page";
-    }
     case "desktop_act": {
         var steps = args.steps;
         var only = Array.isArray(steps) && steps.length === 1 ? String((steps[0] && steps[0].do) || "") : "";

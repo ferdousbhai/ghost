@@ -36,7 +36,7 @@ export function commandRunner(binary: string): CommandRunner {
   };
 }
 
-export interface TailscaleNode {
+interface TailscaleNode {
   /** `Running`, `NeedsLogin`, `Stopped`, ... as `tailscale status` reports it. */
   backendState: string;
   /** The login this node is signed in as. */
@@ -51,7 +51,7 @@ export interface TailscaleNode {
   peers: TailscalePeer[];
 }
 
-export interface TailscalePeer {
+interface TailscalePeer {
   hostname: string;
   login: string | null;
   online: boolean;
@@ -98,7 +98,7 @@ export async function readTailscaleNode(run: CommandRunner = commandRunner("tail
   };
 }
 
-export type RemoteRole = "owner" | "peer" | "guest";
+type RemoteRole = "owner" | "peer" | "guest";
 
 export interface TailscaleIdentity {
   login: string;

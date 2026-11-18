@@ -22,7 +22,7 @@ export interface RenderedOutput {
   quiet?: string;
 }
 
-export type OutputRenderer<T> = (body: T) => string | RenderedOutput;
+type OutputRenderer<T> = (body: T) => string | RenderedOutput;
 
 export function emit<T>(
   ctx: Pick<CliContext, "parsed" | "runtime">,

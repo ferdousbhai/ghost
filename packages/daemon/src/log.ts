@@ -20,7 +20,7 @@ export interface LogRecord {
   fields?: Record<string, unknown>;
 }
 
-export type LogSink = (record: LogRecord) => void;
+type LogSink = (record: LogRecord) => void;
 
 const JOURNAL_PRIORITY: Record<LogLevel, number> = { info: 6, warn: 4, error: 3 };
 

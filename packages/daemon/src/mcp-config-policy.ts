@@ -14,7 +14,7 @@ export interface MCPStdioServerConfig extends MCPServerConfigBase {
   cwd?: string;
 }
 
-export interface MCPHttpServerConfig extends MCPServerConfigBase {
+interface MCPHttpServerConfig extends MCPServerConfigBase {
   type: "http";
   url: string;
   headers?: Record<string, string>;
@@ -22,7 +22,7 @@ export interface MCPHttpServerConfig extends MCPServerConfigBase {
   headerPolicy?: "origin-locked";
 }
 
-export interface MCPSseServerConfig extends MCPServerConfigBase {
+interface MCPSseServerConfig extends MCPServerConfigBase {
   type: "sse";
   url: string;
   headers?: Record<string, string>;

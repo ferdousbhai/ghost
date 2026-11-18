@@ -17,7 +17,7 @@ interface Checkpoint extends Sources {
   reason: string;
   expectedRevision: string;
 }
-export interface RoutineConfigOptions extends ScheduleOptions { verify?: CommandRunner }
+interface RoutineConfigOptions extends ScheduleOptions { verify?: CommandRunner }
 
 function revision(sources: Sources): string {
   return createHash("sha256").update(JSON.stringify([sources.timer, sources.service])).digest("hex");

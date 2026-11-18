@@ -14,14 +14,14 @@ const BOARD_FILE_NAME = "board.md";
 export const BOARD_MAX_BYTES = 256 * 1024;
 export const BOARD_MAX_CARDS = 500;
 
-export interface BoardCard {
+interface BoardCard {
   readonly text: string;
   /** `- [x]` is done, `- [ ]` is open, a plain `-` item has no box. */
   readonly done?: boolean;
   readonly notes: readonly string[];
 }
 
-export interface BoardColumn {
+interface BoardColumn {
   readonly title: string;
   readonly cards: readonly BoardCard[];
 }

@@ -49,7 +49,7 @@ export const FIRST_MEETING_SECTION = [
 ].join("\n");
 
 
-export interface GhostSystemPromptInput {
+interface GhostSystemPromptInput {
   readonly ghostName: string;
   readonly character: CharacterFile | null;
   /** The ghost home; the prompt names its character file by absolute path. */

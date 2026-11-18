@@ -29,11 +29,11 @@ export interface PeerMessage { readonly id: string; readonly text: string }
 
 const PEER_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const MESSAGE_ID = /^[A-Za-z0-9._-]{1,128}$/u;
-export const MAX_PEER_TEXT = 16_384;
+const MAX_PEER_TEXT = 16_384;
 /** Accepted messages per peer per hour, so two ghosts answering each other cannot loop unattended. */
-export const PEER_HOURLY_LIMIT = 120;
+const PEER_HOURLY_LIMIT = 120;
 /** Messages waiting for one peer. */
-export const MAX_OUTBOX = 200;
+const MAX_OUTBOX = 200;
 const INVITE_LIFETIME_MS = 7 * 24 * 3_600_000;
 const HOUR_MS = 3_600_000;
 const INVITE_PREFIX = "ghost-peer:";
@@ -202,7 +202,7 @@ class JsonFile<T> {
   }
 }
 
-export interface QueuedMessage extends PeerMessage { readonly at: string }
+interface QueuedMessage extends PeerMessage { readonly at: string }
 
 /** What waits for one peer, so a message outlives a restart and an absence on either side. */
 export class PeerOutbox {
@@ -241,7 +241,7 @@ export class PeerOutbox {
   }
 }
 
-export interface PendingInvite {
+interface PendingInvite {
   /** sha256 of the one-time code; the code itself is never stored. */
   readonly hash: string;
   readonly name: string;
@@ -295,7 +295,7 @@ export class PeerInvites {
   }
 }
 
-export interface Invite {
+interface Invite {
   /** The inviting daemon's Remote access address. */
   readonly url: string;
   /** Tailscale's link sharing the inviting machine. */

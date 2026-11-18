@@ -21,7 +21,7 @@ const PREVIEW_MAX = 120;
 /** How much of the earlier conversation a newly bound harness is handed. */
 export const HANDOFF_CONTEXT_CHARS = 24_000;
 
-export interface ToolCallPart {
+interface ToolCallPart {
   readonly type: "toolCall";
   readonly id: string;
   readonly name: string;
@@ -142,7 +142,7 @@ export function newConversationEntry(id: string, now: Date): LogEntry {
   return { type: "conversation", v: LOG_VERSION, id, createdAt: now.toISOString() };
 }
 
-export interface LogState {
+interface LogState {
   /** The owner's title, else one derived from the first owner message. */
   readonly title: string | null;
   readonly preview: string | null;

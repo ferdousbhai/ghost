@@ -59,14 +59,14 @@ Environment:
   XDG_CACHE_HOME, XDG_DOCUMENTS_DIR
 `;
 
-export interface ParsedArgs {
+interface ParsedArgs {
   overrides: DaemonConfigOverrides;
   logLevel: LogLevel;
   help: boolean;
   version: boolean;
 }
 
-export interface ShutdownSignalOptions {
+interface ShutdownSignalOptions {
   listening: Pick<ListeningServer, "close">;
   host: Pick<SessionHost, "disposeAll">;
   logger: Pick<Logger, "info" | "warn">;

@@ -78,9 +78,8 @@ export interface HarnessRow {
  * (CONTRACTS.md "Local model"). It emits the same events a parser does and
  * throws with the message the turn reports as its error.
  */
-export interface NativeRow {
+interface NativeRow {
   readonly id: string;
-  readonly effort?: string;
   run(input: NativeTurnInput): Promise<void>;
 }
 

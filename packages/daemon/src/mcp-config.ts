@@ -11,7 +11,7 @@ import { serializeByKey } from "./promise-chain.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 
 /** The file: `mcpServers` is what Ghost reads; other keys pass through untouched. */
-export interface MCPConfigFile {
+interface MCPConfigFile {
   mcpServers?: Record<string, MCPServerConfig>;
   [key: string]: unknown;
 }

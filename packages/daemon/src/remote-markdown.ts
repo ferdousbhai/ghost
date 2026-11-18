@@ -4,7 +4,7 @@
  * in the page by source (`renderMarkdown.toString()`), so it must stay
  * self-contained: no imports, no closures over module scope.
  */
-export interface MarkdownNode {
+interface MarkdownNode {
   append(...kids: (MarkdownNode | string)[]): void;
   setAttribute(name: string, value: string): void;
 }

@@ -5,7 +5,7 @@ export interface CommandDocumentation {
   example: string;
 }
 
-export interface ExitCodeDocumentation {
+interface ExitCodeDocumentation {
   code: number;
   meaning: string;
 }

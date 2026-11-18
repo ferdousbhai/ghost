@@ -36,7 +36,7 @@ interface HarnessProcessOptions {
 }
 
 /** Harness protocols are JSONL; owner shell output is streamed as raw chunks. */
-export type HarnessRunOptions = HarnessProcessOptions & (
+type HarnessRunOptions = HarnessProcessOptions & (
   | { readonly parse: (line: string) => HarnessEvent[]; readonly onEvent: (event: HarnessEvent) => void; readonly onStdout?: never }
   | { readonly onStdout: (chunk: string) => void; readonly parse?: never; readonly onEvent?: never }
 );

@@ -7,6 +7,7 @@
  */
 import type { HarnessEvent } from "./harness-table.js";
 import type { LocalModel } from "./local-model.js";
+import { isRecord } from "./record.js";
 import { Hits, LOCAL_TOOLS, read, search, type ToolContext, type ToolResult } from "./local-tools.js";
 
 /** Tool rounds in one pass; one more call, without tools, then answers. */
@@ -57,7 +58,7 @@ interface ToolCall {
 function parseArgs(raw: string): Record<string, unknown> {
   try {
     const value: unknown = JSON.parse(raw || "{}");
-    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    return isRecord(value) ? value : {};
   } catch {
     return {};
   }

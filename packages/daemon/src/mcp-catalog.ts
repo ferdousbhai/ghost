@@ -6,19 +6,19 @@ import { mcpServerValidationErrors, type MCPServerConfig, type MCPStdioServerCon
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
 
-export interface McpServerView {
+interface McpServerView {
   name: string;
   enabled: boolean;
   path: "mcp.json";
   config: MCPServerConfig;
 }
 
-export interface McpCatalogSkipped {
+interface McpCatalogSkipped {
   path: string;
   reason: string;
 }
 
-export interface McpCatalogSnapshot {
+interface McpCatalogSnapshot {
   servers: McpServerView[];
   skipped: McpCatalogSkipped[];
 }
@@ -31,7 +31,7 @@ export interface McpCatalogOptions {
   writer?: Partial<McpCatalogWriter>;
 }
 
-export interface McpCatalogWriter {
+interface McpCatalogWriter {
   add(path: string, name: string, config: MCPServerConfig): Promise<unknown>;
   update(path: string, name: string, config: MCPServerConfig): Promise<unknown>;
   remove(path: string, name: string): Promise<unknown>;
@@ -44,7 +44,7 @@ const defaultWriter: McpCatalogWriter = {
 };
 
 /** One `mcp.json` row; `errors` is empty for a usable one. */
-export interface McpServerRow {
+interface McpServerRow {
   name: string;
   config: unknown;
   errors: string[];

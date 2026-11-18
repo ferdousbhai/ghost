@@ -151,7 +151,7 @@ export interface SessionHostOptions {
   eventRetryDelays?: readonly number[];
 }
 
-export interface RunTurnOptions {
+interface RunTurnOptions {
   sessionId?: string | null;
   prompt: string;
   /** The window a summon came from: hidden context for the first pass only. */
@@ -159,18 +159,18 @@ export interface RunTurnOptions {
   emit: (event: TurnEvent) => void;
 }
 
-export interface AdmittedTurnOptions {
+interface AdmittedTurnOptions {
   emit: (event: TurnEvent) => void;
 }
 
 /** An admitted turn: the conversation is held until `run` settles. */
-export interface TurnAdmission {
+interface TurnAdmission {
   /** The conversation the turn runs in, "default" when the request named none. */
   readonly sessionId: string;
   run(options: AdmittedTurnOptions): Promise<void>;
 }
 
-export interface QueuedMessages {
+interface QueuedMessages {
   streaming: boolean;
   followUp: readonly string[];
 }
@@ -210,16 +210,16 @@ export interface Transcript {
 const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
 const MAX_TRANSCRIPT_LIMIT = 2_000;
 
-export interface ConversationUpdatedEvent {
+interface ConversationUpdatedEvent {
   type: "conversation-updated";
   id: string;
   updatedAt: string;
 }
 
-export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
+type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
 /** A harness that failed before answering, tried last until `until`. */
-export interface HarnessRest {
+interface HarnessRest {
   until: string;
   /** The failure that sent it to the back, as the harness reported it. */
   reason: string;
@@ -577,7 +577,7 @@ export class SessionHost {
       return this.localModel ? [LOCAL_HARNESS] : [];
     }
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
-    const ordered = orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, readHarnessSetting(ghost.dir), omarchyDefault]);
+    const ordered = orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, setting, omarchyDefault]);
     // A harness that just failed before answering goes to the back, not out:
     // if everything ahead of it fails too, it is still tried.
     return [...ordered.filter((id) => !this.restingFor(id)), ...ordered.filter((id) => this.restingFor(id))];
@@ -620,7 +620,7 @@ export class SessionHost {
       harnesses: [
         ...report.harnesses.flatMap((harness) => {
           const row = this.rowOf(harness.id);
-          return row ? [{ ...harness, effort: row.effort ?? null, resting: this.restingFor(harness.id) }] : [];
+          return row ? [{ ...harness, effort: ("run" in row ? undefined : row.effort) ?? null, resting: this.restingFor(harness.id) }] : [];
         }),
         ...(this.localModel ? [{ id: LOCAL_HARNESS, usage: null, effort: null, resting: null }] : []),
       ],
@@ -1065,6 +1065,7 @@ export class SessionHost {
       }, stream, blocks, signal);
       if (result.error === null) this.resting.delete(harness);
       if (result.error === null || result.aborted || result.produced) {
+        const effort = result.model?.effort ?? ("run" in row ? undefined : row.effort);
         await appendLog(sessionDir, id, [{
           type: "assistant",
           at: new Date().toISOString(),
@@ -1074,7 +1075,7 @@ export class SessionHost {
           ...(result.aborted && this.shuttingDown ? { interrupted: true as const } : {}),
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
-          ...(result.model?.effort ?? row.effort ? { effort: result.model?.effort ?? row.effort } : {}),
+          ...(effort ? { effort } : {}),
         }, ...(result.resources ? [result.resources] : [])]);
         if (result.resources) stream.emit(result.resources);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);

@@ -16,7 +16,7 @@ export const TOOL_RESULT_CHARS = 8_000;
 /** A text file this short is read whole rather than as Recall's passage. */
 const WHOLE_FILE_CHARS = 8_000;
 
-export interface ToolSpec {
+interface ToolSpec {
   readonly type: "function";
   readonly function: { readonly name: string; readonly description: string; readonly parameters: Record<string, unknown> };
 }
@@ -33,7 +33,7 @@ export interface ToolResult {
 }
 
 /** Where a search hit came from, so `read` can open it. */
-export type Hit =
+type Hit =
   | { readonly kind: "file"; readonly path: string; readonly segment: number | null; readonly page: number | null; readonly line?: number }
   | { readonly kind: "lastbook"; readonly path: string; readonly page: number }
   | { readonly kind: "mail"; readonly thread: string }
@@ -71,7 +71,7 @@ export const LOCAL_TOOLS: readonly ToolSpec[] = [
     { task: { type: "string", description: "The whole task, self-contained." } }, ["task"]),
 ];
 
-export function lastbookSearchDb(env: NodeJS.ProcessEnv, home: string): string {
+function lastbookSearchDb(env: NodeJS.ProcessEnv, home: string): string {
   return join(xdgBaseDir(env, "XDG_DATA_HOME", home), "Lastbook", "LastbookData", "library-data", "search.sqlite");
 }
 
