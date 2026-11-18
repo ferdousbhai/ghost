@@ -16,8 +16,7 @@ Ghost preserves history across harness changes. It can try another installed
 harness when one fails before producing text or starting a tool; afterward it
 ends the turn with the error, avoiding replay of possible side effects.
 Usage reports are informational, never admission gates. Ghost adds no provider,
-spend, or concurrency caps; desktop actions alone need a lease because there
-is one pointer and focus.
+spend, or concurrency caps.
 
 ## Why files own durable context
 

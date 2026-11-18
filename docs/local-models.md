@@ -87,9 +87,9 @@ after its idle minutes. Both can be resident at once for up to that long.
   AMD, and plain `ollama` otherwise. On an Apple Silicon machine that is plain
   `ollama`; whether it reaches the GPU there is untested. An `ollama-vulkan`
   package exists but the menu does not pick it.
-- llama.cpp with Vulkan is the route measured here. Arch has no package for
-  it; the build needs `cmake` (`uvx cmake` works), `glslc` and the Vulkan
-  headers.
+- llama.cpp with Vulkan is the route measured here. There is no official Arch
+  package; the AUR has `llama.cpp-vulkan`, or build from source, which needs
+  `cmake` (`uvx cmake` works), `glslc` and the Vulkan headers.
 - Weights go in the Hugging Face hub cache (`~/.cache/huggingface/hub`),
   fetched with `uvx --from huggingface_hub hf download <repo> <file>`.
 

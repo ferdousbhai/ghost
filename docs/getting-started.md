@@ -183,9 +183,6 @@ picks, per turn, the one already carrying the conversation, then the ghost's
 ghost harnesses          # installed agents and informational usage
 ```
 
-The MCP navbar editor manages the additional servers configured for this
-ghost, not the harness's own settings.
-
 In the HUD, the harness label beside the conversation title opens a picker:
 choose an agent for this conversation, then "use <agent>" makes it the ghost's
 default for new conversations and "automatic" sets that back. From the terminal, or by asking the ghost, which runs the

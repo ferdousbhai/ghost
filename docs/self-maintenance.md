@@ -155,7 +155,7 @@ not the version, is what says an update is live.
 ## Canary before adopting
 
 Never prove a build against the owner's ghost or desktop. For a checkout
-canary, use a private root and configuration, a fake desktop, and a free
+canary, use a private root and configuration and a free
 non-live port (7799 below):
 
 ```sh

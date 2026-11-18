@@ -50,10 +50,8 @@ neither indexes it nor injects any part of it, and the system prompt only names
 the directory. A ghost searches it on demand, as a task needs
 (`ghost help memory`). Recall, an optional product of its own
 (`ghost help products`), may index folders the owner selects; its hits are derived,
-possibly stale candidates, and the source file is authoritative. While
-`recall` is on the daemon's PATH (checked each turn), the prompt also names
-`recall search` as the first lookup for things whose words or place are
-unknown.
+possibly stale candidates, and the source file is authoritative; `ghost help
+memory` points a ghost at it for things whose words or place are unknown.
 
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.
@@ -111,7 +109,7 @@ and leaves the restored timer paused. Restore never silently re-enables work.
 CLI `routines config <slug>` prints editable JSON; `routines edit <slug> <file>`
 saves it, `remove <slug>` reads/checks the current revision before deletion,
 `recoveries` lists checkpoints, and `restore <id>` restores one. The HUD and
-phone owner view use the same routes and conflict handling. Changes, controls,
+the summonghost.com app use the same routes and conflict handling. Changes, controls,
 and source reads are serialized per ghost. `GET …/routines/:slug/logs` and
 `routines logs <slug>` return the last 100
 service journal lines, capped at 64000 characters (`{ text, truncated, sessions }`).
@@ -247,17 +245,11 @@ opening a different conversation. A completed turn does not imply its result
 was read; reopening the right conversation does.
 
 `turn_end` is an opt-in owner command-hook boundary after a whole conversation
-turn settles, including failure; cancellation is quiet. It cannot continue or
-block a turn. Its bounded payload includes `outcome` (`done`/`error`), `title`,
-`excerpt`, and nullable `url`, plus the ordinary hook identity fields. The URL
-is that app link to the conversation, from the first `remote.apps` origin and
-this machine's Serve hostname, never a bearer token; it is null while remote
-access is off, not on HTTPS, or `remote.apps` is `[]`. With no handler no provider/network discovery occurs. Commands run
-through the existing hook runner with its timeouts/fail-open logging, after
-the terminal stream event and outside the conversation's busy state, so a slow
-handler never delays the owner's next prompt; failure cannot change the
-conversation's outcome.
-Owner `!commands` use the same boundary. No notification transport, credential
+turn or owner `!command` settles, including failure; cancellation is quiet. It
+cannot continue or block a turn, delay the owner's next prompt, or change the
+conversation's outcome. Its payload, with that app link to the conversation as
+`url`, and how its handlers run are defined in [`docs/hooks.md`](docs/hooks.md).
+No notification transport, credential
 store, retry queue, or push backend is added: `ghost help notifications` gives
 an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
 boundary. No configured handler means no outbound notification.
@@ -448,7 +440,7 @@ the reply has already streamed). Nothing from that inspection enters handoff
 context. The owner should always be able to see what answered: each reply
 records the model, provider, and effort its harness named, and the session row
 carries them. Ghost keeps no inventory of a run's skills, plugins, tools, or
-connected MCP servers; those are the harness's own. The MCP navbar editor
+connected MCP servers; those are the harness's own. The HUD's MCP servers pane
 manages only the ghost's additional configured servers.
 Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
@@ -524,15 +516,15 @@ queues after a live turn or, when the conversation is idle, starts its next
 turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
 table, no jobs API, no jobs strip, and cannot cancel what it did not start;
-the policy (`BACKGROUND_WORK_POLICY` in
+the Ghost section (`GHOST_POLICY` in
 [`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)) points at the recipe,
 `ghost help background`.
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. A ghost that wants a specialist runs the owner's installed `pi`,
 `codex`, `omp`, or `claude -p` from its own Bash as `cd <dir> && ghost delegate
-<harness> -- <args>` (`HARNESS_LIMITS_POLICY` in
-[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that harness runs
+<harness> -- <args>` (the `ghost help harnesses` recipe, indexed by
+`GHOST_POLICY` in [`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that harness runs
 with the owner's own settings for it — its full tool set, project discovery,
 auth, and session semantics.
 `ghost delegate` refuses an uninstalled harness (exit 5); otherwise it runs
@@ -593,8 +585,7 @@ status. Request bodies and control files are bounded before allocation.
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary. The configured owner has full access; any other login is refused
 unless `remote.guests` in the config is `"read-only"` (the default is
-`"none"`), and a `remote.peers` list left by an earlier version is ignored, so
-its logins are guests like any other. Admitted guests are read-only,
+`"none"`). Admitted guests are read-only,
 are refused the routes marked owner-only, which show file paths, hook
 commands, or MCP credentials, and see no path in the ghost list;
 conversations, tool calls included, are shown to them as recorded.
@@ -883,7 +874,7 @@ rounds, then makes one more call without them:
   `cloudmail search` and `icloud-contacts list`. Hits are numbered `S1`,
   `S2`, … in that source order for this pass only.
 - `read(id, page?)`: one hit by its id, never a path: a text file of up to
-  16 KiB whole, a PDF's page (column padding collapsed), the lines around a ripgrep match, a mail
+  16,000 bytes whole, a PDF's page (column padding collapsed), the lines around a ripgrep match, a mail
   thread (`cloudmail thread read`), a contact, else Recall's passage.
 - `delegate(task)`: one headless run of a harness, in the conversation's
   directory with the ghost's persona and MCP servers, tried in the order

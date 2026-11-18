@@ -213,8 +213,9 @@ An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
 `outcome` is `done` or `error`; `title` is at most 160 characters and the
 whitespace-normalized `excerpt` at most 280. `url` opens the conversation in the first
 `remote.apps` app (`<origin>/#/<hostname>/<ghost>/<id>`, each segment
-URI-encoded); it is null while remote access is off, or when
-`remote.apps` is `[]`. Failed turns use the failure message. Handlers run in order,
+URI-encoded), never a bearer token; it is null while remote access is off, or
+when `remote.apps` is `[]`, and with no `turn_end` handler Ghost never looks
+it up. Failed turns use the failure message. Handlers run in order,
 under the existing timeout/output bounds, after the terminal stream frame and
 outside the conversation's busy state, so they never delay the next prompt.
 Their output cannot change the result; failures fail open and are logged. Ghost
