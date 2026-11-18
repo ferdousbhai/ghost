@@ -114,6 +114,10 @@ describe("ghost CLI against a real daemon server", () => {
     // One no message has landed in yet is addressed as given.
     expect(await cli(["switch", "fake", "-g", "casper", "-s", "fresh-1"]))
       .toMatchObject({ code: 0, stdout: "Conversation fresh-1 now runs on fake.\n" });
+    // and `say` reaches the same unlisted conversation `switch` just named.
+    const said = await cli(["say", "-g", "casper", "-s", "fresh-1", "-q", "hi"]);
+    expect(said.code, said.stderr).toBe(0);
+    expect((await host.listSessions("casper")).map((row) => row.id)).toContain("fresh-1");
   });
 
   it("keeps destructive removal behind --yes", async () => {

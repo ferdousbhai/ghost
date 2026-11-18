@@ -3,7 +3,7 @@ import { compactedText } from "../conversation-log.js";
 import { limitNotice, type LimitReachedEvent } from "../turn-events.js";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
-import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, sessionPath, stdinIsTty, stdinText } from "./common.js";
+import { conversationId, ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -48,9 +48,8 @@ async function turnConversationId(
   requestedSession: string | undefined,
 ): Promise<string> {
   if (startNew) return newConversationId();
-  const sessions = await listSessions(ctx.client, name);
-  if (requestedSession) return resolveSessionPrefix(sessions, requestedSession).id;
-  return latestSession(sessions)?.id ?? newConversationId();
+  if (requestedSession) return conversationId(ctx.client, name, requestedSession);
+  return latestSession(await listSessions(ctx.client, name))?.id ?? newConversationId();
 }
 
 export async function sayCommand(ctx: CliContext): Promise<number> {
@@ -69,20 +68,21 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   // The conversation an idle --follow-up turns into a fresh turn of.
   let idleFollowUp: string | undefined;
   if (followUp) {
-    const session = await resolveSession(ctx.client, name, requestedSession);
-    const path = sessionPath(name, session.id);
+    const id = requestedSession ? await conversationId(ctx.client, name, requestedSession)
+      : (await resolveSession(ctx.client, name, undefined)).id;
+    const path = sessionPath(name, id);
     try {
       const response = await ctx.client.request("POST", `${path}/queue`, { text });
-      emit(ctx, response, () => `queued for ${session.id}\n`);
+      emit(ctx, response, () => `queued for ${id}\n`);
       return 0;
     } catch (error) {
       // A follow-up to an idle conversation is its next turn: this is how a
       // background command wakes the ghost that started it.
       if (!(error instanceof CliError) || error.code !== "session_not_streaming") throw error;
-      idleFollowUp = session.id;
+      idleFollowUp = id;
     }
   }
-  const conversationId = idleFollowUp
+  const sessionId = idleFollowUp
     ?? await turnConversationId(ctx, name, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
@@ -98,7 +98,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   let interrupted = false;
   const stop: NodeJS.SignalsListener = () => {
     interrupted = true;
-    ctx.client.request("POST", sessionPath(name, conversationId, "/stop"), {}).catch(() => undefined);
+    ctx.client.request("POST", sessionPath(name, sessionId, "/stop"), {}).catch(() => undefined);
   };
   process.once("SIGINT", stop);
   // A long turn's response is cut, its last frame naming where the next resumes.
@@ -156,11 +156,11 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
           break;
       }
     };
-    await ctx.client.stream(ghostPath(name, "/messages"), { prompt: text, sessionId: conversationId }, onEvent);
+    await ctx.client.stream(ghostPath(name, "/messages"), { prompt: text, sessionId }, onEvent);
     while (resume) {
       const { turn, from } = resume;
       resume = null;
-      await ctx.client.stream(sessionPath(name, conversationId, `/stream?turn=${encodeURIComponent(turn)}&from=${from}`), undefined, onEvent);
+      await ctx.client.stream(sessionPath(name, sessionId, `/stream?turn=${encodeURIComponent(turn)}&from=${from}`), undefined, onEvent);
     }
   } finally {
     (process as NodeJS.EventEmitter).off("SIGINT", stop);

@@ -113,6 +113,16 @@ export function resolveSessionPrefix(rows: readonly SessionSummary[], requested:
   );
 }
 
+/**
+ * `requested` as an id or unique prefix of a listed conversation, else as
+ * given: one no message has landed in yet is not listed, and a turn or switch
+ * may still address it.
+ */
+export async function conversationId(client: DaemonClient, name: string, requested: string): Promise<string> {
+  const sessions = await listSessions(client, name);
+  return sessions.some((row) => row.id.startsWith(requested)) ? resolveSessionPrefix(sessions, requested).id : requested;
+}
+
 export function latestSession(rows: readonly SessionSummary[]): SessionSummary | undefined {
   return rows.reduce<SessionSummary | undefined>((latest, row) =>
     !latest || Date.parse(row.updatedAt) > Date.parse(latest.updatedAt) ? row : latest, undefined);

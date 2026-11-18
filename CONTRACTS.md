@@ -718,7 +718,9 @@ eligible ids, one per line. It keeps no state and throttles nothing. Addressing 
 `-g`, then `$GHOST`, then the `ghost use` default, then the sole ghost, and
 `-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
-owner's `!` commands in a conversation, carry both variables. Signing in is
+owner's `!` commands in a conversation, carry both variables. A session is an
+id or unique prefix of a listed conversation; `say` and `switch` also take an
+unlisted id as given, since one no message has landed in yet is not listed. Signing in is
 the harness's own (`claude`, `codex login`, …); Ghost has no login or model
 commands. There are no plan or todo commands.
 
