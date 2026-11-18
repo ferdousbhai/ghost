@@ -330,16 +330,27 @@ describe("GhostHookRunner", () => {
     }
   }, 10_000);
 
-  it("starts past a retired event with a warning, and refuses to write one", async () => {
+  it("starts past a retired event and stray keys with a warning, serves the document without them, and refuses to write one", async () => {
     const directory = temporaryDirectory();
     const config = join(directory, "hooks.json");
-    const document = { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }] } };
+    const stop = [{ hooks: [{ type: "command", command: "/bin/true", name: "Review" }] }];
+    const document = { builtin: { next_work_turns: 1 }, hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }], session_stop: stop } };
     writeFileSync(config, JSON.stringify(document));
     const logger = recordingLogger("warn");
     const runner = GhostHookRunner.fromConfig(config, { logger });
-    expect(runner.hasHandlers("session_stop")).toBe(false);
-    expect(logger.records).toMatchObject([{ message: "skipping a retired hook event; remove it from hooks.json", fields: { event: "before_prompt" } }]);
+    expect(runner.hasHandlers("session_stop")).toBe(true);
+    expect(logger.records).toMatchObject([
+      { message: "skipping a retired hook event; the next edit drops it from hooks.json", fields: { event: "before_prompt" } },
+      { message: "ignoring top-level keys; the next edit drops them from hooks.json", fields: { keys: ["builtin"] } },
+    ]);
+    expect(runner.config()?.document).toEqual({ hooks: { session_stop: stop } });
     await expect(runner.replaceConfig(document)).rejects.toThrow(/was retired/u);
+
+    // A client editing what the daemon serves (the HUD clones it) writes it clean.
+    const served = structuredClone(runner.config()!.document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };
+    served.hooks.session_stop[0]!.hooks[0]!.name = "Reviewer";
+    await expect(runner.replaceConfig(served)).resolves.toMatchObject({ document: served });
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(served);
   });
 
   it("rejects NUL commands and fails every command event open on execution rejection", async () => {

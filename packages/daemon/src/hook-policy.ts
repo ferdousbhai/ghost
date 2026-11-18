@@ -90,6 +90,16 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
 }
 
 /**
+ * A document `parseHooksDocument` admitted at startup, as `PUT
+ * /api/hooks/config` would accept it: only `hooks`, without retired events.
+ * The daemon serves this, so the next edit writes the file clean.
+ */
+export function admittedHooksDocument(document: Record<string, unknown>): Record<string, unknown> {
+  if (!isRecord(document.hooks)) return {};
+  return { hooks: Object.fromEntries(Object.entries(document.hooks).filter(([eventName]) => !RETIRED_HOOK_EVENTS.has(eventName))) };
+}
+
+/**
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */

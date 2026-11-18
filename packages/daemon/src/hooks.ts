@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  parseCommandResult, parseHooksDocument,
+  admittedHooksDocument, parseCommandResult, parseHooksDocument,
   runSessionStopHooks,
   type CommandHook, type HookCommandResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostSessionStopEvent,
@@ -88,12 +88,15 @@ export class GhostHookRunner {
     const document = readCommandHooksDocument(path);
     const logger = options.logger ?? silentLogger;
     const commands = parseHooksDocument(document, path, (eventName) => {
-      logger.warn("skipping a retired hook event; remove it from hooks.json", { path, event: eventName });
+      logger.warn("skipping a retired hook event; the next edit drops it from hooks.json", { path, event: eventName });
     });
+    const admitted = admittedHooksDocument(document as Record<string, unknown>);
+    const dropped = Object.keys(document as Record<string, unknown>).filter((key) => key !== "hooks");
+    if (dropped.length > 0) logger.warn("ignoring top-level keys; the next edit drops them from hooks.json", { path, keys: dropped });
     return new GhostHookRunner({
       ...options,
       commands,
-      commandConfig: { path, document: document as Record<string, unknown> },
+      commandConfig: { path, document: admitted },
     });
   }
 
