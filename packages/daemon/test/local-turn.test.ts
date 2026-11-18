@@ -110,7 +110,7 @@ describe("the local model", () => {
     expect(server.requests[0]?.messages[1]?.content).toContain("[S1]");
     expect(server.requests[0]?.messages[1]?.content).toContain("The boat leaves at nine.");
     // The top hit's own text is in the prompt before the model asks for it.
-    expect(server.requests[0]?.messages[1]?.content).toContain("[S1] in full:");
+    expect(server.requests[0]?.messages[1]?.content).toContain("[S1] (opening):");
     expect(server.requests[0]?.messages[1]?.content).toContain("north pier");
     // The character and the local section, not the policy a shell-less model cannot follow.
     const system = String(server.requests[0]?.messages[0]?.content);

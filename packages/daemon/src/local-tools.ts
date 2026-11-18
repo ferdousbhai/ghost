@@ -62,7 +62,7 @@ export const LOCAL_TOOLS: readonly ToolSpec[] = [
   spec("search",
     "Search the owner's content: notes, reminders, documents, WhatsApp chats, pictures, iCloud Drive and Downloads (by meaning and keywords), mail and contacts (by keywords), and the Lastbook offline library. Each hit has an id for read.",
     { query: { type: "string", description: "What to look for. For mail and contacts, a few keywords or a name work best." } }, ["query"]),
-  spec("read", "Read one search hit in full, by its id (S1, S2, …).",
+  spec("read", "Read one search hit, by its id (S1, S2, …): a short file whole, else its passage or opening.",
     { id: { type: "string", description: "The hit's id." }, page: { type: "integer", description: "For a PDF, a page other than the hit's." } }, ["id"]),
   spec("delegate",
     "Hand a task you cannot do with search and read (acting, sending, changing, anything on the web or in code) to a cloud agent on this computer, which has full access. It answers with what it did. The task leaves this computer: include only what it needs.",
