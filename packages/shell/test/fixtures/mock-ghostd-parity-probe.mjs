@@ -266,7 +266,8 @@ try {
     frames.push(...events);
   }
   assert.ok(cuts > 0);
-  assert.equal(frames[0].type, "start");
+  // Like ghostd, a pass names its agent right after `start`.
+  assert.deepEqual(frames.slice(0, 2), [{ type: "start" }, { type: "harness", harness: "local" }]);
   assert.deepEqual(frames.filter((event) => event.type === "done" || event.type === "error"), [{ type: "done" }]);
   const gone = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/mock-trace-probe/stream?turn=nope&from=0`);
   assert.equal(gone.status, 404);

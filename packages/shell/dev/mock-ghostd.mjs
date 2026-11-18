@@ -57,6 +57,11 @@ const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 const COMPACT = flag("--compact");
 /** Each scripted turn ends with the ghost asking the owner a question, as `ghost ask` does. */
 const ASK = flag("--ask");
+/** `--resting <id>`: that agent rests after a refusal, as ghostd reports one. */
+const RESTING = opt("--resting", "");
+const resting = (id) => id === RESTING
+  ? { until: new Date(Date.now() + 3_600_000).toISOString(), reason: "429 usage limit reached" }
+  : null;
 /**
  * The agent CLIs the mock pretends are installed, in Omarchy's order, then the
  * configured local model; codex reports a full usage window, which is
@@ -64,11 +69,6 @@ const ASK = flag("--ask");
  * ghost's default, then the local model, as ghostd does when `local` is
  * configured.
  */
-/** `--resting <id>`: that agent rests after a refusal, as ghostd reports one. */
-const RESTING = opt("--resting", "");
-const resting = (id) => id === RESTING
-  ? { until: new Date(Date.now() + 3_600_000).toISOString(), reason: "429 usage limit reached" }
-  : null;
 const MOCK_HARNESSES = [
   {
     id: "claude",
@@ -579,9 +579,11 @@ function* ownerCommand(command) {
  * A scripted pass: the ghost narrating itself, one tool call — two for an
  * ONBOARDING ghost — then a two-paragraph answer.
  */
-function* script(name, prompt) {
+function* script(name, prompt, harness) {
   let contentIndex = 0;
   yield { type: "start" };
+  // Each pass names the agent it runs on, as ghostd does (CONTRACTS.md, "Turn wire").
+  yield { type: "harness", harness };
   if (COMPACT) yield { type: "compacted", trigger: "auto", preTokens: 287_944 };
   // The preamble a real model emits before reaching for a tool: it stays as its
   // own message, and the reply after the call is the next one
@@ -747,7 +749,8 @@ async function streamTurn(res, name, body) {
         : `\`\`\`\n\n\`\`\`\n\n(exit signal)`);
     } else {
       if (COMPACT) append(existing, { role: "compacted", content: textParts("auto · 288k tokens") });
-      let reply = await pump(log, script(name, prompt));
+      const harness = turnHarness(name, sessionId, existing);
+      let reply = await pump(log, script(name, prompt, harness));
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
@@ -767,6 +770,7 @@ async function streamTurn(res, name, body) {
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
+        send(log, { type: "harness", harness });
         reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }
