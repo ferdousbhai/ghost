@@ -150,7 +150,9 @@ describe("ghost CLI against a real daemon server", () => {
 
     expect(await cli(["rm", "wisp", "--yes", "-q"])).toMatchObject({ code: 0 });
     expect(existsSync(path)).toBe(false);
-    expect(await cli(["use"])).toMatchObject({ code: 2, stderr: expect.stringContaining("No default ghost") });
+    expect(await cli(["use"])).toMatchObject({ code: 0, stdout: "No default ghost.\n" });
+    expect(await cli(["use", "-q"])).toMatchObject({ code: 0, stdout: "" });
+    expect(JSON.parse((await cli(["use", "--json"])).stdout)).toEqual({ ghost: null });
 
     // The way out: `--none` forgets a default without removing a ghost.
     expect(await cli(["new", "keeper", "-q"])).toMatchObject({ code: 0 });

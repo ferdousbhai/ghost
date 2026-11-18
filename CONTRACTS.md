@@ -856,7 +856,7 @@ browser. Setup and recovery are in `ghost help browser`.
 
 `local` in `~/.config/ghost/config.json` is
 `{ model, server?, contextSize?, idleMinutes? }`: a GGUF file used in place,
-the `llama-server` executable (default: on `PATH`; a Vulkan build on Asahi),
+the `llama-server` executable (default: `llama-server` on `PATH`; on Asahi, point it at a Vulkan build),
 the context in tokens (32768), and the idle minutes before it stops (5).
 Configured, `local` is the default runtime ([Harnesses](#harnesses)), listed
 with the harnesses (`GET …/harness`, the HUD agent menu) and chosen like one
