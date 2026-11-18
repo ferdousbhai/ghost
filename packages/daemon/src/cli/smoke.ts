@@ -109,7 +109,6 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
     ...ctx.runtime.env,
     GHOSTS_ROOT: join(scratch, "ghosts"),
     GHOSTD_PORT: String(port),
-    GHOSTD_HOST: "127.0.0.1",
     GHOSTD_API_TOKEN_FILE: tokenFile,
     XDG_STATE_HOME: join(scratch, "state"),
     // Harnesses keep their sign-ins under the owner's own XDG config and data

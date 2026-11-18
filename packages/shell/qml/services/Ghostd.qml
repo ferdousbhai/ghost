@@ -27,12 +27,9 @@ import "Attachments.js" as Attachments
 Singleton {
     id: root
 
-    readonly property string host: Quickshell.env("GHOSTD_HOST") || "127.0.0.1"
     readonly property string port: String(Quickshell.env("GHOSTD_PORT") || "7717")
-    // IPv6 literals need brackets in a URL authority; ghostd binds loopback only.
-    readonly property string baseUrl: "http://"
-        + (root.host.indexOf(":") >= 0 ? "[" + root.host + "]" : root.host)
-        + ":" + root.port
+    // ghostd binds 127.0.0.1 only.
+    readonly property string baseUrl: "http://127.0.0.1:" + root.port
 
     // Same resolution the daemon does (packages/daemon/src/token-store.ts): an
     // explicit override, else $XDG_STATE_HOME/ghost/api-token, else the XDG

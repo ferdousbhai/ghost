@@ -3,8 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  assertLoopback,
-  DEFAULT_HOST,
   DEFAULT_PORT,
   defaultConfigPath,
   loadConfig,
@@ -36,7 +34,6 @@ describe("loadConfig", () => {
     const config = loadConfig({ env: {}, home: root });
     expect(config).toMatchObject({
       port: DEFAULT_PORT,
-      host: DEFAULT_HOST,
       ghostsRoot: join(root, "ghosts"),
       remote: { apps: ["https://summonghost.com"] },
       configPath: join(root, ".config", "ghost", "config.json"),
@@ -58,10 +55,10 @@ describe("loadConfig", () => {
     }
   });
 
-  it("reads the remote owner and guests, ignoring the retired remote.enabled and remote.peers", () => {
+  it("reads the remote owner and guests", () => {
     const root = makeHome();
-    writeConfig(root, { remote: { enabled: true, guests: "none", peers: [{ name: "wife", login: "wife@example.com", ghost: "casper" }] } });
-    expect(loadConfig({ env: {}, home: root }).remote).toEqual({ guests: "none", apps: ["https://summonghost.com"] });
+    writeConfig(root, { remote: { owner: "Owner@example.com", guests: "none" } });
+    expect(loadConfig({ env: {}, home: root }).remote).toEqual({ owner: "Owner@example.com", guests: "none", apps: ["https://summonghost.com"] });
   });
 
   it("reads remote.apps, [] admitting none, and refuses anything but https origins", () => {
@@ -136,12 +133,13 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ env: {}, home: root })).toThrowError(/"port" must be a number/);
   });
 
-  it("refuses a non-loopback bind", () => {
+  it("ignores keys it does not read, such as the retired host and remote.peers", () => {
     const root = makeHome();
-    expect(() => loadConfig({ env: { GHOSTD_HOST: "0.0.0.0" }, home: root }))
-      .toThrowError(/loopback only/);
-    expect(() => assertLoopback("192.168.1.10")).toThrowError(/loopback only/);
-    expect(() => assertLoopback("::1")).not.toThrow();
+    writeConfig(root, { host: "0.0.0.0", someday: true, remote: { guests: "none", peers: [{ login: "wife@example.com" }], later: 1 } });
+    const config = loadConfig({ env: {}, home: root });
+    expect(config).not.toHaveProperty("host");
+    expect(config).not.toHaveProperty("someday");
+    expect(config.remote).toEqual({ guests: "none", apps: ["https://summonghost.com"] });
   });
 
   it("refuses a nonsense port", () => {

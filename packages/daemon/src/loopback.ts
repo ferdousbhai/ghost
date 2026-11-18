@@ -1,5 +1,8 @@
 import { createServer, type Server } from "node:net";
 
+/** The one address ghostd binds: loopback, so remote access is only ever Tailscale Serve. */
+export const DAEMON_HOST = "127.0.0.1";
+
 /** The peer addresses a loopback connection arrives from. */
 export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 

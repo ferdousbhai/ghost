@@ -24,7 +24,6 @@ SendSIGKILL=yes
 
 # Do NOT put credential values in this unit or an EnvironmentFile: each harness
 # reads its own sign-in from its own configuration.
-Environment=GHOSTD_HOST=127.0.0.1
 
 # systemd's default PATH is /usr/local/bin:/usr/bin, and the login PATH the
 # user manager imports arrives only after the graphical session is up. The CLIs

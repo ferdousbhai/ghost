@@ -17,6 +17,7 @@ import { GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { LocalModel } from "./local-model.js";
+import { DAEMON_HOST } from "./loopback.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
@@ -52,7 +53,7 @@ Options:
   -v, --version            Show the version
 
 Environment:
-  GHOSTD_PORT, GHOSTD_HOST, GHOSTS_ROOT, GHOSTD_CONFIG, GHOSTD_HOOKS,
+  GHOSTD_PORT, GHOSTS_ROOT, GHOSTD_CONFIG, GHOSTD_HOOKS,
   GHOSTD_API_TOKEN_FILE, XDG_CONFIG_HOME, XDG_STATE_HOME,
   XDG_CACHE_HOME, XDG_DOCUMENTS_DIR
 `;
@@ -225,14 +226,12 @@ async function serveDaemon(
       runningSource,
       logger,
       port: config.port,
-      address: config.host,
       remote: new RemoteAccess(config.remote),
       remoteApps: config.remote.apps,
       remoteServe,
     });
   } catch (error) {
     logger.error("could not bind", {
-      host: config.host,
       port: config.port,
       error: errorMessage(error),
     });
@@ -241,7 +240,7 @@ async function serveDaemon(
   }
 
   logger.info("listening", {
-    url: `http://${config.host}:${listening.port}`,
+    url: `http://${DAEMON_HOST}:${listening.port}`,
     ghostsRoot: config.ghostsRoot,
     ghosts: registry.list().length,
     version: runningSource.version,

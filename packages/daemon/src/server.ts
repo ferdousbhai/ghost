@@ -7,7 +7,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { apiTokenPath, ensureApiToken, tokenMatches } from "./token-store.js";
 import { MAX_ATTACHMENT_BYTES } from "./attachments.js";
-import { assertLoopback } from "./config.js";
 import type { RemoteServe } from "./remote-serve.js";
 import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import { requireConversationId } from "./conversation-log.js";
@@ -21,6 +20,7 @@ import { isRecord } from "./record.js";
 import type { GhostRegistry } from "./ghosts.js";
 import type { GhostHookRunner } from "./hooks.js";
 import type { GhostHookCommandConfig } from "./hook-policy.js";
+import { DAEMON_HOST } from "./loopback.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,
@@ -978,10 +978,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
 }
 
 export async function startDaemonServer(
-  options: ServerOptions & { port: number; address?: string },
+  options: ServerOptions & { port: number },
 ): Promise<ListeningServer> {
-  const address = options.address ?? "127.0.0.1";
-  assertLoopback(address);
+  const address = DAEMON_HOST;
   const { server, liveStreams } = createDaemonServer(options);
   await new Promise<void>((resolvePromise, rejectPromise) => {
     server.once("error", rejectPromise);

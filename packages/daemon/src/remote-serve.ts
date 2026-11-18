@@ -15,6 +15,7 @@ import {
   readTailscaleNode,
 } from "./tailscale-identity.js";
 import { errorMessage, GhostError } from "./errors.js";
+import { DAEMON_HOST } from "./loopback.js";
 
 interface RemoteProblem {
   code: string;
@@ -132,7 +133,7 @@ export class RemoteServe {
   private operatorProblem: RemoteProblem | null = null;
 
   constructor(port: number, options: RemoteServeOptions = {}) {
-    this.target = `http://127.0.0.1:${port}`;
+    this.target = `http://${DAEMON_HOST}:${port}`;
     this.run = options.run ?? commandRunner("tailscale");
     this.qrRun = options.qrRun ?? commandRunner("qrencode");
     // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.

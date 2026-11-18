@@ -24,7 +24,7 @@ Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
-`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon is loopback-only and serves no web page; remote
+`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it; a `host` key an earlier config carries is ignored, like any key Ghost does not read) and serves no web page; remote
 access is the summonghost.com app over an explicit Tailscale Serve address. The
 app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale

@@ -1,5 +1,6 @@
 import { apiTokenPath, readApiToken } from "../token-store.js";
 import { loadConfig } from "../config.js";
+import { DAEMON_HOST } from "../loopback.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import type { CliRuntime } from "./types.js";
 import { errorMessage } from "../errors.js";
@@ -105,8 +106,7 @@ export class DaemonClient {
     } catch (error) {
       throw new CliError(EXIT_CODE.usage, `invalid daemon configuration: ${errorMessage(error)}`);
     }
-    const host = config.host === "::1" ? "[::1]" : config.host;
-    this.baseUrl = `http://${host}:${config.port}`;
+    this.baseUrl = `http://${DAEMON_HOST}:${config.port}`;
     this.tokenPath = apiTokenPath(runtime.env, runtime.home);
     this.#tokenValue = readApiToken(this.tokenPath);
   }

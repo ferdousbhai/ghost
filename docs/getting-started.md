@@ -311,7 +311,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
-| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote owner, guests, and apps) — optional; a missing file is fine, a malformed one is an error |
+| `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
@@ -319,9 +319,8 @@ codes.
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` the API token file.
-`GHOSTD_HOST` and `GHOSTD_PORT` move the endpoint the daemon binds and the CLI
-and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
-host).
+`GHOSTD_PORT` moves the port the daemon binds on `127.0.0.1` and the CLI and
+HUD dial (7717 by default).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
 leaves personas, conversations, tokens, your documents,

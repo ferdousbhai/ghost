@@ -73,7 +73,7 @@ describe("DaemonClient request budgets", () => {
     env: NodeJS.ProcessEnv = {},
   ): CliRuntime {
     return {
-      env: { ...env, GHOSTD_PORT: "7999", GHOSTD_HOST: "127.0.0.1" },
+      env: { ...env, GHOSTD_PORT: "7999" },
       home: base,
       stdout: { write: () => {} },
       stderr: { write: () => {} },

@@ -9,7 +9,6 @@ import { errorMessage } from "./errors.js";
 import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
-import { LOOPBACK_ADDRESSES } from "./loopback.js";
 import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, type LocalModelConfig } from "./local-model.js";
 
 type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { apps?: string[] };
@@ -32,7 +31,6 @@ type RemoteConfigFile = Partial<RemoteConfig>;
 
 export interface DaemonConfig {
   port: number;
-  host: string;
   ghostsRoot: string;
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
@@ -51,7 +49,6 @@ export interface DaemonConfig {
 
 interface DaemonConfigFile {
   port?: number;
-  host?: string;
   ghostsRoot?: string;
   remote?: RemoteConfigFile;
   local?: LocalModelConfig;
@@ -87,17 +84,7 @@ export interface DaemonConfigOverrides {
 }
 
 export const DEFAULT_PORT = 7717;
-export const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_GHOSTS_DIRNAME = "ghosts";
-
-export function assertLoopback(host: string): void {
-  if (host !== "localhost" && !LOOPBACK_ADDRESSES.has(host)) {
-    throw new Error(
-      `ghostd binds loopback only (got "${host}"). `
-        + "Use Tailscale Serve (`ghost remote on`) for remote access.",
-    );
-  }
-}
 
 export function defaultConfigPath(env: NodeJS.ProcessEnv, home: string): string {
   return join(xdgBaseDir(env, "XDG_CONFIG_HOME", home), "ghost", "config.json");
@@ -133,10 +120,6 @@ function readConfigFile(path: string, home: string): DaemonConfigFile | null {
   if (file.port !== undefined) {
     if (typeof file.port !== "number") throw new Error(`${path}: "port" must be a number.`);
     config.port = parsePort(String(file.port), path);
-  }
-  if (file.host !== undefined) {
-    if (typeof file.host !== "string") throw new Error(`${path}: "host" must be a string.`);
-    config.host = file.host;
   }
   if (file.ghostsRoot !== undefined) {
     if (typeof file.ghostsRoot !== "string") {
@@ -182,7 +165,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const file = readConfigFile(configPath, home);
 
   const envPort = env.GHOSTD_PORT?.trim();
-  const envHost = env.GHOSTD_HOST?.trim();
   const envRoot = env.GHOSTS_ROOT?.trim();
   const envHooksPath = env.GHOSTD_HOOKS?.trim();
 
@@ -190,7 +172,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? (envPort ? parsePort(envPort, "GHOSTD_PORT") : undefined)
     ?? file?.port
     ?? DEFAULT_PORT;
-  const host = (envHost || undefined) ?? file?.host ?? DEFAULT_HOST;
   const rawRoot = overrides.ghostsRoot
     ?? (envRoot || undefined)
     ?? file?.ghostsRoot
@@ -198,10 +179,8 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
 
   const hooksPath = resolve(expandHome(envHooksPath || join(dirname(configPath), "hooks.json"), home));
 
-  assertLoopback(host);
   return {
     port,
-    host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
     remote: { apps: [...DEFAULT_REMOTE_APPS], ...file?.remote },
     configPath,
