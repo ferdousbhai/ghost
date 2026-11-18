@@ -248,6 +248,12 @@ TestCase {
         compare(turn.state.limitNotice, "");
     }
 
+    function test_limitNoticeWordsEachKind(): void {
+        compare(Ghostd.limitNoticeText({ harness: "claude", kind: "rate_limit" }), "claude rate limit reached");
+        compare(Ghostd.limitNoticeText({ harness: "claude", kind: "overloaded" }), "claude is overloaded");
+        compare(Ghostd.limitNoticeText({ harness: "claude", kind: "billing" }), "claude needs billing attention");
+    }
+
     function test_watchdogSettlesAndRetiresThePartialStream(): void {
         const aborts = { count: 0 };
         const turn = openTurn("watchdog", aborts);

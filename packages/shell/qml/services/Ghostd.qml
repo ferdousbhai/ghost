@@ -2451,9 +2451,15 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** "claude usage limit reached", from a limit_reached event. */
+    /** "claude usage limit reached", from a limit_reached event; worded as the CLI's limitNotice. */
     function limitNoticeText(event: var): string {
-        return String(event.harness) + " " + String(event.kind || "limit").replace("_", " ") + " reached";
+        const words = {
+            rate_limit: "rate limit reached",
+            usage_limit: "usage limit reached",
+            overloaded: "is overloaded",
+            billing: "needs billing attention"
+        };
+        return String(event.harness) + " " + words[event.kind];
     }
 
     function notificationTitle(state: var): string {

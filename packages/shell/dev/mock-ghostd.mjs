@@ -1105,6 +1105,9 @@ const mockServer = createServer(async (req, res) => {
     const body = await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (activeTurns.has(turnKey(name, conversation))) {
+      return json(res, 409, { error: { message: "Wait for this conversation to finish before switching agents.", code: "session_busy" } });
+    }
     if (!knownHarness(body?.harness)) {
       return json(res, 400, { error: { message: `no installed agent called ${body?.harness}`, code: "unknown_harness" } });
     }
@@ -1127,6 +1130,9 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (activeTurns.has(turnKey(name, conversation))) {
+      return json(res, 409, { error: { message: "Wait for this conversation to finish before deleting it.", code: "session_busy" } });
+    }
     const deleted = ghostSessions(name).delete(conversation);
     if (deleted) publishConversationUpdated(name, conversation);
     return deleted

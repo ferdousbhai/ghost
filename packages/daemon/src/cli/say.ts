@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { compactedText } from "../conversation-log.js";
+import { limitNotice, type LimitReachedEvent } from "../turn-events.js";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, sessionPath, stdinIsTty, stdinText } from "./common.js";
@@ -112,8 +113,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
       if (event.type === "harness") harnessStarted = true;
       else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
       if (event.type === "limit_reached") {
-        const kind = String(event.kind ?? "limit").replace("_", " ");
-        ctx.runtime.stderr.write(`ghost: ${String(event.harness ?? "runtime")} ${kind} reached\n`);
+        ctx.runtime.stderr.write(`ghost: ${limitNotice(event as unknown as LimitReachedEvent)}\n`);
       } else if (event.type === "error") {
         terminal = "error";
         ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);

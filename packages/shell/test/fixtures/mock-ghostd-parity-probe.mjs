@@ -258,6 +258,18 @@ try {
         if (event.type === "resume") resume = event;
         if (event.type === "hook_start" && event.event === "session_stop") {
           sawHook = true;
+          // Like ghostd, a conversation mid-turn keeps its agent and its directory.
+          const conversationUrl = `http://127.0.0.1:${port}/api/ghosts/casper/sessions/${stoppedId}`;
+          const busySwitch = await fetch(`${conversationUrl}/harness`, {
+            method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ harness: "pi" }),
+          });
+          assert.equal(busySwitch.status, 409);
+          assert.deepEqual((await busySwitch.json()).error,
+            { message: "Wait for this conversation to finish before switching agents.", code: "session_busy" });
+          const busyDelete = await fetch(conversationUrl, { method: "DELETE" });
+          assert.equal(busyDelete.status, 409);
+          assert.deepEqual((await busyDelete.json()).error,
+            { message: "Wait for this conversation to finish before deleting it.", code: "session_busy" });
           const stop = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/${stoppedId}/stop`, { method: "POST" });
           assert.equal(stop.status, 200);
         }

@@ -78,6 +78,18 @@ export interface LimitReachedEvent {
   kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
 }
 
+const LIMIT_WORDS: Record<LimitReachedEvent["kind"], string> = {
+  rate_limit: "rate limit reached",
+  usage_limit: "usage limit reached",
+  overloaded: "is overloaded",
+  billing: "needs billing attention",
+};
+
+/** "claude usage limit reached"; the HUD's `limitNoticeText` words it the same. */
+export function limitNotice(event: Pick<LimitReachedEvent, "harness" | "kind">): string {
+  return `${event.harness} ${LIMIT_WORDS[event.kind]}`;
+}
+
 const LIMIT_PATTERNS: ReadonlyArray<[RegExp, LimitReachedEvent["kind"]]> = [
   [/\b429\b|rate.?limit|too many requests/iu, "rate_limit"],
   [/usage limit|hit your limit|limit reached|quota|exceeded your|out of credits|insufficient(_| )credits/iu, "usage_limit"],
