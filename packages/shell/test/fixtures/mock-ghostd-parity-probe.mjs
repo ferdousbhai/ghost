@@ -186,6 +186,51 @@ try {
     { id: "never-started", messages: [], total: 0, truncated: false, readThrough: "" },
   );
 
+  // Refusals carry ghostd's own code and message, so a client's handling of
+  // one is proven against the mock exactly as it will meet ghostd.
+  const base = `http://127.0.0.1:${port}/api/ghosts/casper`;
+  const refusal = async (response, status, code, message) => {
+    assert.equal(response.status, status);
+    assert.deepEqual((await response.json()).error, { message, code });
+  };
+  const send = (method, path, body) => fetch(`${base}${path}`, {
+    method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  await refusal(await send("POST", "/sessions/sess-casper-1/stop"), 409, "session_not_streaming",
+    "This conversation is not currently streaming.");
+  await refusal(await send("POST", "/sessions/sess-casper-1/queue", { text: "later" }), 409, "session_not_streaming",
+    "This conversation is not currently streaming; send a normal message instead.");
+  await refusal(await send("POST", "/sessions/sess-casper-1/attachments", { path: fileURLToPath(import.meta.url) }), 415,
+    "unsupported_media_type", "An attachment must be a PNG, JPEG, GIF, or WebP image.");
+  await refusal(await send("PUT", "/sessions/sess-casper-1/title", { title: "x".repeat(121) }), 400, "invalid_request",
+    '"title" must be at most 120 characters.');
+  await refusal(await send("PUT", "/sessions/no-such-conversation/pin", { pinned: true }), 404, "not_found",
+    'This ghost has no conversation "no-such-conversation".');
+  await refusal(await send("PUT", "/sessions/sess-casper-1/question", { text: "Go?", options: [1] }), 400, "invalid_request",
+    '"options" must be an array of strings.');
+  await refusal(await send("PUT", "/sessions/pins.json/read", {}), 400, "invalid_conversation_id",
+    "Conversation ids are 1-128 letters, digits, '.', '_' or '-', and not pins.json, reads.json, questions.json.");
+  await refusal(await fetch(`http://127.0.0.1:${port}/api/ghosts/nobody/sessions`), 404, "not_found", 'No ghost named "nobody".');
+
+  /** Read a turn to its terminal, following each cut as the HUD does. */
+  const settle = async (response, id) => {
+    const events = [];
+    while (response) {
+      const frames = (await response.text()).split("\n\n").filter((frame) => frame.startsWith("data: "))
+        .map((frame) => JSON.parse(frame.slice(6)));
+      const last = frames.at(-1);
+      response = last?.type === "resume" && await fetch(`${base}/sessions/${id}/stream?turn=${last.turn}&from=${last.from}`);
+      events.push(...frames.filter((event) => event.type !== "resume"));
+    }
+    return events;
+  };
+  // No sessionId is ghostd's conversation `default`.
+  const defaultTurn = await send("POST", "/messages", { prompt: "probe the default conversation" });
+  assert.equal(defaultTurn.status, 200);
+  assert.deepEqual((await settle(defaultTurn, "default")).at(-1), { type: "done" });
+  const defaultLog = await (await fetch(`${base}/sessions/default/transcript`)).json();
+  assert.ok(JSON.stringify(defaultLog.messages).includes("probe the default conversation"));
+
   const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -266,6 +311,8 @@ try {
           assert.equal(busySwitch.status, 409);
           assert.deepEqual((await busySwitch.json()).error,
             { message: "Wait for this conversation to finish before switching agents.", code: "session_busy" });
+          await refusal(await send("POST", "/messages", { prompt: "again", sessionId: stoppedId }), 409, "session_busy",
+            "This ghost is already answering in this conversation.");
           const busyDelete = await fetch(conversationUrl, { method: "DELETE" });
           assert.equal(busyDelete.status, 409);
           assert.deepEqual((await busyDelete.json()).error,

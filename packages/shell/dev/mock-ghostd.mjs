@@ -16,12 +16,13 @@ import {
   mkdtempSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 const mockRoutines = new Map();
 const mockRoutineConfigs = new Map();
@@ -89,7 +90,14 @@ const DEFAULT_RUNTIME = "local";
 const ghostDefaultHarness = new Map();
 /** turnKey -> the agent picked for a conversation the mock has not stored yet. */
 const draftHarness = new Map();
+/**
+ * The mock's rows are its installed agents, so ghostd's 409
+ * harness_not_installed (a row whose CLI is missing) has no mock situation.
+ */
 const knownHarness = (id) => MOCK_HARNESSES.some((h) => h.id === id);
+/** session-host.ts requireRow. */
+const unknownHarness = (res, id) => refuse(res, 400, "unknown_harness",
+  `Ghost cannot run on ${JSON.stringify(id)}; it has no row for that agent.`);
 const harnessSnapshot = (name) => ({
   harnesses: MOCK_HARNESSES,
   ghostDefault: ghostDefaultHarness.get(name) ?? null,
@@ -227,12 +235,37 @@ function mcpSnapshot(name) {
   };
 }
 
-function validMcpConfig(config) {
-  if (!config || typeof config !== "object" || Array.isArray(config)) return false;
-  const type = config.type || "stdio";
-  if (type === "stdio") return typeof config.command === "string" && config.command.trim() !== "";
-  if (type === "http" || type === "sse") return typeof config.url === "string" && config.url.trim() !== "";
-  return false;
+/** mcp-config-policy.ts mcpServerValidationErrors, worded as mcp-catalog.ts validateMutation sends it. */
+function mcpServerProblem(name, config) {
+  const stringRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.values(value).every((entry) => typeof entry === "string");
+  const problem = (() => {
+    if (!name) return "Server name cannot be empty";
+    if (name.length > 100) return "Server name is too long (max 100 characters)";
+    if (!/^[a-zA-Z0-9_.:-]+$/u.test(name)) return "Server name can only contain letters, numbers, dash, underscore, dot, and colon";
+    if (config === null || typeof config !== "object" || Array.isArray(config)) return "MCP server configuration must be a JSON object.";
+    const type = config.type === undefined ? "stdio" : config.type;
+    if (type !== "stdio" && type !== "http" && type !== "sse") return 'MCP server "type" must be "stdio", "http", or "sse".';
+    const allowed = type === "stdio" ? ["enabled", "type", "command", "args", "env", "envPolicy", "cwd"]
+      : ["enabled", "type", "url", "headers", "headerPolicy"];
+    if (!Object.keys(config).every((key) => allowed.includes(key))) return "MCP server configuration contains unsupported fields.";
+    if (config.enabled !== undefined && typeof config.enabled !== "boolean") return 'MCP server "enabled" must be a boolean.';
+    if (type === "stdio") {
+      if (typeof config.command !== "string" || config.command.length === 0) return 'MCP stdio "command" must be a non-empty string.';
+      if (config.args !== undefined && (!Array.isArray(config.args) || !config.args.every((entry) => typeof entry === "string"))) {
+        return 'MCP stdio "args" must be an array of strings.';
+      }
+      if (config.env !== undefined && !stringRecord(config.env)) return 'MCP stdio "env" must contain only string values.';
+      if (config.envPolicy !== undefined && config.envPolicy !== "literal") return 'MCP stdio "envPolicy" must be "literal".';
+      if (config.cwd !== undefined && (typeof config.cwd !== "string" || config.cwd.length === 0)) return 'MCP stdio "cwd" must be a non-empty string.';
+    } else {
+      if (typeof config.url !== "string" || config.url.length === 0) return 'MCP remote "url" must be a non-empty string.';
+      if (config.headers !== undefined && !stringRecord(config.headers)) return 'MCP remote "headers" must contain only string values.';
+      if (config.headerPolicy !== undefined && config.headerPolicy !== "origin-locked") return 'MCP remote "headerPolicy" must be "origin-locked".';
+    }
+    return null;
+  })();
+  return problem && `Invalid MCP server ${JSON.stringify(name)}: ${problem}`;
 }
 
 /** The daemon's character cap (MAX_CHARACTER_BODY_LENGTH); shells must read
@@ -414,6 +447,21 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
+/**
+ * A refusal, as ghostd's errorResponse sends it. Every one the mock answers
+ * carries the code and message ghostd answers the same situation with; the
+ * source each copies is named beside it, and the parity probe pins several.
+ */
+const refuse = (res, status, code, message) => json(res, status, { error: { message, code } });
+/** conversation-log.ts requireConversationId; ghostd checks a route's `:id` before anything else. */
+const badConversation = (res) => refuse(res, 400, "invalid_conversation_id",
+  "Conversation ids are 1-128 letters, digits, '.', '_' or '-', and not pins.json, reads.json, questions.json.");
+/** session-host.ts requireConversation: the conversation has no log. */
+const noConversation = (res, id) => refuse(res, 404, "not_found", `This ghost has no conversation ${JSON.stringify(id)}.`);
+/** server.ts stringField and booleanField. */
+const notString = (res, key) => refuse(res, 400, "invalid_request", `"${key}" must be a string.`);
+const notBoolean = (res, key) => refuse(res, 400, "invalid_request", `"${key}" must be a boolean.`);
+
 
 // The daemon's hooks.json, kept as one document the way ghostd does. The
 // loader's shape check is the small subset a pane edit can plausibly trip,
@@ -475,6 +523,11 @@ const svg = (res, body) => {
   res.end(body);
 };
 
+/**
+ * Lenient where ghostd is strict: an empty body reads as {} and a malformed
+ * one rejects for the caller to default, so ghostd's "Request body …" 400s
+ * have no counterpart here.
+ */
 const readBody = (req) =>
   new Promise((resolve, reject) => {
     let raw = "";
@@ -559,12 +612,14 @@ function* script(name, prompt) {
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 const ghostIsAnswering = (name) => [...activeTurns.keys()].some((key) => JSON.parse(key)[0] === name);
-/** Banishing and renaming both refuse while the ghost is answering. */
-const ghostBusy = (res, name) => json(res, 409, {
-  error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
-});
-/** The ghost-name grammar creation and rename share. */
-const validGhostName = (name) => /^[a-z0-9][a-z0-9-]*$/iu.test(name);
+/** Banishing and renaming both refuse while the ghost is answering (session-host.ts reserve). */
+const ghostBusy = (res, operation) => refuse(res, 409, "ghost_busy",
+  `Wait for this ghost's conversations to finish before ${operation}.`);
+/** ghosts.ts's ghost-name grammar, which creation, rename and every route share. */
+const validGhostName = (name) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(name);
+/** ghosts.ts assertValidGhostName. */
+const badGhostName = (res, name) => refuse(res, 400, "invalid_name",
+  `Ghost names must be 1-64 characters of letters, digits, ".", "_", or "-", and may not start with a dot (got ${JSON.stringify(name)}).`);
 
 /** Each turn's events by turn id, kept as ghostd keeps them so a cut response can resume. */
 const turnLogs = new Map();
@@ -648,7 +703,7 @@ async function pump(log, events) {
 }
 
 async function streamTurn(res, name, body) {
-  const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : "(no prompt)";
+  const prompt = body.prompt.trim(); // The route refused an empty one.
   const sessionId = body.sessionId;
   const log = openTurnLog(name, sessionId);
   followTurn(res, log, 0);
@@ -749,26 +804,18 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts.length === 3 && parts[0] === "api" && parts[1] === "hooks" && parts[2] === "config") {
     if (req.method === "GET") return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
-    if (req.method !== "PUT") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
+    if (req.method !== "PUT") return refuse(res, 405, "method_not_allowed", `${req.method} is not allowed here.`);
     const body = await readBody(req).catch(() => null);
     const problem = hooksDocumentProblem(body);
-    if (problem) return json(res, 400, { error: { code: "invalid_request", message: problem } });
+    if (problem) return refuse(res, 400, "invalid_request", problem);
     hooksDocument = body;
     return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
   }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
     if (req.method === "GET") return json(res, 200, remoteSnapshot());
-    if (req.method !== "POST") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
+    if (req.method !== "POST") return refuse(res, 405, "method_not_allowed", `${req.method} is not allowed here.`);
     const body = await readBody(req).catch(() => null);
-    if (typeof body?.enabled !== "boolean") {
-      return json(res, 400, {
-        error: { code: "invalid_request", message: '"enabled" must be a boolean' },
-      });
-    }
+    if (typeof body?.enabled !== "boolean") return notBoolean(res, "enabled");
     // A problem refuses the write, as Tailscale does, and leaves Serve off.
     remoteEnabled = body.enabled && REMOTE_PROBLEM === "";
     return json(res, 200, remoteSnapshot(body.enabled));
@@ -776,36 +823,41 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts.length === 3 && parts[0] === "api" && parts[1] === "remote"
       && parts[2] === "qr.svg") {
-    if (req.method !== "GET") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
+    if (req.method !== "GET") return refuse(res, 405, "method_not_allowed", `${req.method} is not allowed here.`);
     const status = remoteSnapshot();
     if (status.state !== "on" || !status.app.url) {
-      return json(res, 404, {
-        error: { code: "not_found", message: "Remote access is off, or remote.apps names no app." },
-      });
+      return refuse(res, 404, "not_found", "Remote access is off, or remote.apps names no app.");
     }
     return svg(res, REMOTE_QR_SVG);
   }
 
-  if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: { code: "not_found", message: "Not found." } });
+  if (parts[0] !== "api" || parts[1] !== "ghosts") return refuse(res, 404, "not_found", "Not found.");
 
   if (parts.length === 2 && req.method === "GET") return json(res, 200, ghosts);
 
   if (parts.length === 2 && req.method === "POST") {
     const body = await readBody(req).catch(() => null);
-    const name = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!validGhostName(name)) return json(res, 400, { error: { code: "invalid_request", message: "invalid name" } });
-    if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: { code: "already_exists", message: "already exists" } });
+    const name = body?.name;
+    if (typeof name !== "string") return notString(res, "name");
+    if (!validGhostName(name)) return badGhostName(res, name);
+    if (ghosts.some((g) => g.name === name)) {
+      return refuse(res, 409, "already_exists", `A ghost named ${JSON.stringify(name)} already exists.`);
+    }
     const ghost = { name, dir: join(GHOSTS_ROOT, name) };
     ghosts.push(ghost);
     if (OWNS_GHOSTS_ROOT) seedMockHome(name);
     return json(res, 201, ghost);
   }
 
-  const name = parts[2] ? decodeURIComponent(parts[2]) : "";
+  let name;
+  try {
+    name = decodeURIComponent(parts[2] ?? "");
+  } catch {
+    return refuse(res, 400, "invalid_request", "URL path segments must use valid percent-encoding.");
+  }
+  if (!validGhostName(name)) return badGhostName(res, name);
   const ghost = ghosts.find((g) => g.name === name);
-  if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
+  if (!ghost) return refuse(res, 404, "not_found", `No ghost named ${JSON.stringify(name)}.`);
 
   if (parts[3] === "routines") {
     const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
@@ -838,11 +890,16 @@ const mockServer = createServer(async (req, res) => {
         config: config ? { ...config } : null, routine: routine ? { ...routine } : null, expectedRevision: routineRevision(next) });
       return id;
     };
+    // routine-config.ts's refusals, in its order.
+    const conflict = () => refuse(res, 409, "routine_conflict", "The unit sources changed. Reload before saving or restoring.");
+    const noTimer = () => refuse(res, 404, "not_found", "No such routine timer.");
     if (parts.length === 7 && parts[4] === "recoveries" && parts[6] === "restore" && req.method === "POST") {
       await readBody(req);
+      if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(parts[5])) return refuse(res, 400, "invalid_recovery", "Invalid recovery id.");
       const saved = mockRoutineRecoveries.get(parts[5]);
-      if (!saved || saved.ghost !== name) return json(res, 404, { error: { message: "No such recovery" } });
-      if (saved.expectedRevision !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
+      if (!saved) return refuse(res, 404, "not_found", "No such routine checkpoint.");
+      if (saved.ghost !== name) return refuse(res, 404, "not_found", "No such routine checkpoint for this ghost.");
+      if (saved.expectedRevision !== routineRevision(config)) return conflict();
       const recovery = checkpoint(saved.config, "restore");
       mockRoutineConfigs.set(name, saved.config);
       mockRoutines.set(name, saved.routine ? { ...saved.routine, enabled: "disabled", active: "inactive", nextRun: null } : null);
@@ -856,43 +913,65 @@ const mockServer = createServer(async (req, res) => {
         id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
       })),
     });
-    if (!routine || parts[4] !== routine.slug) return json(res, 404, { error: { message: "No such routine" } });
-    if (parts.length === 6 && parts[5] === "logs" && req.method === "GET") return json(res, 200, { text: "Mock routine journal: completed successfully.", truncated: false, sessions: [] });
-    if (parts.length === 6 && parts[5] === "config" && req.method === "GET") return json(res, 200, { ...config, revision: routineRevision(config) });
+    if (parts.length < 5 || parts.length > 6) return refuse(res, 404, "not_found", "Not found.");
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(parts[4]) || parts[4].length > 64) return refuse(res, 400, "invalid_routine", "Invalid routine slug.");
+    // The mock holds one routine; any other slug has no units.
+    const exists = routine && parts[4] === routine.slug;
+    if (parts.length === 6 && parts[5] === "logs" && req.method === "GET") {
+      if (!exists) return refuse(res, 404, "not_found", "No such routine.");
+      return json(res, 200, { text: "Mock routine journal: completed successfully.", truncated: false, sessions: [] });
+    }
+    if (parts.length === 6 && parts[5] === "config" && req.method === "GET") {
+      return exists ? json(res, 200, { ...config, revision: routineRevision(config) }) : noTimer();
+    }
     if (parts.length === 6 && parts[5] === "config" && req.method === "PUT") {
-      const input = await readBody(req);
-      if (input.revision !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
-      if (typeof input.timer !== "string" || typeof input.service !== "string" || !input.timer.trim() || !input.service.trim()) return json(res, 400, { error: { message: "Invalid unit sources" } });
+      const input = await readBody(req).catch(() => ({}));
+      for (const key of ["timer", "service", "revision"]) if (typeof input?.[key] !== "string") return notString(res, key);
+      if (!exists) return noTimer();
+      if (input.revision !== routineRevision(config)) return conflict();
+      if (!input.timer.trim() || !input.service.trim()) {
+        return refuse(res, 400, "invalid_routine", "Each unit source must be nonempty UTF-8 text of at most 128 KiB without NUL bytes.");
+      }
       const next = { timer: input.timer, service: input.service }, recovery = checkpoint(next, "edit");
       mockRoutineConfigs.set(name, next);
       writeUnits(next);
       return json(res, 200, { recovery });
     }
     if (parts.length === 5 && req.method === "DELETE") {
-      if (url.searchParams.get("revision") !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
+      if (!exists) return noTimer();
+      if (url.searchParams.get("revision") !== routineRevision(config)) return conflict();
       const recovery = checkpoint(null, "remove");
       mockRoutineConfigs.set(name, null); mockRoutines.set(name, null);
       writeUnits(null);
       return json(res, 200, { recovery });
     }
     const action = parts[5];
-    if (parts.length === 6 && req.method === "POST" && ["pause", "resume", "run"].includes(action)) {
+    if (parts.length === 6 && req.method === "POST") {
       await readBody(req);
+      if (!["pause", "resume", "run"].includes(action)) return refuse(res, 400, "invalid_routine", "Use pause, resume, or run.");
+      if (!exists) return refuse(res, 404, "not_found", "No such routine for this ghost.");
       if (action === "pause") { routine.enabled = "disabled"; routine.active = "inactive"; routine.nextRun = null; }
       if (action === "resume") { routine.enabled = "enabled"; routine.active = "active"; routine.nextRun = "Fri 2026-10-23 00:00:00 EEST"; }
       if (action === "run") { routine.serviceActive = "activating"; routine.lastRun = new Date().toISOString(); }
       return json(res, 200, { ok: true });
     }
-    return json(res, 404, { error: { message: "No such routine" } });
+    // ghostd answers 405 where the path has a route for another method; the
+    // mock does not track which, and calls both not found.
+    return refuse(res, 404, "not_found", "Not found.");
   }
 
   // `ghost event` intake, settled at once: the conversation ghostd would
   // run for it, holding a canned finding, unread — the bar mark's "found".
   if (parts[3] === "events" && parts.length === 4 && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const { source, id, instructions, payload = "" } = body ?? {};
-    if (![source, id, instructions].every((field) => typeof field === "string" && field.length > 0)) {
-      return json(res, 400, { error: { message: "source, id, and instructions are required", code: "invalid_event" } });
+    const { source, id, instructions, payload } = body ?? {};
+    // external-events.ts parseExternalEvent, field by field in its order.
+    for (const [key, value, max, empty] of [["source", source, 128], ["id", id, 512],
+      ...(body?.thread === undefined ? [] : [["thread", body.thread, 512]]),
+      ["instructions", instructions, 16384], ["payload", payload, 131072, true]]) {
+      if (typeof value !== "string" || value.length > max || (!empty && !value.trim()) || value.includes("\0")) {
+        return refuse(res, 400, "invalid_event", `${key} must be ${empty ? "" : "nonempty "}text of at most ${max} characters, without NUL bytes.`);
+      }
     }
     const sessionId = `event-${createHash("sha256").update(JSON.stringify([source, id])).digest("hex")}`;
     const sessions = ghostSessions(name);
@@ -939,18 +1018,11 @@ const mockServer = createServer(async (req, res) => {
   if (parts.length === 4 && parts[3] === "character" && req.method === "PUT") {
     const payload = await readBody(req).catch(() => ({}));
     const body = typeof payload?.body === "string" ? payload.body : null;
-    if (body === null) {
-      return json(res, 400, {
-        error: { message: '"body" must be a string.', code: "invalid_request" },
-      });
-    }
+    if (body === null) return notString(res, "body");
     if (body.length > CHARACTER_LIMIT) {
-      return json(res, 400, {
-        error: {
-          message: `character.md is limited to ${CHARACTER_LIMIT} characters.`,
-          code: "limit_exceeded",
-        },
-      });
+      // home.ts writeCharacter.
+      return refuse(res, 400, "limit_exceeded",
+        `character.md may be at most ${CHARACTER_LIMIT} characters; that body is ${body.length}. Nothing was written.`);
     }
     writtenCharacter.set(name, body);
     if (OWNS_GHOSTS_ROOT) writeFileSync(join(ghost.dir, "character.md"), body, "utf8");
@@ -961,11 +1033,10 @@ const mockServer = createServer(async (req, res) => {
   // own scratch copy and answers the same `trash` path.
   if (parts.length === 3 && req.method === "DELETE") {
     if (url.searchParams.get("confirm") !== name) {
-      return json(res, 400, {
-        error: { message: "type the ghost's name to confirm", code: "confirmation_required" },
-      });
+      return refuse(res, 400, "confirmation_required",
+        `Deleting a ghost needs its name repeated: ?confirm=${encodeURIComponent(name)}.`);
     }
-    if (ghostIsAnswering(name)) return ghostBusy(res, name);
+    if (ghostIsAnswering(name)) return ghostBusy(res, "deleting it");
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     for (const store of perGhostStores) store.delete(name);
@@ -977,15 +1048,14 @@ const mockServer = createServer(async (req, res) => {
   // than rebuilding any of it.
   if (parts.length === 4 && parts[3] === "name" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
-    const next = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!validGhostName(next)) {
-      return json(res, 400, { error: { message: `${next || "that"} is not a usable ghost name`, code: "invalid_request" } });
-    }
+    const next = body?.name;
+    if (typeof next !== "string") return notString(res, "name");
+    if (!validGhostName(next)) return badGhostName(res, next);
     if (next === name) return json(res, 200, { ok: true, name });
     if (ghosts.some((g) => g.name === next)) {
-      return json(res, 409, { error: { message: `there is already a ghost called ${next}`, code: "already_exists" } });
+      return refuse(res, 409, "already_exists", `A ghost named ${JSON.stringify(next)} already exists.`);
     }
-    if (ghostIsAnswering(name)) return ghostBusy(res, name);
+    if (ghostIsAnswering(name)) return ghostBusy(res, "renaming it");
     for (const store of perGhostStores) {
       if (store.has(name)) {
         store.set(next, store.get(name));
@@ -1000,35 +1070,30 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const sessionId = body?.sessionId;
-    if (!validConversationId(sessionId)) {
-      return json(res, 400, { error: { message: "sessionId is not a conversation id", code: "invalid_conversation_id" } });
+    // turn-events.ts parseTurnRequest, then session-host.ts admitTurn: no
+    // sessionId is the conversation `default`.
+    if (typeof body?.prompt !== "string" || body.prompt.trim() === "") {
+      return refuse(res, 400, "invalid_request", '"prompt" must be non-empty text.');
     }
+    const sessionId = typeof body.sessionId === "string" && body.sessionId ? body.sessionId : "default";
+    if (!validConversationId(sessionId)) return badConversation(res);
     if (activeTurns.has(turnKey(name, sessionId))) {
-      return json(res, 409, {
-        error: {
-          message: "This ghost is already answering in this conversation",
-          code: "session_busy",
-        },
-      });
+      return refuse(res, 409, "session_busy", "This ghost is already answering in this conversation.");
     }
-    return streamTurn(res, name, body);
+    if (/^(?!!\[)!!?\s*$/u.test(body.prompt.trim())) return refuse(res, 400, "invalid_request", "Write a command after ! or !!.");
+    return streamTurn(res, name, { ...body, sessionId });
   }
   if (parts[3] === "mcp" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, mcpSnapshot(name));
   }
   if (parts[3] === "mcp" && parts.length === 4 && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const serverName = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!/^[A-Za-z0-9_.-]+$/u.test(serverName) || !validMcpConfig(body?.config)) {
-      return json(res, 400, {
-        error: { message: "MCP server name or configuration is invalid", code: "invalid_mcp_server" },
-      });
-    }
+    const serverName = body?.name;
+    if (typeof serverName !== "string") return notString(res, "name");
+    const problem = mcpServerProblem(serverName, body.config);
+    if (problem) return refuse(res, 400, "invalid_mcp_server", problem);
     if (ghostMcp(name).has(serverName)) {
-      return json(res, 409, {
-        error: { message: `MCP server ${serverName} already exists`, code: "mcp_server_exists" },
-      });
+      return refuse(res, 409, "mcp_server_exists", `MCP server ${JSON.stringify(serverName)} already exists.`);
     }
     // Like ghostd: a newly added server starts disabled unless the row says otherwise.
     ghostMcp(name).set(serverName, "enabled" in body.config ? body.config : { ...body.config, enabled: false });
@@ -1037,33 +1102,26 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "mcp" && parts.length >= 5) {
     const serverName = decodeURIComponent(parts[4]);
     const servers = ghostMcp(name);
-    if (!servers.has(serverName)) {
-      return json(res, 404, {
-        error: { message: `No MCP server named ${serverName}`, code: "mcp_server_not_found" },
-      });
-    }
+    const missing = () => refuse(res, 404, "mcp_server_not_found", `No MCP server named ${JSON.stringify(serverName)}.`);
     if (parts.length === 5 && req.method === "PUT") {
       const body = await readBody(req).catch(() => ({}));
-      if (!validMcpConfig(body?.config)) {
-        return json(res, 400, {
-          error: { message: "MCP server configuration is invalid", code: "invalid_mcp_server" },
-        });
-      }
+      // mcp-catalog.ts updateLeased validates before it looks the row up.
+      const problem = mcpServerProblem(serverName, body?.config);
+      if (problem) return refuse(res, 400, "invalid_mcp_server", problem);
+      if (!servers.has(serverName)) return missing();
       // Like ghostd: the written config replaces the row, `enabled` included.
       servers.set(serverName, body.config);
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {
       const body = await readBody(req).catch(() => ({}));
-      if (typeof body?.enabled !== "boolean") {
-        return json(res, 400, {
-          error: { message: '"enabled" must be a boolean', code: "invalid_request" },
-        });
-      }
+      if (typeof body?.enabled !== "boolean") return notBoolean(res, "enabled");
+      if (!servers.has(serverName)) return missing();
       servers.set(serverName, { ...servers.get(serverName), enabled: body.enabled });
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 5 && req.method === "DELETE") {
+      if (!servers.has(serverName)) return missing();
       servers.delete(serverName);
       return json(res, 200, mcpSnapshot(name));
     }
@@ -1074,9 +1132,10 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "harness" && parts.length === 4 && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
     const harness = body?.harness;
-    if (harness !== null && !knownHarness(harness)) {
-      return json(res, 400, { error: { message: `no installed agent called ${harness}`, code: "unknown_harness" } });
+    if (harness !== null && (typeof harness !== "string" || harness === "")) {
+      return refuse(res, 400, "invalid_request", '"harness" must be an agent id or null.');
     }
+    if (harness !== null && !knownHarness(harness)) return unknownHarness(res, harness);
     if (harness === null) ghostDefaultHarness.delete(name);
     else ghostDefaultHarness.set(name, harness);
     return json(res, 200, harnessSnapshot(name));
@@ -1084,32 +1143,44 @@ const mockServer = createServer(async (req, res) => {
   // The machine-local `{ path }` form of an attachment: the file is copied
   // into the conversation directory, created if the draft has none yet.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "attachments" && req.method === "POST") {
-    const body = await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const match = typeof body?.path === "string" && /\.(png|jpe?g|webp|gif)$/iu.exec(body.path);
-    if (!match) return json(res, 415, { error: { message: "Attach a PNG, JPEG, WebP, or GIF image.", code: "unsupported_media_type" } });
+    if (!conversation) return badConversation(res);
+    const body = await readBody(req).catch(() => ({}));
+    // server.ts handleSaveAttachment, then attachments.ts saveAttachment
+    // (which sniffs the bytes; the mock reads the extension).
+    if (typeof body?.path !== "string") return notString(res, "path");
+    if (!isAbsolute(body.path)) return refuse(res, 400, "invalid_request", '"path" must be absolute.');
+    const size = (() => {
+      try {
+        const info = statSync(body.path);
+        return info.isFile() ? info.size : -1;
+      } catch {
+        return -1;
+      }
+    })();
+    if (size < 0) return refuse(res, 404, "not_found", `No file at ${body.path}.`);
+    if (size > 20 * 1024 * 1024) return refuse(res, 413, "payload_too_large", "An attachment is at most 20 MiB.");
+    const match = /\.(png|jpe?g|webp|gif)$/iu.exec(body.path);
+    if (!match) return refuse(res, 415, "unsupported_media_type", "An attachment must be a PNG, JPEG, GIF, or WebP image.");
     const file = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}.${match[1].toLowerCase().replace("jpeg", "jpg")}`;
     const dir = join(ghost.dir, "sessions", conversation, "attachments");
-    try {
-      mkdirSync(dir, { recursive: true });
-      copyFileSync(body.path, join(dir, file));
-    } catch (error) {
-      return json(res, 400, { error: { message: `Could not read ${body.path}: ${error.code ?? error}`, code: "invalid_request" } });
-    }
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(body.path, join(dir, file));
     return json(res, 201, { path: `attachments/${file}` });
   }
   // A conversation's next turn runs on the picked agent; a draft the HUD
   // minted is not stored yet, so its pick waits for its first turn.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "harness" && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (activeTurns.has(turnKey(name, conversation))) {
-      return json(res, 409, { error: { message: "Wait for this conversation to finish before switching agents.", code: "session_busy" } });
+    if (!conversation) return badConversation(res);
+    const body = await readBody(req).catch(() => ({}));
+    // server.ts readHarnessBody, then session-host.ts chooseHarness.
+    if (typeof body?.harness !== "string" || body.harness === "") {
+      return refuse(res, 400, "invalid_request", '"harness" must be an agent id.');
     }
-    if (!knownHarness(body?.harness)) {
-      return json(res, 400, { error: { message: `no installed agent called ${body?.harness}`, code: "unknown_harness" } });
+    if (!knownHarness(body.harness)) return unknownHarness(res, body.harness);
+    if (activeTurns.has(turnKey(name, conversation))) {
+      return refuse(res, 409, "session_busy", "Wait for this conversation to finish before switching agents.");
     }
     const s = ghostSessions(name).get(conversation);
     if (s) {
@@ -1129,98 +1200,109 @@ const mockServer = createServer(async (req, res) => {
   }
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (!conversation) return badConversation(res);
+    if (!ghostSessions(name).has(conversation)) return noConversation(res, conversation);
     if (activeTurns.has(turnKey(name, conversation))) {
-      return json(res, 409, { error: { message: "Wait for this conversation to finish before deleting it.", code: "session_busy" } });
+      return refuse(res, 409, "session_busy", "Wait for this conversation to finish before deleting it.");
     }
-    const deleted = ghostSessions(name).delete(conversation);
-    if (deleted) publishConversationUpdated(name, conversation);
-    return deleted
-      ? json(res, 200, { ok: true })
-      : json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    ghostSessions(name).delete(conversation);
+    publishConversationUpdated(name, conversation);
+    return json(res, 200, { ok: true });
   }
   // Idempotent like the daemon's: the HUD sends the state it wants.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "pin" && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
-    if (typeof body?.pinned !== "boolean") {
-      return json(res, 400, { error: { message: '"pinned" must be a boolean.', code: "invalid_request" } });
-    }
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (!conversation) return badConversation(res);
+    const body = await readBody(req).catch(() => ({}));
+    if (typeof body?.pinned !== "boolean") return notBoolean(res, "pinned");
     const s = ghostSessions(name).get(conversation);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    if (!s) return noConversation(res, conversation);
     s.pinned = body.pinned;
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, pinned: s.pinned });
   }
   // A ghost asking the owner (`ghost ask`), and its withdrawal unanswered.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "question" && (req.method === "PUT" || req.method === "DELETE")) {
+    const conversation = routeConversation(parts);
+    if (!conversation) return badConversation(res);
     const body = req.method === "PUT" ? await readBody(req).catch(() => ({})) : null;
     const options = body?.options ?? [];
-    if (body && (typeof body.text !== "string" || !body.text.trim()
-      || !Array.isArray(options) || options.some((option) => typeof option !== "string"))) {
-      return json(res, 400, { error: { message: "A question needs text, and options must be strings.", code: "invalid_request" } });
+    let question = null;
+    if (body) {
+      // server.ts's question route, then session-host.ts validQuestion.
+      if (!Array.isArray(options) || options.some((option) => typeof option !== "string")) {
+        return refuse(res, 400, "invalid_request", '"options" must be an array of strings.');
+      }
+      if (typeof body.text !== "string") return notString(res, "text");
+      const text = body.text.trim();
+      const kept = [...new Set(options.map((option) => option.trim()).filter(Boolean))];
+      if (text === "") return refuse(res, 400, "invalid_request", "A question needs text.");
+      if (text.length > 2000) return refuse(res, 400, "invalid_request", "A question must be at most 2000 characters.");
+      if (kept.length > 6) return refuse(res, 400, "invalid_request", "A question takes at most 6 options.");
+      if (kept.some((option) => option.length > 120)) return refuse(res, 400, "invalid_request", "Each option must be at most 120 characters.");
+      question = { text, options: kept, askedAt: new Date().toISOString() };
     }
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const s = ghostSessions(name).get(conversation);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    s.question = body
-      ? { text: body.text.trim(), options: [...new Set(options.map((option) => option.trim()).filter(Boolean))], askedAt: new Date().toISOString() }
-      : null;
+    if (!s) return noConversation(res, conversation);
+    s.question = question;
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, body ? { ok: true, question: s.question } : { ok: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
-    const input = await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (!conversation) return badConversation(res);
+    const input = await readBody(req).catch(() => ({}));
+    if (input?.readThrough !== undefined && typeof input.readThrough !== "string") return notString(res, "readThrough");
+    const readAt = input?.readThrough === undefined ? new Date() : new Date(input.readThrough);
+    if (!Number.isFinite(readAt.getTime()) || readAt.getTime() > Date.now()) {
+      return refuse(res, 400, "invalid_request", "readThrough must be a valid timestamp no later than now.");
+    }
     const s = ghostSessions(name).get(conversation);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    s.readAt = typeof input?.readThrough === "string" ? input.readThrough : new Date().toISOString();
+    if (!s) return noConversation(res, conversation);
+    s.readAt = readAt.toISOString();
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stream" && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return badConversation(res);
     const log = turnLogs.get(url.searchParams.get("turn") ?? "");
-    if (!log || log.name !== name || log.sessionId !== routeConversation(parts)) {
-      return json(res, 404, { error: { code: "turn_not_found", message: "That turn is no longer resumable; read the transcript." } });
+    if (!log || log.name !== name || log.sessionId !== conversation) {
+      return refuse(res, 404, "turn_not_found", "That turn is no longer resumable; read the transcript.");
     }
-    const from = Number(url.searchParams.get("from"));
-    if (!Number.isInteger(from) || from < 0 || from > log.frames.length) {
-      return json(res, 400, { error: { code: "invalid_request", message: '"from" must be an event index this turn has reached.' } });
+    const raw = url.searchParams.get("from");
+    const from = raw === null ? undefined : Number(raw);
+    if (from !== undefined && !Number.isFinite(from)) return refuse(res, 400, "invalid_request", '"from" must be a number.');
+    if (from === undefined || !Number.isInteger(from) || from < 0 || from > log.frames.length) {
+      return refuse(res, 400, "invalid_request", '"from" must be an event index this turn has reached.');
     }
     return followTurn(res, log, from);
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return badConversation(res);
     for (const field of ["limit", "offset"]) {
       const value = url.searchParams.get(field);
       if (value !== null && !Number.isFinite(Number(value))) {
-        return json(res, 400, {
-          error: { message: `"${field}" must be a number.`, code: "invalid_request" },
-        });
+        return refuse(res, 400, "invalid_request", `"${field}" must be a number.`);
       }
     }
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     // As in ghostd, a conversation with no log yet reads as an empty page.
     const s = ghostSessions(name).get(conversation) ?? { id: conversation, messages: [] };
     return json(res, 200, transcriptOf(s, url.searchParams));
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stop" && req.method === "POST") {
-    const turn = activeTurns.get(turnKey(name, routeConversation(parts)));
-    if (!turn) {
-      return json(res, 409, {
-        error: { message: "this conversation is not streaming", code: "session_not_streaming" },
-      });
-    }
+    const conversation = routeConversation(parts);
+    if (!conversation) return badConversation(res);
+    const turn = activeTurns.get(turnKey(name, conversation));
+    if (!turn) return refuse(res, 409, "session_not_streaming", "This conversation is not currently streaming.");
     turn.log.stopped = true;
     send(turn.log, { type: "error", reason: "aborted", errorMessage: "Turn aborted." });
     return json(res, 200, { stopped: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
     const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (!conversation) return badConversation(res);
     const turn = activeTurns.get(turnKey(name, conversation));
     const snapshot = () => ({
       streaming: turn?.streaming === true,
@@ -1230,20 +1312,13 @@ const mockServer = createServer(async (req, res) => {
     if (req.method === "POST") {
       const body = await readBody(req).catch(() => ({}));
       const text = typeof body?.text === "string" ? body.text.trim() : "";
-      if (text === "") {
-        return json(res, 400, {
-          error: { message: "text must not be empty", code: "invalid_request" },
-        });
-      }
+      if (text === "") return refuse(res, 400, "invalid_request", '"text" must be a non-empty string.');
       if (!turn) {
-        return json(res, 409, {
-          error: { message: "this conversation is not streaming", code: "session_not_streaming" },
-        });
+        return refuse(res, 409, "session_not_streaming",
+          "This conversation is not currently streaming; send a normal message instead.");
       }
       if (!turn.streaming) {
-        return json(res, 409, {
-          error: { message: "An owner command is running in this conversation; send this when it ends.", code: "session_busy" },
-        });
+        return refuse(res, 409, "session_busy", "An owner command is running in this conversation; send this when it ends.");
       }
       turn.followUp.push(text);
       send(turn.log, { type: "queue", followUp: turn.followUp });
@@ -1252,26 +1327,28 @@ const mockServer = createServer(async (req, res) => {
   }
   // Renaming one conversation.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "title" && req.method === "PUT") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return badConversation(res);
     const body = await readBody(req).catch(() => ({}));
     const raw = body?.title;
     // A conversation is renamed, never un-named: there is no "clear it" here,
-    // so an emptied field is a refusal rather than a reset to untitled.
-    const title = typeof raw === "string" ? raw.trim() : "";
-    if (typeof raw !== "string" || title === "") {
-      return json(res, 400, { error: { message: '"title" must be a non-empty string', code: "invalid_request" } });
+    // so an emptied field is a refusal rather than a reset to untitled
+    // (session-host.ts renameConversation).
+    if (typeof raw !== "string") return notString(res, "title");
+    const title = raw.trim();
+    if (title === "") return refuse(res, 400, "invalid_request", '"title" must not be empty.');
+    if (title.length > 120) return refuse(res, 400, "invalid_request", '"title" must be at most 120 characters.');
+    if (!/\P{C}/u.test(title)) {
+      return refuse(res, 400, "invalid_request", "A conversation title needs at least one printable character.");
     }
-    if (title.length > 120) {
-      return json(res, 400, { error: { message: "a title is at most 120 characters", code: "invalid_request" } });
-    }
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const s = ghostSessions(name).get(conversation);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    if (!s) return noConversation(res, conversation);
     s.title = title;
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
-  return json(res, 404, { error: { code: "not_found", message: "Not found." } });
+  // ghostd answers 405 where the path has a route for another method.
+  return refuse(res, 404, "not_found", "Not found.");
 });
 mockServer.listen(PORT, HOST, () => {
   const address = mockServer.address();
