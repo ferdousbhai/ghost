@@ -12,7 +12,7 @@ import {
 import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
 import { GhostRegistry } from "./ghosts.js";
-import { ConfiguredHookRunner, GhostHookRunner } from "./hooks.js";
+import { type ConfiguredHookRunner, GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { LocalModel } from "./local-model.js";
