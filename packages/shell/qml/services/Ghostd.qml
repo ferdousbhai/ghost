@@ -1007,9 +1007,10 @@ Singleton {
         return JSON.stringify([ghost, sessionId]);
     }
 
-    /** A conversation id the daemon accepts: 1–128 of `[A-Za-z0-9._-]`, not led by a dot. */
+    /** A conversation id the daemon accepts (CONTRACTS.md "Conversations"). */
     function validConversationId(id: var): bool {
-        return typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id);
+        return typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id)
+            && ["pins.json", "reads.json", "questions.json"].indexOf(id) < 0;
     }
 
     /** A fresh HUD-minted conversation id. */
@@ -1994,7 +1995,7 @@ Singleton {
                 // A failed call stays failed on reload so Bubble keeps it in the reading column.
                 status: part.failed === true ? "failed" : "complete",
                 arguments: part.arguments || ({}),
-                // A stored call keeps no cwd, so so its trace shows the path as the tool gave it.
+                // A stored call keeps no cwd, so its trace shows the path as the tool gave it.
                 cwd: ""
             });
         });

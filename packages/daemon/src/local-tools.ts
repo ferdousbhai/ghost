@@ -6,15 +6,13 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { which } from "./harnesses.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 /** The characters of one tool result the model is given. */
 export const TOOL_RESULT_CHARS = 8_000;
-/** A text file this short is read whole rather than as Recall's passage. */
-const WHOLE_FILE_CHARS = 8_000;
 
 interface ToolSpec {
   readonly type: "function";
@@ -264,7 +262,29 @@ async function pdfPage(path: string, page: number, context: ToolContext): Promis
   return error ? { text: `Cannot read page ${page} of ${path}: ${error}`, isError: true } : { text: clip(text || "(no text on this page)"), isError: false };
 }
 
-/** Open one hit: a short text file whole, a PDF's page, else Recall's passage. */
+/**
+ * A text file's start: enough bytes to hold TOOL_RESULT_CHARS characters
+ * (at most 3 UTF-8 bytes each), and whether that is the whole file; null
+ * when it holds a NUL byte, so is not text.
+ */
+async function textHead(path: string): Promise<{ text: string; whole: boolean } | null> {
+  const file = await open(path, "r");
+  try {
+    const limit = TOOL_RESULT_CHARS * 3;
+    const buffer = Buffer.alloc(limit + 1);
+    const { bytesRead } = await file.read(buffer, 0, limit + 1, 0);
+    const bytes = buffer.subarray(0, Math.min(bytesRead, limit));
+    return bytes.includes(0) ? null : { text: bytes.toString("utf8"), whole: bytesRead <= limit };
+  } finally {
+    await file.close();
+  }
+}
+
+/**
+ * Open one hit: a PDF's page, the lines around a ripgrep match, a text file
+ * whole when it fits in one result, else Recall's passage, else (a hit
+ * Recall did not index) the file's start.
+ */
 export async function read(id: string, page: number | null, hits: Hits, context: ToolContext): Promise<ToolResult> {
   const hit = hits.get(id);
   if (!hit) return { text: `There is no hit ${id} in this turn; search first.`, isError: true };
@@ -287,14 +307,11 @@ export async function read(id: string, page: number | null, hits: Hits, context:
           const from = Math.max(0, hit.line - 20);
           return { text: `${hit.path}, lines ${from + 1}-${Math.min(lines.length, from + 80)}\n\n${clip(lines.slice(from, from + 80).join("\n"))}`, isError: false };
         }
-        const info = await stat(hit.path).catch(() => null);
-        if (info && info.size <= WHOLE_FILE_CHARS * 2) {
-          const bytes = await readFile(hit.path);
-          if (!bytes.subarray(0, 4_000).includes(0) && bytes.length <= WHOLE_FILE_CHARS * 2) {
-            return { text: `${hit.path}\n\n${clip(bytes.toString("utf8"))}`, isError: false };
-          }
+        const head = await textHead(hit.path).catch(() => null);
+        if (head?.whole && head.text.length <= TOOL_RESULT_CHARS) return { text: `${hit.path}\n\n${head.text}`, isError: false };
+        if (hit.segment === null) {
+          return head ? { text: `${hit.path}\n\n${clip(head.text)}`, isError: false } : { text: `${hit.path} cannot be read as text.`, isError: true };
         }
-        if (hit.segment === null) return { text: `${hit.path} cannot be read as text.`, isError: true };
         const { out, error } = await run("recall", ["text", String(hit.segment)], context);
         const text = (json(out) as { text?: string } | null)?.text;
         return error || typeof text !== "string"

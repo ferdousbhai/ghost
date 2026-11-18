@@ -11,6 +11,7 @@ import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import { GhostError } from "./errors.js";
+import { SIDECAR_FILENAMES } from "./sidecars.js";
 
 const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
@@ -58,14 +59,17 @@ export type LogEntry =
 
 const CONVERSATION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u;
 
-/** Conversation ids are file stems: letters, digits, `.`, `_`, `-`; at most 128. */
+/**
+ * Conversation ids are directory names in `sessions/`: letters, digits, `.`,
+ * `_`, `-`; at most 128; not a sidecar's name.
+ */
 export function isValidConversationId(id: string): boolean {
-  return CONVERSATION_ID.test(id);
+  return CONVERSATION_ID.test(id) && !SIDECAR_FILENAMES.has(id);
 }
 
 export function requireConversationId(id: string): string {
   if (isValidConversationId(id)) return id;
-  throw new GhostError("invalid_conversation_id", "Conversation ids are 1-128 letters, digits, '.', '_' or '-'.", 400);
+  throw new GhostError("invalid_conversation_id", `Conversation ids are 1-128 letters, digits, '.', '_' or '-', and not ${[...SIDECAR_FILENAMES].join(", ")}.`, 400);
 }
 
 /**

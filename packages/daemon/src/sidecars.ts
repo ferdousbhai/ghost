@@ -12,6 +12,9 @@ import { isRecord } from "./record.js";
 
 const VERSION = 2;
 
+/** The sidecars' names in `sessions/`, which no conversation id may take. */
+export const SIDECAR_FILENAMES: ReadonlySet<string> = new Set(["pins.json", "reads.json", "questions.json"]);
+
 export const pinsPath = (sessionDir: string): string => join(sessionDir, "pins.json");
 export const readsPath = (sessionDir: string): string => join(sessionDir, "reads.json");
 export const questionsPath = (sessionDir: string): string => join(sessionDir, "questions.json");

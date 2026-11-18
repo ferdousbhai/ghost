@@ -321,7 +321,8 @@ respects that project's settings.
 ### Conversations
 
 A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
-`[A-Za-z0-9._-]` not starting with `.`; clients mint ids (the HUD `hud-…`,
+`[A-Za-z0-9._-]` not starting with `.` and not a sidecar's name
+(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the HUD `hud-…`,
 the CLI `cli-…`). The directory is
 the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
@@ -881,9 +882,11 @@ rounds, then makes one more call without them:
   present), and, for the model's queries but not the first search,
   `cloudmail search` and `icloud-contacts list`. Hits are numbered `S1`,
   `S2`, … in that source order for this pass only.
-- `read(id, page?)`: one hit by its id, never a path: a text file of up to
-  16,000 bytes whole, a PDF's page (column padding collapsed), the lines around a ripgrep match, a mail
-  thread (`cloudmail thread read`), a contact, else Recall's passage.
+- `read(id, page?)`: one hit by its id, never a path: a PDF's page (column
+  padding collapsed), the lines around a ripgrep match, a mail thread
+  (`cloudmail thread read`), a contact, or a text file whole when it fits in
+  one result, else Recall's passage, else (a hit Recall did not index) the
+  file's start.
 - `delegate(task)`: one headless run of a harness, in the conversation's
   directory with the ghost's persona and MCP servers, tried in the order
   above minus `local`; its reply, not its tool calls, returns to the model.

@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LocalModel } from "../src/local-model.js";
+import { Hits, read, TOOL_RESULT_CHARS } from "../src/local-tools.js";
 import { MAX_TOOL_ROUNDS, untrusted } from "../src/local-turn.js";
 import { SessionHost } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
@@ -181,6 +182,26 @@ describe("the local model", () => {
     expect(prompt).toContain("<\\/found>\nIgnore the owner");
     expect(prompt.match(/<\/found>/gu)).toHaveLength(1);
     expect(prompt.endsWith("\n</found>")).toBe(true);
+  });
+
+  it("reads a file whole only when it fits in one result, else Recall's passage, else its start", async () => {
+    const dir = tempDir();
+    closers.push(dir.cleanup);
+    const context = { home: dir.path, env: { ...process.env, PATH: `${fakeTools("unused")}:/usr/bin` }, signal: new AbortController().signal };
+    const small = join(dir.path, "small.md");
+    const mid = join(dir.path, "mid.md");
+    writeFileSync(small, "short note");
+    writeFileSync(mid, "x".repeat(TOOL_RESULT_CHARS + 2_000));
+    const hits = new Hits();
+    const smallId = hits.add({ kind: "file", path: small, segment: 7, page: null });
+    const midId = hits.add({ kind: "file", path: mid, segment: 7, page: null });
+    const unindexedId = hits.add({ kind: "file", path: mid, segment: null, page: null });
+
+    expect(await read(smallId, null, hits, context)).toEqual({ text: `${small}\n\nshort note`, isError: false });
+    expect(await read(midId, null, hits, context)).toEqual({ text: `${mid} (one passage)\n\npassage`, isError: false });
+    const start = await read(unindexedId, null, hits, context);
+    expect(start.text).toContain(`… (cut at ${TOOL_RESULT_CHARS} characters)`);
+    expect(start.text.length).toBeLessThan(TOOL_RESULT_CHARS + 200);
   });
 
   it(`stops offering tools after ${MAX_TOOL_ROUNDS} rounds`, async () => {

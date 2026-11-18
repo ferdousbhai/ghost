@@ -27,6 +27,7 @@ import {
 } from "../src/server.js";
 import { TurnBuffer } from "../src/turn-buffer.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { SIDECAR_FILENAMES } from "../src/sidecars.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
@@ -864,8 +865,13 @@ describe("GET /api/ghosts/:name/sessions", () => {
     expect(listing.sessions.map((row) => row.id)).toEqual([boundary]);
     expect((await fetch(`${base}/api/ghosts/casper/sessions/${boundary}/transcript`)).status).toBe(200);
 
+    // A pin writes pins.json beside the conversations; an id naming a sidecar is refused, not a 500.
+    expect((await fetch(`${base}/api/ghosts/casper/sessions/${boundary}/pin`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned: true }),
+    })).status).toBe(200);
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    for (const invalid of ["a".repeat(129), ".hidden", "folder/chat", "chat?draft", "\u{1f47b}", "\ud800"]) {
+    expect(existsSync(join(sessionDir, "pins.json"))).toBe(true);
+    for (const invalid of ["a".repeat(129), ".hidden", "folder/chat", "chat?draft", "\u{1f47b}", "\ud800", ...SIDECAR_FILENAMES]) {
       const rejected = await postTurn(base, turnBody(invalid));
       expect(rejected.status, invalid).toBe(400);
       expect(JSON.parse(rejected.raw)).toMatchObject({ error: { code: "invalid_conversation_id" } });
@@ -885,6 +891,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
     }
     expect(harness!.calls()).toHaveLength(1);
     expect(existsSync(join(sessionDir, ".hidden"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toMatchObject({ pinned: [boundary] });
   });
 });
 
