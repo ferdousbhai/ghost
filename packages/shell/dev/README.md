@@ -40,7 +40,11 @@ node dev/mock-ghostd.mjs --port 17717
 # --stop-hook S (a stop hook decides for S seconds after each reply),
 # --compact (each turn opens with the harness compacting its context),
 # --ask (each turn ends with the ghost asking the owner a question),
-# --cut-bytes N (cut each turn response after N bytes, as ghostd does at ~1 MB).
+# --cut-bytes N (cut each turn response after N bytes, as ghostd does at ~1 MB),
+# --resting ID (that agent rests after a refusal),
+# --remote-problem CODE (ghostd's remote problem: tailscale_missing,
+#   tailscale_stopped, and not_logged_in make it unavailable; operator_required,
+#   https_required, and serve_failed refuse turning it on and leave it off).
 
 # Terminal 2: the one supported HUD preview command.
 bash dev/preview.sh qml 17717

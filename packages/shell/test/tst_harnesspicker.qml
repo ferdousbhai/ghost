@@ -31,7 +31,6 @@ TestCase {
                 { id: "pi", usage: null }
             ],
             ghostDefault: null,
-            omarchyDefault: "pi",
             automatic: "claude"
         }, overrides || {});
     }

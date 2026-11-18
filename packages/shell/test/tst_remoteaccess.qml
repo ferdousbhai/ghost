@@ -28,12 +28,6 @@ TestCase {
             enabled: false,
             state: "off",
             hostname: "omarchy-thinkpad.tail58bdd3.ts.net",
-            tailscale: {
-                installed: true,
-                running: true,
-                loggedIn: true,
-                operator: true
-            },
             guests: "read-only",
             owner: "owner@example.com",
             app: { origin: "https://summonghost.com", url: null },
@@ -96,7 +90,6 @@ TestCase {
         verify(findChild(panel, "remoteAppCard").visible);
         compare(findChild(panel, "remoteAppUrlText").text, add);
         verify(String(findChild(panel, "remoteAppQrImage").source).startsWith("data:image/svg+xml"));
-        verify(!findChild(panel, "remoteHttpsText").visible);
         verify(!findChild(panel, "remoteNoAppText").visible);
         verify(audience.visible);
         verify(audience.text.indexOf("owner@example.com") >= 0);
@@ -105,15 +98,19 @@ TestCase {
 
     function test_saysHttpsIsNeededWhenEnablingWithoutCertificates(): void {
         const panel = createTemporaryObject(panelComponent, tc);
-        requests[0].complete(200, status({
-            problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." }
-        }));
+        // ghostd's https_required message, which says where to turn certificates on.
+        const message = "This tailnet has no HTTPS certificates, which the app needs: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then turn remote access on again.";
+        requests[0].complete(200, status({ problem: { code: "https_required", message: message } }));
         // Off, with no app link and so no QR code to fetch.
         compare(requests.length, 1);
         verify(!findChild(panel, "remoteSwitch").checked);
         verify(!findChild(panel, "remoteAppCard").visible);
-        verify(findChild(panel, "remoteHttpsText").visible);
         verify(!findChild(panel, "remoteProblemAction").visible);
+        // The whole message, wrapped rather than cut to one line.
+        const statusText = findChild(panel, "remoteStatusText");
+        compare(statusText.text, message);
+        tryVerify(() => statusText.lineCount > 1);
+        verify(!statusText.truncated);
     }
 
     function test_noAppCardWithoutApps(): void {

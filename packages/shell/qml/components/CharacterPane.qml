@@ -14,7 +14,7 @@ Rectangle {
     /** Esc was pressed in the editor: back to chat. */
     signal closed()
 
-    /** The editor's draft, exposed for the save path and tests. */
+    /** The editor's draft, exposed for tests. */
     property alias draftText: editor.text
     /** The body the editor was last seeded from. While the draft still equals
         it, a fresh daemon read may replace the text harmlessly; once the

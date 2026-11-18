@@ -114,8 +114,8 @@ try {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
   const harnessChoice = await (await fetch(harnessUrl)).json();
-  assert.deepEqual(Object.keys(harnessChoice), ["harnesses", "ghostDefault", "omarchyDefault", "automatic"]);
-  assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "effort", "usage"]);
+  assert.deepEqual(Object.keys(harnessChoice), ["harnesses", "ghostDefault", "automatic"]);
+  assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "usage", "effort", "resting"]);
   assert.equal(harnessChoice.ghostDefault, null);
   assert.equal((await (await putJson(harnessUrl, { harness: "pi" })).json()).ghostDefault, "pi");
   assert.equal((await (await putJson(harnessUrl, { harness: null })).json()).ghostDefault, null);
@@ -128,13 +128,17 @@ try {
   assert.equal(sessionHarness.status, 200);
   assert.deepEqual(await sessionHarness.json(), { id: "hud-draft-probe", harness: "pi" });
 
+  // RemoteStatus's fields, in ghostd's order.
+  const remote = await (await fetch(`http://127.0.0.1:${port}/api/remote`)).json();
+  assert.deepEqual(Object.keys(remote), ["enabled", "state", "hostname", "guests", "owner", "app", "problem"]);
+
   const transcriptResponse = await fetch(
     `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/transcript`,
   );
   assert.equal(transcriptResponse.status, 200);
   const transcriptBody = await transcriptResponse.json();
   assert.deepEqual(Object.keys(transcriptBody), [
-    "id", "messages", "total", "truncated",
+    "id", "messages", "total", "truncated", "readThrough",
   ]);
   for (const message of transcriptBody.messages) {
     assert.equal(typeof message.entryId, "string");

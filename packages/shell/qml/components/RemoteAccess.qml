@@ -13,6 +13,7 @@ Rectangle {
     readonly property var status: Ghostd.remoteStatus || ({})
     readonly property var problem: root.status.problem || null
     readonly property bool remoteOn: root.status.state === "on"
+    readonly property bool warning: root.problem !== null || Ghostd.remoteError !== ""
     readonly property string statusLine: root.problem !== null
         ? String(root.problem.message || "Remote access is unavailable")
         : (Ghostd.remoteError !== "" ? Ghostd.remoteError
@@ -242,13 +243,14 @@ Rectangle {
                                 width: parent.width
                                 text: root.statusLine
                                 textFormat: Text.PlainText
-                                color: root.problem !== null || Ghostd.remoteError !== ""
+                                color: root.warning
                                     ? Theme.warn
                                     : (root.remoteOn ? Theme.ok : Theme.foregroundDim)
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSize
-                                elide: Text.ElideRight
-                                maximumLineCount: 1
+                                // A problem says what to do, so it is shown whole.
+                                wrapMode: root.warning ? Text.WordWrap : Text.NoWrap
+                                elide: root.warning ? Text.ElideNone : Text.ElideRight
                             }
                         }
 
@@ -348,18 +350,6 @@ Rectangle {
                             textName: "remoteActionCommand"
                             copyName: "remoteActionCopy"
                         }
-                    }
-
-                    Text {
-                        objectName: "remoteHttpsText"
-                        width: parent.width
-                        visible: root.problem !== null && root.problem.code === "https_required"
-                        text: "The app needs HTTPS. Turn on HTTPS Certificates on the DNS page of the Tailscale admin console, then flip the switch again."
-                        textFormat: Text.PlainText
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
-                        wrapMode: Text.WordWrap
                     }
 
                     Text {

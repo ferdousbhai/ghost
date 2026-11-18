@@ -63,21 +63,27 @@ const ASK = flag("--ask");
  * ghost's default, then the local model, as ghostd does when `local` is
  * configured.
  */
+/** `--resting <id>`: that agent rests after a refusal, as ghostd reports one. */
+const RESTING = opt("--resting", "");
+const resting = (id) => id === RESTING
+  ? { until: new Date(Date.now() + 3_600_000).toISOString(), reason: "429 usage limit reached" }
+  : null;
 const MOCK_HARNESSES = [
   {
-    id: "claude", effort: "low",
+    id: "claude",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "5h", percent: 0.42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
+    effort: "low",
   },
   {
-    id: "codex", effort: "low",
+    id: "codex",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "weekly", percent: 1, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
+    effort: "low",
   },
-  { id: "pi", effort: "low", usage: null },
-  { id: "local", effort: null, usage: null },
-];
-const OMARCHY_DEFAULT_HARNESS = "claude";
+  { id: "pi", usage: null, effort: "low" },
+  { id: "local", usage: null, effort: null },
+].map((harness) => ({ ...harness, resting: resting(harness.id) }));
 const DEFAULT_RUNTIME = "local";
 /** ghost name -> its own default agent; absent means automatic. */
 const ghostDefaultHarness = new Map();
@@ -87,7 +93,6 @@ const knownHarness = (id) => MOCK_HARNESSES.some((h) => h.id === id);
 const harnessSnapshot = (name) => ({
   harnesses: MOCK_HARNESSES,
   ghostDefault: ghostDefaultHarness.get(name) ?? null,
-  omarchyDefault: OMARCHY_DEFAULT_HARNESS,
   automatic: ghostDefaultHarness.get(name) ?? DEFAULT_RUNTIME,
 });
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
@@ -97,28 +102,29 @@ const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "
 const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
 const REMOTE_PROBLEM = opt("--remote-problem", "");
 
-// Each problem breaks the Tailscale capability ladder at one rung; the rungs
-// below it stay true.
-const REMOTE_LADDER = ["installed", "running", "loggedIn", "operator"];
+// ghostd's problems, with its messages. Only a Tailscale that cannot be asked
+// makes remote access unavailable; with the others it stays off or on.
 const REMOTE_PROBLEMS = {
   tailscale_missing: {
     message: "Tailscale is not installed.",
     action: "omarchy-install-service-tailscale",
-    breaks: "installed",
+    unavailable: true,
   },
   tailscale_stopped: {
-    message: "Tailscale is installed but not running.",
-    breaks: "running",
+    message: "Tailscale is not running.",
+    unavailable: true,
   },
   not_logged_in: {
     message: "This machine is not logged in to Tailscale.",
     action: "tailscale up",
-    breaks: "loggedIn",
+    unavailable: true,
   },
   operator_required: {
-    message: "Ghost needs permission to manage Tailscale Serve.",
+    message: "Access denied: serve config denied",
     action: "sudo tailscale set --operator=$USER",
-    breaks: "operator",
+  },
+  https_required: {
+    message: "This tailnet has no HTTPS certificates, which the app needs: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then turn remote access on again.",
   },
   serve_failed: {
     message: "tailscale serve failed: mock CLI error",
@@ -132,22 +138,18 @@ if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
 
 let remoteEnabled = false;
 function remoteSnapshot() {
-  const { breaks, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
-  const cut = REMOTE_LADDER.indexOf(breaks ?? "");
-  const tailscale = Object.fromEntries(REMOTE_LADDER.map((rung, index) => [rung, cut < 0 || index < cut]));
-  const { loggedIn } = tailscale;
+  const { unavailable = false, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
   const problem = REMOTE_PROBLEM === "" ? null : { code: REMOTE_PROBLEM, ...problemFields };
-  const available = problem === null;
+  const enabled = remoteEnabled && !unavailable;
   return {
-    enabled: remoteEnabled,
-    state: available ? (remoteEnabled ? "on" : "off") : "unavailable",
-    hostname: loggedIn ? REMOTE_HOSTNAME : null,
-    tailscale,
+    enabled,
+    state: unavailable ? "unavailable" : (enabled ? "on" : "off"),
+    hostname: unavailable ? null : REMOTE_HOSTNAME,
     guests: "none",
-    owner: loggedIn ? "owner@example.com" : null,
+    owner: unavailable ? null : "owner@example.com",
     app: {
       origin: "https://summonghost.com",
-      url: available && remoteEnabled ? `https://summonghost.com/#add=${REMOTE_HOSTNAME}` : null,
+      url: enabled ? `https://summonghost.com/#add=${REMOTE_HOSTNAME}` : null,
     },
     problem,
   };
@@ -348,6 +350,8 @@ const transcriptOf = (s, params) => {
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
+    // When this page was read; the HUD sends it back to PUT …/read.
+    readThrough: new Date().toISOString(),
   };
 };
 
@@ -758,7 +762,8 @@ const mockServer = createServer(async (req, res) => {
         error: { code: "invalid_request", message: '"enabled" must be a boolean' },
       });
     }
-    remoteEnabled = body.enabled;
+    // A problem refuses the write, as Tailscale does, and leaves Serve off.
+    remoteEnabled = body.enabled && REMOTE_PROBLEM === "";
     return json(res, 200, remoteSnapshot());
   }
 
@@ -1154,12 +1159,12 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, body ? { ok: true, question: s.question } : { ok: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
-    await readBody(req).catch(() => ({}));
+    const input = await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const s = ghostSessions(name).get(conversation);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    s.readAt = new Date().toISOString();
+    s.readAt = typeof input?.readThrough === "string" ? input.readThrough : new Date().toISOString();
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
   }

@@ -50,10 +50,9 @@ TestCase {
                 { id: "opencode", usage: null, effort: null, resting: null },
                 { id: "pi", usage: null, effort: null,
                     resting: { until: "2026-11-01T00:00:00.000Z", reason: "429 monthly API usage threshold reached" } }
-            ], ghostDefault: null, omarchyDefault: "claude", automatic: "claude" });
-            else if (/\/api\/remote$/.test(url)) xhr.complete(200, { enabled: true, state: "on", scheme: "https",
+            ], ghostDefault: null, automatic: "claude" });
+            else if (/\/api\/remote$/.test(url)) xhr.complete(200, { enabled: true, state: "on",
                 hostname: "omarchy.tail58bdd3.ts.net",
-                tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
                 guests: "read-only", owner: "owner@example.com",
                 app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=omarchy.tail58bdd3.ts.net" },
                 problem: null });
