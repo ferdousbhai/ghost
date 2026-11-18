@@ -81,6 +81,27 @@ function isAlive(pid: number): boolean {
   }
 }
 
+// Read a pid file the test's own child wrote. An empty or half-written file reads as
+// 0 (or NaN), and `kill(0, ...)` would signal the test runner's whole process group.
+function readPid(path: string): number {
+  try {
+    const pid = Number(readFileSync(path, "utf8"));
+    return Number.isInteger(pid) && pid > 0 ? pid : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// The process can exit between any check and the signal, so ESRCH is success.
+function killIfAlive(pid: number): void {
+  if (!(pid > 0)) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
 describe("GhostHookRunner", () => {
   it("runs session_stop hooks in order and returns the first continuation", async () => {
     const directory = temporaryDirectory();
@@ -226,8 +247,12 @@ describe("GhostHookRunner", () => {
       const runner = GhostHookRunner.fromConfig(config);
       const controller = new AbortController();
       const running = runner.emitSessionStop(event({ signal: controller.signal }));
-      await vi.waitFor(() => expect(existsSync(pidsPath)).toBe(true), { timeout: 5_000 });
-      const pids = JSON.parse(readFileSync(pidsPath, "utf8")) as number[];
+      // A file seen before its write lands is empty; wait for both pids.
+      const pids = await vi.waitFor(() => {
+        const written = JSON.parse(readFileSync(pidsPath, "utf8")) as number[];
+        expect(written.every((pid) => pid > 0)).toBe(true);
+        return written;
+      }, { timeout: 5_000 });
       if (mode === "abort") controller.abort(new Error("owner moved on"));
       await running;
       await vi.waitFor(() => expect(pids.filter(isAlive)).toEqual([]), { timeout: 5_000 });
@@ -284,13 +309,12 @@ describe("GhostHookRunner", () => {
       await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 5_000 });
       writeFileSync(gate, "ready");
       await vi.waitFor(() => expect(existsSync(outcome)).toBe(true), { timeout: 5_000 }).catch((error: unknown) => {
-        const pid = Number(readFileSync(ready, "utf8"));
+        const pid = readPid(ready);
         throw new Error(`no pipe outcome; descendant ${pid} is ${isAlive(pid) ? "alive" : "gone"}`, { cause: error });
       });
       expect(readFileSync(outcome, "utf8")).toBe("closed");
     } finally {
-      const pid = Number(readFileSync(pidPath, "utf8"));
-      if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
+      killIfAlive(readPid(pidPath));
     }
   }, 25_000);
 
@@ -315,18 +339,18 @@ describe("GhostHookRunner", () => {
     const controller = new AbortController();
     const running = GhostHookRunner.fromConfig(config).emitSessionStop(event({ signal: controller.signal }));
     try {
-      await vi.waitFor(() => expect(existsSync(pidPath)).toBe(true), { timeout: 3_000 });
+      const pid = await vi.waitFor(() => {
+        const written = readPid(pidPath);
+        expect(written).toBeGreaterThan(0);
+        return written;
+      }, { timeout: 3_000 });
       controller.abort();
       await running;
-      const pid = Number(readFileSync(pidPath, "utf8"));
-      await vi.waitFor(() => expect(isAlive(pid)).toBe(false));
+      await vi.waitFor(() => expect(isAlive(pid)).toBe(false), { timeout: 5_000 });
     } finally {
       controller.abort();
       await running;
-      if (existsSync(pidPath)) {
-        const pid = Number(readFileSync(pidPath, "utf8"));
-        if (isAlive(pid)) process.kill(pid, "SIGKILL");
-      }
+      killIfAlive(readPid(pidPath));
     }
   }, 10_000);
 

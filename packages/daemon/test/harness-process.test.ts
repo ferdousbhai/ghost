@@ -45,10 +45,21 @@ it("closes inherited pipes and never parses descendant output after settlement",
   }
 }, 10_000);
 
+// An empty or half-written pid file reads as 0 (or NaN), and `kill(0, ...)` would
+// signal the test runner's whole process group.
+function readPid(pidFile: string): number {
+  try {
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    return Number.isInteger(pid) && pid > 0 ? pid : 0;
+  } catch { return 0; }
+}
+
 function killCaptured(pidFile: string): void {
-  try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); }
+  const pid = readPid(pidFile);
+  if (!(pid > 0)) return;
+  try { process.kill(pid, "SIGKILL"); }
   catch (error) {
-    if (!["ESRCH", "ENOENT"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }
 }
 
@@ -88,8 +99,9 @@ it.each(["inherit", "ignore"] as const)("kills the stopped leader's surviving pr
       signal: controller.signal,
       parse: () => { controller.abort(); return []; }, onEvent: () => {},
     });
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    await vi.waitFor(() => expect(alive(pid)).toBe(false));
+    const pid = readPid(pidFile);
+    expect(pid).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5_000 });
   } finally {
     killCaptured(pidFile);
     rmSync(directory, { recursive: true, force: true });
