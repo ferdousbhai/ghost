@@ -109,7 +109,7 @@ and leaves the restored timer paused. Restore never silently re-enables work.
 CLI `routines config <slug>` prints editable JSON; `routines edit <slug> <file>`
 saves it, `remove <slug>` reads/checks the current revision before deletion,
 `recoveries` lists checkpoints, and `restore <id>` restores one. The HUD and
-the summonghost.com app use the same routes and conflict handling. Changes, controls,
+`ghost routines` use the same routes and conflict handling. Changes, controls,
 and source reads are serialized per ghost. `GET …/routines/:slug/logs` and
 `routines logs <slug>` return the last 100
 service journal lines, capped at 64000 characters (`{ text, truncated, sessions }`).

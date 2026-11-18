@@ -8,8 +8,8 @@ requires the exact matching runtime version.
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
 toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
-tree. Ghost's application code and its MCP support remain packaged for
-offline use; the agent CLIs a ghost's turns run on are the owner's own.
+tree. Ghost's application code is packaged for offline use; the agent CLIs a
+ghost's turns run on are the owner's own.
 
 The stable `ghost` release-source machinery lives under `packaging/release/`; its
 v3 runtime source carries the same bundles, launchers, and exact bundled-license

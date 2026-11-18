@@ -384,9 +384,9 @@ persistent timers may catch up. Run now queues the service without changing the
 timer and returns before the work finishes. Refresh to inspect its state.
 Guests, when admitted at all, cannot inspect routines or control them.
 
-Use **Edit sources** in the HUD or **Edit** on the phone to change the timer and
-service together. Saves verify the units, detect source conflicts, reload
-systemd, and keep a checkpoint. **Remove** also keeps a checkpoint. Recovery
+Use **Edit sources** in the HUD to change the timer and service together.
+Saves verify the units, detect source conflicts, reload systemd, and keep a
+checkpoint. **Remove** also keeps a checkpoint. Recovery
 entries restore the old source paused; resume explicitly when ready.
 
 ```sh

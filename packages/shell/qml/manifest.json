@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Ghost",
-    "description": "A dot that reports the ghost's state and opens its window.",
+    "description": "The ghost mark: shows the ghost's state and opens its window.",
     "category": "AI",
     "allowMultiple": false,
     "defaultSection": "right"
