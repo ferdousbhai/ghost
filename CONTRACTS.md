@@ -722,7 +722,9 @@ owner's `!` commands in a conversation, carry both variables. A session is an
 id or unique prefix of a listed conversation; `say` and `switch` also take an
 unlisted id as given, since one no message has landed in yet is not listed.
 `-g` and `-s` exist only on the verbs whose usage lists them; elsewhere they
-are unknown options. Signing in is
+are unknown options. `ghost rename` moves the `ghost use` default
+(`$XDG_CONFIG_HOME/ghost/cli.json`) to the new name and `ghost rm` clears it
+when it names that ghost. Signing in is
 the harness's own (`claude`, `codex login`, …); Ghost has no login or model
 commands. There are no plan or todo commands.
 

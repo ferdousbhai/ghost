@@ -310,7 +310,7 @@ codes.
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
-| `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
+| `~/.config/ghost/cli.json` | the `ghost use` default, private to your login; `ghost rename` and `ghost rm` keep it true |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | XDG Pictures | browser screenshots, unless you name another destination |
 

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ListeningServer } from "../src/server.js";
@@ -118,6 +118,24 @@ describe("ghost CLI against a real daemon server", () => {
     const said = await cli(["say", "-g", "casper", "-s", "fresh-1", "-q", "hi"]);
     expect(said.code, said.stderr).toBe(0);
     expect((await host.listSessions("casper")).map((row) => row.id)).toContain("fresh-1");
+  });
+
+  it("moves the `ghost use` default with a rename and clears it with removal", async () => {
+    const path = join(env.XDG_CONFIG_HOME!, "ghost", "cli.json");
+    expect(await cli(["new", "probe", "-q"])).toMatchObject({ code: 0 });
+    expect(await cli(["use", "casper", "-q"])).toMatchObject({ code: 0 });
+    // Another ghost's rename or removal leaves it alone.
+    expect(await cli(["rename", "spook", "-g", "probe", "-q"])).toMatchObject({ code: 0 });
+    expect(await cli(["rm", "spook", "--yes", "-q"])).toMatchObject({ code: 0 });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "casper" });
+
+    expect(await cli(["rename", "wisp", "-g", "casper", "-q"])).toMatchObject({ code: 0 });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "wisp" });
+    expect(JSON.parse((await cli(["sessions", "--json"])).stdout).sessions).toEqual([expect.objectContaining({ id: "conv-1" })]);
+
+    expect(await cli(["rm", "wisp", "--yes", "-q"])).toMatchObject({ code: 0 });
+    expect(existsSync(path)).toBe(false);
+    expect(await cli(["use"])).toMatchObject({ code: 2, stderr: expect.stringContaining("No default ghost") });
   });
 
   it("keeps destructive removal behind --yes", async () => {

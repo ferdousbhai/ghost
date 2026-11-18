@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { readPrivateFileText, writePrivateJsonAtomic } from "../private-file.js";
 import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
@@ -64,6 +64,19 @@ export async function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home"
   chmodSync(directory, 0o700);
   await writePrivateJsonAtomic(path, { ghost });
   return path;
+}
+
+/**
+ * Keep the `ghost use` default true after the ghost it names is renamed
+ * (`next`) or trashed (null). A default naming another ghost, or a file that
+ * cannot be read, is left alone: the change itself already happened.
+ */
+export async function followDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">, previous: string, next: string | null): Promise<void> {
+  let stored: string | undefined;
+  try { stored = readDefaultGhost(runtime); } catch { return; }
+  if (stored !== previous) return;
+  if (next) await writeDefaultGhost(runtime, next);
+  else rmSync(cliConfigPath(runtime), { force: true });
 }
 
 export function listGhosts(client: DaemonClient): Promise<Ghost[]> {

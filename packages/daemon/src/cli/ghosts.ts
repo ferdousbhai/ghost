@@ -1,5 +1,5 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { cliConfigPath, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
+import { cliConfigPath, followDefaultGhost, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
 import { notFound } from "./client.js";
 import { emit, primary, table } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -53,6 +53,7 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
     "DELETE",
     ghostPath(name, `?confirm=${encodeURIComponent(name)}`),
   );
+  await followDefaultGhost(ctx.runtime, name, null);
   emit(ctx, response, () => `trashed ${name}; \`gio trash --list\` shows it\n`);
   return 0;
 }

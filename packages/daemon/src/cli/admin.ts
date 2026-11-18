@@ -1,5 +1,5 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { conversationId, readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { conversationId, followDefaultGhost, readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
@@ -16,6 +16,7 @@ export async function renameCommand(ctx: CliContext): Promise<number> {
   if (!next) throw new ArgsError("ghost rename needs the new name");
   const name = await resolveGhost(ctx);
   const body = await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next });
+  await followDefaultGhost(ctx.runtime, name, next);
   emit(ctx, body, () => `Renamed ${name} to ${next}.\n`);
   return 0;
 }
