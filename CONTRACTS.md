@@ -56,10 +56,6 @@ possibly stale candidates, and the source file is authoritative. While
 `recall` is on the daemon's PATH (checked each turn), the prompt also names
 `recall search` as the first lookup for things whose words or place are
 unknown.
-`ghost sessions --semantic QUERY` optionally ranks current conversation titles
-and previews through `recall rank`; it does not read transcripts or index notes.
-Missing, incompatible, or unresponsive Recall falls back to title/preview text
-matching with a warning. Normal session listing never contacts Recall.
 
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.

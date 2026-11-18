@@ -108,8 +108,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "sessions",
-    flags: { value: ["semantic"] },
-    usage: "sessions [-g <name>] [--semantic <query>] [--json] [-q]",
+    usage: "sessions [-g <name>] [--json] [-q]",
     summary: "List conversations.",
     example: "ghost sessions -g sage",
     positionals: [0, 0],
