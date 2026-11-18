@@ -114,6 +114,17 @@ describe("SessionHost.complete", () => {
       .rejects.toThrow(/broken: not signed in.*refused: usage limit reached/u);
   });
 
+  it("reports an exit by its stderr tail or status and rests the harness, as a delegated task does", async () => {
+    const noisy = harness([{ exit: 1, stderr: "warming up\nnot signed in\nrun login" }], "noisy");
+    const quiet = harness([{ exit: 3 }], "quiet");
+    const { sessions } = host([noisy, quiet]);
+
+    await expect(sessions.complete("casper", "Classify.", signal()))
+      .rejects.toThrow("noisy: warming up\nnot signed in\nrun login; quiet: quiet exited with 3.");
+    const resting = (await sessions.listHarnesses("casper")).harnesses.filter((row) => row.resting).map((row) => row.id);
+    expect(resting.sort()).toEqual(["noisy", "quiet"]);
+  });
+
   it("completes on the daemon's own local model, as a turn would, never falling through to a cloud harness", async () => {
     const cloud = harness([{ events: [{ type: "text", block: "a", delta: "from the cloud" }] }], "cloud");
     const local = localModel(" APPROVE ");

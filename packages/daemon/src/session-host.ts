@@ -989,34 +989,48 @@ export class SessionHost {
     ghost: Ghost, dir: string, env: NodeJS.ProcessEnv, persona: string, task: string, signal: AbortSignal,
   ): Promise<DelegateResult> {
     const [ordered, mcp] = await Promise.all([this.cloudHarnesses([readHarnessSetting(ghost.dir)]), this.mcpServers(ghost)]);
+    const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
     let lastError = "No cloud agent is installed to delegate to.";
     for (const harness of ordered) {
-      const row = this.rowOf(harness) as HarnessRow;
-      const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
-      const launch = row.launch({ prompt, resume: false, sessionId: null, persona, mcp });
-      await writeLaunchFiles(dir, launch.files);
-      let text = "";
-      let error: string | null = null;
-      const exit = await runHarness({
-        launch, cwd: dir, env: { ...env, ...(await accountEnv(harness, this.env)) }, signal, parse: row.parser(),
-        onEvent: (event) => {
-          if (event.type === "text") text += event.delta;
-          else if (event.type === "error") error = event.message;
-          else if (event.type === "retry") error = null;
-        },
-      });
-      if (signal.aborted) return { harness, text: "Stopped.", isError: true };
-      error ??= exit.spawnError ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").slice(-4).join("\n") || `${harness} exited with ${exit.code}.`);
-      if (text.trim() && error === null) {
-        // Answering ends a rest, as it does for a turn's pass.
-        this.resting.delete(harness);
-        return { harness, text: text.trim().slice(0, TOOL_RESULT_CHARS), isError: false };
-      }
-      if (text.trim()) return { harness, text: `${text.trim().slice(0, TOOL_RESULT_CHARS)}\n(${harness} then failed: ${error})`, isError: true };
-      lastError = `${harness}: ${error ?? "no answer"}`;
-      if (error) this.rest(harness, error);
+      const pass = await this.cloudPass(harness, { prompt, persona, mcp, dir, env, signal });
+      if (!pass) return { harness, text: "Stopped.", isError: true };
+      const text = pass.text.slice(0, TOOL_RESULT_CHARS);
+      if (text && pass.error === null) return { harness, text, isError: false };
+      if (text) return { harness, text: `${text}\n(${harness} then failed: ${pass.error})`, isError: true };
+      lastError = `${harness}: ${pass.error ?? "no answer"}`;
     }
     return { harness: null, text: `No cloud agent could take the task. ${lastError}`, isError: true };
+  }
+
+  /**
+   * One headless run of a cloud harness outside a turn (a delegated task, a
+   * hook completion): its trimmed text and the error that ended it, or null
+   * when `signal` stopped it. Answering ends the harness's rest, as a turn's
+   * pass does; failing before any text starts one.
+   */
+  private async cloudPass(harness: string, run: {
+    prompt: string; persona: string; mcp: readonly HarnessMcpServer[]; dir: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
+  }): Promise<{ text: string; error: string | null } | null> {
+    const row = this.rowOf(harness) as HarnessRow;
+    const launch = row.launch({ prompt: run.prompt, resume: false, sessionId: null, persona: run.persona, mcp: run.mcp });
+    await writeLaunchFiles(run.dir, launch.files);
+    let text = "";
+    let error: string | null = null;
+    const exit = await runHarness({
+      launch, cwd: run.dir, env: { ...run.env, ...(await accountEnv(harness, this.env)) }, signal: run.signal, parse: row.parser(),
+      onEvent: (event) => {
+        if (event.type === "text") text += event.delta;
+        else if (event.type === "error") error = event.message;
+        else if (event.type === "retry") error = null;
+      },
+    });
+    if (run.signal.aborted) return null;
+    error ??= exit.spawnError
+      ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").slice(-4).join("\n") || `${harness} exited with ${exit.code}.`);
+    text = text.trim();
+    if (text && error === null) this.resting.delete(harness);
+    else if (!text && error !== null) this.rest(harness, error);
+    return { text, error };
   }
 
   /**
@@ -1041,31 +1055,14 @@ export class SessionHost {
     }
     const failures: string[] = [];
     for (const harness of candidates) {
-      const row = this.rowOf(harness) as HarnessRow;
       const dir = await mkdtemp(join(tmpdir(), "ghost-hook-"));
       try {
-        const launch = row.launch({ prompt, resume: false, sessionId: null, persona: "", mcp: [] });
-        await writeLaunchFiles(dir, launch.files);
-        let text = "";
-        let error: string | null = null;
-        const exit = await runHarness({
-          // `GHOST` names the ghost, as in a turn, so a harness stop hook that
-          // stands down inside Ghost runs does not review this completion.
-          launch, cwd: dir, env: { ...this.env, GHOST: ghost.name, ...(await accountEnv(harness, this.env)) }, signal, parse: row.parser(),
-          onEvent: (event) => {
-            if (event.type === "text") text += event.delta;
-            else if (event.type === "error") error = event.message;
-            else if (event.type === "retry") error = null;
-          },
-        });
-        if (signal.aborted) throw new Error("The completion was cancelled.");
-        error ??= exit.spawnError ?? (exit.code === 0 ? null : exit.stderr.trim().split("\n").at(-1) || `exit ${exit.code}`);
-        if (text.trim() && error === null) {
-          this.resting.delete(harness);
-          return text.trim();
-        }
-        failures.push(`${harness}: ${error ?? "no answer"}`);
-        if (error) this.rest(harness, error);
+        // `GHOST` names the ghost, as in a turn, so a harness stop hook that
+        // stands down inside Ghost runs does not review this completion.
+        const pass = await this.cloudPass(harness, { prompt, persona: "", mcp: [], dir, env: { ...this.env, GHOST: ghost.name }, signal });
+        if (!pass) throw new Error("The completion was cancelled.");
+        if (pass.text && pass.error === null) return pass.text;
+        failures.push(`${harness}: ${pass.error ?? "no answer"}`);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
