@@ -315,6 +315,22 @@ describe("ghost help", () => {
     }
   });
 
+  it("refuses -g or -s on a verb whose usage does not list it", async () => {
+    const fetch: CliFetch = async (input) => {
+      throw new Error(`unexpected request to ${String(input)}`);
+    };
+    for (const argv of [
+      ...["harness", "sessions", "mcp", "character", "rename x", "routines", "event a b"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["list", "new x", "use", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude"].map((verb) => [...verb.split(" "), "-g", "casper"]),
+    ]) {
+      const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
+      expect(result.code, argv.join(" ")).toBe(2);
+      expect(result.stderr, argv.join(" ")).toContain("Unknown option");
+    }
+    // -g still renders a recipe for the named ghost.
+    expect(await runCli(["help", "timers", "-g", "casper"], { env: {}, home: "/tmp/ghost-cli-unit", fetch })).toMatchObject({ code: 0 });
+  });
+
   it("refuses a missing or malformed input file before asking the daemon anything", async () => {
     const fetch: CliFetch = async (input) => {
       throw new Error(`unexpected request to ${String(input)}`);

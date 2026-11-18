@@ -28,8 +28,8 @@ Commands:
 ${plainRows(commands)}
 
 Common flags:
-  -g, --ghost <name>       Select a ghost
-  -s, --session <id>       Select by id or unique prefix
+  -g, --ghost <name>       Select a ghost (verbs that list it)
+  -s, --session <id>       Select by id or unique prefix (verbs that list it)
       --json               Emit API JSON (streams use one object per line)
   -q, --quiet              Suppress secondary output
   -h, --help               Show command help

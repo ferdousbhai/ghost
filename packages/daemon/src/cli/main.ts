@@ -43,14 +43,13 @@ import { errorMessage } from "../errors.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
-  /** Flags this verb alone accepts, on top of `CLI_ARGS`. */
+  /** Flags this verb alone accepts, on top of `CLI_ARGS` and the `-g`/`-s` its usage lists. */
   flags?: ArgsSpec;
   run(ctx: CliContext): number | Promise<number>;
 }
 
 const CLI_ARGS: ArgsSpec = {
   boolean: ["version"],
-  value: ["ghost", "session"],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -299,20 +298,26 @@ export const COMMANDS: readonly Command[] = [
   },
 ];
 
-/** The common flags plus one verb's own. */
-function argsWith(extra: ArgsSpec | undefined): ArgsSpec {
-  if (!extra) return CLI_ARGS;
+/**
+ * The common flags plus one verb's own; `-g` and `-s` only where its usage
+ * lists them, so a stray one is the unknown option it is, not silently ignored.
+ */
+function commandArgs(command: Command): ArgsSpec {
+  const addressing = [
+    ...command.usage.includes("-g <name>") ? ["ghost"] : [],
+    ...command.usage.includes("-s <id>") ? ["session"] : [],
+  ];
   return {
-    boolean: [...CLI_ARGS.boolean ?? [], ...extra.boolean ?? []],
-    value: [...CLI_ARGS.value ?? [], ...extra.value ?? []],
+    boolean: [...CLI_ARGS.boolean ?? [], ...command.flags?.boolean ?? []],
+    value: [...addressing, ...command.flags?.value ?? []],
   };
 }
 
 /** Every verb's flags at once: enough to find the verb, not to validate it. */
-const EVERY_ARG = argsWith({
-  boolean: COMMANDS.flatMap((command) => command.flags?.boolean ?? []),
-  value: COMMANDS.flatMap((command) => command.flags?.value ?? []),
-});
+const EVERY_ARG: ArgsSpec = {
+  boolean: [...new Set(COMMANDS.flatMap((command) => commandArgs(command).boolean ?? []))],
+  value: [...new Set(COMMANDS.flatMap((command) => commandArgs(command).value ?? []))],
+};
 
 const USAGE = renderUsage(COMMANDS);
 const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
@@ -351,7 +356,7 @@ async function dispatch(argv: readonly string[], runtime: CliRuntime): Promise<n
   }
   const command = COMMANDS.find((candidate) => candidate.verb === verb);
   if (!command) throw new ArgsError(`Unknown command: ${verb}`);
-  const all = parseArgs(argv, argsWith(command.flags));
+  const all = parseArgs(argv, commandArgs(command));
   const [, ...positionals] = all.positionals;
   const parsed = { ...all, positionals };
   if (flagBoolean(parsed, "help")) {
