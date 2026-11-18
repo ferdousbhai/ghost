@@ -1,12 +1,12 @@
 import type { CommandRunner } from "../../src/command-runner.js";
 
-export type FakeScheme = "https" | "http" | null;
-
 export interface FakeTailscale {
   run: CommandRunner;
   calls: string[][];
-  /** What `tailscale serve status` reports (`http`: an entry an earlier version wrote); `serve --bg` and `serve ... off` move it. */
-  scheme: FakeScheme;
+  /** The listeners `tailscale serve status` reports; `serve --bg` turns HTTPS on and `serve ... off` either off. */
+  https: boolean;
+  /** A plain-HTTP (port 80) entry only an earlier version wrote; Ghost now only clears it. */
+  http: boolean;
   certs: boolean;
   backendState: string;
 }
@@ -15,10 +15,11 @@ export const FAKE_TARGET = "http://127.0.0.1:7717";
 export const FAKE_HOSTNAME = "ghostbox.example.ts.net";
 
 /** A `tailscale` that answers `status`, `serve status`, `serve --bg`, and `serve ... off` from its fields. */
-export function fakeTailscale(initial: Partial<Pick<FakeTailscale, "scheme" | "certs" | "backendState">> = {}): FakeTailscale {
+export function fakeTailscale(initial: Partial<Pick<FakeTailscale, "https" | "http" | "certs" | "backendState">> = {}): FakeTailscale {
   const fake: FakeTailscale = {
     calls: [],
-    scheme: initial.scheme ?? null,
+    https: initial.https ?? false,
+    http: initial.http ?? false,
     certs: initial.certs ?? true,
     backendState: initial.backendState ?? "Running",
     run: async (args) => {
@@ -40,17 +41,21 @@ export function fakeTailscale(initial: Partial<Pick<FakeTailscale, "scheme" | "c
         }));
       }
       if (line === "serve status --json") {
-        const port = fake.scheme === "https" ? "443" : "80";
-        return ok(JSON.stringify(fake.scheme
-          ? { Web: { [`${FAKE_HOSTNAME}:${port}`]: { Handlers: { "/": { Proxy: FAKE_TARGET } } } } }
+        const ports = [...(fake.https ? ["443"] : []), ...(fake.http ? ["80"] : [])];
+        return ok(JSON.stringify(ports.length > 0
+          ? { Web: Object.fromEntries(ports.map((port) => [`${FAKE_HOSTNAME}:${port}`, { Handlers: { "/": { Proxy: FAKE_TARGET } } }])) }
           : {}));
       }
-      if (args[0] === "serve" && args[1] === "--bg") {
-        fake.scheme = args[2] === "--https=443" ? "https" : "http";
+      if (line === `serve --bg --https=443 ${FAKE_TARGET}`) {
+        fake.https = true;
         return ok();
       }
-      if (args[0] === "serve" && args[2] === "off") {
-        if (args[1] === (fake.scheme === "https" ? "--https=443" : "--http=80")) fake.scheme = null;
+      if (line === "serve --https=443 off") {
+        fake.https = false;
+        return ok();
+      }
+      if (line === "serve --http=80 off") {
+        fake.http = false;
         return ok();
       }
       throw new Error(`Unexpected command: ${line}`);

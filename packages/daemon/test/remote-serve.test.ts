@@ -6,7 +6,7 @@ import { FAKE_TARGET, fakeTailscale, missingBinary, ok } from "./helpers/fake-ta
 describe("RemoteServe status", () => {
   it("derives an HTTPS URL, owner, and guest policy from Tailscale JSON", async () => {
     const status = await new RemoteServe(7717, {
-      run: fakeTailscale({ scheme: "https" }).run,
+      run: fakeTailscale({ https: true }).run,
       guests: "none",
     }).status();
 
@@ -23,27 +23,27 @@ describe("RemoteServe status", () => {
 
   it("links the first app to this machine only once Serve is on HTTPS", async () => {
     const apps = ["https://summonghost.com", "https://lab.summonghost.com"];
-    expect((await new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps }).status()).app)
+    expect((await new RemoteServe(7717, { run: fakeTailscale({ https: true }).run, apps }).status()).app)
       .toEqual({ origin: "https://summonghost.com", url: "https://summonghost.com/#add=ghostbox.example.ts.net" });
-    for (const scheme of ["http", null] as const) {
-      expect((await new RemoteServe(7717, { run: fakeTailscale({ certs: scheme === null, scheme }).run, apps }).status()).app)
+    for (const listeners of [{ http: true, certs: false }, {}]) {
+      expect((await new RemoteServe(7717, { run: fakeTailscale(listeners).run, apps }).status()).app)
         .toEqual({ origin: "https://summonghost.com", url: null });
     }
   });
 
   it("links a conversation in the first app only while there is an app link", async () => {
-    const linked = new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps: ["https://summonghost.com"] });
+    const linked = new RemoteServe(7717, { run: fakeTailscale({ https: true }).run, apps: ["https://summonghost.com"] });
     expect(await linked.conversationUrl("casper", "c 1"))
       .toBe("https://summonghost.com/#/ghostbox.example.ts.net/casper/c%201");
     for (const serve of [
-      new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps: [] }),
-      new RemoteServe(7717, { run: fakeTailscale({ certs: false, scheme: "http" }).run, apps: ["https://summonghost.com"] }),
-      new RemoteServe(7717, { run: fakeTailscale({ scheme: null }).run, apps: ["https://summonghost.com"] }),
+      new RemoteServe(7717, { run: fakeTailscale({ https: true }).run, apps: [] }),
+      new RemoteServe(7717, { run: fakeTailscale({ certs: false, http: true }).run, apps: ["https://summonghost.com"] }),
+      new RemoteServe(7717, { run: fakeTailscale().run, apps: ["https://summonghost.com"] }),
     ]) expect(await serve.conversationUrl("casper", "c1")).toBeNull();
   });
 
   it("reports a plain-HTTP entry an earlier version wrote as off, since no app can use it", async () => {
-    const status = await new RemoteServe(7717, { run: fakeTailscale({ certs: false, scheme: "http" }).run }).status();
+    const status = await new RemoteServe(7717, { run: fakeTailscale({ certs: false, http: true }).run }).status();
     expect(status).toMatchObject({ enabled: false, state: "off", problem: null });
   });
 
@@ -97,22 +97,32 @@ describe("RemoteServe mutations", () => {
 
   it("clears a plain-HTTP entry an earlier version wrote, on enable and on disable", async () => {
     for (const certs of [true, false]) {
-      const fake = fakeTailscale({ certs, scheme: "http" });
+      const fake = fakeTailscale({ certs, http: true });
       await new RemoteServe(7717, { run: fake.run }).enable();
       expect(fake.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([
         ["serve", "--http=80", "off"],
         ...(certs ? [["serve", "--bg", "--https=443", FAKE_TARGET]] : []),
       ]);
     }
-    const fake = fakeTailscale({ certs: false, scheme: "http" });
+    const fake = fakeTailscale({ certs: false, http: true });
     const remote = new RemoteServe(7717, { run: fake.run });
     expect(await remote.disable()).toMatchObject({ enabled: false, state: "off", problem: null });
     expect(fake.calls.filter((args) => args[0] === "serve" && args[2] === "off")).toEqual([["serve", "--http=80", "off"]]);
-    expect(fake.scheme).toBeNull();
+    expect(fake.http).toBe(false);
+  });
+
+  it("turns off both listeners when an HTTPS one and an earlier version's HTTP one are on", async () => {
+    const fake = fakeTailscale({ https: true, http: true });
+    const remote = new RemoteServe(7717, { run: fake.run });
+    expect(await remote.status()).toMatchObject({ enabled: true, state: "on" });
+    expect(await remote.disable()).toMatchObject({ enabled: false, state: "off", problem: null });
+    expect(fake.calls.filter((args) => args[0] === "serve" && args[2] === "off"))
+      .toEqual([["serve", "--https=443", "off"], ["serve", "--http=80", "off"]]);
+    expect([fake.https, fake.http]).toEqual([false, false]);
   });
 
   it("turns off only the listener that is on, and nothing when none is", async () => {
-    const fake = fakeTailscale({ scheme: "https" });
+    const fake = fakeTailscale({ https: true });
     const remote = new RemoteServe(7717, { run: fake.run });
     expect(await remote.disable()).toMatchObject({ enabled: false, state: "off", problem: null });
     expect(fake.calls.filter((args) => args[0] === "serve" && args[2] === "off")).toEqual([["serve", "--https=443", "off"]]);
