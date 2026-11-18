@@ -76,22 +76,6 @@ TestCase {
         compare(failedSpy.count, 0);
     }
 
-    function test_resourcesStayOutOfChatAndCompletionNotification(): void {
-        const turn = openTurn("resources", null);
-        Ghostd.handleTurnEvent(turn.state, { type: "text_start", contentIndex: 0 });
-        Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 0, delta: "Answer" });
-        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: mail" });
-        // The inspector takes the streamed snapshot as is, without a refetch.
-        compare(Ghostd.runResources.summary, "Skills: mail");
-        compare(Ghostd.runResources.type, undefined);
-        Ghostd.flushTurn(turn.state, true);
-        compare(turn.state.rows.length, 2);
-        compare(turn.state.rows[1].text, "Answer");
-        finishedSpy.clear();
-        Ghostd.handleTurnEvent(turn.state, { type: "done" });
-        compare(finishedSpy.count, 1);
-        compare(finishedSpy.signalArguments[0][1], "Answer");
-    }
 
     function test_aTurnThatCannotResumeFailsOnce(): void {
         const resumed = [];

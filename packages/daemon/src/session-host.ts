@@ -79,7 +79,6 @@ import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
 import { runLocalTurn, type DelegateResult } from "./local-turn.js";
 import { TOOL_RESULT_CHARS } from "./local-tools.js";
-import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "./run-resources.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
@@ -200,7 +199,6 @@ export interface SessionSummary {
 }
 
 export interface Transcript {
-  resources: RunResourceSnapshot | null;
   id: string;
   messages: TranscriptMessage[];
   total: number;
@@ -252,7 +250,6 @@ interface LiveTurn {
 
 /** One harness pass: what it said and did, and how it ended. */
 interface PassResult {
-  readonly resources?: Extract<LogEntry, { type: "resources" }>;
   readonly content: AssistantPart[];
   readonly error: string | null;
   readonly aborted: boolean;
@@ -1072,8 +1069,7 @@ export class SessionHost {
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
           ...(effort ? { effort } : {}),
-        }, ...(result.resources ? [result.resources] : [])]);
-        if (result.resources) stream.emit(result.resources);
+        }]);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
       lastError = result.error;
@@ -1147,9 +1143,7 @@ export class SessionHost {
     const launch = "run" in row ? null : row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch?.files);
 
-    const run = randomUUID();
     const at = new Date().toISOString();
-    let resources = unreportedResources();
     const content: AssistantPart[] = [];
     const tools = new Map<string, { name: string; part: number }>();
     // The text block streaming now and its logged part, the last one while it is open,
@@ -1209,9 +1203,6 @@ export class SessionHost {
           stream.emit({ type: "tool_execution_end", id: event.id, toolName: tool.name, isError: event.isError, ...(summary ? { summary } : {}) });
           return;
         }
-        case "resources":
-          resources = event.resources;
-          return;
         case "model":
           model = event;
           return;
@@ -1256,7 +1247,7 @@ export class SessionHost {
       for (const fact of await row.inspectSession(reported, env, at).catch(() => [])) {
         // Found after the reply streamed: logged ahead of it, shown when the client reloads the transcript.
         if (fact.type === "compacted") logCompaction(fact);
-        else if (fact.type === "resources" || model === null) onEvent(fact);
+        else if (model === null) onEvent(fact);
       }
       await Promise.all(writes);
     }
@@ -1266,10 +1257,7 @@ export class SessionHost {
       const stderr = exit.stderr.trim().split("\n").slice(-6).join("\n");
       error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
     }
-    const snapshot = error === null ? { type: "resources" as const, at: new Date().toISOString(), run, harness: row.id, resources,
-      supplied: { instructions: ["Ghost character and policy"], mcpServers: [...launch?.suppliedMcp ?? []] }, summary: "" } : undefined;
-    if (snapshot) snapshot.summary = snapshotSummary(snapshot);
-    return { content, error, aborted: false, produced, model, resources: snapshot };
+    return { content, error, aborted: false, produced, model };
   }
 
   private async turnEnd(
@@ -1598,11 +1586,10 @@ export class SessionHost {
     const id = requireConversationId(sessionId);
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
     const requestedOffset = clamp(options.offset, 0, Number.MAX_SAFE_INTEGER);
-    const { messages, total, resources } = await readTranscriptPage(ghostPaths(ghost.dir).sessionDir, id, requestedOffset, limit);
+    const { messages, total } = await readTranscriptPage(ghostPaths(ghost.dir).sessionDir, id, requestedOffset, limit);
     const offset = Math.min(requestedOffset, total);
     return {
       id,
-      resources,
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,

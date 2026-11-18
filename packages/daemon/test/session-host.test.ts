@@ -165,64 +165,6 @@ describe("a turn", () => {
   });
 });
 
-describe("run resources", () => {
-  it("updates the live and persisted snapshot from attributed post-pass session facts", async () => {
-    const fake = harness([{ events: [{ type: "session", id: "native-1" }, { type: "text", block: "r", delta: "OK" }] }]);
-    const asked: Array<{ session: string; since: string | undefined }> = [];
-    Object.assign(fake.row, { inspectSession: async (session: string, _env: unknown, since?: string) => {
-      asked.push({ session, since });
-      return [{ type: "resources", resources: { skills: ["marker"], extensions: null, mcpServers: null } }];
-    } });
-    const sessions = host({ harnesses: [fake] });
-    const events = await turn(sessions, "hello");
-    const snapshots = events.filter((event) => event.type === "resources");
-    expect(snapshots).toHaveLength(1);
-    expect(events.findIndex(event => event.type === "resources")).toBeGreaterThan(events.findLastIndex(event => event.type === "text_end"));
-    expect(asked[0]).toMatchObject({ session: "native-1", since: expect.stringMatching(/^\d{4}-/) });
-    const logged = (await readLog(sessionDir(), "c1"))!.filter((entry) => entry.type === "resources");
-    expect(logged).toHaveLength(1);
-    expect(logged[0]?.resources.skills).toEqual(["marker"]);
-    const transcript = await sessions.readTranscript("casper", "c1", { limit: 1 });
-    expect(transcript.messages).toHaveLength(1);
-    expect(transcript.resources?.resources.skills).toEqual(["marker"]);
-    expect(transcript.resources?.summary).toContain("Reported by harness\nSkills: marker");
-  });
-
-  it("does not publish an inventory when a pass fails after producing text", async () => {
-    const fake = harness([{ events: [
-      { type: "resources", resources: { skills: ["mail"], extensions: [], mcpServers: [] } },
-      { type: "text", block: "r", delta: "partial" },
-      { type: "error", message: "connection reset" },
-    ] }]);
-    const sessions = host({ harnesses: [fake] });
-    const events = await turn(sessions, "hello");
-    expect(events.at(-1)?.type).toBe("error");
-    expect(events.some(event => event.type === "resources")).toBe(false);
-    expect((await readLog(sessionDir(), "c1"))!.some(entry => entry.type === "resources")).toBe(false);
-  });
-
-  it("omits failed fallback inventories and unknown resumed runs", async () => {
-    const first = harness([{ events: [
-      { type: "resources", resources: { skills: ["mail"], extensions: ["review"], mcpServers: [] } },
-      { type: "error", message: "not signed in" },
-    ] }], "first");
-    const second = harness(replies("one", "two"), "second");
-    const sessions = host({ harnesses: [first, second] });
-    const events = await turn(sessions, "hello");
-    const reports = events.filter((event) => event.type === "resources");
-    expect(reports).toHaveLength(1);
-    expect(reports[0]?.harness).toBe("second");
-    await turn(sessions, "again");
-    const entries = (await readLog(sessionDir(), "c1"))!;
-    expect(entries.filter((entry) => entry.type === "resources")).toHaveLength(2);
-    expect((await sessions.listSessions("casper"))[0]?.messageCount).toBe(4);
-    expect(second.calls()[0]?.prompt).not.toContain("Run resources");
-    const transcript = await sessions.readTranscript("casper", "c1");
-    expect(transcript.resources?.resources.skills).toBeNull();
-    expect(transcript.messages.map(message => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
-  });
-});
-
 describe("harness choice", () => {
   it("hands a prompt the first harness refused to the next one", async () => {
     const refusing = harness([{ exit: 1, stderr: "Not logged in. Run login first." }], "first");

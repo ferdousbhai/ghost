@@ -345,7 +345,6 @@ const transcriptOf = (s, params) => {
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
-    resources: s.resources || null,
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
@@ -661,16 +660,6 @@ async function streamTurn(res, name, body) {
     append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: reply, ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
-    if (reply !== null && !failing) reportResources();
-  };
-  const reportResources = () => {
-    const harness = turnHarness(name, sessionId, existing);
-    const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["local-files"] };
-    const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
-      supplied: { instructions: ["Ghost character and policy"], mcpServers: ["local-files"] },
-      summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: local-files\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: local-files` };
-    send(log, { type: "resources", ...snapshot });
-    existing.resources = snapshot;
   };
   let stopped = false;
   try {

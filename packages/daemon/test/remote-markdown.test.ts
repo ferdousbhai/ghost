@@ -131,7 +131,7 @@ describe("remote viewer deep links", () => {
 });
 
 describe("remote viewer transcript", () => {
-  test("resource metadata stays out of chat across continued runs", async () => {
+  test("each pass and each text after a tool is its own bubble", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];
     const nodes: Array<{ textContent: string; className: string }> = [];
     const element = (textContent = "") => ({
@@ -143,19 +143,17 @@ describe("remote viewer transcript", () => {
     const events = [
       { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "first answer" },
-      { type: "resources", run: "r1", summary: "first inventory" },
       { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "second answer" },
       { type: "tool_execution_start", toolName: "bash" },
       { type: "text_start" }, { type: "text_delta", delta: "after tool" },
-      { type: "resources", run: "r2", summary: "second inventory" },
     ];
     const context = {
       prompt: { value: "hello" }, pending: [], ghost: "casper", session: "c1", draft: null, streaming: false,
       show() {}, refresh() {}, seg: encodeURIComponent,
       fetch: async () => ({ ok: true }), grow() {}, clearTray() {},
       log: { querySelector: () => null, append: (el: ReturnType<typeof element>) => nodes.push(el) },
-      userBubble: element, assistantBubble: element, resourceNotice: element,
+      userBubble: element, assistantBubble: element,
       document: { createElement: () => element() }, follow() {}, nearBottom: () => true,
       turnEvents: async function* () { yield* events; },
       bubbles: (parts: Array<{ type: string; text: string }>) => parts.filter(p => p.type === "text").map(p => p.text).filter(Boolean),
@@ -166,29 +164,6 @@ describe("remote viewer transcript", () => {
     expect(nodes.map(n => n.textContent)).toEqual([
       "hello", "first answer", "second answer", "after tool",
     ]);
-  });
-
-  test("resources load on demand and ignore a response from a previous conversation", async () => {
-    const source = REMOTE_VIEWER_HTML.match(/async function showResources\(\) \{[\s\S]*?\n {2}\}/)?.[0];
-    const panel = { open: false, showModal() { this.open = true; } };
-    const text = { textContent: "" };
-    let resolveFirst!: (body: unknown) => void;
-    const paths: string[] = [];
-    const api = (path: string) => {
-      paths.push(path);
-      return paths.length === 1 ? new Promise(resolve => { resolveFirst = resolve; }) : Promise.resolve({ resources: { summary: "latest catalog" } });
-    };
-    const page = new Function("api", "seg", "$", `let ghost = "casper", session = "c1", draft = null, resourceGeneration = 0; ${source}; return { open: showResources, switchSession() { session = "c2"; resourceGeneration++; } };`)(
-      api, encodeURIComponent, (id: string) => id === "resource-panel" ? panel : text,
-    );
-    expect(paths).toEqual([]);
-    const first = page.open();
-    page.switchSession();
-    await page.open();
-    resolveFirst({ resources: { summary: "stale catalog" } });
-    await first;
-    expect(text.textContent).toBe("latest catalog");
-    expect(paths).toEqual(["/ghosts/casper/sessions/c1/transcript?limit=1", "/ghosts/casper/sessions/c2/transcript?limit=1"]);
   });
 
   test("a long conversation opens on its newest page", async () => {

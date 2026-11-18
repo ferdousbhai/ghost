@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import { GhostError } from "./errors.js";
 import { readPeerMessage } from "./peers.js";
-import { snapshotSummary, type RunResourceSnapshot } from "./run-resources.js";
 
 const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
@@ -31,7 +30,6 @@ interface ToolCallPart {
 export type AssistantPart = { readonly type: "text"; readonly text: string } | ToolCallPart;
 
 export type LogEntry =
-  | ({ readonly type: "resources" } & RunResourceSnapshot)
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
   /** `origin` is absent for an owner message; `auto` marks historical next-work prompts; `peer` is another owner's ghost. */
   | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" | "peer" }
@@ -240,7 +238,7 @@ function logStateAccumulator() {
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
+    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -472,13 +470,11 @@ interface LogIndex {
   total: number;
   newlineEnded: boolean;
   summary: ReturnType<typeof logStateAccumulator>;
-  resources: ReturnType<typeof resourceAccumulator>;
 }
 interface IndexedLogSnapshot {
   info: Stats;
   state: LogState;
   total: number;
-  resources: RunResourceSnapshot | null;
   entries: readonly IndexedEntry[] | undefined;
 }
 // Summaries remain cheap for long lists; only sixteen logs retain historical offsets.
@@ -486,8 +482,7 @@ const logIndexes = new BoundedCache<string, LogIndex>();
 const offsetIndexes = new BoundedCache<string, { index: LogIndex; entries: IndexedEntry[] }>(16);
 
 function indexSnapshot(index: LogIndex, entries?: IndexedEntry[]): IndexedLogSnapshot {
-  return { info: index.info, state: index.summary.value(), total: index.total,
-    resources: index.resources.value(), entries };
+  return { info: index.info, state: index.summary.value(), total: index.total, entries };
 }
 const indexing = new Map<string, Promise<IndexedLogSnapshot | null>>();
 
@@ -499,10 +494,14 @@ function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
     : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" || entry.type === "sent" || entry.type === "compacted" ? 1 : 0;
 }
+/** The entry types ghostd writes; any other line, such as a retired `resources` record, is skipped. */
+const ENTRY_TYPES: ReadonlySet<string> = new Set<LogEntry["type"]>(
+  ["conversation", "user", "sent", "handed", "assistant", "command", "harness", "title", "compacted", "handoff"]);
+
 function parseEntry(bytes: Buffer): LogEntry | null {
   try {
     const entry = JSON.parse(bytes.toString("utf8")) as LogEntry;
-    return entry && typeof entry === "object" && typeof entry.type === "string" ? entry : null;
+    return entry && typeof entry === "object" && ENTRY_TYPES.has(entry.type) ? entry : null;
   } catch {
     return null;
   }
@@ -522,7 +521,6 @@ async function scanIndex(file: FileHandle, index: LogIndex, from: number, entrie
     index.ordinal += 1;
     index.total += count;
     index.summary.append(entry);
-    index.resources.append(entry);
   };
   while (position < index.info.size) {
     const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, index.info.size - position), position);
@@ -566,8 +564,7 @@ async function updateIndex(path: string, needOffsets: boolean): Promise<IndexedL
     if (extend && index && info.size === index.info.size) return indexSnapshot(index, entries);
     const from = extend && index ? index.info.size : 0;
     if (!extend || !index) {
-      index = { info, ordinal: 0, total: 0, newlineEnded: true,
-        summary: logStateAccumulator(), resources: resourceAccumulator() };
+      index = { info, ordinal: 0, total: 0, newlineEnded: true, summary: logStateAccumulator() };
       entries = [];
     }
     index.info = info;
@@ -589,18 +586,18 @@ function indexedLog(path: string, needOffsets = true): Promise<IndexedLogSnapsho
 
 /** Seek only the requested messages once the disposable index is current. */
 export async function readTranscriptPage(sessionDir: string, id: string, offset: number, limit: number): Promise<{
-  messages: TranscriptMessage[]; total: number; resources: RunResourceSnapshot | null;
+  messages: TranscriptMessage[]; total: number;
 }> {
   const path = logPath(sessionDir, id);
   const index = await indexedLog(path);
-  if (!index) return { messages: [], total: 0, resources: null };
+  if (!index) return { messages: [], total: 0 };
   // Indexed records stay where they are while the log grows, so a page reads
   // them in place; a log trashed since it was indexed reads as empty.
   let file: FileHandle;
   try {
     file = await open(path, "r");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { messages: [], total: 0, resources: null };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { messages: [], total: 0 };
     throw error;
   }
   try {
@@ -624,7 +621,7 @@ export async function readTranscriptPage(sessionDir: string, id: string, offset:
       messages.push(...entryMessages(entry, `e${record.ordinal}`, Math.max(0, offset - record.first),
         offset + limit - Math.max(offset, record.first)));
     }
-    return { messages, total: index.total, resources: index.resources };
+    return { messages, total: index.total };
   } finally {
     await file.close();
   }
@@ -645,46 +642,4 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
  */
 export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string } {
   return { GHOST: ghostName, GHOST_SESSION: id };
-}
-
-/** Latest successful pass, including legacy snapshots written before the reply. */
-function resourceAccumulator() {
-  let latest: RunResourceSnapshot | null = null;
-  let pending: Extract<LogEntry, { type: "resources" }> | null = null;
-  let previous: Pick<Extract<LogEntry, { type: "assistant" | "handoff" }>, "type" | "harness" | "at" | "error"> | undefined;
-  const append = (entry: LogEntry) => {
-    if (entry.type === "user" || entry.type === "harness") pending = null;
-    if (entry.type === "resources") {
-      const adjacent = (previous?.type === "assistant" || previous?.type === "handoff")
-        && previous.harness === entry.harness ? previous : null;
-      const postReply = entry.supplied !== undefined
-        || (adjacent !== null && Date.parse(entry.at) < Date.parse(adjacent.at));
-      pending = null;
-      if (postReply) {
-        if (adjacent && !adjacent.error) latest = entry;
-      } else if (adjacent === null || Date.parse(entry.at) > Date.parse(adjacent.at)) {
-        pending = entry;
-      }
-    } else if (entry.type === "assistant" || entry.type === "handoff") {
-      if (!entry.error) latest = pending?.harness === entry.harness
-        && Date.parse(pending.at) <= Date.parse(entry.at) ? pending : null;
-      pending = null;
-    }
-    previous = entry.type === "assistant" || entry.type === "handoff"
-      ? { type: entry.type, harness: entry.harness, at: entry.at, error: entry.error } : undefined;
-  };
-  const value = (): RunResourceSnapshot | null => {
-  if (!latest) return null;
-  const { run, harness, at, resources, supplied } = latest;
-  const snapshot = { run, harness, at, resources, ...(supplied ? { supplied } : {}), summary: "" };
-  snapshot.summary = snapshotSummary(snapshot);
-  return snapshot;
-  };
-  return { append, value };
-}
-
-export function latestRunResources(entries: readonly LogEntry[]): RunResourceSnapshot | null {
-  const resources = resourceAccumulator();
-  for (const entry of entries) resources.append(entry);
-  return resources.value();
 }

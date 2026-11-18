@@ -912,28 +912,6 @@ Singleton {
         return true;
     }
 
-    property var runResources: null
-    readonly property bool resourcesLoading: root.resourcesRequest !== null
-    property string resourcesError: ""
-    property var resourcesRequest: null
-
-    function clearRunResources(): void {
-        root.retire(root, "resourcesRequest");
-        root.runResources = null;
-        root.resourcesError = "";
-    }
-
-    function fetchRunResources(): void {
-        const ghost = root.activeGhost;
-        const session = root.currentSessionId;
-        root.clearRunResources();
-        if (ghost === "" || session === "") return;
-        root.request(root, "resourcesRequest", "GET", root.sessionPath(ghost, session) + "/transcript?limit=1", null, function (xhr, body) {
-                if (xhr.status === 200 && body) root.runResources = body.resources || null;
-                else root.resourcesError = "Could not load resources. Try refreshing.";
-            }, () => ghost === root.activeGhost && session === root.currentSessionId);
-    }
-
     function fetchHarnesses(): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.harnessMutation !== null) return;
@@ -2323,16 +2301,6 @@ Singleton {
             break;
         case "harness":
             state.activity = "starting:" + (event.harness || "");
-            break;
-        case "resources":
-            // The streamed snapshot is the one the transcript would report.
-            if (root.isActiveTurn(state)) {
-                root.retire(root, "resourcesRequest");
-                const snapshot = Object.assign({}, event);
-                delete snapshot.type;
-                root.runResources = snapshot;
-                root.resourcesError = "";
-            }
             break;
         case "text_start":
             root.textPart(state, event.contentIndex);

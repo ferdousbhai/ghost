@@ -34,16 +34,6 @@ const TURN: HarnessTurnInput = {
   mcp: [{ name: "notes", config: { command: "/usr/bin/notes-mcp" } }],
 };
 
-describe("resource provenance", () => {
-  it.each(["claude", "codex", "grok", "copilot", "opencode", "agy", "crush"])("%s reports only forwarded MCP names", id => {
-    const launch = harnessRow(id)!.launch(TURN);
-    expect(launch.suppliedMcp).toEqual(["notes"]);
-  });
-  it.each(["pi", "omp"])("%s does not claim to forward Ghost MCP", id => {
-    expect(harnessRow(id)!.launch(TURN).suppliedMcp ?? []).toEqual([]);
-  });
-});
-
 describe("parsers over recorded output", () => {
   it("claude: streamed text deltas, one Bash call, the session id", () => {
     const events = parse("claude", "claude.jsonl");
@@ -135,11 +125,6 @@ describe("parsers over recorded output", () => {
       .toEqual([{ type: "retry" }]);
   });
 
-  it("claude init carries a named native tool inventory", () => {
-    const events = harnessRow("claude")!.parser()(JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: ["Bash", "Read"] }));
-    expect(events).toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null, tools: ["Bash", "Read"] } });
-  });
-
   // Trimmed from a 2026-11-16 `claude -p --resume <id> /compact --output-format stream-json` probe.
   it("claude: a compact boundary is a compaction, with its trigger and size", () => {
     const parse = harnessRow("claude")!.parser();
@@ -169,23 +154,6 @@ describe("parsers over recorded output", () => {
     const pi = (harnessRow("pi") ?? { parser: () => () => [] }).parser();
     expect(pi(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], provider: "openai-codex", model: "gpt-6-astra", thinkingLevel: "low", stopReason: "stop" } })))
       .toEqual([{ type: "model", model: "gpt-6-astra", provider: "openai-codex", effort: "low" }]);
-  });
-
-  it("claude: reports only inventory names, with disconnected MCP servers excluded", () => {
-    const parse = harnessRow("claude")!.parser();
-    const events = parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s1",
-      skills: ["calendar", "mail", "mail"],
-      plugins: [{ name: "review", path: "/private/plugin" }],
-      mcp_servers: [{ name: "ghost", status: "connected", env: { TOKEN: "secret" } }, { name: "offline", status: "failed" }],
-    }));
-    expect(events.find((event) => event.type === "resources")).toEqual({ type: "resources", resources: {
-      skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"],
-    } });
-    expect(JSON.stringify(events)).not.toMatch(/private|secret|offline/);
-    expect(parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s2", skills: [], plugins: [] })))
-      .toContainEqual({ type: "resources", resources: { skills: [], extensions: [], mcpServers: null } });
-    expect(parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s3", skills: ["ok", 7], plugins: [{ path: "/private" }] })))
-      .toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null } });
   });
 
   // Lines trimmed from a 2026-10-04 codex-cli 0.160.0 rollout file.
@@ -265,70 +233,6 @@ describe("parsers over recorded output", () => {
       data: { promptCacheBreakState: [{ conversation: "main", lastActiveModel: "mai-code-1.1-flash",
         models: { "mai-code-1.1-flash": { model: "mai-code-1.1-flash", vendor: "openai", reasoning_effort: "medium" } } }] },
     }))).toEqual([{ type: "model", model: "mai-code-1.1-flash", provider: "openai", effort: "medium" }]);
-  });
-
-  it("claude, grok and copilot: inventories captured in native 2026-10-13 probes", () => {
-    expect(parse("claude", "claude-init-resources.jsonl").find((event) => event.type === "resources"))
-      .toEqual({ type: "resources", resources: { skills: ["resource-audit-marker", "cloudmail"], extensions: ["keep-going", "clangd-lsp"], mcpServers: [] } });
-    expect(parse("grok", "grok-init-resources.jsonl").find((event) => event.type === "resources"))
-      .toEqual({ type: "resources", resources: { skills: ["cloud-calendar", "cloudmail", "built-in-browser"], extensions: null, mcpServers: [] } });
-    expect(parse("copilot", "copilot-resources.jsonl"))
-      .toEqual([{ type: "resources", resources: { skills: null, extensions: null, mcpServers: ["github-mcp-server"] } }]);
-  });
-
-  it("omp: an authenticated startup header carries no inventory", () => {
-    expect(parse("omp", "omp-header-no-inventory.jsonl"))
-      .toEqual([{ type: "session", id: "omp-probe" }]);
-  });
-
-  it("copilot: schema-based partial inventories accumulate without importing disabled resources or subagents", () => {
-    const parse = harnessRow("copilot")!.parser();
-    const event = (type: string, data: unknown, agentId?: string) => parse(JSON.stringify({ type, data, agentId }));
-    expect(event("session.skills_loaded", { skills: [{ name: "mail", enabled: true, path: "/private" }, { name: "off", enabled: false }] }))
-      .toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: null, mcpServers: null } }]);
-    expect(event("session.extensions_loaded", { extensions: [
-      { id: "plugin:review:checks", name: "checks", status: "running" }, { id: "user:broken", status: "failed" },
-    ] })).toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: null } }]);
-    expect(event("session.mcp_servers_loaded", { servers: [{ name: "ghost", status: "connected", error: "private" }, { name: "pending", status: "pending" }] }))
-      .toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: ["ghost"] } }]);
-    expect(event("session.skills_loaded", { skills: [] }, "worker")).toEqual([]);
-    expect(event("session.mcp_server_status_changed", { serverName: "ghost", status: "failed" }))
-      .toContainEqual({ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: [] } });
-    event("session.mcp_server_status_changed", { serverName: "ghost", status: "connected" });
-    expect(event("session.mcp_server_removed", { serverName: "ghost" })[0])
-      .toMatchObject({ resources: { mcpServers: [] } });
-    expect(event("session.skills_loaded", { skills: [{ name: "invalid" }] })[0])
-      .toMatchObject({ resources: { skills: null, extensions: ["plugin:review:checks"], mcpServers: [] } });
-    expect(event("constructor", {})).toEqual([]);
-    expect(harnessRow("copilot")!.parser()(JSON.stringify({ type: "session.mcp_server_status_changed", data: { serverName: "partial", status: "connected" } })))
-      .toEqual([]);
-  });
-
-  it("codex: reads the rendered catalog for a fresh turn, never an old failed resume or plugin recommendations", async () => {
-    const home = mkdtempSync(join(tmpdir(), "ghost-codex-resources-"));
-    try {
-      const dir = join(home, "sessions", "2026", "10", "13");
-      mkdirSync(dir, { recursive: true });
-      const path = join(dir, "rollout-resource-thread.jsonl");
-      const fixture = readFileSync(new URL("./fixtures/harness/codex-world-state.jsonl", import.meta.url), "utf8");
-      writeFileSync(path, fixture);
-      const inspect = (since: string) => harnessRow("codex")!.inspectSession!("resource-thread", { CODEX_HOME: home }, since);
-      const facts = await inspect("2026-10-13T12:00:00.500Z");
-      expect(facts).toContainEqual({ type: "resources", resources: {
-        skills: ["resource-audit-marker", "visualize:visualize"], extensions: null, mcpServers: null,
-      } });
-      expect(JSON.stringify(facts)).not.toContain("/private");
-      expect((await inspect("2026-10-13T12:00:03.000Z")).some((event) => event.type === "resources")).toBe(false);
-      // A new full world state supersedes an old catalog even when it omits skills.
-      writeFileSync(path, fixture + [
-        { type: "world_state", payload: { full: true, state: { plugins_instructions: false } } },
-        { type: "turn_context", timestamp: "2026-10-13T12:00:05.000Z", payload: { model: "gpt-6.1-sol" } },
-      ].map((entry) => JSON.stringify(entry)).join("\n"));
-      expect(await inspect("2026-10-13T12:00:04.000Z"))
-        .toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null } });
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 
   it("agy: its own typed stream, the session it opened and a refusal as the turn's error", () => {

@@ -132,7 +132,7 @@ Rectangle {
             Layout.fillWidth: true
             title: "MCP servers"
             subtitle: "Additional servers for " + (Ghostd.activeGhost || "this ghost")
-                + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
+                + ". Enabled servers are offered to supported harnesses on their next run."
 
             ActionButton {
                 label: Ghostd.mcpLoading ? "Refreshing" : "Refresh"

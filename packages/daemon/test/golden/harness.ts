@@ -89,8 +89,6 @@ export class Normalizer {
       if (raw === undefined) continue;
       if (key === "updatedAt") {
         out[key] = "<time>";
-      } else if (key === "run") {
-        out[key] = "<run>";
       } else {
         out[key] = this.value(raw);
       }

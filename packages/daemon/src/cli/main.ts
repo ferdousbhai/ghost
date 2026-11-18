@@ -115,8 +115,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "show",
-    flags: { boolean: ["resources"], value: ["limit", "offset"] },
-    usage: "show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>] [--resources] [--json] [-q]",
+    flags: { value: ["limit", "offset"] },
+    usage: "show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>] [--json] [-q]",
     summary: "Print a conversation transcript as Markdown.",
     example: "ghost show -s cli-abc",
     positionals: [0, 0],

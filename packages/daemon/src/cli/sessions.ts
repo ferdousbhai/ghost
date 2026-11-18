@@ -48,10 +48,6 @@ export async function showCommand(ctx: CliContext): Promise<number> {
   if (offset) query.set("offset", offset);
   const suffix = query.size ? `?${query}` : "";
   const response = await ctx.client.request<Transcript>("GET", `${path}/transcript${suffix}`);
-  if (flagBoolean(parsed, "resources")) {
-    emit(ctx, response.resources, (snapshot) => snapshot ? `${snapshot.summary}\n` : "No successful run resources available.\n");
-    return 0;
-  }
   emit(ctx, response, (body) => {
     const markdown = transcriptMarkdown(body, name);
     return markdown ? `${markdown}\n` : "";

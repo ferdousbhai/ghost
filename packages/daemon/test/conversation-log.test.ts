@@ -2,7 +2,7 @@ import { appendFile, mkdir, mkdtemp, rename, rm, stat, utimes, writeFile } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appendLog, listedLog, logPath, logState, readLog, readTranscriptPage, transcriptPage, latestRunResources, type LogEntry } from "../src/conversation-log.js";
+import { appendLog, listedLog, logPath, logState, readLog, readTranscriptPage, transcriptPage, type LogEntry } from "../src/conversation-log.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -22,6 +22,17 @@ describe("conversation log reads", () => {
     await writeFile(logPath(root, "s"), `\n${JSON.stringify(entry)}\nmalformed\nnull\n{}\n{"type":`);
     expect(await readLog(root, "s")).toEqual([entry]);
     expect(await readLog(root, "missing")).toBeNull();
+  });
+
+  it("skips record types it does not write, such as the retired per-run resources", async () => {
+    const root = await scratch();
+    const owner = { type: "user", at: "2026-10-15T00:00:00Z", text: "hello" };
+    const retired = { type: "resources", at: "2026-10-15T00:01:00Z", run: "r1", harness: "codex",
+      resources: { skills: ["mail"], extensions: [], mcpServers: [] }, supplied: { instructions: [], mcpServers: [] }, summary: "legacy" };
+    await writeFile(logPath(root, "s"), `${JSON.stringify(owner)}\n${JSON.stringify(retired)}\n${JSON.stringify({ type: "future", at: "later" })}\n`);
+    expect(await readLog(root, "s")).toEqual([owner]);
+    expect((await listedLog(root, "s"))?.state).toMatchObject({ activeAt: owner.at, messageCount: 1 });
+    expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage([owner as LogEntry]));
   });
 
   it("refreshes a replaced log even if its size and mtime match the cached file", async () => {
@@ -45,14 +56,13 @@ describe("indexed conversation reads", () => {
   const at = "2026-10-15T00:00:00Z";
   const user = (text: string): LogEntry => ({ type: "user", at, text });
 
-  it("preserves every page, entry ID and resource snapshot through incremental appends", async () => {
+  it("preserves every page and entry ID through incremental appends", async () => {
     const root = await scratch();
     const entries: LogEntry[] = [
       { type: "conversation", v: 1, id: "s", createdAt: at },
       { type: "harness", at, harness: "codex", session: "h1" },
       user("Explain the new feature"),
       { type: "command", at, command: "printf hello", output: "hello", exitCode: 0, excluded: false },
-      { type: "resources", at: "2026-10-14T23:59:59Z", run: "r1", harness: "codex", resources: { skills: ["mail"], extensions: [], mcpServers: [] }, summary: "legacy" },
       { type: "assistant", at, harness: "codex", content: [{ type: "text", text: "answer" }], model: "model" },
       { type: "command", at, command: "private", output: "hidden", exitCode: 0, excluded: true },
       { type: "title", at, title: "Custom title" },
@@ -62,13 +72,12 @@ describe("indexed conversation reads", () => {
       await appendLog(root, "s", [entry]);
       const prefix = entries.slice(0, entries.indexOf(entry) + 1);
       expect((await listedLog(root, "s"))?.state).toEqual(logState(prefix));
-      expect((await readTranscriptPage(root, "s", 0, 10)).resources).toEqual(latestRunResources(prefix));
     }
     const expected = transcriptPage(entries);
     for (let offset = 0; offset <= expected.total + 1; offset++) {
       for (const limit of [1, 2, 4]) {
         expect(await readTranscriptPage(root, "s", offset, limit)).toEqual({
-          messages: expected.messages.slice(offset, offset + limit), total: expected.total, resources: latestRunResources(entries),
+          messages: expected.messages.slice(offset, offset + limit), total: expected.total,
         });
       }
     }
@@ -133,14 +142,14 @@ describe("indexed conversation reads", () => {
     // the log's only writer, and it only appends.
     for (const entries of [[user("entirely different and longer"), user("second")], [user("first")], []]) {
       await writeFile(path, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-      expect(await readTranscriptPage(root, "s", 0, 10)).toEqual({ ...transcriptPage(entries), resources: null });
+      expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage(entries));
       expect((await listedLog(root, "s"))?.state).toEqual(logState(entries));
     }
     await writeFile(`${path}.new`, JSON.stringify(user("replacement")) + "\n");
     await rename(`${path}.new`, path);
     expect((await readTranscriptPage(root, "s", 0, 1)).messages[0]?.content).toEqual([{ type: "text", text: "replacement" }]);
     await rm(path);
-    expect(await readTranscriptPage(root, "s", 0, 1)).toEqual({ messages: [], total: 0, resources: null });
+    expect(await readTranscriptPage(root, "s", 0, 1)).toEqual({ messages: [], total: 0 });
   });
 
   it("keeps concurrent reads and appends coherent and rebuilds after an unterminated record", async () => {
@@ -161,7 +170,7 @@ describe("indexed conversation reads", () => {
     expect((await readTranscriptPage(root, "s", 0, 10)).total).toBe(1);
     await appendLog(root, "s", [user("concatenated")]);
     const actual = (await readLog(root, "s")) ?? [];
-    expect(await readTranscriptPage(root, "s", 0, 10)).toEqual({ ...transcriptPage(actual), resources: null });
+    expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage(actual));
   });
 
   it("handles malformed, split UTF-8, torn and valid unterminated final lines", async () => {
@@ -175,6 +184,6 @@ describe("indexed conversation reads", () => {
     expect((await readTranscriptPage(root, "s", 0, 10)).messages).toEqual(transcriptPage([first, recovered]).messages);
     await appendFile(path, "\n");
     await appendLog(root, "s", [user("last")]);
-    expect(await readTranscriptPage(root, "s", 0, 10)).toEqual({ ...transcriptPage([first, recovered, user("last")]), resources: null });
+    expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage([first, recovered, user("last")]));
   });
 });

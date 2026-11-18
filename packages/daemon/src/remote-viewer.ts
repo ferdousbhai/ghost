@@ -99,8 +99,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .user .pics:last-child { margin-bottom: -.15rem; }
   .pics a { display: block; flex: 1 1 8rem; max-width: 100%; }
   .pics img { display: block; width: 100%; max-height: 18rem; object-fit: cover; border-radius: .7rem; background: var(--deep); }
-  #resource-panel { background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: .7rem; max-width: min(42rem, 90vw); }
-  #resource-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 65dvh; overflow: auto; }
   .assistant { color: var(--fg); }
   .assistant.pending::after { content: ""; display: inline-block; width: .55rem; height: 1.05em; vertical-align: text-bottom; background: var(--amber); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -154,11 +152,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
-  <details class="tools"><summary aria-label="Conversation tools">⋯</summary><div><button id="resources" type="button">Resources</button><button id="routines" type="button" hidden>Routines</button></div></details>
+  <details class="tools" id="tools" hidden><summary aria-label="Conversation tools">⋯</summary><div><button id="routines" type="button">Routines</button></div></details>
   <div class="pick"><select id="session" aria-label="Conversation"></select></div>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
-<dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
 <dialog id="routine-editor"><h2 id="routine-editor-title"></h2><p id="routine-editor-error" role="status"></p><label>Timer unit<textarea id="routine-timer" rows="9"></textarea></label><label>Service unit<textarea id="routine-service" rows="9"></textarea></label><button id="routine-save" type="button">Save and reload</button> <button id="routine-discard" type="button">Discard draft</button></dialog>
 <dialog id="routine-panel"><button id="routine-close" type="button">Close</button> <button id="routine-refresh" type="button">Refresh</button><h2>Routines</h2><p>Pause stops future triggers; running work continues. Resume may catch up.</p><div id="routine-list" role="status"></div></dialog>
 <main id="log"></main>
@@ -393,22 +390,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("routine-close").onclick = () => $("routine-panel").close();
   $("routine-panel").onclose = () => { ++routineGeneration; };
 
-  let resourceGeneration = 0;
-  async function showResources() {
-    const generation = ++resourceGeneration, targetGhost = ghost, targetSession = session;
-    const panel = $("resource-panel"), text = $("resource-text");
-    text.textContent = "Loading resources…";
-    if (!panel.open) panel.showModal();
-    if (!ghost || !session || session === draft) { text.textContent = "No successful run resources available."; return; }
-    try {
-      const body = await api("/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript?limit=1");
-      if (generation === resourceGeneration && targetGhost === ghost && targetSession === session)
-        text.textContent = body.resources?.summary || "No successful run resources available.";
-    } catch (error) {
-      if (generation === resourceGeneration) text.textContent = error.message;
-    }
-  }
-
   async function loadTranscript(keep = false) {
     if (!ghost || !session || session === draft) return render([]);
     const targetGhost = ghost, targetSession = session;
@@ -621,14 +602,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   };
   $("composer").onsubmit = (e) => { e.preventDefault(); send().catch(show); };
   $("camera").onclick = () => $("file").click();
-  $("resources").onclick = showResources;
-  $("resource-close").onclick = () => $("resource-panel").close();
-  $("resource-panel").onclose = () => { resourceGeneration++; };
   $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file").value = ""; };
-  $("ghost").onchange = () => { requestedSession = null; readThrough = null; $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
-  $("session").onchange = () => { requestedSession = null; readThrough = null; $("resource-panel").close(); session = $("session").value; clearTray(); loadSessions().catch(show); };
+  $("ghost").onchange = () => { requestedSession = null; readThrough = null; $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
+  $("session").onchange = () => { requestedSession = null; readThrough = null; session = $("session").value; clearTray(); loadSessions().catch(show); };
   $("new").onclick = () => {
-    $("resource-panel").close();
     if (streaming || !ghost) return;
     if (session !== draft || !draft) draft = session = mint();
     clearTray(); loadSessions().catch(show);
@@ -639,7 +616,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const who = await api("/remote/whoami");
     owner = who.role !== "guest";
     $("composer").hidden = !owner;
-    $("routines").hidden = !owner;
+    $("tools").hidden = !owner;
     refresh();
     const ghosts = await api("/ghosts");
     for (const g of ghosts) { const o = document.createElement("option"); o.value = g.name; o.textContent = g.name; $("ghost").append(o); }

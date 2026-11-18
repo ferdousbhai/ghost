@@ -189,7 +189,6 @@ surfaces affected by the change:
 - Chat in the HUD and the presence card mark replies read; the launcher,
   Routines, a closed HUD, and a narrow workbench hiding Chat preserve unread
   state.
-- Resources open on demand and add no chat messages.
 - Notifications replace their prior server ID and open the originating
   conversation when clicked.
 - File edits preserve Markdown, merge disjoint external edits, and block

@@ -13,7 +13,7 @@ HTTPS certificates (Tailscale admin console → DNS → HTTPS Certificates, then
 The app has no server; its page calls each machine directly. Set
 `remote.apps` to `[]` in the config to refuse it.
 
-The conversation tools menu contains resources and routines.
+The owner's conversation tools menu holds routines.
 Owners can edit, pause/resume, run, remove, and recover routines. Guests, only
 when `remote.guests` is `"read-only"`, can read conversations and cannot access routine controls or
 machine-local tool routes. See `CONTRACTS.md` for the wire contract.

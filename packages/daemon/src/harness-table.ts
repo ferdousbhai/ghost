@@ -17,7 +17,6 @@ import type { NativeTurnInput } from "./local-turn.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord } from "./record.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
-import { resourceNames, unreportedResources, codexSkillNames, type RunResources } from "./run-resources.js";
 
 export interface HarnessMcpServer {
   readonly name: string;
@@ -36,7 +35,6 @@ export interface HarnessTurnInput {
 }
 
 export interface HarnessLaunch {
-  readonly suppliedMcp?: readonly string[];
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   /** Files written into the conversation directory before launch. */
@@ -50,7 +48,6 @@ export type HarnessEvent =
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
-  | { readonly type: "resources"; readonly resources: RunResources }
   /** The model answering, as the harness names it; `provider` and `effort` where it says. */
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
   | { readonly type: "error"; readonly message: string }
@@ -67,7 +64,7 @@ export interface HarnessRow {
    * Display-only facts missing from stdout, read from the harness's own
    * session record (see CONTRACTS.md, "Harnesses").
    */
-  inspectSession?(session: string, env: Readonly<Record<string, string | undefined>>, startedAt?: string): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" | "compacted" }>>>;
+  inspectSession?(session: string, env: Readonly<Record<string, string | undefined>>, startedAt?: string): Promise<Array<Extract<HarnessEvent, { type: "model" | "compacted" }>>>;
   launch(input: HarnessTurnInput): HarnessLaunch;
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
@@ -90,16 +87,6 @@ const MAX_TOOL_OUTPUT = 4_000;
 
 function record(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
-}
-
-/**
- * The `name`s of rows whose `status` is `loaded`; null, an unknown inventory,
- * unless every row names itself and carries a status of `loaded`'s type.
- */
-function loadedNames(rows: unknown, name: string, status: string, loaded: string | boolean): string[] | null {
-  if (!Array.isArray(rows) || resourceNames(rows.map((row) => record(row)[name])) === null
-    || !rows.every((row) => typeof record(row)[status] === typeof loaded)) return null;
-  return resourceNames(rows.filter((row) => record(row)[status] === loaded).map((row) => record(row)[name]));
 }
 
 function str(value: unknown): string {
@@ -188,14 +175,6 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
     if (typeof event.session_id === "string" && event.type === "system" && event.subtype === "init") {
       out.push({ type: "session", id: event.session_id });
       if (typeof event.model === "string") out.push({ type: "model", model: event.model });
-      if (event.skills !== undefined || event.plugins !== undefined || event.mcp_servers !== undefined || event.tools !== undefined) {
-        out.push({ type: "resources", resources: {
-          skills: resourceNames(event.skills),
-          ...(event.tools !== undefined ? { tools: resourceNames(event.tools) } : {}),
-          extensions: resourceNames(Array.isArray(event.plugins) ? event.plugins.map((plugin) => record(plugin).name) : undefined),
-          mcpServers: loadedNames(event.mcp_servers, "name", "status", "connected"),
-        } });
-      }
     }
     if (event.type === "system" && event.subtype === "compact_boundary") {
       const meta = record(event.compact_metadata);
@@ -398,8 +377,7 @@ async function codexRollout(root: string, session: string): Promise<string | nul
 }
 
 /**
- * The model/effort and rendered skill catalog of Codex's latest turn, and the
- * compactions since `startedAt`, from its rollout file
+ * The model/effort of Codex's latest turn, and the compactions since `startedAt`, from its rollout file
  * (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec --json`
  * reports none of them. A resumed session keeps its first day's file, so the
  * date directories are searched newest first.
@@ -408,7 +386,7 @@ async function codexSessionFacts(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
   startedAt?: string,
-): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" | "compacted" }>>> {
+): Promise<Array<Extract<HarnessEvent, { type: "model" | "compacted" }>>> {
   const rollout = await codexRollout(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions"), session);
   if (!rollout) return [];
   // A long session's rollout runs to a hundred megabytes: `session_meta` is its
@@ -423,10 +401,6 @@ async function codexSessionFacts(
     let end = size;
     let carry = Buffer.alloc(0);
     let model: Extract<HarnessEvent, { type: "model" }> | null = null;
-    let skills: string[] | null = null;
-    let sawSkills = false;
-    let currentTurn = false;
-    let skillSearchBytes = 0;
     // Newest first; each one's size is the input of the `token_count` just before it.
     const compactions: Array<{ type: "compacted"; trigger: string; at: string; preTokens?: number }> = [];
     let awaitingTokens = false;
@@ -461,35 +435,22 @@ async function codexSessionFacts(
           awaitingTokens = false;
           continue;
         }
-        if (!line.includes('"turn_context"') && !line.includes('"world_state"')) continue;
+        if (model !== null || !line.includes('"turn_context"')) continue;
         const entry = json(line);
         const payload = record(entry?.payload);
-        if (entry?.type === "turn_context" && model === null && typeof payload.model === "string") {
+        if (entry?.type === "turn_context" && typeof payload.model === "string") {
           model = {
             type: "model", model: payload.model,
             ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
             ...(typeof provider === "string" ? { provider } : {}),
           };
-          currentTurn = startedAt === undefined || (typeof entry.timestamp === "string" && Date.parse(entry.timestamp) >= Date.parse(startedAt));
-        }
-        if (entry?.type === "world_state" && !sawSkills) {
-          const state = record(payload.state);
-          if (Object.hasOwn(state, "host_skills") || payload.full === true) {
-            sawSkills = true;
-            skills = codexSkillNames(record(state.host_skills).body);
-          }
         }
       }
-      if (model !== null) skillSearchBytes += chunk.length;
-      if (model !== null && passedStart && (sawSkills || !currentTurn || skillSearchBytes >= 8 * 1024 * 1024)) break;
+      if (model !== null && passedStart) break;
       carry = window.subarray(0, first);
       end = start;
     }
-    return [
-      ...(model ? [model] : []),
-      ...(currentTurn && sawSkills ? [{ type: "resources" as const, resources: { ...unreportedResources(), skills } }] : []),
-      ...compactions.reverse(),
-    ];
+    return [...(model ? [model] : []), ...compactions.reverse()];
   } finally {
     await file.close();
   }
@@ -503,7 +464,7 @@ async function codexSessionFacts(
 async function opencodeSessionFacts(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
-): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>> {
+): Promise<Array<Extract<HarnessEvent, { type: "model" }>>> {
   const { Database } = await import("bun:sqlite");
   const path = join(xdgBaseDir(env, "XDG_DATA_HOME", env.HOME ?? ""), "opencode", "opencode.db");
   const db = new Database(path, { readonly: true });
@@ -574,33 +535,10 @@ function opencodeParser(): (line: string) => HarnessEvent[] {
 
 /** Copilot `--output-format json`: dotted session events. */
 function copilotParser(): (line: string) => HarnessEvent[] {
-  let resources = unreportedResources();
   return (line) => {
     const event = json(line);
     if (!event) return [];
     const data = record(event.data);
-    if (typeof event.agentId !== "string") {
-      const inventories = {
-        "session.skills_loaded": ["skills", data.skills, "name", "enabled", true],
-        "session.extensions_loaded": ["extensions", data.extensions, "id", "status", "running"],
-        "session.mcp_servers_loaded": ["mcpServers", data.servers, "name", "status", "connected"],
-      } as const;
-      const inventory = Object.hasOwn(inventories, str(event.type)) ? inventories[event.type as keyof typeof inventories] : undefined;
-      if (inventory) {
-        const [field, rows, name, status, loaded] = inventory;
-        resources = { ...resources, [field]: loadedNames(rows, name, status, loaded) };
-        return [{ type: "resources", resources }];
-      }
-      if (resources.mcpServers !== null && ["session.mcp_server_status_changed", "session.mcp_server_removed", "session.mcp_server_needs_reconnect"].includes(str(event.type))) {
-        const names = resourceNames([data.serverName]);
-        if (names === null || (event.type === "session.mcp_server_status_changed" && typeof data.status !== "string")) return [];
-        const name = names[0] as string;
-        const connected = resources.mcpServers.filter((server) => server !== name);
-        if (event.type === "session.mcp_server_status_changed" && data.status === "connected") connected.push(name);
-        resources = { ...resources, mcpServers: connected };
-        return [{ type: "resources", resources }];
-      }
-    }
     switch (event.type) {
       case "model.call_start":
         return typeof data.model === "string" ? [{ type: "model", model: data.model }] : [];
@@ -663,7 +601,6 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // The prompt goes right after -p: --mcp-config takes a list.
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "claude", "-p", turn.prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
@@ -679,7 +616,6 @@ const ROWS: readonly HarnessRow[] = [
     id: "codex",
     effort: EFFORT,
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
@@ -697,7 +633,6 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // Grok reads no AGENTS.md; --rules appends the persona to its system prompt.
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "grok", "-p", turn.prompt,
         "--output-format", "streaming-messages-json", "--include-partial-messages",
@@ -711,7 +646,6 @@ const ROWS: readonly HarnessRow[] = [
   {
     id: "copilot",
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "copilot", "-p", turn.prompt, "--output-format", "json", "--allow-all",
         ...(turn.resume ? ["--continue"] : []),
@@ -733,8 +667,7 @@ const ROWS: readonly HarnessRow[] = [
           : { type: "local", command: [config.command, ...(config.args ?? [])], ...(config.env ? { environment: config.env } : {}), enabled: true };
       }
       return {
-        suppliedMcp: turn.mcp.map(server => server.name),
-        argv: [
+          argv: [
           "opencode", "run", "--format", "json", "--auto",
           ...(turn.resume && turn.sessionId ? ["--session", turn.sessionId] : []),
           "--", turn.prompt,
@@ -766,7 +699,6 @@ const ROWS: readonly HarnessRow[] = [
     id: "agy",
     effort: EFFORT,
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
@@ -780,7 +712,6 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // Crush keeps its sessions in the directory it runs in.
     launch: (turn) => ({
-      suppliedMcp: turn.mcp.map(server => server.name),
       argv: ["crush", "run", "-q", "--reasoning-effort", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
       files: turn.mcp.length > 0
         ? { "crush.json": writeJson({ mcp: Object.fromEntries(turn.mcp.map(({ name, config }) => [name,
