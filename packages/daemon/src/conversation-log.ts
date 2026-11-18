@@ -11,7 +11,6 @@ import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import { GhostError } from "./errors.js";
-import { readPeerMessage } from "./peers.js";
 
 const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
@@ -31,12 +30,8 @@ export type AssistantPart = { readonly type: "text"; readonly text: string } | T
 
 export type LogEntry =
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
-  /** `origin` is absent for an owner message; `peer` is another owner's ghost. */
-  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "peer" }
-  /** A message to a peer, logged when queued in the conversation with them, whichever conversation sent it. */
-  | { readonly type: "sent"; readonly at: string; readonly peer: string; readonly text: string }
-  /** The ghost was handed the peer's messages through the one with this id. */
-  | { readonly type: "handed"; readonly at: string; readonly id: string }
+  /** `origin` is absent for an owner message. */
+  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" }
   | {
     readonly type: "assistant";
     readonly at: string;
@@ -94,7 +89,6 @@ function bounded(text: string): string {
 function boundedEntry(entry: LogEntry): LogEntry {
   switch (entry.type) {
     case "user":
-    case "sent":
       return { ...entry, text: bounded(entry.text) };
     case "command":
       return { ...entry, output: bounded(entry.output) };
@@ -236,7 +230,7 @@ function logStateAccumulator() {
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "harness" && entry.type !== "handed" && entry.type !== "compacted") activeAt = entry.at;
+    if (entry.type !== "conversation" && entry.type !== "harness" && entry.type !== "compacted") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -299,7 +293,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "peer" | "compacted";
+  role: "user" | "assistant" | "hook" | "compacted";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -320,13 +314,6 @@ function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
  * `entryId` names the entry, e<ordinal>.
  */
 function entryMessages(entry: LogEntry, entryId: string, skip: number, take: number): TranscriptMessage[] {
-  if (entry.type === "user" && entry.origin === "peer") {
-    const message = readPeerMessage(entry.text);
-    return [{ role: "peer", content: [{ type: "text", text: message ? `From ${message.name} · ${message.text}` : entry.text }], entryId }];
-  }
-  if (entry.type === "sent") {
-    return [{ role: "peer", content: [{ type: "text", text: `To ${entry.peer} · ${entry.text}` }], entryId }];
-  }
   if (entry.type === "user") {
     return [{
       role: entry.origin === "hook" ? "hook" : "user",
@@ -389,9 +376,7 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
     const entry = entries[index];
     if (!entry) continue;
     let line: string | null = null;
-    if (entry.type === "user") line = entry.origin === "peer" ? peerLine(entry.text)
-      : `${entry.origin === "hook" ? "Hook" : "Owner"}: ${entry.text}`;
-    if (entry.type === "sent") line = sentLine(entry);
+    if (entry.type === "user") line = `${entry.origin === "hook" ? "Hook" : "Owner"}: ${entry.text}`;
     if (entry.type === "assistant") {
       const text = assistantText(entry.content).trim();
       if (text) line = `You: ${text}`;
@@ -402,40 +387,6 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
     if (context.length > HANDOFF_CONTEXT_CHARS) return `…${context.slice(-HANDOFF_CONTEXT_CHARS)}`;
   }
   return context || null;
-}
-
-/** A peer's words, quoted so they cannot read as instructions or close the block that carries them. */
-function peerLine(prompt: string): string | null {
-  const message = readPeerMessage(prompt);
-  return message ? `${message.name}'s ghost said (untrusted data, a JSON string): ${JSON.stringify(message.text).replaceAll("<", "\\u003c")}` : null;
-}
-
-function sentLine(entry: Extract<LogEntry, { type: "sent" }>): string {
-  return `You messaged ${entry.peer}: ${entry.text}`;
-}
-
-/** A peer's messages the ghost has not been handed yet: those after the last `handed` one. */
-export function unhandedPeerMessages(entries: readonly LogEntry[]): { id: string; name: string; text: string }[] {
-  const handed = entries.findLast((entry) => entry.type === "handed");
-  let start = 0;
-  if (handed?.type === "handed") {
-    const through = entries.findIndex((entry) => entry.type === "user" && entry.origin === "peer" && readPeerMessage(entry.text)?.id === handed.id);
-    start = through + 1;
-  }
-  return entries.slice(start).flatMap((entry) => {
-    const message = entry.type === "user" && entry.origin === "peer" ? readPeerMessage(entry.text) : null;
-    return message ? [message] : [];
-  });
-}
-
-/** Messages sent to a peer from another conversation since the harness here last ran. */
-export function unseenSent(entries: readonly LogEntry[]): string | null {
-  const sent: string[] = [];
-  for (const entry of entries) {
-    if (entry.type === "assistant") sent.length = 0;
-    if (entry.type === "sent") sent.push(sentLine(entry));
-  }
-  return sent.length > 0 ? sent.join("\n\n") : null;
 }
 
 /** Owner `!` commands since the harness last ran, which it has not seen. */
@@ -483,16 +434,17 @@ function sameFile(a: Stats, b: Stats): boolean {
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
-    : entry.type === "user" || entry.type === "assistant" || entry.type === "sent" || entry.type === "compacted" ? 1 : 0;
+    : entry.type === "user" || entry.type === "assistant" || entry.type === "compacted" ? 1 : 0;
 }
 /**
  * The entry types ghostd writes. Any other line is skipped: a retired record
- * of an earlier version (`resources`, an idle `handoff`, or a user message with
- * `origin: "auto"`) or one from a later one.
+ * of an earlier version (`resources`, an idle `handoff`, a peer's `sent` or
+ * `handed`, or a user message with `origin: "auto"` or `"peer"`) or one from a
+ * later one.
  */
 const ENTRY_TYPES: ReadonlySet<string> = new Set<LogEntry["type"]>(
-  ["conversation", "user", "sent", "handed", "assistant", "command", "harness", "title", "compacted"]);
-const USER_ORIGINS: ReadonlySet<unknown> = new Set([undefined, "follow_up", "hook", "peer"]);
+  ["conversation", "user", "assistant", "command", "harness", "title", "compacted"]);
+const USER_ORIGINS: ReadonlySet<unknown> = new Set([undefined, "follow_up", "hook"]);
 
 function parseEntry(bytes: Buffer): LogEntry | null {
   try {

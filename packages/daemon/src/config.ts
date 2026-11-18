@@ -10,10 +10,9 @@ import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
 import { LOOPBACK_ADDRESSES } from "./loopback.js";
-import { parsePeers, type Peer } from "./peers.js";
 import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, type LocalModelConfig } from "./local-model.js";
 
-type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { peers?: Peer[]; apps?: string[] };
+type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { apps?: string[] };
 
 /** The web apps admitted to call this daemon with a tailnet identity (CONTRACTS.md "Daemon HTTP API"). */
 const DEFAULT_REMOTE_APPS: readonly string[] = ["https://summonghost.com"];
@@ -38,9 +37,8 @@ export interface DaemonConfig {
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
-   * says what other tailnet members may do (default "none"), `peers` are
-   * other owners whose ghosts may message this owner's (CONTRACTS.md "Peers"),
-   * `apps` the web app origins admitted with a tailnet identity (default
+   * says what other tailnet members may do (default "none"), `apps` the web
+   * app origins admitted with a tailnet identity (default
    * `DEFAULT_REMOTE_APPS`; `[]` admits none).
    */
   remote: RemoteConfig;
@@ -162,7 +160,6 @@ function readConfigFile(path: string, home: string): DaemonConfigFile | null {
       }
       remote.guests = raw.guests;
     }
-    if (raw.peers !== undefined) remote.peers = parsePeers(raw.peers, path);
     if (raw.apps !== undefined) {
       const apps = Array.isArray(raw.apps) ? raw.apps.map(appOrigin) : [null];
       if (apps.some((app) => app === null)) {

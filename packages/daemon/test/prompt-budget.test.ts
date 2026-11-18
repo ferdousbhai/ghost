@@ -39,9 +39,9 @@ function promptSection(heading: string): string {
   return section;
 }
 
-/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting, a Tailscale key about to expire). */
+/** Every stable section, keyed by its heading: the list SessionHost renders, at its largest (first meeting). */
 function renderStablePolicy(): Record<string, string> {
-  const sections = stablePolicySections({ documents: DOCUMENTS, firstMeeting: true, keyExpiresOn: "2027-04-11" });
+  const sections = stablePolicySections({ documents: DOCUMENTS, firstMeeting: true });
   return Object.fromEntries([promptSection("## Character file"), ...sections]
     .map((section) => [section.slice("## ".length, section.indexOf("\n")), section]));
 }
@@ -50,12 +50,12 @@ function renderStablePolicy(): Record<string, string> {
 const CEILINGS: Record<string, number> = {
   "Character file": 560,
   "Computer use": 273,
-  "Ghost": 895,
+  "Ghost": 753,
   "Owner context": 555,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 2604;
+const TOTAL_CEILING = 2462;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

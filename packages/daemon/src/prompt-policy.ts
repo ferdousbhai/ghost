@@ -15,26 +15,21 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 /**
  * Asking the owner (harnesses withhold their own question tools when run
  * headless, and `ghost ask` marks the conversation as waiting), that the
- * harness's own background jobs die with the turn, the index of `ghost help`
- * recipes, and a key expiry that is about to cut off the owner's peers.
+ * harness's own background jobs die with the turn, and the index of `ghost
+ * help` recipes.
  */
-export function renderGhostPolicy(keyExpiresOn: string | null = null): string {
-  return [
-    "## Ghost",
-    "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
-      + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
-      + "next message is the answer. One question at a time. Your harness's own background jobs end "
-      + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
-      + "work (harnesses), work outliving this turn (background), clock work (timers), external events "
-      + "(events), reaching the owner away (notifications), peers, heat or a full disk (machine), "
-      + "crashes, notes (memory), audio (dictation), a website (browser), getting or fixing one of "
-      + "the owner's products (products), changing or restarting yourself (self). "
-      + "`ghost --help` lists every command.",
-    ...(keyExpiresOn
-      ? [`This machine's Tailscale key expires ${keyExpiresOn}, which cuts off its peers: tell your owner to sign in again or disable its key expiry.`]
-      : []),
-  ].join("\n");
-}
+export const GHOST_POLICY = [
+  "## Ghost",
+  "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
+    + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
+    + "next message is the answer. One question at a time. Your harness's own background jobs end "
+    + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
+    + "work (harnesses), work outliving this turn (background), clock work (timers), external events "
+    + "(events), reaching the owner away (notifications), heat or a full disk (machine), "
+    + "crashes, notes (memory), audio (dictation), a website (browser), getting or fixing one of "
+    + "the owner's products (products), changing or restarting yourself (self). "
+    + "`ghost --help` lists every command.",
+].join("\n");
 
 /** The owner's own directory: deliverables and notes every ghost on this machine shares. */
 export function renderOwnerContextPolicy(documentsDir: string): string {

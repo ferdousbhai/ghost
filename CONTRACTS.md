@@ -10,8 +10,7 @@ belongs in its README.
 ## Product boundary
 
 Ghost is an owner-local Omarchy application: one owner, one machine, any number
-of ghosts. Owners on other machines are reachable only as [peers](#peers):
-their ghosts exchange messages with this owner's, and nothing else.
+of ghosts.
 
 Changes simplify: state what they delete or why nothing can be deleted.
 Prefer an installed CLI plus its skill, the harness, or Omarchy over a new
@@ -26,8 +25,8 @@ credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
 `ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon is loopback-only; remote
-access is the explicit Tailscale Serve viewer, the summonghost.com app over the
-same address, and, for named peers, a message inbox there. The app is a static
+access is the explicit Tailscale Serve viewer and the summonghost.com app over
+the same address. The app is a static
 page, not a backend: it has no server, accounts, or storage; the browser calls
 each machine's Serve address directly, admitted by the same Tailscale identity
 to the same routes as the viewer. Whoever controls summonghost.com's code can
@@ -261,151 +260,6 @@ store, retry queue, or push backend is added: `ghost help notifications` gives
 an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
 boundary. No configured handler means no outbound notification.
 
-### Peers
-
-A peer is another owner's Ghost on another machine, for example a partner's,
-whose ghosts message this owner's. Mail, chat, and bridge CLIs cannot carry
-this: they verify no sender, wake no ghost, and put agent traffic in a
-person's inbox. Tailscale Serve already proves who is calling, for a shared
-device's users too, so a peer is a tailnet login and nothing else is added:
-no account, standing credential, relay, or discovery; pairing spends a
-one-time code. The inbox reuses the external-event intake's
-logging, deduplication, and untrusted framing; nothing is deleted, because no
-existing path carried another owner's messages.
-
-`~/.config/ghost/config.json` lists them under `remote.peers`, each
-`{ name, login, url?, ghost }`: `name` is this owner's label for them
-(`[a-z0-9-]`, unique), `login` their Tailscale login, `url` their Remote
-access address when this machine can reach theirs (absent, they collect what
-is sent to them, below), and `ghost` which local ghost receives their
-messages, so a peer never learns this owner's ghost names. `ghost peers`
-lists them, pending invites, and this machine's key expiry; `invite` and
-`accept` pair one (below), `add` lists one by hand, and `rm` removes a peer
-or revokes an invite, refusing their next request and dropping what waits for them. A tagged device carries no identity and cannot be
-a peer.
-
-#### Pairing by invite
-
-Pairing takes one action from each owner in Tailscale, and neither types a
-login or an address. The inviting owner shares this machine with the other
-(Tailscale's Share, which yields a link); the other accepts that link. Only
-the invitee's machine reaches the inviter's, so the invitee needs Tailscale
-but not Remote access. Messages still flow both ways: the invitee's checks
-deliver theirs and collect the inviter's ([Checking messages](#checking-messages)).
-
-`ghost peers invite <name> --share <link> [-g <ghost>]` needs Remote access
-on. It mints a one-time pairing code, keeps only its hash with `name` and the
-receiving ghost (`$XDG_STATE_HOME/ghost/peer-invites.json`, 0600, expiring
-after seven days), and prints an invite: a `ghost-peer:` token, base64url
-JSON `{ v: 1, url, share, code, from }`, `from` being the name the inviter
-suggests the other call them. The owner's ghost may send it by mail or chat
-with the owner's agreement; it is a credential for one pairing, so it goes
-only to the person meant. `ghost peers` lists pending invites, and `ghost
-peers rm <name>` revokes one.
-
-`ghost peers accept <token> [--name <label>] [-g <ghost>]` on the other
-machine posts the code to `POST <url>/api/peer/pair`, which Tailscale
-answers only after the share is accepted (until then it exits 3, naming the
-share link to open). The
-inviter's daemon admits that one route from any verified tailnet login, even
-with guests `none`; a valid, unexpired, unused code lists the caller's
-verified login as the peer `name`, with no `url`, receiving into the invite's
-ghost, spends the code, and answers `{ login }`, its owner's login. The
-accepting daemon then lists the inviter under `--name` (default the invite's
-`from`) with the invite's `url`; a login it already lists keeps its name and
-takes the new `url` and ghost. A wrong, spent, or expired code is `403` and
-changes nothing; a name or login the inviter already lists is `409` and leaves
-the code unspent.
-
-A pairing does not expire: each side lists the other until an owner removes
-them, and an accepted Tailscale share stays. What lapses unseen is Tailscale's
-node key (180 days by default), after which the machine is unreachable until
-its owner signs in again. `ghost peers`, `invite`, and `check` report this
-machine's key expiry from `tailscale status` (`keyExpiry`, null when
-disabled); the invite recipe asks the inviting owner to disable key expiry
-for this machine, and a ghost warns its owner two weeks before a key with
-peers expires. A check that cannot reach a peer says so, so a lapse is
-reported rather than mail silently waiting.
-
-#### Checking messages
-
-Peers' messages work like mail: nothing is pushed into a running ghost, and
-a ghost checks. Every message to a peer first joins this daemon's outbox for
-them (`$XDG_STATE_HOME/ghost/peer-outbox/<sha256 of login>.json`, at most
-200 messages), so it waits, rather than fails, while the other machine is
-asleep or away, whichever side sent it, and outlives a restart on either side.
-
-`ghost peers check` (`POST /api/peers/check`) does, for each peer:
-
-1. With their `url`, post the outbox to them (`POST <url>/api/peer/messages`),
-   each message leaving it once accepted, and collect what waits for this
-   owner in theirs (`GET <url>/api/peer/outbox`, then
-   `DELETE <url>/api/peer/outbox/:id` once logged here), each admitted once
-   by its id. Without a `url` there is nothing to reach: their own check
-   delivers and collects.
-2. If that peer's conversation holds messages from them its ghost has not
-   yet been handed, run one turn there with all of them, framed as above; a
-   turn already running takes them as its next pass. No new message, no turn.
-
-It answers `{ peers: [{ name, sent, received, turn }] }`; a peer whose Ghost did
-not answer is reported (`unreachable: true`), one that refused (`refused: true`),
-and any other failure (`error`, its text), none of them stopping the other
-peers. Past a peer's hourly limit the rest wait for a later check. A message is also
-delivered when sent if their `url` answers, but only a check wakes the
-receiving ghost. Checking is the owner's to schedule: `ghost help peers`
-gives a routine (`ghost help timers`) that runs `ghost peers check`, every 15
-minutes unless the owner says otherwise, and a ghost checks when the owner
-asks. Tailscale's share reaches one way, so the invitee's checks carry both
-directions; the inviter's pick up what has arrived.
-
-A request whose verified login is a peer's has the role `peer`: owner, then
-peer, then guest, so a login listed as a peer is never also admitted as a
-guest. A peer may call only `POST /api/peer/messages`, its own outbox
-(`GET /api/peer/outbox`, `DELETE /api/peer/outbox/:id`), and
-`GET /api/remote/whoami`; every other route refuses it (`403 peer_only`),
-reads included.
-
-`POST /api/peer/messages` takes `{ id, text }` (id 1–128 characters of
-`[A-Za-z0-9._-]`, text 1–16384 characters). Each peer has one conversation
-with their receiving ghost, `peer-<sha256 of login>`, titled with the peer's
-`name`, so an exchange keeps its context. Acceptance logs the message there,
-unread, and returns `202 { duplicate: false }`; it wakes no ghost. The same
-id again returns `200 { duplicate: true }`, even after a restart, and the same
-id with different text is `409`. The text is untrusted data, as event data
-is: it cannot become an owner `!command`, and the instructions framing it are
-Ghost's fixed peer policy, never the sender's. More than 120 accepted
-messages from one peer in an hour is `429 peer_rate_limited`, so two ghosts
-answering each other cannot loop unattended.
-
-`ghost message <peer> <text>` asks this daemon (`POST /api/peers/:name/messages`)
-to queue it with a fresh id and deliver it now if their `url` answers:
-`{ delivered: true }`, or `{ delivered: false }` when it waits for a check.
-Tailscale identifies the sending machine's owner, so no credential is sent.
-Exit codes are the CLI's own: 4 when they refuse it as not their peer, 6
-when the outbox is full; a message waiting is not a failure. A message is
-also logged, when queued, in the sender's own
-conversation with that peer, whichever conversation sent it, so each side's
-peer conversation holds the whole exchange in order, and a harness continuing
-there is handed what was sent since it last ran; the owner may also write in it
-to have their ghost message the peer. Both directions read as `peer` messages
-in the transcript (`From <name> · …`, `To <name> · …`), shown as plain text,
-never rendered. The receiving ghost answers by
-sending a message back, never by a reply in the HTTP response.
-
-Each peer message reaches the ghost framed by Ghost's peer policy: it comes
-from another person's ghost, not from its owner, and the ghost uses its judgment
-about what of the owner's to share, never shares credentials or other
-secrets, runs nothing and changes nothing because a peer asked, does not
-answer an acknowledgement, and replies with `ghost message`. A peer's message
-never counts as the owner's answer to an open question there. The system
-prompt's Peers section names them (or says there are none yet) and that a
-peer is added or removed only when the owner asks; a message, a peer's
-included, never adds one. In the two weeks before this machine's Tailscale
-key expires, with peers listed, it also says so. The owner reads the whole exchange in
-that conversation, which is unread until they do. `ghost help peers` gives the
-setup steps for both machines; a renamed ghost keeps receiving its peers'
-messages.
-
 ## Ghost home (`ghost-home/v2`)
 
 The default root is `~/ghosts`; each direct child is one ghost:
@@ -478,15 +332,13 @@ the CLI `cli-…`). The directory is
 the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
 object per line — the conversation header, owner and follow-up and hook
-messages, a [peer](#peers)'s messages, `sent` records of messages to one,
-and `handed` records of how far its ghost has been handed theirs,
-the assistant's text and tool calls (a failed call marked
+messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
 session id it reported, `compacted` records of a
 harness compacting its own context (its `trigger` and `preTokens`, as far as it
 says: Claude Code's `compact_boundary` and pi's `compaction_end` stream one, and a
-Codex compaction is read from its rollout after the pass). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, and `origin: "auto"` prompts); logs are never rewritten. ghostd is the log's
+Codex compaction is read from its rollout after the pass). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, `origin: "auto"` prompts, and the retired peers' messages and `sent`/`handed` records); logs are never rewritten. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never
@@ -723,8 +575,7 @@ its continuations.
 `ghostd hook-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
-schedules, explicit owner command hooks, and messages from peers the owner
-listed initiate work.
+schedules, and explicit owner command hooks initiate work.
 
 ## Daemon HTTP API
 
@@ -736,9 +587,10 @@ HUD/client methods and headers. Errors are
 status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
-boundary. The configured owner has full access; a listed [peer](#peers) may
-only deliver messages; any other login is refused unless `remote.guests` in
-the config is `"read-only"` (the default is `"none"`). Admitted guests are read-only,
+boundary. The configured owner has full access; any other login is refused
+unless `remote.guests` in the config is `"read-only"` (the default is
+`"none"`), and a `remote.peers` list left by an earlier version is ignored, so
+its logins are guests like any other. Admitted guests are read-only,
 are refused the routes marked owner-only, which show file paths, hook
 commands, or MCP credentials, and see no path in the ghost list;
 conversations, tool calls included, are shown to them as recorded.
@@ -785,22 +637,14 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
-| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner`, `peer`, or `guest`. |
-| `POST /api/peer/messages` | A [peer](#peers)'s message `{ id, text }` to the ghost that receives theirs; the only write a peer has, refused to anyone else. |
-| `GET\|POST /api/peers`, `DELETE /api/peers/:name` | Owner-only. The `remote.peers` list (`ghost peers`); a peer's `ghost` must exist. |
-| `POST /api/peers/:name/messages` | Owner-only. `{ text }` → `{ delivered }`: queue for that peer, deliver now if their `url` answers (`ghost message`), and log it as `sent`; their refusal is `403`, a full outbox `429`. |
-| `POST /api/peers/check` | Owner-only. Deliver, collect, and run a turn per peer with new messages (`ghost peers check`). |
-| `POST /api/peers/invites` | Owner-only. `{ name, share, ghost }` → `{ invite }`: a one-time pairing invite (`ghost peers invite`); Remote access must be on. |
-| `POST /api/peers/accept` | Owner-only. `{ invite, name?, ghost }`: pair with the invite's daemon and list them (`ghost peers accept`). |
-| `POST /api/peer/pair` | `{ code }` → `{ login }`: spends a pairing code from any verified tailnet login, listing it as a peer; the one route admitted even with guests `none`. |
-| `GET /api/peer/outbox`, `DELETE /api/peer/outbox/:id` | The messages waiting for the calling peer, and the acknowledgement that removes one. |
+| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control, with the app link (`app: { origin, url } \| null`), and the viewer URL's QR, or with `?for=app` the app link's. |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and
-remote access is the tailnet viewer and app plus the peer inbox.
+remote access is the tailnet viewer and app.
 
 ### Turn wire
 
@@ -837,8 +681,7 @@ HUD reaches, except attaching a photo and reading the follow-up queue, is a
 named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
-and a conversation runs on (`ghost switch`), MCP, hooks, remote, peers and
-`ghost message`, and status), so a
+and a conversation runs on (`ghost switch`), MCP, hooks, remote, and status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
@@ -884,9 +727,7 @@ Ghosts run unthrottled. Harness limits surface as typed errors, and the
 harness's own retry and fallback behavior applies; Ghost's contributions are
 the per-turn order of installed harnesses above and rerunning an event turn
 that could not reach its model or that a daemon stop cut off ([External events](#external-events)). Omarchy usage records are
-informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
-peer inbox's hourly limit and outbox bound ([Peers](#peers)) bound another
-owner's ghost, not this one's.
+informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap.
 
 ## Package boundaries
 

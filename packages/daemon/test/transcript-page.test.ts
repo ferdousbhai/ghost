@@ -11,14 +11,13 @@ describe("transcript pages", () => {
       command,
       { ...command, excluded: true },
       { type: "assistant", at: "now", harness: "pi", content: [{ type: "text", text: "answer" }] },
-      { type: "sent", at: "now", peer: "ana", text: "hi" },
     ];
     const all = transcriptPage(entries);
-    expect(all.total).toBe(5);
-    expect(all.messages.map(message => message.entryId)).toEqual(["e1", "e2", "e2o", "e4", "e5"]);
+    expect(all.total).toBe(4);
+    expect(all.messages.map(message => message.entryId)).toEqual(["e1", "e2", "e2o", "e4"]);
     for (let offset = 0; offset < 8; offset++) {
       for (let limit = 1; limit < 8; limit++) {
-        expect(transcriptPage(entries, offset, limit)).toEqual({ messages: all.messages.slice(offset, offset + limit), total: 5 });
+        expect(transcriptPage(entries, offset, limit)).toEqual({ messages: all.messages.slice(offset, offset + limit), total: 4 });
       }
     }
   });

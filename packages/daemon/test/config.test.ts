@@ -58,9 +58,9 @@ describe("loadConfig", () => {
     }
   });
 
-  it("reads the remote owner and guests, ignoring the retired remote.enabled", () => {
+  it("reads the remote owner and guests, ignoring the retired remote.enabled and remote.peers", () => {
     const root = makeHome();
-    writeConfig(root, { remote: { enabled: true, guests: "none" } });
+    writeConfig(root, { remote: { enabled: true, guests: "none", peers: [{ name: "wife", login: "wife@example.com", ghost: "casper" }] } });
     expect(loadConfig({ env: {}, home: root }).remote).toEqual({ guests: "none", apps: ["https://summonghost.com"] });
   });
 

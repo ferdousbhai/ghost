@@ -27,7 +27,6 @@ import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
-import { messageCommand, peersCommand } from "./peers.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
@@ -211,23 +210,6 @@ export const COMMANDS: readonly Command[] = [
     positionals: [2, 3],
     flags: { value: ["instructions", "thread"] },
     run: eventCommand,
-  },
-  {
-    verb: "peers",
-    usage: "peers [list|invite <name> --share <link> [--from <name>]|accept <invite> [--name <label>]|check|add <name> <login> <url>|rm <name>] [-g <name>] [--json] [-q]",
-    summary: "Pair with other owners' ghosts by invite, check for their messages, or list and remove them.",
-    example: "ghost peers invite wife --share https://login.tailscale.com/admin/invite/… -g casper",
-    positionals: [0, 4],
-    flags: { value: ["share", "from", "name"] },
-    run: peersCommand,
-  },
-  {
-    verb: "message",
-    usage: "message <peer> <text> [--json] [-q]",
-    summary: "Send a peer's ghost a message; it joins the conversation with them.",
-    example: "ghost message wife \"Does Saturday dinner work?\"",
-    positionals: [2, 2],
-    run: messageCommand,
   },
   {
     verb: "remote",

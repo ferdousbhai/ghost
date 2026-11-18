@@ -24,14 +24,17 @@ describe("conversation log reads", () => {
     expect(await readLog(root, "missing")).toBeNull();
   });
 
-  it("skips records it does not write: retired resources, idle handoffs and auto prompts, or a later version's", async () => {
+  it("skips records it does not write: retired resources, idle handoffs, auto prompts and peer mail, or a later version's", async () => {
     const root = await scratch();
     const owner = { type: "user", at: "2026-10-15T00:00:00Z", text: "hello" };
     const retired = { type: "resources", at: "2026-10-15T00:01:00Z", run: "r1", harness: "codex",
       resources: { skills: ["mail"], extensions: [], mcpServers: [] }, supplied: { instructions: [], mcpServers: [] }, summary: "legacy" };
     const handoff = { type: "handoff", at: "2026-10-12T00:00:00Z", harness: "pi", text: "idle reply" };
     const auto = { type: "user", at: "2026-10-12T00:00:00Z", text: "next work", origin: "auto" };
-    await writeFile(logPath(root, "s"), [owner, retired, handoff, auto, { type: "future", at: "later" }].map((line) => `${JSON.stringify(line)}\n`).join(""));
+    const peer = { type: "user", at: "2026-10-30T00:00:00Z", text: "[ghost-peer] wife\n\"hi\"", origin: "peer" };
+    const sent = { type: "sent", at: "2026-10-30T00:01:00Z", peer: "wife", text: "hello back" };
+    const handed = { type: "handed", at: "2026-10-30T00:02:00Z", id: "m1" };
+    await writeFile(logPath(root, "s"), [owner, retired, handoff, auto, peer, sent, handed, { type: "future", at: "later" }].map((line) => `${JSON.stringify(line)}\n`).join(""));
     expect(await readLog(root, "s")).toEqual([owner]);
     expect((await listedLog(root, "s"))?.state).toMatchObject({ activeAt: owner.at, messageCount: 1 });
     expect(await readTranscriptPage(root, "s", 0, 10)).toEqual(transcriptPage([owner as LogEntry]));

@@ -1,5 +1,4 @@
 import { parseExternalEvent } from "./external-events.js";
-import { callPeer, decodeInvite, encodeInvite, newPeerMessageId, parsePeer, parsePeerMessage, parsePeerName, parseShareLink, peerConversationId, suggestedPeerName, type Peer, type PeerBook, type PeerFetch } from "./peers.js";
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -70,12 +69,6 @@ export interface ServerOptions {
   remoteServe?: RemoteServe;
   /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
   streamCutBytes?: number;
-  /** The owner's peers (CONTRACTS.md "Peers"); omitted, there are none and their routes 404. */
-  peers?: PeerBook;
-  /** How a message reaches a peer's daemon; a test stands in for the tailnet. */
-  peerFetch?: PeerFetch;
-  /** When this machine's Tailscale key expires, or null when it does not; omitted, unknown (null). */
-  keyExpiry?: () => Promise<string | null>;
 }
 
 export interface ListeningServer {
@@ -383,10 +376,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }
     const presented = bearerToken(request.headers.authorization);
     const tokenOk = presented !== "" && tokenMatches(apiToken, presented);
-    const path = segments.join("/");
-    // Pairing comes from a login not yet listed, whatever guests may do: a one-time code guards it.
-    const pairing = method === "POST" && path === "api/peer/pair";
-    const identity = tokenOk ? undefined : (await remote?.identify(request, pairing)) ?? undefined;
+    const identity = tokenOk ? undefined : (await remote?.identify(request)) ?? undefined;
     if (!tokenOk && !identity) {
       response.setHeader("www-authenticate", "Bearer");
       errorResponse(
@@ -397,16 +387,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       );
       return null;
     }
-    if (identity?.role === "guest" && method !== "GET" && !pairing) {
+    if (identity?.role === "guest" && method !== "GET") {
       errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
-      return null;
-    }
-    // A peer may deliver messages, collect its own, and ask who it is; nothing else, reads included.
-    const peerRoute = (method === "POST" && path === "api/peer/messages")
-      || (method === "GET" && (path === "api/peer/outbox" || path === "api/remote/whoami"))
-      || (method === "DELETE" && segments.length === 4 && path.startsWith("api/peer/outbox/"));
-    if (identity?.role === "peer" && !peerRoute) {
-      errorResponse(response, 403, "peer_only", "A peer may only deliver and collect messages.");
       return null;
     }
     if ((method === "POST" || method === "PUT") && !isPreflightedContentType(request.headers["content-type"])) {
@@ -724,72 +706,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     return handle(context);
   };
 
-  const requirePeers = (): PeerBook => {
-    if (!options.peers) throw new GhostError("not_found", "This daemon has no peers.", 404);
-    return options.peers;
-  };
-  const keyExpiry = options.keyExpiry ?? (async () => null);
-  /** The listed peer a tailnet request comes from, or a refusal. */
-  const callingPeer = (admission: RequestContext["admission"]): Peer => {
-    const identity = admission.identity;
-    const peer = identity?.role === "peer" ? requirePeers().byLogin(identity.login) : undefined;
-    if (!peer) throw new GhostError("not_a_peer", "Only a listed peer may do this.", 403);
-    return peer;
-  };
-  /**
-   * One peer's part of a check: deliver what waits for them and collect what
-   * waits for this owner when their daemon can be reached, then hand any new
-   * messages to the receiving ghost in a turn.
-   */
-  const checkPeer = async (peer: Peer) => {
-    const book = requirePeers();
-    const result: { name: string; sent: number; received: number; turn: boolean; unreachable?: true; refused?: true; error?: string } = { name: peer.name, sent: 0, received: 0, turn: false };
-    try {
-      if (peer.url) {
-        const call = (method: string, path: string, body?: unknown) => callPeer(peer.name, peer.url ?? "", method, path, body, options.peerFetch);
-        try {
-          for (const queued of book.outbox.list(peer.login)) {
-            try {
-              await call("POST", "/api/peer/messages", { id: queued.id, text: queued.text });
-            } catch (error) {
-              // Past their hour's limit the rest wait here for the next check; theirs can still be collected.
-              if (error instanceof GhostError && error.code === "peer_rate_limited") break;
-              throw error;
-            }
-            await book.outbox.remove(peer.login, queued.id);
-            result.sent += 1;
-          }
-          const waiting = (await call("GET", "/api/peer/outbox")).body;
-          for (const item of isRecord(waiting) && Array.isArray(waiting.messages) ? waiting.messages : []) {
-            const message = parsePeerMessage(isRecord(item) ? item : {});
-            try {
-              if (!(await options.host.receivePeerMessage(peer, message)).duplicate) result.received += 1;
-            } catch (error) {
-              // Past the hour's limit the rest wait in their outbox for the next check.
-              if (error instanceof GhostError && error.code === "peer_rate_limited") break;
-              if (!(error instanceof GhostError && error.code === "peer_conflict")) throw error;
-            }
-            await call("DELETE", `/api/peer/outbox/${encodeURIComponent(message.id)}`);
-          }
-        } catch (error) {
-          // `peer_failed`: their machine answered, their Ghost did not (down, or Remote access off).
-          if (error instanceof GhostError && (error.code === "peer_unreachable" || error.code === "peer_failed")) result.unreachable = true;
-          else if (error instanceof GhostError && error.code === "peer_refused") result.refused = true;
-          else throw error;
-        }
-      }
-      const turn = await options.host.peerTurn(peer);
-      const admission = turn?.admission;
-      if (admission) startTurnLog(peer.ghost, peerConversationId(peer), (emit) => admission.run({ emit }));
-      result.turn = turn !== null;
-    } catch (error) {
-      // Theirs alone: the other peers are still checked, and what this one already did is still reported.
-      result.error = errorMessage(error);
-      options.logger?.warn("peer check failed", { peer: peer.name, error: result.error });
-    }
-    return result;
-  };
-
   const routes: Route<RequestContext>[] = [
     route("GET", "", ({ response }) => {
       response.writeHead(200, {
@@ -811,114 +727,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/remote/whoami", ({ response, admission }) => {
       jsonResponse(response, 200, { role: admission.identity?.role ?? "owner" });
     }),
-    // A peer's message, logged unread for the ghost that receives theirs.
-    route("POST", "api/peer/messages", async ({ admission, body, response }) => {
-      const received = await options.host.receivePeerMessage(callingPeer(admission), parsePeerMessage(await body()));
-      jsonResponse(response, received.duplicate ? 200 : 202, received);
-    }),
-    // What waits here for the calling peer, and its acknowledgement.
-    route("GET", "api/peer/outbox", ({ admission, response }) => {
-      const peer = callingPeer(admission);
-      jsonResponse(response, 200, { messages: requirePeers().outbox.list(peer.login).map(({ id, text }) => ({ id, text })) });
-    }),
-    route("DELETE", "api/peer/outbox/:message", async ({ admission, params, response }) => {
-      const peer = callingPeer(admission);
-      jsonResponse(response, 200, { removed: await requirePeers().outbox.remove(peer.login, params.message ?? "") });
-    }),
-    // Another owner redeeming this owner's invite: listed as a peer by the
-    // login Tailscale verified, receiving into the invite's ghost.
-    route("POST", "api/peer/pair", async ({ admission, body, response }) => {
-      const identity = admission.identity;
-      if (!identity || identity.role === "owner") {
-        throw new GhostError("not_a_peer", "Pairing comes from another owner's machine over Tailscale.", 403);
-      }
-      const code = (await body()).code;
-      const book = requirePeers(), invalid = new GhostError("invalid_invite", "This invite is wrong, already used, or expired.", 403);
-      const invite = typeof code === "string" ? book.invites.find(code) : null;
-      if (typeof code !== "string" || !invite) throw invalid;
-      // Listed first: a name or login already taken refuses this without spending the code.
-      await book.add({ name: invite.name, login: identity.login, ghost: invite.ghost });
-      if (!await book.invites.spend(code)) {
-        await book.remove(invite.name);
-        throw invalid;
-      }
-      jsonResponse(response, 200, { login: (await remote?.ownerLogin()) ?? null });
-    }),
-    route("GET", "api/peers", ownerOnly(async ({ response }) => {
-      const book = requirePeers();
-      jsonResponse(response, 200, {
-        peers: book.list(),
-        invites: book.invites.list().map(({ name, ghost, expiresAt }) => ({ name, ghost, expiresAt })),
-        keyExpiry: await keyExpiry(),
-      });
-    })),
-    route("POST", "api/peers", ownerOnly(async ({ body, response }) => {
-      const peer = parsePeer(await body());
-      options.registry.get(peer.ghost);
-      jsonResponse(response, 200, { peers: await requirePeers().add(peer) });
-    })),
-    route("POST", "api/peers/invites", ownerOnly(async ({ body, response }) => {
-      const input = await body(), book = requirePeers();
-      const url = remoteServe ? (await remoteServe.status()).url : null;
-      if (!url) throw new GhostError("remote_off", "Turn on Remote access first: `ghost remote on`.", 409);
-      const name = parsePeerName(input.name), ghost = options.registry.get(stringField(input, "ghost")).name;
-      if (book.list().some((peer) => peer.name === name)) throw new GhostError("peer_exists", `A peer named ${name} is already listed.`, 409);
-      const from = input.from === undefined ? suggestedPeerName(await remote?.ownerLogin()) : parsePeerName(input.from, "from");
-      const share = parseShareLink(input.share);
-      const code = await book.invites.create(name, ghost);
-      jsonResponse(response, 200, { invite: encodeInvite({ url: new URL(url).origin, share, code, from }), keyExpiry: await keyExpiry() });
-    })),
-    // Redeeming another owner's invite: their daemon lists this owner, this
-    // one lists them.
-    route("POST", "api/peers/accept", ownerOnly(async ({ body, response }) => {
-      const input = await body(), book = requirePeers();
-      const invite = decodeInvite(String(input.invite ?? ""));
-      const name = parsePeerName(input.name ?? invite.from), ghost = options.registry.get(stringField(input, "ghost")).name;
-      if (book.list().some((peer) => peer.name === name)) throw new GhostError("peer_exists", `A peer named ${name} is already listed.`, 409);
-      let answer: Awaited<ReturnType<typeof callPeer>>;
-      try {
-        answer = await callPeer(name, invite.url, "POST", "/api/peer/pair", { code: invite.code }, options.peerFetch);
-      } catch (error) {
-        // Until the share is accepted their machine is out of reach: say which link opens it.
-        if (error instanceof GhostError && error.code === "peer_unreachable") {
-          throw new GhostError("peer_unreachable", `Open ${invite.share} and click Accept, then accept the invite again. (${error.message})`, 502);
-        }
-        throw error;
-      }
-      const login = isRecord(answer.body) && typeof answer.body.login === "string" ? answer.body.login : null;
-      if (!login) throw new GhostError("peer_failed", `${name}'s Ghost paired but did not say who it is.`, 502);
-      const paired = login.toLowerCase();
-      jsonResponse(response, 200, {
-        peers: book.byLogin(paired) ? await book.relist(paired, invite.url, ghost) : await book.add({ name, login: paired, url: invite.url, ghost }),
-      });
-    })),
-    route("POST", "api/peers/check", ownerOnly(async ({ response }) => {
-      const results = [];
-      for (const peer of requirePeers().list()) results.push(await checkPeer(peer));
-      jsonResponse(response, 200, { peers: results, keyExpiry: await keyExpiry() });
-    })),
-    route("DELETE", "api/peers/:name", ownerOnly(async ({ params, response }) => {
-      jsonResponse(response, 200, { peers: await requirePeers().remove(params.name ?? "") });
-    })),
-    // This owner's ghost messaging a peer: queued, delivered now if their
-    // daemon answers, and logged in the conversation with them.
-    route("POST", "api/peers/:name/messages", ownerOnly(async ({ params, body, response }) => {
-      const book = requirePeers(), peer = book.get(params.name ?? "");
-      const message = parsePeerMessage({ id: newPeerMessageId(), text: (await body()).text });
-      let delivered = false;
-      if (peer.url) {
-        try {
-          await callPeer(peer.name, peer.url, "POST", "/api/peer/messages", message, options.peerFetch);
-          delivered = true;
-        } catch (error) {
-          // Away, failing, or full for the hour: it waits for a check. A refusal does not.
-          if (!(error instanceof GhostError) || error.code === "peer_refused" || error.code === "peer_conflict") throw error;
-        }
-      }
-      if (!delivered) await book.outbox.add(peer.login, message);
-      await options.host.recordSentMessage(peer, message.text);
-      jsonResponse(response, 200, { delivered });
-    })),
     // The viewer's URL, or with `?for=app` the app link adding this machine.
     route("GET", "api/remote/qr.svg", async ({ response, url: request }) => {
       const app = request.searchParams.get("for") === "app";

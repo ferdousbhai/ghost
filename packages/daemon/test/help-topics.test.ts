@@ -25,7 +25,7 @@ describe("ghost help products", () => {
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers", "browser", "products"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });

@@ -348,8 +348,8 @@ describe("a web app in remote.apps", () => {
     expect(local.headers.get("access-control-allow-private-network")).toBeNull();
   });
 
-  it("keeps guests read-only and peers to their routes", async () => {
-    const base = await serve({ isPeer: (login) => login === "peer@example.com" }, undefined, undefined, [APP]);
+  it("keeps a guest calling through the app read-only", async () => {
+    const base = await serve({}, undefined, undefined, [APP]);
     expect((await fetch(`${base}/api/ghosts`, { headers: fromApp("guest@example.com") })).status).toBe(200);
     const write = await fetch(`${base}/api/ghosts`, {
       method: "POST",
@@ -357,8 +357,6 @@ describe("a web app in remote.apps", () => {
       body: JSON.stringify({ name: "wraith" }),
     });
     expect(await write.json()).toMatchObject({ error: { code: "read_only" } });
-    const peer = await fetch(`${base}/api/ghosts`, { headers: fromApp("peer@example.com") });
-    expect(await peer.json()).toMatchObject({ error: { code: "peer_only" } });
   });
 
   it("is an ordinary foreign origin when not listed, or when remote.apps is empty", async () => {

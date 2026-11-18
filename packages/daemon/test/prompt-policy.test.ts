@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HELP_TOPICS } from "../src/help-topics.js";
-import { renderGhostPolicy, renderOwnerContextPolicy } from "../src/prompt-policy.js";
+import { GHOST_POLICY, renderOwnerContextPolicy } from "../src/prompt-policy.js";
 
 describe("owner context policy", () => {
   it("names the owner's documents directory and keeps skill paths out of the policy", () => {
@@ -14,19 +14,14 @@ describe("owner context policy", () => {
 
 describe("the Ghost section", () => {
   it("keeps asking the owner in the prompt", () => {
-    const policy = renderGhostPolicy();
+    const policy = GHOST_POLICY;
     expect(policy).toContain("`ghost ask");
     expect(policy).toContain("then end your turn");
   });
 
   it("indexes every `ghost help` topic by name, so the CLI is the documentation", () => {
-    const policy = renderGhostPolicy();
+    const policy = GHOST_POLICY;
     expect(policy).toContain("`ghost help <topic>`");
     expect(HELP_TOPICS.filter((topic) => !new RegExp(`\\b${topic}\\b`, "u").test(policy))).toEqual([]);
-  });
-
-  it("warns, only when it is near, that the Tailscale key will cut the peers off", () => {
-    expect(renderGhostPolicy("2027-04-11")).toContain("Tailscale key expires 2027-04-11");
-    expect(renderGhostPolicy()).not.toContain("expires");
   });
 });

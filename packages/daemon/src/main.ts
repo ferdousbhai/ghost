@@ -2,10 +2,9 @@
 import { apiTokenCommand } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readTailscaleNode, RemoteAccess } from "./tailscale-identity.js";
-import { xdgBaseDir } from "./xdg-user-dirs.js";
+import { RemoteAccess } from "./tailscale-identity.js";
 import {
   loadConfig,
   type DaemonConfig,
@@ -21,7 +20,6 @@ import { LocalModel } from "./local-model.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
-import { PeerBook } from "./peers.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
@@ -206,15 +204,6 @@ async function serveDaemon(
   registry.ensureRoot();
 
   const remoteServe = new RemoteServe(config.port, config.remote);
-  const peers = new PeerBook(config.configPath, config.remote.peers ?? [], join(xdgBaseDir(process.env, "XDG_STATE_HOME", ownerHome), "ghost"));
-  // `tailscale status` is a subprocess: asked at most hourly for the key's expiry.
-  let keyCache: { at: number; value: Promise<string | null> } | null = null;
-  const keyExpiry = (): Promise<string | null> => {
-    if (!keyCache || Date.now() - keyCache.at > 3_600_000) {
-      keyCache = { at: Date.now(), value: readTailscaleNode().then((node) => node.keyExpiry, () => null) };
-    }
-    return keyCache.value;
-  };
   const host = new SessionHost({
     registry,
     ownerHome,
@@ -222,8 +211,6 @@ async function serveDaemon(
     viewerUrl: async () => (await remoteServe.status()).url,
     logger,
     hooks,
-    peers,
-    keyExpiry,
     localModel: config.local ? new LocalModel(config.local, logger.child({ part: "local-model" })) : null,
   });
   const mcp = new McpCatalog({ registry });
@@ -239,11 +226,9 @@ async function serveDaemon(
       logger,
       port: config.port,
       address: config.host,
-      remote: new RemoteAccess({ ...config.remote, isPeer: (login) => peers.byLogin(login) !== undefined }),
+      remote: new RemoteAccess(config.remote),
       remoteApps: config.remote.apps,
       remoteServe,
-      peers,
-      keyExpiry,
     });
   } catch (error) {
     logger.error("could not bind", {
