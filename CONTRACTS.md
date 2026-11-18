@@ -51,7 +51,7 @@ hard-coded path. It is persistent owner context, not a Ghost-owned store: Ghost
 neither indexes it nor injects any part of it, and the system prompt only names
 the directory. A ghost searches it on demand, as a task needs
 (`ghost help memory`). Recall, an optional product of its own
-(`ghost-products`), may index folders the owner selects; its hits are derived,
+(`ghost help products`), may index folders the owner selects; its hits are derived,
 possibly stale candidates, and the source file is authoritative. While
 `recall` is on the daemon's PATH (checked each turn), the prompt also names
 `recall search` as the first lookup for things whose words or place are
@@ -421,7 +421,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ```text
 ~/ghosts/<name>/
   character.md
-  skills/<name>/SKILL.md
   settings.yml         (`harness: <id>` prefers one harness)
   mcp.json
   sessions/<id>/       (one directory per conversation)
@@ -441,8 +440,7 @@ The checkout a ghost may edit is the clone the daemon was built from
 (`GET /api/status` `source.root`), and it is the same for every ghost on the
 machine: one daemon powers them all, so a self-edit powers all of them after a
 build and restart. A packaged install has no checkout. No per-ghost setting
-names one; the checkout's own rules and MCP never enter a session, and of its
-skills only the shipped `skills/` do (see "Ghost-home resources").
+names one; the checkout's own rules, MCP, and skills never enter a session.
 `settings.yml` names no cwd: every conversation runs in its own directory.
 
 ### Character and notes
@@ -465,17 +463,14 @@ runs no memory maintenance of its own.
 ### Ghost-home resources
 
 `character.md` is the one persona file, the owner's instructions for this
-ghost included; there is no ghost-home `AGENTS.md`. Each conversation directory
-gets `.claude/skills` and `.agents/skills`, where harnesses look for project
-skills, holding one link per skill: the skills Ghost ships (the repository's
-`skills/`, installed at `/usr/lib/ghost/skills`; a checkout links its own), then
-the ghost's `skills/`, which wins on a shared name. Links are refreshed every
-turn, so an upgrade or a removed skill takes effect on the next one. Ghost ships
-only skills no product ships itself: `ghost-products` indexes the recommended
-products, each of which installs its own skill. `web-browser` adds the
-owner-wide session and task-tab locking recipe to agent-browser's own guide.
-Machine skills are whatever
-each harness discovers itself. `mcp.json`
+ghost included; there is no ghost-home `AGENTS.md`. Ghost has no skills of
+its own and links none into a conversation: the `ghost` CLI is a ghost's
+documentation (`ghost help products` indexes the recommended products, each of
+which installs its own skill; `ghost help browser` adds the owner-wide session
+and task-tab locking recipe to agent-browser's own skills), and skills are
+whatever each harness discovers itself, the owner's included. A conversation
+directory's `.claude/skills` and `.agents/skills` lose, on its next turn, the
+links earlier versions put there. `mcp.json`
 rows that are enabled and valid are handed to the harness each turn (see
 "Harnesses"). A ghost home carries no executable extension code; the only
 hooks are the owner's `hooks.json` commands. Nothing is discovered from any
@@ -1013,7 +1008,7 @@ runtime preserves owner data.
   is desktop control for any agent: the `computer-use` CLI (`look`, which
   never changes the desktop, and `act`, ordered steps) and the skill it
   installs (`computer-use skill install`). It is a separate product with its
-  own version, listed in `ghost-products`; Ghost neither bundles nor calls
+  own version, listed in `ghost help products`; Ghost neither bundles nor calls
   it. What a ghost relies on is its skill: JSON arguments, screenshots
   printed as file paths, the untrusted-content fence, and errors written for
   the agent. Without it a ghost has no desktop control.
@@ -1043,7 +1038,7 @@ one owner-wide `flock`. Tab selection invalidates snapshot refs; separate
 operations use semantic or CSS selectors. Ref-based sequences hold the lock
 from selection and snapshot through action without reselecting. Tabs and CLI
 state survive Ghost restarts, rename and deletion; explicitly close a task's tabs when finished, never the owner's
-browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
+browser. Setup and recovery are in `ghost help browser`.
 
 ### Local model
 

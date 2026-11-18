@@ -27,7 +27,8 @@ export function renderGhostPolicy(keyExpiresOn: string | null = null): string {
       + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
       + "work (harnesses), work outliving this turn (background), clock work (timers), external events "
       + "(events), reaching the owner away (notifications), peers, heat or a full disk (machine), "
-      + "crashes, notes (memory), audio (dictation), changing or restarting yourself (self). "
+      + "crashes, notes (memory), audio (dictation), a website (browser), getting or fixing one of "
+      + "the owner's products (products), changing or restarting yourself (self). "
       + "`ghost --help` lists every command.",
     ...(keyExpiresOn
       ? [`This machine's Tailscale key expires ${keyExpiresOn}, which cuts off its peers: tell your owner to sign in again or disable its key expiry.`]

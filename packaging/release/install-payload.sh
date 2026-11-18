@@ -48,9 +48,6 @@ if [[ "$component" == runtime ]]; then
     "$pkgdir/usr/lib/systemd/user/ghostd.service"
   install -Dm755 "$source_root/packaging/arch/service-smoke.sh" \
     "$pkgdir/usr/lib/ghost/package-smoke/service-smoke.sh"
-  # Skills Ghost ships; ghostd links them into every conversation directory.
-  install_tree "$source_root/skills" "$appdir/skills"
-
   install -Dm644 "$source_root/packaging/arch/README.md" \
     "$pkgdir/usr/share/doc/ghost/ARCH.md"
   install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"

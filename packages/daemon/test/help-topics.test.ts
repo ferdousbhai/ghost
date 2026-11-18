@@ -3,13 +3,29 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PRODUCTS } from "../src/help-guides.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../src/help-topics.js";
 
 const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", cliPath: "/usr/bin/ghost" };
 
+describe("ghost help products", () => {
+  it("tables every product but Ghost, each saying how to get it, and each section it points at exists", () => {
+    const text = renderHelpTopic("products", { ghostName: undefined, unitDir: "/u", cliPath: "ghost" });
+    for (const product of PRODUCTS) {
+      if (product.host) {
+        expect(text, product.name).not.toContain(`[${product.name}](`);
+        continue;
+      }
+      expect(text, product.name).toContain(`[${product.name}](${product.source})`);
+      expect(product.install ?? product.section, product.name).toBeDefined();
+      if (product.section) expect(text, product.name).toContain(`\n## ${product.section}\n`);
+    }
+  });
+});
+
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers", "browser", "products"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });

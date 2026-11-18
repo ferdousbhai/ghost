@@ -7,9 +7,10 @@
  * text is still contract text the ghost acts on: keep it exact, and keep the
  * index in step (prompt-policy.test.ts checks).
  */
+import { BROWSER_LINES, productsLines } from "./help-guides.js";
 import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "peers", "browser", "products"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -286,7 +287,7 @@ function memory(): string[] {
     "# Memory",
     "Your durable memory is the owner's documents directory (Owner context): Markdown in its existing project and topic folders, with `board.md` at its root. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
     "Known names or terms: guess the folder from its name, then `rg -n -i '<term>' <folder>`, widening to the whole directory only if that finds nothing.",
-    "Unknown wording or location: search by meaning with Recall through its `recall` skill (the `ghost-products` skill gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
+    "Unknown wording or location: search by meaning with Recall through its `recall` skill (`ghost help products` gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
     "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
     "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the existing folder it belongs to, updating the note that covers it and dating what you add; start a folder only for a new project or topic.",
@@ -385,6 +386,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, peers: () => peers(input) }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, peers: () => peers(input), browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
   return `${lines.join("\n")}\n`;
 }

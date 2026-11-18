@@ -69,11 +69,3 @@ export function replacedSinceStart(running: RunningSource): boolean {
     return true;
   }
 }
-
-/** Where the package installs the skills Ghost ships. */
-const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
-
-/** The skills Ghost ships: the checkout's `skills/`, else the package's. */
-export function bundledSkillsDir(running: RunningSource): string {
-  return running.root === null ? PACKAGED_SKILLS : join(running.root, "skills");
-}

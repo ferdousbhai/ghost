@@ -80,10 +80,9 @@ upstream as the desktop user; the upstream installer then owns its files and
 updates. Many MCP servers are launched through `npx`, which the optional `npm`
 package provides.
 
-The package ships Ghost's own skills under `/usr/lib/ghost/skills`, linked into
-every conversation directory with the ghost's own skills: `ghost-products`
-indexes the recommended products; `web-browser` teaches shared Chromium
-sessions and task tabs. Each product installs its own skill
+The package ships no skills: the `ghost` CLI is a ghost's documentation
+(`ghost help products` indexes the recommended products, `ghost help browser`
+the shared Chromium session and task tabs). Each product installs its own skill
 (`<cli> skill install`). Machine skills are whatever each agent CLI discovers on
 its own.
 

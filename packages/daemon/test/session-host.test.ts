@@ -3,7 +3,7 @@
  * (persona, cwd, env, resume, MCP), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
-import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
@@ -338,7 +338,6 @@ describe("harness choice", () => {
   it("hands the log to the harness again after a home rename moves the conversation", async () => {
     const fake = harness(replies("I am Casper.", "Still here."));
     const sessions = host({ harnesses: [fake] });
-    mkdirSync(join(temp.root, "casper", "skills", "mail"), { recursive: true });
     await turn(sessions, "Who are you?");
     await sessions.renameGhost("casper", "wisp");
     const events: TurnEvent[] = [];
@@ -348,30 +347,20 @@ describe("harness choice", () => {
     expect(second?.resume).toBe(false);
     expect(second?.cwd).toBe(conversationDir(ghostPaths(join(temp.root, "wisp")).sessionDir, "c1"));
     expect(second?.prompt).toContain("Owner: Who are you?");
-    expect(readlinkSync(join(second?.cwd ?? "", ".claude", "skills", "mail"))).toBe(join(temp.root, "wisp", "skills", "mail"));
   });
 
-  it("links Ghost's bundled skills and the ghost's own into each conversation, the ghost's winning", async () => {
-    const shipped = tempDir();
-    const bundled = shipped.path;
-    mkdirSync(join(bundled, "ghost-products"), { recursive: true });
-    mkdirSync(join(bundled, "mail"), { recursive: true });
+  it("links no skills into a conversation, and takes away the links earlier versions made", async () => {
     const fake = harness(replies("one", "two"));
-    const sessions = host({ harnesses: [fake], bundledSkills: bundled });
-    mkdirSync(join(temp.root, "casper", "skills", "mail"), { recursive: true });
+    const sessions = host({ harnesses: [fake] });
     await turn(sessions, "hi");
     const cwd = fake.calls()[0]?.cwd ?? "";
-    for (const root of [".claude", ".agents"]) {
-      expect(readlinkSync(join(cwd, root, "skills", "ghost-products"))).toBe(join(bundled, "ghost-products"));
-      expect(readlinkSync(join(cwd, root, "skills", "mail"))).toBe(join(temp.root, "casper", "skills", "mail"));
-    }
-    // A skill removed from the ghost's home leaves the conversation on the next turn.
-    rmSync(join(temp.root, "casper", "skills", "mail"), { recursive: true });
-    rmSync(join(bundled, "mail"), { recursive: true });
+    expect(existsSync(join(cwd, ".claude", "skills"))).toBe(false);
+    mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
+    symlinkSync("/usr/lib/ghost/skills/web-browser", join(cwd, ".agents", "skills", "web-browser"));
+    writeFileSync(join(cwd, ".agents", "skills", "notes.md"), "the owner's");
     await sessions.runTurn("casper", { sessionId: "c1", prompt: "again", emit: () => {} });
-    expect(existsSync(join(cwd, ".agents", "skills", "mail"))).toBe(false);
-    expect(existsSync(join(cwd, ".agents", "skills", "ghost-products"))).toBe(true);
-    shipped.cleanup();
+    expect(existsSync(join(cwd, ".agents", "skills", "web-browser"))).toBe(false);
+    expect(readFileSync(join(cwd, ".agents", "skills", "notes.md"), "utf8")).toBe("the owner's");
   });
 
   it("prefers the ghost's harness setting over Omarchy's order", async () => {

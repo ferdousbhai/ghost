@@ -57,9 +57,9 @@ rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
 
 ### Product skills through Bash
 
-Nothing to install: every conversation already has Ghost's product index,
-[`skills/ghost-products`](../skills/ghost-products/SKILL.md). It lists the
-recommended products; the ghost installs a product when needed, and the product installs its own skill
+Nothing to install: a ghost reads the product index with `ghost help
+products`. It lists the recommended products; the ghost installs a product
+when needed, and the product installs its own skill
 (`<cli> skill install`). Ghost uses
 these product CLIs through the harness's Bash/shell tool and native skill
 discovery; no additional daemon integration or MCP server is needed.
@@ -69,10 +69,9 @@ accounts. The owner completes sign-in windows and keeps passwords/recovery keys
 out of chat. Installing a package does not authorize sending messages, changing
 mail routing, or restoring/syncing files.
 
-Start a fresh harness session after installing a skill. For ghost-specific
-skills, link them under `~/ghosts/<name>/skills/`; Ghost exposes that directory
-as project skills in each conversation. Source checkouts are never loaded into
-a conversation automatically. No daemon restart is needed.
+Start a fresh harness session after installing a skill. A ghost sees the
+same skills your agents do; Ghost adds none of its own. Source checkouts are
+never loaded into a conversation automatically. No daemon restart is needed.
 
 ## 2. Where shared notes go
 
@@ -215,7 +214,7 @@ machine: once `local.model` in `~/.config/ghost/config.json` names a GGUF
 file, Ghost runs it itself as the `local` agent and new conversations start
 there, so your notes, chats, mail and files stay on the computer; it hands
 other work to the agents above. What to install for it, and the alternatives,
-are in [Running locally](../skills/ghost-products/SKILL.md#running-locally).
+are in `ghost help products`, under "Running locally".
 For the hard questions, a ghost
 also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
 
@@ -336,8 +335,7 @@ and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
 
-- **Use websites.** Install agent-browser and follow the shipped
-  [web-browser skill](../skills/web-browser/SKILL.md) for signed-in Chromium
+- **Use websites.** Install agent-browser; `ghost help browser` covers signed-in Chromium
   setup, shared-session tab locking, and cleanup.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
   Install → AI → Dictation, which sets up Voxtype). With the composer focused,

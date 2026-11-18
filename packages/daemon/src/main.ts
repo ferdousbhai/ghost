@@ -19,7 +19,7 @@ import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { LocalModel } from "./local-model.js";
 import { McpCatalog } from "./mcp-catalog.js";
-import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
+import { resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
 import { PeerBook } from "./peers.js";
 import { RemoteServe } from "./remote-serve.js";
@@ -219,7 +219,6 @@ async function serveDaemon(
     registry,
     ownerHome,
     scheduleUnitDir,
-    bundledSkills: bundledSkillsDir(runningSource),
     viewerUrl: async () => (await remoteServe.status()).url,
     logger,
     hooks,
