@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -85,6 +85,7 @@ describe("file work during whole-home moves", () => {
     listening = await startDaemonServer({
       registry: temp.registry,
       host,
+      ...serverServices(temp.registry),
       mcp,
       port: 0,
       apiToken: null,

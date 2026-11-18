@@ -39,7 +39,7 @@ export interface ServerOptions {
   host: SessionHost;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
-  mcp?: McpCatalog;
+  mcp: McpCatalog;
   hooks?: Pick<GhostHookRunner, "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
@@ -64,8 +64,8 @@ export interface ServerOptions {
    * tailnet identity only, never the bearer token; omitted, none.
    */
   remoteApps?: readonly string[];
-  /** Owns the Tailscale Serve exposure and its QR code; omitted, the `/api/remote` routes 404. */
-  remoteServe?: RemoteServe;
+  /** Owns the Tailscale Serve exposure and its QR code. */
+  remoteServe: RemoteServe;
   /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
   streamCutBytes?: number;
 }
@@ -329,7 +329,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const liveStreams = new Set<ServerResponse>();
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
-  const remoteServe = options.remoteServe;
+  const { mcp, remoteServe } = options;
   const remoteApps = new Set(options.remoteApps ?? []);
   const streamCutBytes = options.streamCutBytes ?? DEFAULT_STREAM_CUT_BYTES;
   const turnLogs = new Map<string, TurnLog>();
@@ -676,14 +676,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     await followTurn(request, response, log, from);
   };
 
-  const requireMcp = (): McpCatalog => {
-    if (!options.mcp) throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
-    return options.mcp;
-  };
-  const requireRemoteServe = (): RemoteServe => {
-    if (!remoteServe) throw new GhostError("not_found", "Remote access is not available.", 404);
-    return remoteServe;
-  };
   const isGuest = (context: RequestContext): boolean => context.admission.identity?.role === "guest";
   /** A route a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. */
   const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
@@ -699,8 +691,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     // The app link adding this machine.
     route("GET", "api/remote/qr.svg", async ({ response }) => {
-      const url = remoteServe ? (await remoteServe.status()).app?.url : null;
-      if (!remoteServe || !url) {
+      const url = (await remoteServe.status()).app?.url;
+      if (!url) {
         throw new GhostError("not_found", "Remote access is off, or remote.apps names no app.", 404);
       }
       const svg = await remoteServe.qrSvg(url);
@@ -712,14 +704,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       response.end(svg);
     }),
     route("GET", "api/remote/machines", ownerOnly(async ({ response }) => {
-      jsonResponse(response, 200, { machines: await requireRemoteServe().machines() });
+      jsonResponse(response, 200, { machines: await remoteServe.machines() });
     })),
     route("GET", "api/remote", async ({ response }) => {
-      jsonResponse(response, 200, await requireRemoteServe().status());
+      jsonResponse(response, 200, await remoteServe.status());
     }),
     route("POST", "api/remote", async ({ response, body }) => {
-      const remote = requireRemoteServe();
-      jsonResponse(response, 200, await (booleanField(await body(), "enabled") ? remote.enable() : remote.disable()));
+      jsonResponse(response, 200, await (booleanField(await body(), "enabled") ? remoteServe.enable() : remoteServe.disable()));
     }),
     route("GET PUT", "api/hooks/config", ownerOnly(handleHookConfig)),
     route("GET", "api/status", ownerOnly(({ response }) => {
@@ -859,26 +850,21 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, await options.host.queueMessage(ghost, id, text.trim()));
     }),
     route("GET", "api/ghosts/:ghost/mcp", ownerOnly(async ({ ghost, response }) => {
-      const mcp = requireMcp();
       jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.listLeased(ghost)));
     })),
     route("POST", "api/ghosts/:ghost/mcp", async ({ ghost, response, body }) => {
-      const mcp = requireMcp();
       const document = await body();
       const name = stringField(document, "name");
       jsonResponse(response, 201, await options.host.withGhost(ghost, () => mcp.addLeased(ghost, name, document.config)));
     }),
     route("PUT", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response, body }) => {
-      const mcp = requireMcp();
       const { config } = await body();
       jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.updateLeased(ghost, params.server ?? "", config)));
     }),
     route("DELETE", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response }) => {
-      const mcp = requireMcp();
       jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.removeLeased(ghost, params.server ?? "")));
     }),
     route("PUT", "api/ghosts/:ghost/mcp/:server/enabled", async ({ ghost, params, response, body }) => {
-      const mcp = requireMcp();
       const enabled = booleanField(await body(), "enabled");
       jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.setEnabledLeased(ghost, params.server ?? "", enabled)));
     }),

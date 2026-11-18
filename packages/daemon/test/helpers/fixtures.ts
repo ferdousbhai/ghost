@@ -7,9 +7,11 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
+import { RemoteServe } from "../../src/remote-serve.js";
 import type { TurnEvent } from "../../src/turn-events.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
+import { fakeTailscale } from "./fake-tailscale.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./fake-harness.js";
 
 export interface TempGhosts {
@@ -109,7 +111,7 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    mcp: new McpCatalog({ registry: temp.registry }),
+    ...serverServices(temp.registry),
     apiToken,
     port: 0,
   });
@@ -155,4 +157,9 @@ export function parseSseStream(body: string): TurnEvent[] {
 export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): void } {
   const path = mkdtempSync(join(tmpdir(), prefix));
   return { path, cleanup: () => rmSync(path, { recursive: true, force: true }) };
+}
+
+/** The services every daemon server holds, with Serve answered by a fake `tailscale` so no test reaches the real one. */
+export function serverServices(registry: GhostRegistry): { mcp: McpCatalog; remoteServe: RemoteServe } {
+  return { mcp: new McpCatalog({ registry }), remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }) };
 }

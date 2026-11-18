@@ -24,7 +24,7 @@ import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
 import type { TurnEvent } from "../../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, type FakeHarness, type FakeTurn } from "../helpers/fake-harness.js";
-import { seedGhost } from "../helpers/fixtures.js";
+import { seedGhost, serverServices } from "../helpers/fixtures.js";
 
 const API_TOKEN = "a".repeat(64);
 const DEFAULT_WAIT_MS = 5_000;
@@ -293,6 +293,7 @@ export async function startRealDaemonHarness(
     listening = await startDaemonServer({
       registry,
       host,
+      ...serverServices(registry),
       mcp,
       port: 0,
       apiToken: API_TOKEN,

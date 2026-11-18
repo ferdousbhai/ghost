@@ -7,7 +7,7 @@ import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteAccess, type CommandRunner } from "../src/tailscale-identity.js";
 import { runCli } from "./helpers/cli.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts;
@@ -157,7 +157,7 @@ describe("systemd routine inspection and controls", () => {
     const unitDir = await setup(), calls: string[][] = [];
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
       scheduleCommandRunner: manager(calls), scheduleVerifyRunner: async () => ok, scheduleJournalRunner: async () => ({ ...ok, stdout: "Finished routine" }), env: { ...process.env } });
-    server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token",
+    server = await startDaemonServer({ registry: temp.registry, host, ...serverServices(temp.registry), port: 0, apiToken: "test-token",
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
     const path = `http://127.0.0.1:${server.port}/api/ghosts/casper/routines`;
     const owner = { "tailscale-user-login": "owner@example.com", "content-type": "application/json" };

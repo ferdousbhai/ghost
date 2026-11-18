@@ -27,7 +27,7 @@ import {
 import { TurnBuffer } from "../src/turn-buffer.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
-import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts | null = null;
@@ -79,6 +79,7 @@ async function serve(
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    ...serverServices(temp.registry),
     mcp,
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.

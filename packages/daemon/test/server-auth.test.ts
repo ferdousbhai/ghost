@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 const TOKEN = "a".repeat(64);
@@ -40,6 +40,7 @@ async function serve(apiToken: string | null = TOKEN): Promise<string> {
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    ...serverServices(temp.registry),
     port: 0,
     apiToken,
   });

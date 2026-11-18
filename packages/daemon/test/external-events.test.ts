@@ -9,7 +9,7 @@ import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteAccess } from "../src/tailscale-identity.js";
 import { appendLog, logState, newConversationEntry, readLog, type LogEntry } from "../src/conversation-log.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { runCli } from "./helpers/cli.js";
 let temp: TempGhosts;
@@ -24,7 +24,7 @@ async function serve(turns: FakeTurn[] = replies("Handled event"), eventRetryDel
 }
 async function restart(eventRetryDelays?: number[]) {
   host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(harness!), ...(eventRetryDelays ? { eventRetryDelays } : {}) });
-  server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token", remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
+  server = await startDaemonServer({ registry: temp.registry, host, ...serverServices(temp.registry), port: 0, apiToken: "test-token", remote: new RemoteAccess({ selfLogin: async () => "owner@example.com", guests: "read-only" }) });
   return `http://127.0.0.1:${server.port}/api/ghosts/casper`;
 }
 async function post(base: string, input: unknown = event) { return fetch(`${base}/events`, { method: "POST", headers, body: JSON.stringify(input) }); }

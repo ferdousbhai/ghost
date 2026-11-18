@@ -4,7 +4,7 @@ import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
 import { SessionHost } from "../src/session-host.js";
 import type { RunningSource } from "../src/running-source.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fakeHarness, onlyHarnesses, replies } from "./helpers/fake-harness.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { fakeTailscale, missingBinary } from "./helpers/fake-tailscale.js";
@@ -36,6 +36,7 @@ async function serve(
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    ...serverServices(temp.registry),
     port: 0,
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", guests: "read-only", ...remote }),
@@ -275,10 +276,10 @@ describe("remote management", () => {
     expect(await qr.text()).toContain(`${APP}/#add=ghostbox.example.ts.net`);
   });
 
-  it("has no remote routes on a server built without a RemoteServe", async () => {
+  it("has no QR code while Serve is off", async () => {
     const base = await serve();
     const headers = { authorization: `Bearer ${TOKEN}` };
-    expect((await fetch(`${base}/api/remote`, { headers })).status).toBe(404);
+    expect((await fetch(`${base}/api/remote`, { headers })).status).toBe(200);
     expect((await fetch(`${base}/api/remote/qr.svg`, { headers })).status).toBe(404);
   });
 });
@@ -362,7 +363,7 @@ describe("the summonghost.com app's routes", () => {
     seedGhost(temp.root, { name: "casper" });
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(fakeHarness(replies("hello"))) });
     listening = await startDaemonServer({
-      registry: temp.registry, host, port: 0, apiToken: TOKEN,
+      registry: temp.registry, host, ...serverServices(temp.registry), port: 0, apiToken: TOKEN,
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }),
       remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
       remoteApps: [APP],

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
-import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 
 let temp: TempGhosts | null = null;
@@ -36,6 +36,7 @@ async function setup(streamCutBytes?: number): Promise<string> {
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
+    ...serverServices(temp.registry),
     port: 0,
     apiToken: null,
     streamCutBytes,
