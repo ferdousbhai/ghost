@@ -73,23 +73,15 @@ Singleton {
                     && typeof body.problem.message === "string"));
     }
 
-    /** Adopt a status; each QR code is fetched once per URL. */
+    /** Adopt a status; the app link's QR code is fetched once per link. */
     function applyRemoteStatus(body: var): bool {
         if (!root.validRemoteStatus(body)) return false;
-        const urlBefore = root.remoteUrl;
         const appUrlBefore = root.remoteAppUrl;
         root.remoteStatus = body;
         root.remoteError = "";
-        if (root.remoteUrl !== urlBefore) root.clearRemoteQr();
         if (root.remoteAppUrl !== appUrlBefore) root.clearRemoteAppQr();
-        if (root.remoteUrl !== "" && root.remoteQrSource === "") root.fetchRemoteQr();
         if (root.remoteAppUrl !== "" && root.remoteAppQrSource === "") root.fetchRemoteAppQr();
         return true;
-    }
-
-    function clearRemoteQr(): void {
-        root.retire(root, "remoteQrRequest");
-        root.remoteQrSource = "";
     }
 
     function clearRemoteAppQr(): void {
@@ -101,36 +93,26 @@ Singleton {
         root.retire(root, "remoteRequest");
         root.remoteLoading = false;
         root.remoteMutating = false;
-        root.clearRemoteQr();
         root.clearRemoteAppQr();
     }
 
-    function fetchRemoteQr(): void {
-        root.fetchQr("remoteQrRequest", "remoteQrSource", "remoteUrl", "/api/remote/qr.svg");
-    }
-
+    /** The app link's QR code, for the link as it was asked. */
     function fetchRemoteAppQr(): void {
-        root.fetchQr("remoteAppQrRequest", "remoteAppQrSource", "remoteAppUrl", "/api/remote/qr.svg?for=app");
-    }
-
-    /** One QR code into `source`, for the URL in `urlProperty` as it was asked. */
-    function fetchQr(slot: string, source: string, urlProperty: string, path: string): void {
-        const expectedUrl = root[urlProperty];
+        const expectedUrl = root.remoteAppUrl;
         if (expectedUrl === "") {
-            root.retire(root, slot);
-            root[source] = "";
+            root.clearRemoteAppQr();
             return;
         }
-        if (root[slot]) return;
-        root.request(root, slot, "GET", path, null, function (xhr) {
-            if (root[urlProperty] !== expectedUrl) return;
+        if (root.remoteAppQrRequest) return;
+        root.request(root, "remoteAppQrRequest", "GET", "/api/remote/qr.svg", null, function (xhr) {
+            if (root.remoteAppUrl !== expectedUrl) return;
             const svg = String(xhr.responseText || "");
             if (xhr.status !== 200)
                 root.remoteError = root.describeError(xhr, "GET remote-access QR code");
             else if (svg.indexOf("<svg") < 0)
                 root.remoteError = "ghostd sent malformed remote-access QR code";
             else
-                root[source] = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+                root.remoteAppQrSource = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
         });
     }
 
@@ -254,20 +236,16 @@ Singleton {
 
     /** The daemon's RemoteStatus, `{}` until read. */
     property var remoteStatus: ({})
-    /** The tailnet URL while remote access is on, else "". */
-    readonly property string remoteUrl: typeof root.remoteStatus.url === "string" ? root.remoteStatus.url : ""
     property bool remoteLoading: false
     property bool remoteMutating: false
     property string remoteError: ""
-    /** Authenticated SVG responses become a data URL for QML's Image, whose
-        network loader cannot attach the bearer header itself. */
-    property string remoteQrSource: ""
-    readonly property bool remoteQrLoading: root.remoteQrRequest !== null
     /** `app`: the first `remote.apps` origin, and its link adding this machine ("" until Serve is on HTTPS). */
     readonly property string remoteAppOrigin: root.remoteStatus.app && typeof root.remoteStatus.app.origin === "string"
         ? root.remoteStatus.app.origin : ""
     readonly property string remoteAppUrl: root.remoteStatus.app && typeof root.remoteStatus.app.url === "string"
         ? root.remoteStatus.app.url : ""
+    /** The authenticated SVG response becomes a data URL for QML's Image, whose
+        network loader cannot attach the bearer header itself. */
     property string remoteAppQrSource: ""
     readonly property bool remoteAppQrLoading: root.remoteAppQrRequest !== null
 
@@ -388,7 +366,6 @@ Singleton {
     property var characterRequest: null
     property var characterWriteRequest: null
     property var remoteRequest: null
-    property var remoteQrRequest: null
     property var remoteAppQrRequest: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null

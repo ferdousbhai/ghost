@@ -1,8 +1,8 @@
 pragma ComponentBehavior: Bound
 
-// Machine-global Tailscale Serve access. The daemon owns setup and persisted
-// intent; this surface only shows its exact state and asks it to flip the one
-// enabled bit.
+// Machine-global Tailscale Serve access for the remote app. The daemon owns
+// setup and persisted intent; this surface only shows its exact state and the
+// app link, and asks it to flip the one enabled bit.
 import Quickshell
 import QtQuick
 import "../services"
@@ -12,11 +12,11 @@ Rectangle {
 
     readonly property var status: Ghostd.remoteStatus || ({})
     readonly property var problem: root.status.problem || null
-    readonly property bool remoteOn: Ghostd.remoteUrl !== ""
+    readonly property bool remoteOn: root.status.state === "on"
     readonly property string statusLine: root.problem !== null
         ? String(root.problem.message || "Remote access is unavailable")
         : (Ghostd.remoteError !== "" ? Ghostd.remoteError
-            : (root.remoteOn ? "On — " + Ghostd.remoteUrl : "Off"))
+            : (root.remoteOn ? "On — " + String(root.status.hostname || "") : "Off"))
 
     signal closeRequested()
 
@@ -172,7 +172,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.topMargin: Theme.pad
         title: "Remote access"
-        subtitle: "Reach Ghost from your phone or another device, served privately to your tailnet by Tailscale."
+        subtitle: "Reach Ghost from the app on your phone or another device, served privately to your tailnet by Tailscale."
     }
 
     Rectangle {
@@ -349,75 +349,31 @@ Rectangle {
                             copyName: "remoteActionCopy"
                         }
                     }
-                }
-            }
-
-            Rectangle {
-                width: parent.width
-                height: remoteContent.implicitHeight + Theme.pad * 2
-                visible: root.remoteOn
-                radius: Theme.radius
-                color: Theme.surface
-                border.width: 1
-                border.color: Theme.border
-
-                Column {
-                    id: remoteContent
-                    x: Theme.pad
-                    y: Theme.pad
-                    width: parent.width - Theme.pad * 2
-                    spacing: Theme.gap
 
                     Text {
+                        objectName: "remoteNoAppText"
                         width: parent.width
-                        text: "Open on another device"
+                        visible: root.remoteOn && Ghostd.remoteAppOrigin === ""
+                        text: "remote.apps is empty in the Ghost config, so no app can reach Ghost remotely."
                         textFormat: Text.PlainText
-                        color: Theme.foregroundBright
+                        color: Theme.foregroundDim
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSubtitle
-                        font.weight: Font.DemiBold
+                        font.pixelSize: Theme.fontSize
+                        wrapMode: Text.WordWrap
                     }
 
-                    CopyField {
-                        label: "Remote access URL"
-                        value: Ghostd.remoteUrl
-                        textName: "remoteUrlText"
-                        copyName: "remoteUrlCopy"
-                    }
-
-                    QrCode {
-                        imageName: "remoteQrImage"
-                        source: Ghostd.remoteQrSource
-                        loading: Ghostd.remoteQrLoading
-                        url: Ghostd.remoteUrl
-                    }
-
-                    Column {
+                    Text {
+                        objectName: "remoteAudienceText"
                         width: parent.width
-                        spacing: 2
-
-                        Text {
-                            width: parent.width
-                            text: "Who can watch"
-                            textFormat: Text.PlainText
-                            color: Theme.foregroundBright
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            font.weight: Font.DemiBold
-                        }
-
-                        Text {
-                            objectName: "remoteAudienceText"
-                            width: parent.width
-                            text: "Owner: " + (root.status.owner || "not reported")
-                                + " · Guests: " + (root.status.guests === "read-only"
-                                    ? "read-only" : "none")
-                            textFormat: Text.PlainText
-                            color: Theme.foregroundDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                            wrapMode: Text.WordWrap
-                        }
+                        visible: root.remoteOn
+                        text: "Owner: " + (root.status.owner || "not reported")
+                            + " · Guests: " + (root.status.guests === "read-only"
+                                ? "read-only" : "none")
+                        textFormat: Text.PlainText
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                        wrapMode: Text.WordWrap
                     }
                 }
             }

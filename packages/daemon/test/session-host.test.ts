@@ -863,11 +863,11 @@ describe("completion delivery", () => {
   it("delivers a final bounded excerpt and exact conversation link once after done", async () => {
     const notifications: GhostHookEvent[] = [];
     const fake = harness(replies(`Finished.\n${"a".repeat(400)}`));
-    const sessions = host({ harnesses: [fake], hooks: delivery(notifications), viewerUrl: async () => "https://ghost.example.ts.net/" });
+    const sessions = host({ harnesses: [fake], hooks: delivery(notifications), conversationUrl: async (ghost, id) => `https://summonghost.com/#/ghost.example.ts.net/${ghost}/${id}` });
     const events = await turn(sessions, "Make the report");
     await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
-    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://ghost.example.ts.net/?ghost=casper&session=c1" });
+    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://summonghost.com/#/ghost.example.ts.net/casper/c1" });
     expect(notifications[0]?.type === "turn_end" && notifications[0].excerpt.length).toBe(280);
     expect(events.filter(event => event.type === "done")).toHaveLength(1);
     expect(events.filter(event => event.type === "hook_start")).toEqual([]);
@@ -937,7 +937,7 @@ describe("completion delivery", () => {
   });
   it("does no remote discovery when notification delivery is disabled", async () => {
     let lookups = 0;
-    const sessions = host({ harnesses: [harness(replies("done"))], viewerUrl: async () => { lookups++; return null; } });
+    const sessions = host({ harnesses: [harness(replies("done"))], conversationUrl: async () => { lookups++; return null; } });
     await turn(sessions, "Do it");
     expect(lookups).toBe(0);
   });

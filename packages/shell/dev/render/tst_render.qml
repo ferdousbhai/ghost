@@ -52,7 +52,7 @@ TestCase {
                     resting: { until: "2026-11-01T00:00:00.000Z", reason: "429 monthly API usage threshold reached" } }
             ], ghostDefault: null, omarchyDefault: "claude", automatic: "claude" });
             else if (/\/api\/remote$/.test(url)) xhr.complete(200, { enabled: true, state: "on", scheme: "https",
-                hostname: "omarchy.tail58bdd3.ts.net", url: "https://omarchy.tail58bdd3.ts.net",
+                hostname: "omarchy.tail58bdd3.ts.net",
                 tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
                 guests: "read-only", owner: "owner@example.com",
                 app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=omarchy.tail58bdd3.ts.net" },
@@ -185,7 +185,7 @@ TestCase {
     Component { id: routinesC; Routines { width: 900; height: 520 } }
     Component { id: hooksC; HooksBrowser { width: 900; height: 520 } }
     Component { id: mcpC; McpBrowser { width: 900; height: 520 } }
-    // Tall enough to show the app card under the viewer's.
+    // Tall enough to show the app card under the access card.
     Component { id: remoteC; RemoteAccess { width: 900; height: 1040 } }
     Component { id: characterC; CharacterPane { width: 900; height: 520 } }
     function test_panes(): void {

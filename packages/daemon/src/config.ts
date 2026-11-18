@@ -94,7 +94,7 @@ export function assertLoopback(host: string): void {
   if (host !== "localhost" && !LOOPBACK_ADDRESSES.has(host)) {
     throw new Error(
       `ghostd binds loopback only (got "${host}"). `
-        + `Use the authenticated Tailscale viewer for remote access.`,
+        + "Use Tailscale Serve (`ghost remote on`) for remote access.",
     );
   }
 }

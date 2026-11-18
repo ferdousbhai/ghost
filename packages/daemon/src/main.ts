@@ -208,7 +208,7 @@ async function serveDaemon(
     registry,
     ownerHome,
     scheduleUnitDir,
-    viewerUrl: async () => (await remoteServe.status()).url,
+    conversationUrl: (ghost, id) => remoteServe.conversationUrl(ghost, id),
     logger,
     hooks,
     localModel: config.local ? new LocalModel(config.local, logger.child({ part: "local-model" })) : null,

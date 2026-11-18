@@ -312,7 +312,6 @@ describe("CLI API adaptation", () => {
           state: "off",
           scheme: null,
           hostname: null,
-          url: null,
           tailscale: { installed: false, running: false, loggedIn: false, operator: false, certs: false },
           guests: "read-only",
           owner: null,
@@ -338,7 +337,7 @@ describe("CLI API adaptation", () => {
   it("ghost remote prints a problem's message, not the object", async () => {
     const fetch: CliFetch = async () => jsonResponse({
       enabled: false,
-      url: null,
+      hostname: null,
       problem: { code: "tailscale_stopped", message: "Tailscale is not running", action: "sudo tailscale up" },
     });
     const response = await runCli(["remote"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
@@ -347,16 +346,16 @@ describe("CLI API adaptation", () => {
 
   it("ghost remote prints the app link on HTTPS, and how to get HTTPS without it", async () => {
     let body: Record<string, unknown> = {
-      enabled: true, url: "https://box.tail.ts.net/", problem: null,
+      enabled: true, hostname: "box.tail.ts.net", problem: null,
       app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=box.tail.ts.net" },
     };
     const fetch: CliFetch = async () => jsonResponse(body);
     const run = () => runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
-    expect((await run()).stdout).toBe("on https://box.tail.ts.net/\napp https://summonghost.com/#add=box.tail.ts.net\n");
-    body = { ...body, url: "http://box.tail.ts.net/", app: { origin: "https://summonghost.com", url: null } };
-    expect((await run()).stdout).toMatch(/^on http:\/\/box\.tail\.ts\.net\/\napp https:\/\/summonghost\.com needs HTTPS: turn on HTTPS Certificates .*admin\/dns.*`ghost remote on` again\.\n$/);
+    expect((await run()).stdout).toBe("on box.tail.ts.net\napp https://summonghost.com/#add=box.tail.ts.net\n");
+    body = { ...body, app: { origin: "https://summonghost.com", url: null } };
+    expect((await run()).stdout).toMatch(/^on box\.tail\.ts\.net\napp https:\/\/summonghost\.com needs HTTPS: turn on HTTPS Certificates .*admin\/dns.*`ghost remote on` again\.\n$/);
     body = { ...body, app: null };
-    expect((await run()).stdout).toBe("on http://box.tail.ts.net/\n");
+    expect((await run()).stdout).toBe("on box.tail.ts.net\nno app: remote.apps is empty, so nothing can reach Ghost remotely\n");
   });
 
   it("ghost hooks status prints each hook's event, name, and description", async () => {

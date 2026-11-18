@@ -475,7 +475,7 @@ it("delivers turn completion to a local notification endpoint and honors live op
     const command = `jq '{topic:"scratch",title:.title,message:.excerpt,click:.url}' | curl --fail --silent --show-error --noproxy 127.0.0.1 --max-time 3 -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:${port}/`;
     writeFileSync(config, JSON.stringify({ hooks: { turn_end: [{ hooks: [{ type: "command", command, timeout: 5 }] }] } }));
     const runner = GhostHookRunner.fromConfig(config);
-    const notification = turnEndEvent({ cwd: directory, url: "https://example.ts.net/?ghost=casper&session=c1" });
+    const notification = turnEndEvent({ cwd: directory, url: "https://summonghost.com/#/ghost.example.ts.net/casper/c1" });
     await runner.emitTurnEnd(notification);
     expect(received).toEqual([{ topic: "scratch", title: notification.title, message: notification.excerpt, click: notification.url }]);
     await runner.replaceConfig({ hooks: {} });

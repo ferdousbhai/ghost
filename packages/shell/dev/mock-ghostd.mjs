@@ -142,7 +142,6 @@ function remoteSnapshot() {
     state: available ? (remoteEnabled ? "on" : "off") : "unavailable",
     scheme: loggedIn ? "https" : null,
     hostname: loggedIn ? REMOTE_HOSTNAME : null,
-    url: available && remoteEnabled ? `https://${REMOTE_HOSTNAME}` : null,
     tailscale,
     guests: "none",
     owner: loggedIn ? "owner@example.com" : null,
@@ -758,10 +757,9 @@ const mockServer = createServer(async (req, res) => {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
     const status = remoteSnapshot();
-    const forApp = new URL(req.url, "http://mock").searchParams.get("for") === "app";
-    if (!status.enabled || status.state !== "on" || !(forApp ? status.app.url : status.url)) {
+    if (!status.enabled || status.state !== "on" || !status.app.url) {
       return json(res, 404, {
-        error: { code: "remote_off", message: "Remote access is off." },
+        error: { code: "not_found", message: "The app needs Remote access on HTTPS." },
       });
     }
     return svg(res, REMOTE_QR_SVG);

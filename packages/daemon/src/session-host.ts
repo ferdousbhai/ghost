@@ -122,7 +122,8 @@ export interface SessionHostOptions {
   scheduleJournalRunner?: CommandRunner;
   logger?: Logger;
   hooks?: GhostHookRunner;
-  viewerUrl?: () => Promise<string | null>;
+  /** The app's link to a conversation for `turn_end`'s `url`, or null. */
+  conversationUrl?: (ghost: string, id: string) => Promise<string | null>;
   /**
    * The harnesses a turn may run on, in Omarchy's order; production reads
    * Omarchy's eligibility report. A test supplies its own list and rows.
@@ -346,7 +347,7 @@ export class SessionHost {
   private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
-  private readonly viewerUrl: (() => Promise<string | null>) | undefined;
+  private readonly conversationUrl: ((ghost: string, id: string) => Promise<string | null>) | undefined;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
   private readonly harnessReport: () => Promise<HarnessReport>;
   private readonly defaultHarness: () => Promise<string | null>;
@@ -376,7 +377,7 @@ export class SessionHost {
     this.scheduleVerifyRunner = options.scheduleVerifyRunner;
     this.scheduleJournalRunner = options.scheduleJournalRunner;
     this.logger = options.logger ?? silentLogger;
-    this.viewerUrl = options.viewerUrl;
+    this.conversationUrl = options.conversationUrl;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
@@ -1163,12 +1164,10 @@ export class SessionHost {
           : last?.type === "command" ? last.output : "";
         return { title: (logState(entries).title ?? ghost.name).slice(0, 160), text, sessionDir };
       });
-      const base = await this.viewerUrl?.().catch(() => null);
-      const url = base ? new URL(base) : null;
-      if (url) { url.searchParams.set("ghost", ghost.name); url.searchParams.set("session", id); }
+      const url = await this.conversationUrl?.(ghost.name, id).catch(() => null) ?? null;
       await this.hooks.emitTurnEnd({
         type: "turn_end", turn_id: turnId, outcome: terminal.type, title: event.title,
-        excerpt: (event.text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
+        excerpt: (event.text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url,
         ...hookEventBase(ghost, id, event.sessionDir, signal),
       });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }

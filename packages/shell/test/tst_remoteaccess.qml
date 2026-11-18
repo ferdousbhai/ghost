@@ -29,7 +29,6 @@ TestCase {
             state: "off",
             scheme: "https",
             hostname: "omarchy-thinkpad.tail58bdd3.ts.net",
-            url: null,
             tailscale: {
                 installed: true,
                 running: true,
@@ -39,6 +38,7 @@ TestCase {
             },
             guests: "read-only",
             owner: "owner@example.com",
+            app: { origin: "https://summonghost.com", url: null },
             problem: null
         }, overrides || {});
     }
@@ -69,23 +69,21 @@ TestCase {
 
         const remoteSwitch = findChild(panel, "remoteSwitch");
         const statusText = findChild(panel, "remoteStatusText");
-        const qr = findChild(panel, "remoteQrImage");
         verify(remoteSwitch !== null);
         verify(statusText !== null);
-        verify(qr !== null);
         verify(!remoteSwitch.checked);
         compare(statusText.text, "Off");
-        verify(!qr.visible);
-        compare(String(qr.source), "");
+        verify(!findChild(panel, "remoteAppCard").visible);
+        verify(!findChild(panel, "remoteAudienceText").visible);
     }
 
-    function test_onStateRendersUrlAndAuthenticatedQrSource(): void {
+    function test_appLinkAndItsAuthenticatedQrWhileOnHttps(): void {
         const panel = createTemporaryObject(panelComponent, tc);
-        verify(panel !== null);
+        const add = "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net";
         requests[0].complete(200, status({
             enabled: true,
             state: "on",
-            url: "https://omarchy-thinkpad.tail58bdd3.ts.net"
+            app: { origin: "https://summonghost.com", url: add }
         }));
         compare(requests.length, 2);
         compare(requests[1].method, "GET");
@@ -94,40 +92,17 @@ TestCase {
         requests[1].complete(200,
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0h1v1H0z"/></svg>');
 
-        const remoteSwitch = findChild(panel, "remoteSwitch");
-        const statusText = findChild(panel, "remoteStatusText");
-        const urlText = findChild(panel, "remoteUrlText");
-        const qr = findChild(panel, "remoteQrImage");
         const audience = findChild(panel, "remoteAudienceText");
-        verify(remoteSwitch.checked);
-        compare(statusText.text,
-            "On — https://omarchy-thinkpad.tail58bdd3.ts.net");
-        compare(urlText.text, "https://omarchy-thinkpad.tail58bdd3.ts.net");
-        verify(qr.visible);
-        verify(String(qr.source).startsWith("data:image/svg+xml"));
-        verify(audience.text.indexOf("owner@example.com") >= 0);
-        verify(audience.text.indexOf("read-only") >= 0);
-    }
-
-    function test_appLinkAndItsQrWhileOnHttps(): void {
-        const panel = createTemporaryObject(panelComponent, tc);
-        const add = "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net";
-        requests[0].complete(200, status({
-            enabled: true,
-            state: "on",
-            url: "https://omarchy-thinkpad.tail58bdd3.ts.net",
-            app: { origin: "https://summonghost.com", url: add }
-        }));
-        compare(requests.length, 3);
-        verify(requests[1].url.endsWith("/api/remote/qr.svg"));
-        verify(requests[2].url.endsWith("/api/remote/qr.svg?for=app"));
-        requests[2].complete(200,
-            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><path d="M0 0h1v1H0z"/></svg>');
-
+        verify(findChild(panel, "remoteSwitch").checked);
+        compare(findChild(panel, "remoteStatusText").text, "On — omarchy-thinkpad.tail58bdd3.ts.net");
         verify(findChild(panel, "remoteAppCard").visible);
         compare(findChild(panel, "remoteAppUrlText").text, add);
         verify(String(findChild(panel, "remoteAppQrImage").source).startsWith("data:image/svg+xml"));
         verify(!findChild(panel, "remoteAppHttpsText").visible);
+        verify(!findChild(panel, "remoteNoAppText").visible);
+        verify(audience.visible);
+        verify(audience.text.indexOf("owner@example.com") >= 0);
+        verify(audience.text.indexOf("read-only") >= 0);
     }
 
     function test_appCardSaysHttpsIsNeededWithoutCertificates(): void {
@@ -136,11 +111,10 @@ TestCase {
             enabled: true,
             state: "on",
             scheme: "http",
-            url: "http://omarchy-thinkpad.tail58bdd3.ts.net",
             app: { origin: "https://summonghost.com", url: null }
         }));
-        // Only the viewer's QR code: there is no app link to encode.
-        compare(requests.length, 2);
+        // No QR code: there is no app link to encode.
+        compare(requests.length, 1);
         verify(findChild(panel, "remoteAppCard").visible);
         verify(findChild(panel, "remoteAppHttpsText").visible);
         verify(!findChild(panel, "remoteAppQrImage").visible);
@@ -148,8 +122,10 @@ TestCase {
 
     function test_noAppCardWithoutApps(): void {
         const panel = createTemporaryObject(panelComponent, tc);
-        requests[0].complete(200, status({ enabled: true, state: "on", url: "https://omarchy-thinkpad.tail58bdd3.ts.net" }));
+        requests[0].complete(200, status({ enabled: true, state: "on", app: null }));
+        compare(requests.length, 1);
         verify(!findChild(panel, "remoteAppCard").visible);
+        verify(findChild(panel, "remoteNoAppText").visible);
     }
 
     function test_eachProblemShowsMessageAndOptionalAction(): void {
@@ -208,7 +184,7 @@ TestCase {
         requests[1].complete(200, status({
             enabled: true,
             state: "on",
-            url: "https://omarchy-thinkpad.tail58bdd3.ts.net"
+            app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net" }
         }));
 
         // The POST reply is the post-change status; only the QR code follows.

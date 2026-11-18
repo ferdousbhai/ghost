@@ -342,8 +342,9 @@ and any skill you installed untouched.
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** `ghost remote` (or the HUD's Remote access pane)
-  controls the opt-in Tailscale Serve viewer, and prints the
-  summonghost.com link that adds this machine to the app ([mobile](mobile.md)).
+  turns the opt-in Tailscale Serve address on and off, and prints the
+  summonghost.com link that adds this machine to the app, the phone client
+  ([mobile](mobile.md)).
   Only your own login gets in;
   to let other tailnet members read along, set `remote.guests` to
   `"read-only"` in the config. On a
@@ -372,7 +373,7 @@ already loaded, so an upgraded HUD needs the shell restart.
 
 ## Inspect scheduled work
 
-Open **Routines** in the HUD or the tailnet owner viewer, or run:
+Open **Routines** in the HUD, or run:
 
 ```sh
 ghost routines -g casper

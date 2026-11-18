@@ -1,8 +1,8 @@
 /**
  * Ghost's Tailscale Serve exposure: `tailscale serve --bg --https=443` (or
  * `--http=80` on a tailnet without certificates) proxying to the loopback
- * daemon, so the viewer at `/` is reachable at the node's tailnet name with
- * the caller's identity stamped (see tailscale-identity.ts). Status is read
+ * daemon, so an app in `remote.apps` reaches its API at the node's tailnet
+ * name with the caller's identity stamped (see tailscale-identity.ts). Status is read
  * from Tailscale on every call; the one thing remembered is an operator
  * refusal, because only a write attempt can reveal it. Tailscale keeps a
  * `--bg` Serve entry across restarts, so Ghost stores no on/off of its own.
@@ -27,7 +27,6 @@ export interface RemoteStatus {
   state: "on" | "off" | "unavailable";
   scheme: "https" | "http" | null;
   hostname: string | null;
-  url: string | null;
   tailscale: {
     installed: boolean;
     running: boolean;
@@ -140,7 +139,6 @@ export class RemoteServe {
       state: "off",
       scheme: null,
       hostname: null,
-      url: null,
       tailscale: { installed: true, running: false, loggedIn: false, operator: this.operatorProblem === null, certs: false },
       guests: this.guests,
       owner: this.owner,
@@ -211,6 +209,16 @@ export class RemoteServe {
       .map(({ hostname, online }) => ({ hostname, online }));
   }
 
+  /**
+   * The app's deep link to one conversation on this machine,
+   * `<origin>/#/<hostname>/<ghost>/<id>`, null while there is no app link.
+   */
+  async conversationUrl(ghost: string, id: string): Promise<string | null> {
+    const { app, hostname } = await this.status();
+    if (!app?.url || !hostname) return null;
+    return `${app.origin}/#/${[hostname, ghost, id].map(encodeURIComponent).join("/")}`;
+  }
+
   async qrSvg(url: string): Promise<string> {
     let result: CommandResult;
     try {
@@ -244,7 +252,6 @@ export class RemoteServe {
       enabled: scheme !== null,
       state: scheme ? "on" : "off",
       scheme,
-      url: scheme ? `${scheme}://${known.hostname}/` : null,
       app: known.app && { ...known.app, url: scheme === "https" ? `${known.app.origin}/#add=${known.hostname}` : null },
       problem: this.operatorProblem,
     };

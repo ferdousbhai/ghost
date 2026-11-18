@@ -8,7 +8,6 @@ import type { AddressInfo } from "node:net";
 import { apiTokenPath, ensureApiToken, tokenMatches } from "./token-store.js";
 import { MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import { assertLoopback } from "./config.js";
-import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
 import type { RemoteServe } from "./remote-serve.js";
 import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import { requireConversationId } from "./conversation-log.js";
@@ -98,23 +97,12 @@ interface TurnLog {
 }
 
 /**
- * The HUD is not a web page, and the viewer the daemon serves at `/` is same
- * origin; a local UI on another loopback port is a different origin on the
- * same interface. Allow exactly that, and nothing else — a page on a remote
- * origin must not be able to read a ghost's conversations through the user's own
- * browser.
+ * The HUD is not a web page, and the daemon serves none; a local UI on a
+ * loopback port is a different origin on the same interface. Allow exactly
+ * that and `remote.apps`, and nothing else — a page on another origin must not
+ * be able to read a ghost's conversations through the user's own browser.
  */
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
-
-/** Whether a browser origin names the host this request was addressed to. */
-function sameHostOrigin(origin: string, host: string | undefined): boolean {
-  if (!host) return false;
-  try {
-    return new URL(origin).host.toLowerCase() === host.toLowerCase();
-  } catch {
-    return false;
-  }
-}
 
 function jsonResponse(
   response: ServerResponse,
@@ -132,7 +120,7 @@ function jsonResponse(
 
 /**
  * The `{ error: { message, code } }` envelope is fixed by Ghost's HTTP contract
- * and in-repo consumers, not chosen here: the shell, CLI, and remote viewer all
+ * and in-repo consumers, not chosen here: the shell, CLI, and summonghost.com app all
  * parse the nested error from a non-2xx response. Flattening it silently breaks
  * those clients.
  */
@@ -349,7 +337,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   /**
    * The gate every `/api` request passes before it is routed: `null` when it
    * has already answered, otherwise who was admitted (a tailnet identity, or
-   * `undefined` for the bearer token and the open routes).
+   * `undefined` for the bearer token and for paths outside `/api`, all 404).
    */
   const authenticate = async (
     request: IncomingMessage,
@@ -361,12 +349,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (apiToken === null) return admitted;
     if (segments[0] !== "api") return admitted;
 
-    // A page served by this daemon is loopback, or same-host through
-    // `tailscale serve`; an app in `remote.apps` is admitted by tailnet
+    // A local UI is loopback; an app in `remote.apps` is admitted by tailnet
     // identity alone; anything else is a cross-site page.
     const origin = request.headers.origin;
     const app = typeof origin === "string" && remoteApps.has(origin);
-    if (typeof origin === "string" && !app && !LOOPBACK_ORIGIN.test(origin) && !sameHostOrigin(origin, request.headers.host)) {
+    if (typeof origin === "string" && !app && !LOOPBACK_ORIGIN.test(origin)) {
       errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
       return null;
     }
@@ -707,33 +694,14 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   const routes: Route<RequestContext>[] = [
-    route("GET", "", ({ response }) => {
-      response.writeHead(200, {
-        "content-type": "text/html; charset=utf-8",
-        "content-security-policy": REMOTE_VIEWER_CSP,
-        "cache-control": "no-store",
-      });
-      response.end(REMOTE_VIEWER_HTML);
-    }),
-    route("GET", "manifest.webmanifest", ({ response }) => {
-      const manifest = JSON.stringify(REMOTE_MANIFEST);
-      response.writeHead(200, {
-        "content-type": "application/manifest+json; charset=utf-8",
-        "content-length": Buffer.byteLength(manifest),
-        "cache-control": "no-store",
-      });
-      response.end(manifest);
-    }),
     route("GET", "api/remote/whoami", ({ response, admission }) => {
       jsonResponse(response, 200, { role: admission.identity?.role ?? "owner" });
     }),
-    // The viewer's URL, or with `?for=app` the app link adding this machine.
-    route("GET", "api/remote/qr.svg", async ({ response, url: request }) => {
-      const app = request.searchParams.get("for") === "app";
-      const status = remoteServe ? await remoteServe.status() : null;
-      const url = app ? status?.app?.url : status?.url;
+    // The app link adding this machine.
+    route("GET", "api/remote/qr.svg", async ({ response }) => {
+      const url = remoteServe ? (await remoteServe.status()).app?.url : null;
       if (!remoteServe || !url) {
-        throw new GhostError("not_found", app ? "The app needs Remote access on HTTPS." : "Remote access is off.", 404);
+        throw new GhostError("not_found", "The app needs Remote access on HTTPS.", 404);
       }
       const svg = await remoteServe.qrSvg(url);
       response.writeHead(200, {
@@ -920,7 +888,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // Nothing a request carries may take the process down. A throw anywhere
     // in the handler answers 500 (or is logged when the reply already began)
     // instead of becoming an unhandled rejection, which exits Bun — a path
-    // of "//" once did exactly that, from the tailnet viewer.
+    // of "//" once did exactly that, from a tailnet client.
     void (async () => {
       applyCors(request, response, remoteApps);
       const method = request.method ?? "GET";

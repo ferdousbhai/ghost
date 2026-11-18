@@ -20,8 +20,9 @@ agents, browser automation through agent-browser and Bash, the ghost's MCP
 servers, owner hooks, and scheduled work through systemd timers.
 Notes are Markdown in the owner's Documents directory, never indexed or
 injected. A ghost can maintain its own code
-([docs/self-maintenance.md](docs/self-maintenance.md)), and an opt-in tailnet
-viewer reaches it from a phone.
+([docs/self-maintenance.md](docs/self-maintenance.md)), and the
+[summonghost.com](https://summonghost.com) app reaches it from a phone over an
+opt-in Tailscale Serve address.
 
 Install and first conversation:
 [getting started](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md)

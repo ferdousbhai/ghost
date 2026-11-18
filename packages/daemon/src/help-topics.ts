@@ -325,7 +325,7 @@ function events(input: HelpTopicInput): string[] {
 function notifications(): string[] {
   return [
     "# Mobile completion notifications",
-    "Delivery is opt-in: an existing notification service receives a turn_end command hook. Ghost runs locally; host sleep, lost connectivity, or delivery failure can lose an alert. There is no retry queue. The phone viewer need not stay open.",
+    "Delivery is opt-in: an existing notification service receives a turn_end command hook. Ghost runs locally; host sleep, lost connectivity, or delivery failure can lose an alert. There is no retry queue. The summonghost.com app need not stay open.",
     "For ntfy, subscribe the phone app to your chosen private topic on an existing server. Follow https://docs.ntfy.sh/publish/ for authentication. Keep the server's root URL (not the topic URL; the JSON body names the topic) and Authorization header in a mode-600 curl config at ~/.config/ghost/ntfy.curl; keep credentials out of hooks.json. Test the destination deliberately before enabling alerts.",
     "Create an executable script at an absolute path, replacing YOUR_PRIVATE_TOPIC:",
     "```sh",
@@ -335,8 +335,8 @@ function notifications(): string[] {
     '  curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --config "$HOME/.config/ghost/ntfy.curl" -H "Content-Type: application/json" --data-binary @-',
     "```",
     'Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array of the current document (`ghost hooks show | jq .document > hooks.json`); preserve existing handlers and apply with `ghost hooks set hooks.json`. Remove that handler to opt out; no restart is needed.',
-    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the exact conversation link when Tailscale remote access is enabled. Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
-    "Open the alert link to inspect the conversation. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
+    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the conversation's app link (summonghost.com by default) while remote access is on over HTTPS (otherwise null). Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
+    "The link opens the conversation in the app on a device that has added this machine. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
   ];
 }
 

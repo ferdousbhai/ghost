@@ -60,7 +60,7 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
         lines.push("restart needed code on disk is newer than this daemon (ghost help self)");
     }
     if (remote) {
-      const url = remote.url ? ` ${remote.url}` : "";
+      const url = remote.state === "on" && remote.hostname ? ` ${remote.hostname}` : "";
       const problem = remote.problem ? ` (${remote.problem.message})` : "";
       lines.push(`remote         ${remote.state}${url}${problem}`);
     } else lines.push("remote         unavailable");

@@ -214,7 +214,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "remote",
     usage: "remote [status|on|off] [--json] [-q]",
-    summary: "Show or toggle the Tailscale Serve viewer.",
+    summary: "Show or toggle Tailscale Serve for the summonghost.com app.",
     example: "ghost remote on",
     positionals: [0, 1],
     run: remoteCommand,

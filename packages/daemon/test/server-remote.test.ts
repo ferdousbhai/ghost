@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
-import { REMOTE_MANIFEST } from "../src/remote-viewer.js";
 import { SessionHost } from "../src/session-host.js";
 import type { RunningSource } from "../src/running-source.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
+import { fakeHarness, onlyHarnesses, replies } from "./helpers/fake-harness.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { fakeTailscale, missingBinary } from "./helpers/fake-tailscale.js";
 
@@ -57,7 +57,6 @@ function remoteStatus(enabled: boolean): RemoteStatus {
     state: enabled ? "on" : "off",
     scheme: enabled ? "https" : null,
     hostname: "ghostbox.example.ts.net",
-    url: enabled ? "https://ghostbox.example.ts.net/" : null,
     tailscale: {
       installed: true,
       running: true,
@@ -208,23 +207,22 @@ describe("tailnet identity", () => {
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).status).toBe(401);
   });
 
-  it("serves the viewer page at / with a hashed CSP", async () => {
+  it("serves no page: everything outside /api is a 404", async () => {
     const base = await serve();
-    const page = await fetch(`${base}/`);
-    expect(page.status).toBe(200);
-    expect(page.headers.get("content-type")).toContain("text/html");
-    expect(page.headers.get("content-security-policy")).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'; style-src 'sha256-/);
-    expect(await page.text()).toContain("/remote/whoami");
-    expect((await fetch(`${base}/`, { method: "POST" })).status).toBe(405);
-    expect((await fetch(`${base}/remote`)).status).toBe(404);
+    for (const path of ["/", "/manifest.webmanifest", "/remote"]) {
+      const response = await fetch(`${base}${path}`, { headers: asTailnet("owner@example.com") });
+      expect(response.status, path).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    }
   });
 
-  it("serves the web app manifest without authentication", async () => {
+  it("refuses a page on the tailnet host itself: only loopback and remote.apps are origins", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/manifest.webmanifest`);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toContain("application/manifest+json");
-    expect(await response.json()).toEqual(REMOTE_MANIFEST);
+    const response = await fetch(`${base}/api/ghosts`, {
+      headers: asTailnet("owner@example.com", { origin: "https://ghostbox.example.ts.net", host: "ghostbox.example.ts.net" }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "forbidden_origin" } });
   });
 });
 
@@ -265,30 +263,18 @@ describe("remote management", () => {
     expect(fake.mutations).toEqual([]);
   });
 
-  it("serves a no-store QR only while remote access is on", async () => {
+  it("serves a no-store QR of the app link only while there is one", async () => {
     const { fake, base } = await serveFake(true);
     const headers = { authorization: `Bearer ${TOKEN}` };
+    const none = await fetch(`${base}/api/remote/qr.svg`, { headers });
+    expect(none.status).toBe(404);
+    expect(await none.json()).toMatchObject({ error: { code: "not_found" } });
+    fake.current = { ...remoteStatus(true), app: { origin: APP, url: `${APP}/#add=ghostbox.example.ts.net` } };
     const qr = await fetch(`${base}/api/remote/qr.svg`, { headers });
     expect(qr.status).toBe(200);
     expect(qr.headers.get("content-type")).toContain("image/svg+xml");
     expect(qr.headers.get("cache-control")).toBe("no-store");
-    expect(await qr.text()).toContain("https://ghostbox.example.ts.net/");
-
-    fake.current = remoteStatus(false);
-    const off = await fetch(`${base}/api/remote/qr.svg`, { headers });
-    expect(off.status).toBe(404);
-    expect(await off.json()).toMatchObject({ error: { code: "not_found" } });
-  });
-
-  it("serves the app link's QR only while there is one", async () => {
-    const { fake, base } = await serveFake(true);
-    const headers = { authorization: `Bearer ${TOKEN}` };
-    expect((await fetch(`${base}/api/remote/qr.svg?for=app`, { headers })).status).toBe(404);
-    fake.current = { ...remoteStatus(true), app: { origin: APP, url: `${APP}/#add=ghostbox.example.ts.net` } };
-    const qr = await fetch(`${base}/api/remote/qr.svg?for=app`, { headers });
-    expect(qr.status).toBe(200);
     expect(await qr.text()).toContain(`${APP}/#add=ghostbox.example.ts.net`);
-    expect(await (await fetch(`${base}/api/remote/qr.svg`, { headers })).text()).toContain("https://ghostbox.example.ts.net/");
   });
 
   it("has no remote routes on a server built without a RemoteServe", async () => {
@@ -368,6 +354,61 @@ describe("a web app in remote.apps", () => {
       expect(response.headers.get("access-control-allow-origin")).toBeNull();
       await stop();
     }
+  });
+});
+
+describe("the summonghost.com app's routes", () => {
+  it("answers each one the app calls, admitted by tailnet identity alone", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(fakeHarness(replies("hello"))) });
+    listening = await startDaemonServer({
+      registry: temp.registry, host, port: 0, apiToken: TOKEN,
+      remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }),
+      remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
+      remoteApps: [APP],
+    });
+    const base = `http://127.0.0.1:${listening.port}/api`;
+    const owner = { origin: APP, ...asTailnet("owner@example.com") };
+    const json = { ...owner, "content-type": "application/json" };
+    const call = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, { headers: owner, ...init });
+    const conversation = "/ghosts/casper/sessions/app-1";
+
+    expect(await (await call("/remote/whoami")).json()).toEqual({ role: "owner" });
+    expect((await call("/remote/machines")).status).toBe(200);
+    expect((await call("/ghosts")).status).toBe(200);
+    const events = new AbortController();
+    // An EventSource stays open, so this one is read with the streaming fetch.
+    const stream = await globalThis.fetch(`${base}/ghosts/casper/events`, { headers: owner, signal: events.signal });
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    expect(stream.headers.get("access-control-allow-origin")).toBe(APP);
+    events.abort();
+    await stream.body?.cancel().catch(() => {});
+
+    const turn = await call("/ghosts/casper/messages", { method: "POST", headers: json, body: JSON.stringify({ prompt: "hi", sessionId: "app-1" }) });
+    expect(turn.status).toBe(200);
+    expect(await turn.text()).toContain("hello");
+    expect(await (await call("/ghosts/casper/sessions")).json()).toMatchObject({ sessions: [{ id: "app-1" }] });
+    const transcript = await (await call(`${conversation}/transcript`)).json() as { readThrough: string };
+    expect((await call(`${conversation}/transcript?offset=0`)).status).toBe(200);
+    expect((await call(`${conversation}/read`, { method: "PUT", headers: json, body: JSON.stringify({ readThrough: transcript.readThrough }) })).status).toBe(200);
+    expect((await call(`${conversation}/pin`, { method: "PUT", headers: json, body: JSON.stringify({ pinned: true }) })).status).toBe(200);
+    const attached = await call(`${conversation}/attachments`, {
+      method: "POST", headers: { ...owner, "content-type": "image/png" }, body: Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"),
+    });
+    expect(attached.status).toBe(201);
+    const { path } = await attached.json() as { path: string };
+    expect((await call(`${conversation}/${path}`)).status).toBe(200);
+    expect(await (await call(`${conversation}/queue`)).json()).toMatchObject({ streaming: false });
+    // Idle, so these answer the contract's idle refusal rather than an auth or routing one.
+    for (const [path, body] of [["/queue", { text: "more" }], ["/stop", {}]] as const) {
+      const response = await call(`${conversation}${path}`, { method: "POST", headers: json, body: JSON.stringify(body) });
+      expect(await response.json(), path).toMatchObject({ error: { code: "session_not_streaming" } });
+    }
+    expect(await (await call(`${conversation}/stream?turn=gone&from=0`)).json()).toMatchObject({ error: { code: "turn_not_found" } });
+    expect((await call(conversation, { method: "DELETE" })).status).toBe(200);
   });
 });
 

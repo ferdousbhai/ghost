@@ -24,14 +24,13 @@ Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
-`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon is loopback-only; remote
-access is the explicit Tailscale Serve viewer and the summonghost.com app over
-the same address. The app is a static
-page, not a backend: it has no server, accounts, or storage; the browser calls
-each machine's Serve address directly, admitted by the same Tailscale identity
-to the same routes as the viewer. Whoever controls summonghost.com's code can
-therefore act as a visiting owner on that owner's tailnet; `remote.apps: []`
-opts out. See [concepts](docs/concepts.md) for rationale.
+`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon is loopback-only and serves no web page; remote
+access is the summonghost.com app over an explicit Tailscale Serve address. The
+app is a static page, not a backend: it has no server, accounts, or storage;
+the browser calls each machine's Serve address directly, admitted by Tailscale
+identity. Whoever controls summonghost.com's code can therefore act as a
+visiting owner on that owner's tailnet; `remote.apps: []` opts out, leaving no
+remote client at all. See [concepts](docs/concepts.md) for rationale.
 
 Durable state has three scopes:
 
@@ -67,11 +66,11 @@ owner's documents. Background work is the shell's: Ghost keeps no job table
 ### Routine inspection and controls
 
 Systemd remains the only schedule store. `ghost routines`
-and the HUD and tailnet owner view inspect persistent timers in the configured
+and the HUD inspect persistent timers in the configured
 systemd user unit directory, using the exact owning ghost prefix. They expose
 systemd's calendar/monotonic expressions, next trigger and last service start, enablement,
 active state, service command, and latest service result; empty properties are
-unknown, not inferred successes. The daemon projects this native state because the HUD and tailnet viewer cannot
+unknown, not inferred successes. The daemon projects this native state because the HUD cannot
 inspect the systemd user manager directly; no scheduler or job database is added.
 `GET /api/ghosts/:ghost/routines` returns `{ routines, recoveries }`; each routine row has `ghost`,
 `slug`, `unit`, `service`, `timerPath`, `servicePath`, `description`, `schedule`,
@@ -229,18 +228,20 @@ proposes a fix with its undo; it changes, files, restarts, or sends nothing
 until the owner says yes in that conversation.
 
 The HUD counts unread `event-` conversations, which only intake creates, as
-the ghost's findings (see the shell README's bar mark), and it and the phone
-viewer list them apart from the rest, a group per event source (the listing's
-`source`; the HUD folds a source only once it has two; a pinned one or one
-holding a question stays with the rest), so that id prefix is contract.
+the ghost's findings (see the shell README's bar mark), and it lists them apart
+from the rest, a group per event source (the listing's `source`; it folds a
+source only once it has two; a pinned one or one holding a question stays with
+the rest), as the summonghost.com app does in one group, so that id prefix is
+contract.
 
 ### Mobile links and completion delivery
 
-The viewer accepts `?ghost=<name>&session=<id>` links, preserves the selected
-conversation in its URL. Transcript responses carry a server-side `readThrough`
-timestamp, accepted by `PUT …/read` to cap acknowledgement at the read start;
-read timestamps never regress. The viewer marks a displayed owner's reply read only while
-the page is visible and focused. Guests never change owner read state. Failed
+The summonghost.com app keeps the selected conversation in its URL,
+`<origin>/#/<hostname>/<ghost>/<id>` (each segment URI-encoded). Transcript
+responses carry a server-side `readThrough` timestamp, accepted by
+`PUT …/read` to cap acknowledgement at the read start; read timestamps never
+regress. A client marks a displayed owner's reply read only while the page is
+visible and focused. Guests never change owner read state. Failed
 navigation keeps the requested URL and shows an error instead of silently
 opening a different conversation. A completed turn does not imply its result
 was read; reopening the right conversation does.
@@ -249,8 +250,9 @@ was read; reopening the right conversation does.
 turn settles, including failure; cancellation is quiet. It cannot continue or
 block a turn. Its bounded payload includes `outcome` (`done`/`error`), `title`,
 `excerpt`, and nullable `url`, plus the ordinary hook identity fields. The URL
-is the active Tailscale viewer with ghost/session parameters, never a bearer
-token. With no handler no provider/network discovery occurs. Commands run
+is that app link to the conversation, from the first `remote.apps` origin and
+this machine's Serve hostname, never a bearer token; it is null while remote
+access is off, not on HTTPS, or `remote.apps` is `[]`. With no handler no provider/network discovery occurs. Commands run
 through the existing hook runner with its timeouts/fail-open logging, after
 the terminal stream event and outside the conversation's busy state, so a slow
 handler never delays the owner's next prompt; failure cannot change the
@@ -580,8 +582,9 @@ schedules, and explicit owner command hooks initiate work.
 ## Daemon HTTP API
 
 `ghostd` is the only session owner. All `/api/*` routes require the bearer token
-from Ghost's mode-0600 XDG-state token file, except explicitly public
-viewer assets, and authenticated tailnet requests. Loopback CORS allows only the exact
+from Ghost's mode-0600 XDG-state token file or an authenticated tailnet
+request; every path outside `/api` is `404`. A browser origin is admitted only
+when it is loopback or in `remote.apps`. Loopback CORS allows only the exact
 HUD/client methods and headers. Errors are
 `{ "error": { "code": string, "message": string } }` with a meaningful HTTP
 status. Request bodies and control files are bounded before allocation.
@@ -597,7 +600,8 @@ conversations, tool calls included, are shown to them as recorded.
 Remote access never broadens a ghost's local tool authority.
 
 `remote.apps` lists `https://` web app origins admitted past the Origin check
-(default `["https://summonghost.com"]`; `[]` admits none). An app is admitted
+(default `["https://summonghost.com"]`; `[]` admits none, so nothing can
+reach Ghost remotely). An app is admitted
 by tailnet identity alone, with the roles above; a request from it carrying
 `Authorization` is `403 app_token_refused`. Its responses carry
 `Access-Control-Allow-Origin: <origin>` and `Vary: Origin`, its preflight
@@ -638,13 +642,12 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
-| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control, with the app link (`app: { origin, url } \| null`), and the viewer URL's QR, or with `?for=app` the app link's. |
+| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control (`{ enabled, state, scheme, hostname, tailscale, guests, owner, app, problem }`), with the app link (`app: { origin, url } \| null`), and that link's QR (`404` while it is null). |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
-| `GET /manifest.webmanifest` | Public viewer manifest. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and
-remote access is the tailnet viewer and app.
+remote access is the summonghost.com app.
 
 ### Turn wire
 

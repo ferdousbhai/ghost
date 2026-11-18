@@ -176,7 +176,7 @@ is a 400 naming the offending field and changes nothing. `session_stop` and
 `turn_end` changes apply at the next boundary.
 
 Scheduled work is separate from lifecycle hooks: `ghost routines` and the HUD
-and tailnet owner view inspect and control systemd timers, as specified in
+inspect and control systemd timers, as specified in
 [the routine contract](../CONTRACTS.md#routine-inspection-and-controls). Neither
 routine inspection nor pause/resume sends a prompt or runs a lifecycle hook;
 run now queues the existing service. If it starts a Ghost turn, normal hooks apply.
@@ -199,18 +199,20 @@ An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
   "outcome": "done",
   "title": "Prepare the report",
   "excerpt": "The report is ready.",
-  "url": "https://ghostbox.example.ts.net/?ghost=casper&session=c1"
+  "url": "https://summonghost.com/#/ghostbox.example.ts.net/casper/c1"
 }
 ```
 
 `outcome` is `done` or `error`; `title` is at most 160 characters and the
-whitespace-normalized `excerpt` at most 280. The URL is null when remote access
-is unavailable. Failed turns use the failure message. Handlers run in order,
+whitespace-normalized `excerpt` at most 280. `url` opens the conversation in the first
+`remote.apps` app (`<origin>/#/<hostname>/<ghost>/<id>`, each segment
+URI-encoded); it is null while remote access is off or not on HTTPS, or when
+`remote.apps` is `[]`. Failed turns use the failure message. Handlers run in order,
 under the existing timeout/output bounds, after the terminal stream frame and
 outside the conversation's busy state, so they never delay the next prompt.
 Their output cannot change the result; failures fail open and are logged. Ghost
 stores no delivery credentials, retries, or push subscription. Removing the
 handler through `ghost hooks set` or the Hooks pane disables delivery at the
 next boundary. `ghost help notifications` gives a curl/ntfy recipe that works
-with the phone viewer closed. It sends conversation text to the selected
+with the app closed. It sends conversation text to the selected
 service, so configure it only when the owner wants that delivery.

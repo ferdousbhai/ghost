@@ -123,7 +123,7 @@ that has already exited and the preview keeps running.
   owner's `hooks.json` handlers with their lifecycle triggers and the loaded
   count, and opening it does not create a conversation. MCP lists stdio, HTTP,
   and SSE fixtures as stored and exercises add, full replacement,
-  enable/disable, and confirmed deletion. Remote exercises the Tailscale viewer lifecycle, including the
+  enable/disable, and confirmed deletion. Remote exercises the Tailscale Serve lifecycle and app link, including the
   off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.

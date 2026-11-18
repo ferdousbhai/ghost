@@ -3,7 +3,7 @@
 // Attachments — how a message names the images sent with it.
 //
 // The daemon stores an image pasted or dropped in the HUD, or sent from the
-// tailnet viewer, in the conversation directory and answers with its path
+// summonghost.com app, in the conversation directory and answers with its path
 // relative to it, `attachments/<file>`. The message names each one on its own
 // line as a Markdown image after the typed text, so the harness (whose working
 // directory that is) can open it, and every client draws it as a picture.

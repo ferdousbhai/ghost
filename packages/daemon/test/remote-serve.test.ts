@@ -15,7 +15,6 @@ describe("RemoteServe status", () => {
       state: "on",
       scheme: "https",
       hostname: "ghostbox.example.ts.net",
-      url: "https://ghostbox.example.ts.net/",
       tailscale: { installed: true, running: true, loggedIn: true, operator: true, certs: true },
       guests: "none",
       owner: "owner@example.com",
@@ -34,9 +33,20 @@ describe("RemoteServe status", () => {
     }
   });
 
+  it("links a conversation in the first app only while there is an app link", async () => {
+    const linked = new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps: ["https://summonghost.com"] });
+    expect(await linked.conversationUrl("casper", "c 1"))
+      .toBe("https://summonghost.com/#/ghostbox.example.ts.net/casper/c%201");
+    for (const serve of [
+      new RemoteServe(7717, { run: fakeTailscale({ scheme: "https" }).run, apps: [] }),
+      new RemoteServe(7717, { run: fakeTailscale({ certs: false, scheme: "http" }).run, apps: ["https://summonghost.com"] }),
+      new RemoteServe(7717, { run: fakeTailscale({ scheme: null }).run, apps: ["https://summonghost.com"] }),
+    ]) expect(await serve.conversationUrl("casper", "c1")).toBeNull();
+  });
+
   it("uses plain HTTP on port 80 when the tailnet has no certificates", async () => {
     const status = await new RemoteServe(7717, { run: fakeTailscale({ certs: false, scheme: "http" }).run }).status();
-    expect(status).toMatchObject({ enabled: true, scheme: "http", url: "http://ghostbox.example.ts.net/", tailscale: { certs: false } });
+    expect(status).toMatchObject({ enabled: true, scheme: "http", tailscale: { certs: false } });
   });
 
   it("reports a stopped daemon as unavailable", async () => {
