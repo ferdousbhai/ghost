@@ -751,9 +751,8 @@ its continuations.
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
 schedules, explicit owner command hooks, and messages from peers the owner
-listed initiate work. Legacy `builtin`
-settings in `hooks.json` are ignored; command hooks remain active. Historical
-`handoff` and `auto` log entries remain readable.
+listed initiate work. Historical `handoff` and `auto` log entries remain
+readable.
 
 ## Daemon HTTP API
 

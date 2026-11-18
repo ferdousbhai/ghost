@@ -220,6 +220,12 @@ describe("/api/hooks/config", () => {
       body: JSON.stringify({ path, document: next, hooks: {} }),
     });
     expect(wrapped.status).toBe(400);
+    const legacy = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ hooks: {}, builtin: { next_work_turns: 1 } }),
+    });
+    expect(legacy.status).toBe(400);
     expect(replaceConfig).toHaveBeenCalledTimes(2);
 
     const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });

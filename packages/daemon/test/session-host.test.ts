@@ -889,21 +889,6 @@ describe("conversation metadata", () => {
   });
 });
 
-describe("idle conversations", () => {
-  it("ignores legacy automatic-work settings after an owner turn", async () => {
-    const dir = tempDir();
-    cleanups.push(dir.cleanup);
-    const config = join(dir.path, "hooks.json");
-    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1, next_work_turns: 100 } }));
-    const fake = harness(replies("done", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks: GhostHookRunner.fromConfig(config) });
-    await turn(sessions, "ship it");
-    await new Promise((resolve) => setTimeout(resolve, 1_300));
-    expect(fake.calls()).toHaveLength(1);
-    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant"]);
-  });
-});
-
 async function waitFor(condition: () => boolean): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (!condition()) {

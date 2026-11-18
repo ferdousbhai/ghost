@@ -144,17 +144,6 @@ describe("GhostHookRunner", () => {
     expect(runner.hasHandlers("session_stop")).toBe(false);
   });
 
-  it("reads legacy builtin settings without registering automatic work", async () => {
-    const config = join(temporaryDirectory(), "hooks.json");
-    const document = { hooks: {}, builtin: { handoff_idle_seconds: 1, next_work_turns: 100 } };
-    writeFileSync(config, JSON.stringify(document));
-    const runner = GhostHookRunner.fromConfig(config);
-    expect(runner.hasHandlers("session_stop")).toBe(false);
-    expect(runner.config()?.document).toEqual(document);
-    await runner.replaceConfig({ hooks: {} });
-    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ hooks: {} });
-  });
-
   it("has no configuration to replace when built without a file", async () => {
     const runner = new GhostHookRunner();
     expect(runner.config()).toBeUndefined();

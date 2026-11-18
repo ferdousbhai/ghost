@@ -49,7 +49,6 @@ out of sight: the reply already reads as finished, and only a continuation
 shows. The first `session_stop` handler that requests a continuation wins.
 
 Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
-Legacy top-level `builtin` settings are ignored.
 
 `ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
 document with the file, which must be the document itself (`hooks` at its top level), so a
@@ -170,7 +169,7 @@ that file as one object and its absolute path; `ghost hooks` and the HUD's
 Hooks pane read it there, showing a handler without a `name` or
 `description` with the defaults above. `PUT
 /api/hooks/config` with a whole document refuses a top-level key other than
-`hooks` (and the ignored legacy `builtin`), so a pasted `{ path, document }` reply cannot empty the file, then
+`hooks`, so a pasted `{ path, document }` reply cannot empty the file, then
 validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `session_stop` and

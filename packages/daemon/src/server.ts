@@ -455,10 +455,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       return;
     }
     const document = await readJsonBody(request, maxBodyBytes);
-    // A replacement names only `hooks` (and the ignored legacy `builtin`), so a pasted
-    // `{ path, document }` reply is refused instead of silently disabling every hook.
-    const stray = isRecord(document)
-      ? Object.keys(document).filter(key => key !== "hooks" && key !== "builtin") : [];
+    // A replacement names only `hooks`, so a pasted `{ path, document }` reply
+    // is refused instead of silently disabling every hook.
+    const stray = isRecord(document) ? Object.keys(document).filter(key => key !== "hooks") : [];
     if (stray.length > 0) throw new GhostError("invalid_request", `hooks.json has no top-level ${stray.map(key => JSON.stringify(key)).join(", ")}; send the document itself.`, 400);
     let replaced: GhostHookCommandConfig;
     try {
