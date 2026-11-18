@@ -577,9 +577,12 @@ A turn is one headless run of an agent CLI, a row of
 [`harness-table.ts`](packages/daemon/src/harness-table.ts): how to launch it
 non-interactively with permissions pre-approved, how to resume, how it takes
 MCP servers, and a parser from its JSON output to text, reasoning, tool
-start/end, session, model, and error events. Rows exist for claude, codex, grok,
-copilot, opencode, pi, omp, agy, and crush; their parsers
-are tested against output each CLI really printed. That table is the one
+start/end, session, model, and error events. Rows follow the agents Omarchy
+offers (`omarchy default agent`), and Ghost offers only those Omarchy reports
+installed: claude, codex, grok, copilot, opencode, pi, omp, agy, ori, and
+crush. Their parsers are tested against output each CLI really printed (ori's
+recorded with a local stand-in for OpenRouter's API, since a run needs an
+OpenRouter key). That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. The one deliberate exception: display-only facts absent from stdout are read
 after the pass from the session record the harness wrote, found by a session id
@@ -599,15 +602,16 @@ is the harness's own, configured by the owner exactly as when they run it.
 The harness runs in the conversation directory with the conversation's
 identity (`GHOST`, `GHOST_SESSION`) in its environment. Ghost writes the
 persona there as `AGENTS.md`, with `CLAUDE.md` and `GEMINI.md` linking to it;
-grok, which reads none of them, gets it as `--rules`. Because the directory is
+grok, which reads none of them, gets it as `--rules`, and ori, which reads
+none and takes no system prompt, gets it ahead of every prompt. Because the directory is
 the conversation's own, a harness's "continue the most recent session here" is
 the conversation's resume; opencode, whose continue is not
-cwd-scoped, is resumed by the session id it reported. Each turn also
+cwd-scoped, and ori, which has none, are resumed by the session id they reported. Each turn also
 receives the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
-mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
-in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
+mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, `ORI_MCP_CONFIG` (ori ignores a stdio `cwd`), or a
+project config file in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
 carries it. The pi and omp rows forward none of these; Pi 1.2 itself

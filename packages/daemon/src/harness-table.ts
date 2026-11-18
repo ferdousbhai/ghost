@@ -575,6 +575,59 @@ function copilotParser(): (line: string) => HarnessEvent[] {
   };
 }
 
+/**
+ * Ori Code's `--output jsonl` (ori 0.17): runtime events, each inside
+ * `{"kind":"event","event":{"type":"runtime.event","event":{…}}}`; a refusal
+ * before the runtime starts is only its stderr and exit status. A model attempt that fails mid-stream withdraws
+ * the text it showed (`content.retracted`) and retries, so an attempt's text
+ * is held until a tool call or the turn's end proves the attempt stood.
+ */
+function oriParser(): (line: string) => HarnessEvent[] {
+  let segment = 0;
+  let held = "";
+  const flush = (): HarnessEvent[] => {
+    const text = held;
+    held = "";
+    return text ? [{ type: "text", block: String(segment++), delta: text }] : [];
+  };
+  return (line) => {
+    const envelope = json(line);
+    if (!envelope) return [];
+    const event = record(record(envelope.event).event);
+    const payload = record(event.payload);
+    switch (event.type) {
+      case "session.started":
+        return typeof payload.sessionId === "string" ? [{ type: "session", id: payload.sessionId }] : [];
+      case "assistant.text.delta":
+        held += str(payload.delta);
+        return [];
+      case "content.retracted":
+        held = "";
+        return [];
+      case "reasoning.delta":
+        return [{ type: "thinking", block: `r${segment}`, delta: str(payload.delta) }];
+      case "tool.started":
+        return [...flush(), { type: "tool_start", id: str(payload.toolCallId), name: str(payload.name), args: payload.input ?? {} }];
+      case "tool.succeeded":
+      case "tool.failed":
+        return [{ type: "tool_end", id: str(payload.toolCallId), isError: event.type === "tool.failed", output: outputText(payload.result) }];
+      case "turn.succeeded": {
+        const model = record(payload.usage).model;
+        return [...flush(), ...(typeof model === "string" ? [{ type: "model" as const, model }] : [])];
+      }
+      case "turn.failed": {
+        const failure = record(payload.failure);
+        // The provider's status is what tells a quota refusal (429) apart.
+        const message = [str(failure.message) || "The turn failed.", str(failure.detail)].filter(Boolean).join(" ");
+        const status = typeof failure.upstreamStatus === "number" ? ` (status ${failure.upstreamStatus})` : "";
+        return [...flush(), { type: "error", message: `${message}${status}` }];
+      }
+      default:
+        return [];
+    }
+  };
+}
+
 /** A harness with no structured output: stdout is the reply. */
 function textParser(): (line: string) => HarnessEvent[] {
   let first = true;
@@ -706,6 +759,27 @@ const ROWS: readonly HarnessRow[] = [
       files: turn.mcp.length > 0 ? { ".gemini/settings.json": writeJson(mcpServersJson(turn.mcp)) } : {},
     }),
     parser: agyParser,
+  },
+  {
+    id: "ori",
+    effort: EFFORT,
+    // `ori code` reads no AGENTS.md and takes no system prompt, so the persona
+    // leads every prompt; the prompt goes in a file, where no argv parsing or
+    // length limit can reach it. It resumes by the session id it reported, and
+    // takes Ghost's MCP servers as an extra config file (ori ignores a stdio `cwd`).
+    launch: (turn) => ({
+      argv: [
+        "ori", "code", "--output", "jsonl", "--approvals", "self-drive", "--reasoning-effort", EFFORT,
+        ...(turn.resume && turn.sessionId ? ["--resume", turn.sessionId] : []),
+        "--prompt-file", ".ghost-prompt.md",
+      ],
+      files: {
+        ".ghost-prompt.md": `<ghost-persona>\n${turn.persona}\n</ghost-persona>\n\n${turn.prompt}\n`,
+        ...(turn.mcp.length > 0 ? { ".ghost-mcp.json": writeJson(mcpServersJson(turn.mcp)) } : {}),
+      },
+      ...(turn.mcp.length > 0 ? { env: { ORI_MCP_CONFIG: ".ghost-mcp.json" } } : {}),
+    }),
+    parser: oriParser,
   },
   {
     id: "crush",

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { harnessRow, type HarnessEvent, type HarnessTurnInput } from "../src/harness-table.js";
+import { classifyLimitMessage } from "../src/turn-events.js";
 
 function parse(id: string, fixture: string): HarnessEvent[] {
   const row = harnessRow(id);
@@ -278,6 +279,33 @@ describe("parsers over recorded output", () => {
     ]);
   });
 
+  // Recorded 2026-11-18 from ori 0.17.1 (`ori code --output jsonl`) against a
+  // local stand-in for OpenRouter: the events are ori's own, the model's turns scripted.
+  it("ori: its session, reasoning, a shell call, then the reply and the model that gave it", () => {
+    const events = parse("ori", "ori.jsonl");
+    expect(events.find((event) => event.type === "session")).toEqual({ type: "session", id: "831014a2-a552-4b89-9239-c38d74257585" });
+    expect(events.filter((event) => event.type === "thinking").map((event) => event.type === "thinking" && event.delta)).toEqual(["The owner wants one word."]);
+    expect(events.find((event) => event.type === "tool_start")).toMatchObject({ name: "shell", args: { command: "echo hi" } });
+    expect(tools(events)).toEqual([["start", "shell"], ["end", false]]);
+    expect(reply(events)).toBe("ok");
+    expect(events.at(-1)).toEqual({ type: "model", model: "~anthropic/claude-opus-latest" });
+    expect(events.some((event) => event.type === "error")).toBe(false);
+  });
+
+  it("ori: text an attempt withdrew before retrying is never shown", () => {
+    const events = parse("ori", "ori-retry.jsonl");
+    expect(events.filter((event) => event.type === "text")).toEqual([{ type: "text", block: "0", delta: "ok" }]);
+  });
+
+  it("ori: a failed tool, and a refusal as the turn's error", () => {
+    expect(tools(parse("ori", "ori-tool-failed.jsonl"))).toEqual([["start", "read"], ["end", true]]);
+    const events = parse("ori", "ori-limit.jsonl");
+    expect(events.filter((event) => event.type === "error"))
+      .toEqual([{ type: "error", message: "The OpenRouter account used its daily free-model requests. The account used its daily free-model requests. (status 429)" }]);
+    const [refusal] = events.filter((event) => event.type === "error");
+    expect(classifyLimitMessage(refusal?.type === "error" ? refusal.message : "")).not.toBeNull();
+  });
+
   it("crush: plain stdout is the reply", () => {
     expect(reply(parse("crush", "crush.txt"))).toBe("ZEPHYR: My name is Zephyr.");
   });
@@ -292,6 +320,7 @@ describe("launch lines", () => {
       pi: ["--thinking", "low"],
       crush: ["--reasoning-effort", "low"],
       agy: ["--effort", "low"],
+      ori: ["--reasoning-effort", "low"],
     };
     for (const [id, pair] of Object.entries(flags)) {
       expect(harnessRow(id)?.launch(TURN).argv, id).toEqual(expect.arrayContaining(pair));
@@ -325,6 +354,17 @@ describe("launch lines", () => {
     const launch = harnessRow("grok")?.launch(TURN);
     expect(launch?.argv).toEqual(expect.arrayContaining(["--rules", "You are Casper."]));
     expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.notes]\ncommand = "/usr/bin/notes-mcp"');
+  });
+
+  it("ori takes the persona ahead of the prompt in a file, resumes by session id, and MCP as a config file", () => {
+    const fresh = harnessRow("ori")?.launch(TURN);
+    expect(fresh?.argv).toEqual(["ori", "code", "--output", "jsonl", "--approvals", "self-drive", "--reasoning-effort", "low", "--prompt-file", ".ghost-prompt.md"]);
+    expect(fresh?.files?.[".ghost-prompt.md"]).toBe("<ghost-persona>\nYou are Casper.\n</ghost-persona>\n\n-hello\n");
+    expect(fresh?.env).toEqual({ ORI_MCP_CONFIG: ".ghost-mcp.json" });
+    expect(JSON.parse(fresh?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({ mcpServers: { notes: { command: "/usr/bin/notes-mcp", args: [] } } });
+    const resumed = harnessRow("ori")?.launch({ ...TURN, resume: true, sessionId: "s1", mcp: [] });
+    expect(resumed?.argv).toEqual(expect.arrayContaining(["--resume", "s1"]));
+    expect(resumed?.env).toBeUndefined();
   });
 
   it("opencode resumes by the session id it reported, not by directory", () => {
