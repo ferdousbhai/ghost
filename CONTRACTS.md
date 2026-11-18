@@ -695,7 +695,8 @@ empty list prints a sentence saying so (`No ghosts.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
-rendered for the ghost the shell's `$GHOST` names and needing no daemon; they
+rendered for the ghost `-g`, `$GHOST`, or the `ghost use` default names and
+needing no daemon; they
 are prompt-visible contract text like the policy sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
 --json`; without `omarchy` on `PATH`, the ids Ghost has a row for) that
@@ -726,7 +727,7 @@ unlisted id as given, since one no message has landed in yet is not listed.
 `-g` and `-s` exist only on the verbs whose usage lists them; elsewhere they
 are unknown options. `ghost rename` moves the `ghost use` default
 (`$XDG_CONFIG_HOME/ghost/cli.json`) to the new name and `ghost rm` clears it
-when it names that ghost. Signing in is
+when it names that ghost; `ghost use --none` clears it. Signing in is
 the harness's own (`claude`, `codex login`, …); Ghost has no login or model
 commands. There are no plan or todo commands.
 

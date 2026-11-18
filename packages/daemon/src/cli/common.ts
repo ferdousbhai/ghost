@@ -66,6 +66,13 @@ export async function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home"
   return path;
 }
 
+/** Forget the `ghost use` default; addressing falls through to the sole ghost. */
+export function clearDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): string {
+  const path = cliConfigPath(runtime);
+  rmSync(path, { force: true });
+  return path;
+}
+
 /**
  * Keep the `ghost use` default true after the ghost it names is renamed
  * (`next`) or trashed (null). A default naming another ghost, or a file that
@@ -76,7 +83,7 @@ export async function followDefaultGhost(runtime: Pick<CliRuntime, "env" | "home
   try { stored = readDefaultGhost(runtime); } catch { return; }
   if (stored !== previous) return;
   if (next) await writeDefaultGhost(runtime, next);
-  else rmSync(cliConfigPath(runtime), { force: true });
+  else clearDefaultGhost(runtime);
 }
 
 export function listGhosts(client: DaemonClient): Promise<Ghost[]> {

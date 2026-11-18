@@ -97,10 +97,11 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "use",
-    usage: "use [<name>] [--json] [-q]",
-    summary: "Print or persist the private default ghost.",
+    usage: "use [<name>|--none] [--json] [-q]",
+    summary: "Print, persist, or clear (--none) the private default ghost.",
     example: "ghost use sage",
     positionals: [0, 1],
+    flags: { boolean: ["none"] },
     run: (ctx) => ghostsCommand("use", ctx),
   },
   {

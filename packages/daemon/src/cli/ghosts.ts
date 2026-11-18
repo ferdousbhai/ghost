@@ -1,5 +1,5 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { cliConfigPath, followDefaultGhost, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
+import { clearDefaultGhost, cliConfigPath, followDefaultGhost, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
 import { notFound } from "./client.js";
 import { emit, primary, table } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -25,6 +25,12 @@ export async function ghostsCommand(verb: "list" | "new" | "rm" | "use", ctx: Cl
 
   if (verb === "use") {
     const requested = parsed.positionals[0];
+    if (flagBoolean(parsed, "none")) {
+      if (requested) throw new ArgsError("ghost use takes a name or --none, not both");
+      const path = clearDefaultGhost(ctx.runtime);
+      emit(ctx, { ghost: null, path }, () => "No default ghost.\n");
+      return 0;
+    }
     if (!requested) {
       const ghost = readDefaultGhost(ctx.runtime);
       if (!ghost) throw new ArgsError(`No default ghost is stored in ${cliConfigPath(ctx.runtime)}.`);
