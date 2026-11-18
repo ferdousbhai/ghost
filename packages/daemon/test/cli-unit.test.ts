@@ -418,6 +418,28 @@ describe("CLI API adaptation", () => {
     ]);
   });
 
+  it("ghost hooks set acknowledges in words; --json keeps the API body and -q prints nothing", async () => {
+    const config = {
+      path: "/home/owner/.config/ghost/hooks.json",
+      document: { hooks: { turn_end: [{ hooks: [{ type: "command", command: "/bin/true" }, { type: "command", command: "/bin/false" }] }] } },
+    };
+    const fetch: CliFetch = async (_input, init) => {
+      expect(init?.method).toBe("PUT");
+      return jsonResponse(config);
+    };
+    const dir = mkdtempSync(join(tmpdir(), "ghost-cli-hooks-"));
+    try {
+      const file = join(dir, "hooks.json");
+      writeFileSync(file, JSON.stringify(config.document));
+      const run = (...flags: string[]) => runCli(["hooks", "set", file, ...flags], { env: { GHOSTD_PORT: "7718" }, home: dir, fetch });
+      expect(await run()).toMatchObject({ code: 0, stdout: "replaced /home/owner/.config/ghost/hooks.json (2 hooks)\n" });
+      expect(JSON.parse((await run("--json")).stdout)).toEqual(config);
+      expect(await run("-q")).toMatchObject({ code: 0, stdout: "" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   /** A daemon answering `ghost status`'s three reads, `/api/status` with `daemon`. */
   const statusDaemon = (daemon: Record<string, unknown>): CliFetch => async (input) => {
     const path = new URL(input).pathname;

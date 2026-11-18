@@ -108,6 +108,12 @@ describe("ghost CLI against a real daemon server", () => {
     // From a ghost's own shell, the conversation is $GHOST_SESSION.
     const switched = await cli(["switch", "fake"], { env: { ...env, GHOST: "casper", GHOST_SESSION: "conv-1" } });
     expect(switched).toMatchObject({ code: 0, stdout: "Conversation conv-1 now runs on fake.\n" });
+    // A prefix names the listed conversation, as -s does elsewhere, not a new one.
+    expect(await cli(["switch", "fake", "-g", "casper", "-s", "conv"]))
+      .toMatchObject({ code: 0, stdout: "Conversation conv-1 now runs on fake.\n" });
+    // One no message has landed in yet is addressed as given.
+    expect(await cli(["switch", "fake", "-g", "casper", "-s", "fresh-1"]))
+      .toMatchObject({ code: 0, stdout: "Conversation fresh-1 now runs on fake.\n" });
   });
 
   it("keeps destructive removal behind --yes", async () => {

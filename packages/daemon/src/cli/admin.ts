@@ -1,5 +1,5 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { readArgumentFile, readArgumentJson, stdinText, ghostPath, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, resolveTarget, sessionPath } from "./common.js";
 import { emit, primary } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
@@ -99,11 +99,13 @@ export async function switchCommand(ctx: CliContext): Promise<number> {
   const id = parsed.positionals[0];
   if (!id) throw new ArgsError("ghost switch needs the agent to switch to");
   const name = await resolveGhost(ctx);
-  // A conversation not listed yet (no message landed) is addressed as given.
+  // An id or unique prefix of a listed conversation, as `-s` is elsewhere; one
+  // not listed yet (no message landed) is addressed as given.
   const requested = preferredSessionId(ctx);
-  const path = requested
-    ? sessionPath(name, requested)
-    : sessionPath(name, (await resolveSession(ctx.client, name, undefined)).id);
+  const sessions = requested ? await listSessions(ctx.client, name) : [];
+  const path = sessionPath(name, !requested ? (await resolveSession(ctx.client, name, undefined)).id
+    : sessions.some((row) => row.id.startsWith(requested)) ? resolveSessionPrefix(sessions, requested).id
+    : requested);
   const body = await ctx.client.request<{ id: string; harness: string }>("PUT", `${path}/harness`, { harness: id });
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
