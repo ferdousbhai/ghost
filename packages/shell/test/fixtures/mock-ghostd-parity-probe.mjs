@@ -130,7 +130,7 @@ try {
 
   // RemoteStatus's fields, in ghostd's order.
   const remote = await (await fetch(`http://127.0.0.1:${port}/api/remote`)).json();
-  assert.deepEqual(Object.keys(remote), ["enabled", "state", "hostname", "guests", "owner", "app", "problem"]);
+  assert.deepEqual(Object.keys(remote), ["state", "hostname", "guests", "owner", "app", "problem"]);
 
   const transcriptResponse = await fetch(
     `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/transcript`,

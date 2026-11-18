@@ -25,7 +25,6 @@ TestCase {
 
     function status(overrides: var): var {
         return Object.assign({
-            enabled: false,
             state: "off",
             hostname: "omarchy-thinkpad.tail58bdd3.ts.net",
             guests: "read-only",
@@ -73,7 +72,6 @@ TestCase {
         const panel = createTemporaryObject(panelComponent, tc);
         const add = "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net";
         requests[0].complete(200, status({
-            enabled: true,
             state: "on",
             app: { origin: "https://summonghost.com", url: add }
         }));
@@ -100,9 +98,13 @@ TestCase {
         const panel = createTemporaryObject(panelComponent, tc);
         // ghostd's https_required message, which says where to turn certificates on.
         const message = "This tailnet has no HTTPS certificates, which the app needs: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then turn remote access on again.";
-        requests[0].complete(200, status({ problem: { code: "https_required", message: message } }));
+        requests[0].complete(200, status());
+        // Like ghostd, the problem comes only in the reply to turning it on.
+        findChild(panel, "remoteSwitch").activate();
+        compare(requests[1].body, '{"enabled":true}');
+        requests[1].complete(200, status({ problem: { code: "https_required", message: message } }));
         // Off, with no app link and so no QR code to fetch.
-        compare(requests.length, 1);
+        compare(requests.length, 2);
         verify(!findChild(panel, "remoteSwitch").checked);
         verify(!findChild(panel, "remoteAppCard").visible);
         verify(!findChild(panel, "remoteProblemAction").visible);
@@ -115,7 +117,7 @@ TestCase {
 
     function test_noAppCardWithoutApps(): void {
         const panel = createTemporaryObject(panelComponent, tc);
-        requests[0].complete(200, status({ enabled: true, state: "on", app: null }));
+        requests[0].complete(200, status({ state: "on", app: null }));
         compare(requests.length, 1);
         verify(!findChild(panel, "remoteAppCard").visible);
         verify(findChild(panel, "remoteNoAppText").visible);
@@ -175,7 +177,6 @@ TestCase {
         const remoteSwitch = findChild(panel, "remoteSwitch");
         remoteSwitch.activate();
         requests[1].complete(200, status({
-            enabled: true,
             state: "on",
             app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=omarchy-thinkpad.tail58bdd3.ts.net" }
         }));

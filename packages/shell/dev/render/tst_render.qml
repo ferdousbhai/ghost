@@ -51,7 +51,7 @@ TestCase {
                 { id: "pi", usage: null, effort: null,
                     resting: { until: "2026-11-01T00:00:00.000Z", reason: "429 monthly API usage threshold reached" } }
             ], ghostDefault: null, automatic: "claude" });
-            else if (/\/api\/remote$/.test(url)) xhr.complete(200, { enabled: true, state: "on",
+            else if (/\/api\/remote$/.test(url)) xhr.complete(200, { state: "on",
                 hostname: "omarchy.tail58bdd3.ts.net",
                 guests: "read-only", owner: "owner@example.com",
                 app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=omarchy.tail58bdd3.ts.net" },

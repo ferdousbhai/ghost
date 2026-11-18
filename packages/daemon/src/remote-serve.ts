@@ -21,7 +21,6 @@ interface RemoteProblem {
 }
 
 export interface RemoteStatus {
-  enabled: boolean;
   state: "on" | "off" | "unavailable";
   hostname: string | null;
   guests: "read-only" | "none";
@@ -155,7 +154,7 @@ export class RemoteServe {
   /** Turn off each listener Ghost has on, the plain-HTTP one an earlier version wrote included. */
   async disable(): Promise<RemoteStatus> {
     const { status, http } = await this.inspect();
-    const listeners = [...(status.enabled ? [HTTPS] : []), ...(http ? [HTTP] : [])];
+    const listeners = [...(status.state === "on" ? [HTTPS] : []), ...(http ? [HTTP] : [])];
     if (listeners.length === 0) return status;
     for (const listener of listeners) {
       const problem = await this.change(["serve", listener, "off"]);
@@ -207,7 +206,6 @@ export class RemoteServe {
 
   private async inspect(): Promise<Inspection> {
     const off: RemoteStatus = {
-      enabled: false,
       state: "off",
       hostname: null,
       guests: this.guests,
@@ -248,7 +246,6 @@ export class RemoteServe {
     }
     return inspection({
       ...known,
-      enabled: served.https,
       state: served.https ? "on" : "off",
       app: known.app && { ...known.app, url: served.https ? `${known.app.origin}/#add=${known.hostname}` : null },
       problem: this.operatorProblem,

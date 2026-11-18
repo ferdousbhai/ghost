@@ -64,7 +64,7 @@ Singleton {
     /** The daemon's RemoteStatus; the panel reads the rest defensively. */
     function validRemoteStatus(body: var): bool {
         return !!body && typeof body === "object" && !Array.isArray(body)
-            && typeof body.enabled === "boolean"
+            && typeof body.state === "string"
             && (body.problem === null
                 || (!!body.problem && typeof body.problem === "object"
                     && typeof body.problem.message === "string"));

@@ -258,7 +258,7 @@ Rectangle {
                             id: remoteSwitch
                             objectName: "remoteSwitch"
 
-                            readonly property bool checked: root.status.enabled === true
+                            readonly property bool checked: root.status.state === "on"
 
                             function activate(): void {
                                 if (remoteSwitch.enabled)

@@ -303,7 +303,7 @@ describe("ghost help", () => {
 describe("CLI API adaptation", () => {
   it("ghost remote prints a problem's message, not the object", async () => {
     const fetch: CliFetch = async () => jsonResponse({
-      enabled: false,
+      state: "off",
       hostname: null,
       problem: { code: "tailscale_stopped", message: "Tailscale is not running", action: "sudo tailscale up" },
     });
@@ -313,13 +313,13 @@ describe("CLI API adaptation", () => {
 
   it("ghost remote prints the app link, and how to get HTTPS without it", async () => {
     let body: Record<string, unknown> = {
-      enabled: true, hostname: "box.tail.ts.net", problem: null,
+      state: "on", hostname: "box.tail.ts.net", problem: null,
       app: { origin: "https://summonghost.com", url: "https://summonghost.com/#add=box.tail.ts.net" },
     };
     const fetch: CliFetch = async () => jsonResponse(body);
     const run = () => runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect((await run()).stdout).toBe("on box.tail.ts.net\napp https://summonghost.com/#add=box.tail.ts.net\n");
-    const refused = { enabled: false, hostname: "box.tail.ts.net", app: { origin: "https://summonghost.com", url: null },
+    const refused = { state: "off", hostname: "box.tail.ts.net", app: { origin: "https://summonghost.com", url: null },
       problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." } };
     expect((await runCli(["remote", "on"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch: async () => jsonResponse(refused) })).stdout)
       .toBe("off (This tailnet has no HTTPS certificates.)\n");
@@ -351,7 +351,7 @@ describe("CLI API adaptation", () => {
     if (path === "/api/status") return jsonResponse(daemon);
     if (path === "/api/remote") {
       return jsonResponse({
-        enabled: false, state: "off", hostname: null, guests: "read-only", owner: null, app: null,
+        state: "off", hostname: null, guests: "read-only", owner: null, app: null,
         problem: { code: "https_required", message: "This tailnet has no HTTPS certificates." },
       });
     }

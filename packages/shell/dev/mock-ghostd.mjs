@@ -137,12 +137,13 @@ if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
 }
 
 let remoteEnabled = false;
-function remoteSnapshot() {
+/** Like ghostd, `https_required` appears only in the reply to turning Serve on, never on GET. */
+function remoteSnapshot(turningOn = false) {
   const { unavailable = false, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
-  const problem = REMOTE_PROBLEM === "" ? null : { code: REMOTE_PROBLEM, ...problemFields };
+  const reported = REMOTE_PROBLEM !== "" && (REMOTE_PROBLEM !== "https_required" || turningOn);
+  const problem = reported ? { code: REMOTE_PROBLEM, ...problemFields } : null;
   const enabled = remoteEnabled && !unavailable;
   return {
-    enabled,
     state: unavailable ? "unavailable" : (enabled ? "on" : "off"),
     hostname: unavailable ? null : REMOTE_HOSTNAME,
     guests: "none",
@@ -764,7 +765,7 @@ const mockServer = createServer(async (req, res) => {
     }
     // A problem refuses the write, as Tailscale does, and leaves Serve off.
     remoteEnabled = body.enabled && REMOTE_PROBLEM === "";
-    return json(res, 200, remoteSnapshot());
+    return json(res, 200, remoteSnapshot(body.enabled));
   }
 
   if (parts.length === 3 && parts[0] === "api" && parts[1] === "remote"
@@ -773,7 +774,7 @@ const mockServer = createServer(async (req, res) => {
       error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
     });
     const status = remoteSnapshot();
-    if (!status.enabled || status.state !== "on" || !status.app.url) {
+    if (status.state !== "on" || !status.app.url) {
       return json(res, 404, {
         error: { code: "not_found", message: "The app needs Remote access on HTTPS." },
       });

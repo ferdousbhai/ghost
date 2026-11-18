@@ -55,7 +55,6 @@ const asTailnet = (login: string, extra: Record<string, string> = {}) => ({
 
 function remoteStatus(enabled: boolean): RemoteStatus {
   return {
-    enabled,
     state: enabled ? "on" : "off",
     hostname: "ghostbox.example.ts.net",
     guests: "read-only",
