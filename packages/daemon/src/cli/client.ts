@@ -115,19 +115,21 @@ export class DaemonClient {
     path: string,
     init: RequestInit,
     retry: boolean,
-    timeoutMs: number,
+    /** Null: no deadline, and no Bun idle timer either; the caller bounds the call. */
+    timeoutMs: number | null,
   ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("accept", headers.get("accept") ?? "application/json");
     if (this.#tokenValue) headers.set("authorization", `Bearer ${this.#tokenValue}`);
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), timeoutMs);
+    const timer = timeoutMs === null ? undefined : setTimeout(() => timeout.abort(), timeoutMs);
     let response: Response;
     try {
       response = await this.#runtime.fetch(`${this.baseUrl}${path}`, {
         ...init,
         headers,
         signal: timeout.signal,
+        ...(timeoutMs === null ? { timeout: false } : {}),
       });
     } catch (error) {
       throw networkError(error);
@@ -146,7 +148,7 @@ export class DaemonClient {
     method: string,
     path: string,
     body?: unknown,
-    timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
+    timeoutMs: number | null = CONTROL_REQUEST_TIMEOUT_MS,
   ): Promise<T> {
     const response = await this.#fetch(path, {
       method,

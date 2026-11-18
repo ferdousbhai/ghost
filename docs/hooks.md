@@ -171,7 +171,9 @@ the ghost's `harness` is `local` or unset, the prompt runs on the daemon's own
 loaded model instead, as a turn would: one completion without tools, never
 falling through to a cloud harness. A ghost whose `harness` is `local` with no
 local model configured is refused, and so is a call when the daemon is not
-running.
+running. `hook-complete` sets no deadline of its own: the calling hook's
+`timeout` kills its process group, which closes the request and stops the
+completion.
 
 ## Status and editing
 

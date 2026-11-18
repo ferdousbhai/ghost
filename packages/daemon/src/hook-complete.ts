@@ -16,7 +16,6 @@ import { isGhostHome } from "./ghosts.js";
 import { isRecord } from "./record.js";
 
 const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
-const HOOK_COMPLETE_TIMEOUT_MS = 180_000;
 
 interface HookCompleteInput {
   readonly ghost_home: string;
@@ -84,7 +83,10 @@ export async function hookCompleteCommand(argv: string[], options: Partial<CliRu
     const name = ghostName(input.ghost_home, loadConfig({ env: runtime.env, home: runtime.home }).ghostsRoot);
     const client = new DaemonClient(runtime);
     const { text } = await client.request<{ text: string }>(
-      "POST", `/api/ghosts/${encodeURIComponent(name)}/complete`, { prompt: input.prompt }, HOOK_COMPLETE_TIMEOUT_MS,
+      "POST", `/api/ghosts/${encodeURIComponent(name)}/complete`, { prompt: input.prompt },
+      // No deadline of its own: the hook's `timeout` kills this process group,
+      // which closes the request and stops the completion.
+      null,
     ).catch((error: unknown) => {
       if (error instanceof CliError && error.exitCode === EXIT_CODE.unreachable) {
         throw new Error(`${error.message} at ${client.baseUrl}; is it running? (systemctl --user status ghostd)`);

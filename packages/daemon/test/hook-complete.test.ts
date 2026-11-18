@@ -169,11 +169,12 @@ describe("SessionHost.complete", () => {
 });
 
 describe("ghostd hook-complete", () => {
-  async function run(stdin: string, env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
+  async function run(stdin: string, env: NodeJS.ProcessEnv, through: typeof fetch = fetch): Promise<{ code: number; stdout: string; stderr: string }> {
     let stdout = "";
     let stderr = "";
     const code = await hookCompleteCommand([], {
       env,
+      fetch: through,
       home: daemon?.temp.ownerHome ?? tmpdir(),
       stdin,
       stdout: { write: (chunk: string) => { stdout += chunk; } },
@@ -189,6 +190,20 @@ describe("ghostd hook-complete", () => {
     await expect(run(JSON.stringify({ ghost_home: home, prompt: "Review this." }), daemon.env))
       .resolves.toEqual({ code: 0, stdout: `${JSON.stringify({ text: "APPROVE" })}\n`, stderr: "" });
     expect(daemon.harness.calls()).toMatchObject([{ prompt: "Review this.", ghost: "casper", session: null }]);
+  });
+
+  it("sets no deadline of its own, so the hook's timeout bounds the call", async () => {
+    daemon = await startTestDaemon({ turns: replies("APPROVE") });
+    const inits: RequestInit[] = [];
+    const through = (async (input: string | URL | Request, init?: RequestInit) => {
+      inits.push(init ?? {});
+      return fetch(input, init);
+    }) as typeof fetch;
+    const home = join(daemon.temp.root, "casper");
+
+    expect((await run(JSON.stringify({ ghost_home: home, prompt: "Review this." }), daemon.env, through)).code).toBe(0);
+    // Bun's own 5-minute idle timer is off too; a hook may allow up to 600 s.
+    expect(inits).toMatchObject([{ timeout: false }]);
   });
 
   it("rejects a non-ghost home, a relative path, and an empty prompt before asking", async () => {
