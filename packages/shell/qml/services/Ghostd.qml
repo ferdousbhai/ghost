@@ -2367,7 +2367,7 @@ Singleton {
             // The terminal error that follows says "provider failed"; this
             // says what actually happened.
             state.limitNotice = root.limitNoticeText(event);
-            state.activity = "limit reached";
+            state.activity = state.limitNotice;
             break;
         case "done":
             root.endTurnState(state, "");

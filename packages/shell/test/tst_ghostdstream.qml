@@ -239,13 +239,17 @@ TestCase {
         Ghostd.handleTurnEvent(turn.state, {
             type: "limit_reached", harness: "claude", kind: "usage_limit"
         });
-        compare(turn.state.activity, "limit reached");
+        compare(turn.state.activity, "claude usage limit reached");
         Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "the provider ended the turn." });
         compare(turn.state.lastError, "claude usage limit reached");
         verify(turn.state.limitNotice !== "");
         // The conversation's next turn starts without the stale notice.
         Ghostd.beginTurnFor(turn.state);
         compare(turn.state.limitNotice, "");
+
+        const busy = openTurn("overloaded", null);
+        Ghostd.handleTurnEvent(busy.state, { type: "limit_reached", harness: "codex", kind: "overloaded" });
+        compare(busy.state.activity, "codex is overloaded");
     }
 
     function test_limitNoticeWordsEachKind(): void {
