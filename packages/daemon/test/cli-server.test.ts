@@ -90,7 +90,7 @@ describe("ghost CLI against a real daemon server", () => {
     const read = await cli(["read", "-g", "casper", "-s", "conv", "--json"]);
     expect(read.code).toBe(0);
     expect(JSON.parse(read.stdout)).toMatchObject({ ok: true });
-    expect(await cli(["remote"])).toMatchObject({ code: 5 });
+    expect(await cli(["remote"])).toMatchObject({ code: 0, stdout: "off\n" });
     expect(await cli(["browser"])).toMatchObject({ code: 2 });
     expect(await cli(["browser", "allow"])).toMatchObject({ code: 2 });
   });
