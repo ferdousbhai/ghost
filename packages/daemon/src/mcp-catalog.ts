@@ -18,7 +18,7 @@ interface McpCatalogSkipped {
   reason: string;
 }
 
-interface McpCatalogSnapshot {
+export interface McpCatalogSnapshot {
   servers: McpServerView[];
   skipped: McpCatalogSkipped[];
 }

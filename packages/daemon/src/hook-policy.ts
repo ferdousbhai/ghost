@@ -9,8 +9,6 @@ export interface GhostHookEventBase {
   ghost_home: string;
   cwd: string;
   conversation_id: string;
-  /** The harness the conversation's latest stretch ran on, when one has run. */
-  harness?: string;
 }
 
 export interface GhostSessionStopEvent extends GhostHookEventBase {
@@ -22,6 +20,8 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   stop_hook_active: boolean;
   /** The conversation log on disk; `messages` carries only the current pass. */
   transcript_path: string;
+  /** The harness that answered the pass. */
+  harness: string;
 }
 
 export interface GhostSessionStopResult {

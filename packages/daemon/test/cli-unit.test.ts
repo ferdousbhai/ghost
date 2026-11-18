@@ -309,6 +309,12 @@ describe("CLI API adaptation", () => {
     });
     const response = await runCli(["remote"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect(response.stdout).toBe("off (Tailscale is not running)\n");
+    const unavailable: CliFetch = async () => jsonResponse({
+      state: "unavailable", hostname: null, app: null,
+      problem: { code: "tailscale_stopped", message: "Tailscale is not running", action: "sudo tailscale up" },
+    });
+    expect((await runCli(["remote"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch: unavailable })).stdout)
+      .toBe("unavailable (Tailscale is not running)\n");
   });
 
   it("ghost remote prints the app link, and how to get HTTPS without it", async () => {

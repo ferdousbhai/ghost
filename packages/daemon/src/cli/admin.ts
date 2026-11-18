@@ -56,7 +56,7 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
   } else throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
   emit(ctx, body, (result) => {
     const status = result as Pick<RemoteStatus, "state" | "hostname" | "app" | "problem">;
-    const line = `${status.state === "on" ? `on ${status.hostname}` : "off"}${status.problem ? ` (${status.problem.message})` : ""}\n`;
+    const line = `${status.state === "on" ? `on ${status.hostname}` : status.state}${status.problem ? ` (${status.problem.message})` : ""}\n`;
     if (status.state !== "on") return line;
     if (!status.app) return line + "no app: remote.apps is empty, so nothing can reach Ghost remotely\n";
     return line + (status.app.url ? `app ${status.app.url}\n` : "");
@@ -64,15 +64,13 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
   return 0;
 }
 
-type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault"> & Partial<Pick<HarnessChoices, "harnesses" | "automatic">>;
-
 /**
  * The preference, and any agent a recent failure keeps at the back;
  * `ghost harnesses` lists installed agents and usage.
  */
-function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
+function harnessChoicesText(name: string, body: HarnessChoices): string {
   const preferred = body.ghostDefault ?? (body.automatic ? `automatic (now ${body.automatic})` : "automatic");
-  const resting = (body.harnesses ?? []).flatMap((harness) => harness.resting
+  const resting = body.harnesses.flatMap((harness) => harness.resting
     ? [`${harness.id} is tried last until ${new Date(harness.resting.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${harness.resting.reason}\n`]
     : []);
   return `${name} runs on ${preferred}\n${resting.join("")}`;
@@ -87,7 +85,7 @@ export async function harnessCommand(ctx: CliContext): Promise<number> {
   const body = id || flagBoolean(parsed, "none")
     ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
     : await ctx.client.request("GET", ghostPath(name, "/harness"));
-  emit(ctx, body, (result) => harnessChoicesText(name, result as HarnessChoicesBody));
+  emit(ctx, body, (result) => harnessChoicesText(name, result as HarnessChoices));
   return 0;
 }
 

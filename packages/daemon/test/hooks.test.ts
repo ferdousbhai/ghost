@@ -33,7 +33,6 @@ function turnEndEvent(overrides: Partial<GhostTurnEndEvent> = {}): GhostTurnEndE
     ghost_home: process.cwd(),
     cwd: process.cwd(),
     conversation_id: "session-1",
-    harness: "claude",
     ...overrides,
   };
 }

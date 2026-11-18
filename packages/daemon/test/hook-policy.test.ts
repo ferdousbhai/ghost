@@ -57,7 +57,7 @@ describe("shared hook policy", () => {
   it("stops at the first real continuation", async () => {
     const commands = parseHooksDocument(config, path);
     const called: string[] = [];
-    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, transcript_path: base.session_file, turn_id: "turn-1", stop_hook_active: false };
+    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, transcript_path: base.session_file, turn_id: "turn-1", stop_hook_active: false, harness: "claude" };
     expect(await runSessionStopHooks(commands, stop, async (hook) => {
       called.push(hook.command);
       return hook.command === "continue" ? { decision: "block", reason: "Revise" } : { continue: true };

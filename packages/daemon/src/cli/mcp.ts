@@ -2,14 +2,10 @@ import { ArgsError } from "./args.js";
 import { ghostPath, readArgumentJson, resolveGhost } from "./common.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
-
-type McpRow = { name: string; enabled: boolean };
-type McpSnapshot = { servers?: McpRow[]; skipped?: Array<{ path: string; reason: string }> };
+import type { McpCatalogSnapshot } from "../mcp-catalog.js";
 
 function renderSnapshot(body: unknown): string {
-  const snapshot = body as McpSnapshot;
-  const rows = snapshot.servers ?? [];
-  const skipped = snapshot.skipped ?? [];
+  const { servers: rows, skipped } = body as McpCatalogSnapshot;
   const lines = [rows.length > 0
     ? table(rows.map((row) => [row.name, row.enabled ? "on" : "off"]), ["SERVER", "ENABLED"])
     : "No MCP servers configured."];
