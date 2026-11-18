@@ -1215,7 +1215,6 @@ export class SessionHost {
       await Promise.all(writes);
     }
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
-    if (exit.spawnError !== undefined) return { content, error: exitError(row.id, exit), aborted: false, produced, model };
     error ??= exitError(row.id, exit);
     return { content, error, aborted: false, produced, model };
   }

@@ -671,7 +671,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   const isGuest = (context: RequestContext): boolean => context.admission.identity?.role === "guest";
-  /** A route a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. */
+  /** A read a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. Every guest write is already refused `read_only` in `authenticate`. */
   const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
     if (isGuest(context)) {
       throw new GhostError("owner_only", "Only the owner may see this.", 403);
@@ -737,10 +737,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
       jsonResponse(response, 200, await options.host.routines(ghost));
     })),
-    route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", ownerOnly(async ({ ghost, params, response, body }) => {
+    route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", async ({ ghost, params, response, body }) => {
       await body();
       jsonResponse(response, 200, await options.host.restoreRoutine(ghost, params.recovery ?? ""));
-    })),
+    }),
     route("GET", "api/ghosts/:ghost/routines/:slug/logs", ownerOnly(async ({ ghost, params, response }) => {
       jsonResponse(response, 200, await options.host.routineLogs(ghost, params.slug ?? ""));
     })),
@@ -754,21 +754,21 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         }));
       }
     })),
-    route("DELETE", "api/ghosts/:ghost/routines/:slug", ownerOnly(async ({ ghost, params, url, response }) => {
+    route("DELETE", "api/ghosts/:ghost/routines/:slug", async ({ ghost, params, url, response }) => {
       jsonResponse(response, 200, await options.host.removeRoutine(ghost, params.slug ?? "", url.searchParams.get("revision") ?? ""));
-    })),
-    route("POST", "api/ghosts/:ghost/routines/:slug/:action", ownerOnly(async ({ ghost, params, response, body }) => {
+    }),
+    route("POST", "api/ghosts/:ghost/routines/:slug/:action", async ({ ghost, params, response, body }) => {
       await body();
       await options.host.controlRoutine(ghost, params.slug ?? "", params.action ?? "");
       jsonResponse(response, 200, { ok: true });
-    })),
+    }),
     route("GET", "api/ghosts/:ghost/harness", async ({ ghost, response }) => {
       jsonResponse(response, 200, await options.host.listHarnesses(ghost));
     }),
     route("PUT", "api/ghosts/:ghost/harness", async (context) => {
       jsonResponse(context.response, 200, await options.host.setGhostHarness(context.ghost, await readHarnessBody(context, true)));
     }),
-    route("POST", "api/ghosts/:ghost/complete", ownerOnly(async ({ ghost, request, response, body }) => {
+    route("POST", "api/ghosts/:ghost/complete", async ({ ghost, request, response, body }) => {
       const prompt = stringField(await body(), "prompt");
       const { signal, release } = abortOnClose(request, response);
       try {
@@ -776,14 +776,14 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       } finally {
         release();
       }
-    })),
+    }),
     route("POST", "api/ghosts/:ghost/messages", handleMessages),
-    route("POST", "api/ghosts/:ghost/events", ownerOnly(async ({ ghost, body, response }) => {
+    route("POST", "api/ghosts/:ghost/events", async ({ ghost, body, response }) => {
       const accepted = await options.host.admitEvent(ghost, parseExternalEvent(await body()));
       const admission = accepted.admission;
       if (admission) startTurnLog(ghost, accepted.sessionId, (emit) => admission.run({ emit }));
       jsonResponse(response, accepted.admission ? 202 : 200, { sessionId: accepted.sessionId, duplicate: accepted.admission === null });
-    })),
+    }),
     route("GET", "api/ghosts/:ghost/events", handleConversationEvents),
     // The name is the home directory's name, so a rename moves the whole home
     // and every other route's `:ghost` changes with it.

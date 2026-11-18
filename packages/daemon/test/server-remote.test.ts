@@ -182,12 +182,18 @@ describe("tailnet identity", () => {
       expect(guest.status).toBe(403);
       expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
     }
-    const complete = await fetch(`${base}/api/ghosts/casper/complete`, {
-      method: "POST",
-      headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
-      body: JSON.stringify({ prompt: "Spend the owner's subscription." }),
-    });
-    expect(complete.status).toBe(403);
+    // Owner-only writes need no route guard: every guest write is refused first.
+    for (const path of ["/api/ghosts/casper/complete", "/api/ghosts/casper/events", "/api/ghosts/casper/routines/daily/start"]) {
+      const guest = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "Spend the owner's subscription." }),
+      });
+      expect(guest.status).toBe(403);
+      expect(await guest.json()).toMatchObject({ error: { code: "read_only" } });
+    }
+    const remove = await fetch(`${base}/api/ghosts/casper/routines/daily?revision=x`, { method: "DELETE", headers: asTailnet("guest@example.com") });
+    expect(await remove.json()).toMatchObject({ error: { code: "read_only" } });
   });
 
   it("honours guests: none and a configured owner login", async () => {
