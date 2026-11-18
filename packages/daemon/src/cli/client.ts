@@ -174,7 +174,7 @@ export class DaemonClient {
   async stream(
     path: string,
     body: unknown | undefined,
-    onEvent: (event: unknown) => boolean | void | Promise<boolean | void>,
+    onEvent: (event: unknown) => void | Promise<void>,
   ): Promise<void> {
     const response = await this.#fetch(path, {
       method: body === undefined ? "GET" : "POST",
@@ -193,8 +193,6 @@ export class DaemonClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let pending = "";
-    // A handler that returned false has had its last event.
-    let stopped = false;
     const consume = async (complete = false): Promise<void> => {
       const normalized = pending.replace(/\r\n/g, "\n");
       const frames = normalized.split("\n\n");
@@ -206,12 +204,7 @@ export class DaemonClient {
           .join("\n");
         if (!data) continue;
         try {
-          const keepGoing = await onEvent(JSON.parse(data) as unknown);
-          if (keepGoing === false) {
-            stopped = true;
-            await reader.cancel().catch(() => undefined);
-            return;
-          }
+          await onEvent(JSON.parse(data) as unknown);
         } catch (error) {
           if (error instanceof SyntaxError) throw new CliError(EXIT_CODE.failure, "daemon sent invalid SSE JSON");
           throw error;
@@ -219,7 +212,7 @@ export class DaemonClient {
       }
     };
     try {
-      while (!stopped) {
+      for (;;) {
         const { done, value } = await reader.read();
         pending += decoder.decode(value, { stream: !done });
         await consume(done);

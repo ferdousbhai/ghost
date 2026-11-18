@@ -41,7 +41,6 @@ import {
   renderUsage,
   type CommandDocumentation,
 } from "./usage.js";
-import { watchCommand } from "./watch.js";
 import { errorMessage } from "../errors.js";
 
 interface Command extends CommandDocumentation {
@@ -247,15 +246,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost remote on",
     positionals: [0, 1],
     run: remoteCommand,
-  },
-  {
-    verb: "watch",
-    usage: "watch [-g <name>] [--exit-on-first] [--json] [-q]",
-    summary: "Stream conversation invalidations as JSON lines.",
-    example: "ghost watch --exit-on-first",
-    positionals: [0, 0],
-    flags: { boolean: ["exit-on-first"] },
-    run: watchCommand,
   },
   {
     verb: "status",
