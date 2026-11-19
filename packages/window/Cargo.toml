@@ -1,0 +1,30 @@
+[package]
+name = "ghost-window"
+version = "0.11.9"
+edition = "2024"
+license = "Apache-2.0"
+description = "Ghost's window: the owner's own data and the ghost, in one GTK 4 app"
+repository = "https://github.com/ferdousbhai/ghost"
+publish = false
+
+[[bin]]
+name = "ghost-window"
+path = "src/main.rs"
+
+[dependencies]
+# The GTK 4 stack lastbook-for-omarchy and Strata (github.com/lgse/strata) use, whose theme approach this follows.
+gtk = { package = "gtk4", version = "0.11.4", features = ["v4_14"] }
+glib = "0.22.9"
+gio = { version = "0.22.9", features = ["v2_72"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+serde_json = "1.0"
+toml = "1.1"
+async-channel = "2.3"
+urlencoding = "2.1"
+# Plain HTTP to ghostd on 127.0.0.1: no TLS stack.
+ureq = { version = "2.12", default-features = false, features = ["json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true

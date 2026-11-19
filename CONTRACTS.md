@@ -775,6 +775,22 @@ runtime preserves owner data.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns ghost homes and the
   persona prompt, configuration, authentication, conversations, the harness table, MCP, hooks, lifecycle,
   HTTP, and the `ghost` CLI. Bun is the production runtime.
+- [`packages/window`](packages/window/src/main.rs) is Ghost's window
+  (`ghost-window`, app id `io.github.ferdousbhai.Ghost`): a Rust and GTK 4
+  app in the Omarchy theme, the stack and look of lastbook-for-omarchy, which
+  follows [Strata](https://github.com/lgse/strata). It is a client of the
+  API like the HUD and keeps no data: a sidebar of Ask and each available
+  [source](#sources), a page per source (its list, a search of it, and a
+  reader for one item), and Ask, a conversation of the default ghost
+  (`ghost use`, else the first ghost) whose answer's `[S1]` citations open
+  the item the turn's `sources` event names. It finds the daemon as the CLI
+  does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
+  file). One instance: a second launch presents the first.
+  `GHOST_WINDOW_OPEN` starts it on a source id or asks `ask:<prompt>`, for
+  [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
+  nested Hyprland against a scratch ghostd and sample data. It is not yet in
+  the Arch packages or the gate: build it with `cargo build --release` in
+  `packages/window`.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring
   `service` (the daemon connection, the desktop presence, and the
