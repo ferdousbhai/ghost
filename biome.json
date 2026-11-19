@@ -12,6 +12,7 @@
       "!.agents",
       "!packages/shell/qml/**/*.js",
       "!packages/shell/test/**/*.js",
+      "!packages/window/src/style.css",
       "!.claude"
     ]
   },
