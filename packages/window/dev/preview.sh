@@ -20,7 +20,7 @@ here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 repo=$(realpath -e -- "$here/../../..")
 binary=${GHOST_WINDOW_BINARY:-$repo/packages/window/target/release/ghost-window}
 [[ -x $binary ]] || { echo "preview: build the window first (cargo build --release in packages/window)" >&2; exit 1; }
-for command_name in Hyprland hyprctl grim bun dbus-daemon setsid curl; do
+for command_name in Hyprland hyprctl grim jq bun dbus-daemon setsid curl; do
   command -v "$command_name" >/dev/null || { echo "preview: $command_name is required" >&2; exit 1; }
 done
 parent_runtime=${XDG_RUNTIME_DIR:?preview: XDG_RUNTIME_DIR is required}
@@ -166,13 +166,14 @@ export DBUS_SESSION_BUS_ADDRESS=${dbus_details[0]}
 dbus_pid=${dbus_details[1]}
 
 printf '%s\n' \
-  'hl.monitor({ output = "", mode = "1280x820@60", position = "0x0", scale = 1 })' \
+  'hl.monitor({ output = "", mode = "1280x820@60", position = "auto", scale = 1 })' \
   'hl.config({' \
   '  general = { gaps_in = 0, gaps_out = 0, border_size = 0 },' \
   '  decoration = { rounding = 0, shadow = { enabled = false }, blur = { enabled = false } },' \
   '  animations = { enabled = false },' \
   '  misc = { disable_hyprland_logo = true, disable_splash_rendering = true },' \
-  '})' > "$root/hyprland.lua"
+  '})' \
+  'hl.window_rule({ match = { class = ".*" }, monitor = "ghost" })' > "$root/hyprland.lua"
 unset HYPRLAND_INSTANCE_SIGNATURE
 /usr/bin/setsid /usr/bin/env WAYLAND_DISPLAY="$parent_socket" /usr/bin/Hyprland --config "$root/hyprland.lua" > "$root/hyprland.log" 2>&1 &
 hypr_pid=$!
@@ -193,12 +194,26 @@ done
 [[ -n $signature ]] || { echo "preview: nested Hyprland did not publish its sockets" >&2; exit 1; }
 export HYPRLAND_INSTANCE_SIGNATURE=$signature WAYLAND_DISPLAY=$display
 
+# The nested compositor's own output is a window on the desktop this runs from, which that desktop may hide or
+# tile at another size, and then has no frame to capture. The window goes on a headless output instead, whose
+# size is the monitor rule's; the window rule sends it there.
+hyprctl output create headless ghost >/dev/null
+
 GHOST_WINDOW_OPEN=$route GDK_BACKEND=wayland "$binary" > "$root/window.log" 2>&1 &
 window_pid=$!
+on_output() {
+  local output
+  output=$(hyprctl monitors -j | jq 'first(.[] | select(.name == "ghost") | .id)') &&
+    hyprctl clients -j | jq -e --argjson output "${output:-null}" 'any(.[]; .mapped and .monitor == $output)' >/dev/null
+}
 # The window, then what the route loads (an asked question's answer most of all).
 sleep "${GHOST_WINDOW_SETTLE:-4}"
 kill -0 "$window_pid" 2>/dev/null || { echo "preview: the window exited" >&2; sed -n '1,40p' "$root/window.log" >&2; exit 1; }
+# A picture of an output the window is not on would be blank, and look like a result.
+on_output || { echo "preview: the window is not on the output being captured" >&2; hyprctl clients >&2; exit 1; }
 mkdir -p "$(dirname "$screenshot")"
-/usr/bin/grim "$screenshot"
+# Hyprland's own notices (it says it was started without its wrapper) would cover the header.
+hyprctl dismissnotify >/dev/null
+/usr/bin/grim -o ghost "$screenshot"
 echo "preview: $screenshot"
 [[ ! -s $root/window.log ]] || sed -n '1,20p' "$root/window.log" >&2
