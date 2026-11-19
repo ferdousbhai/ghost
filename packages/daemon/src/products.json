@@ -37,7 +37,7 @@
     },
     {
       "id": "cloud-contacts",
-      "need": "iCloud and Google contacts together, optionally kept the same",
+      "need": "iCloud and Google contacts together, optionally mirrored between them",
       "name": "Cloud Contacts",
       "source": "https://github.com/ferdousbhai/cloud-contacts",
       "cli": "cloud-contacts",
