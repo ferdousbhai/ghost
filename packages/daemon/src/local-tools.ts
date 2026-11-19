@@ -1,15 +1,12 @@
 /**
  * The local model's tools (CONTRACTS.md "Local model"): `search` over the
- * owner's content, `read` of one search hit by its id, and `delegate`, which
+ * owner's sources, `read` of one search hit by its id, and `delegate`, which
  * the turn hands to a harness. Like Lastbook's, the tools take ids, never
- * paths: the model reads only what a search returned.
+ * paths: the model reads only what a search returned. Searching and reading
+ * are the sources' own ("Sources"); this file numbers the hits and shapes
+ * the text the model sees.
  */
-import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { open, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { which } from "./harnesses.js";
-import { xdgBaseDir } from "./xdg-user-dirs.js";
+import { listSources, readFileRef, readSource, searchFiles, searchSources, type SourceContext, type SourceItem, type SourceRef } from "./sources.js";
 
 /** The characters of one tool result the model is given. */
 export const TOOL_RESULT_CHARS = 8_000;
@@ -19,37 +16,29 @@ interface ToolSpec {
   readonly function: { readonly name: string; readonly description: string; readonly parameters: Record<string, unknown> };
 }
 
-export interface ToolContext {
-  readonly home: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly signal: AbortSignal;
-}
+export type ToolContext = SourceContext;
 
 export interface ToolResult {
   readonly text: string;
   readonly isError: boolean;
 }
 
-/** Where a search hit came from, so `read` can open it. */
-type Hit =
-  | { readonly kind: "file"; readonly path: string; readonly segment: number | null; readonly page: number | null; readonly line?: number }
-  | { readonly kind: "lastbook"; readonly path: string; readonly page: number }
-  | { readonly kind: "mail"; readonly thread: string }
-  | { readonly kind: "contact"; readonly contact: string };
+/** Sources whose hits are files, read straight from disk. */
+const FILE_SOURCES = new Set(["files", "notes", "reminders", "whatsapp", "drive", "lastbook"]);
 
 /** One pass's search hits, keyed `S1`, `S2`, …; a pass's ids mean nothing in the next. */
 export class Hits {
-  private readonly byId = new Map<string, Hit>();
-  add(hit: Hit): string {
+  private readonly byId = new Map<string, SourceRef>();
+  add(ref: SourceRef): string {
     const id = `S${this.byId.size + 1}`;
-    this.byId.set(id, hit);
+    this.byId.set(id, ref);
     return id;
   }
   /** The ids of the first `count` hits that are files or library pages, in search order. */
   documents(count: number): string[] {
-    return [...this.byId].filter(([, hit]) => hit.kind === "file" || hit.kind === "lastbook").slice(0, count).map(([id]) => id);
+    return [...this.byId].filter(([, ref]) => FILE_SOURCES.has(ref.source)).slice(0, count).map(([id]) => id);
   }
-  get(id: string): Hit | undefined {
+  get(id: string): SourceRef | undefined {
     return this.byId.get(id.trim().toUpperCase());
   }
 }
@@ -69,256 +58,65 @@ export const LOCAL_TOOLS: readonly ToolSpec[] = [
     { task: { type: "string", description: "The whole task, self-contained." } }, ["task"]),
 ];
 
-function lastbookSearchDb(env: NodeJS.ProcessEnv, home: string): string {
-  return join(xdgBaseDir(env, "XDG_DATA_HOME", home), "Lastbook", "LastbookData", "library-data", "search.sqlite");
-}
-
-function run(command: string, args: string[], context: ToolContext, input?: string): Promise<{ out: string; error: string | null }> {
-  return new Promise((done) => {
-    const child = execFile(command, args, { env: context.env, signal: context.signal, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
-      done({ out: String(stdout), error: error ? (String(stderr).trim() || error.message) : null });
-    });
-    child.stdin?.on("error", () => {});
-    child.stdin?.end(input ?? "");
-  });
-}
-
-/**
- * Files whose names match, typos forgiven: fd lists the files and fzf ranks
- * their names (Omarchy's `ff`); fd's plain substring match without fzf.
- */
-async function matchNames(pattern: string, roots: string[], names: string[], context: ToolContext): Promise<string[]> {
-  if (!which("fd", context.env)) return [];
-  const skip = names.flatMap((name) => ["--exclude", name]);
-  if (!which("fzf", context.env)) {
-    return (await run("fd", ["-i", "-F", "--max-results", "5", ...skip, pattern, ...roots], context)).out.split("\n").filter(Boolean);
-  }
-  const files = await run("fd", ["-t", "f", ...skip, ".", ...roots], context);
-  const ranked = await run("fzf", ["--filter", pattern, "--delimiter", "/", "--nth", "-1"], context, files.out);
-  return ranked.out.split("\n").filter(Boolean).slice(0, 5);
-}
-
 function clip(text: string, limit = TOOL_RESULT_CHARS): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}\n… (cut at ${limit} characters)`;
 }
 
-const oneLine = (text: unknown, limit: number) => String(text ?? "").replace(/\s+/gu, " ").trim().slice(0, limit);
-
-function json(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+/** A hit as one line or two: where it is, so the answer can name it, then its excerpt. */
+function hitText(item: SourceItem): string {
+  const day = item.at === null ? "" : ` ${new Date(item.at).toISOString().slice(0, 10)}`;
+  switch (item.source) {
+    case "mail": return `Mail${day}: ${item.title}\n    ${item.snippet}`;
+    case "contacts": return `Contact: ${item.title}${item.snippet ? `, ${item.snippet}` : ""}`;
+    case "lastbook": return `Lastbook: ${item.title}\n    ${item.snippet}`;
+    case "whatsapp": return `WhatsApp chat "${item.title}": ${item.path}\n    ${item.snippet}`;
+    default: return `${item.path ?? item.title}\n    ${item.snippet}`;
   }
-}
-
-/** Recall's folders and exclusions, so the fallback searches what Recall would; home alone without Recall. */
-async function recallFolders(context: ToolContext): Promise<{ roots: string[]; excluded: string[] }> {
-  if (!which("recall", context.env)) return { roots: [context.home], excluded: [] };
-  const config = json((await run("recall", ["config"], context)).out) as { roots?: unknown; excluded_folders?: unknown } | null;
-  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-  const roots = strings(config?.roots);
-  return { roots: roots.length ? roots : [context.home], excluded: strings(config?.excluded_folders) };
 }
 
 /**
- * ripgrep for the words in files and fd for them in names, both shipped with
- * Omarchy, over Recall's folders: exact words and files Recall has not indexed
- * yet, and everything when Recall is missing or failing. Keywords only: a
- * short query as one phrase, a longer one as its two longest words. Paths
- * Recall already returned are skipped.
- */
-async function searchKeywords(query: string, context: ToolContext): Promise<Array<{ path: string; line?: number; text: string }>> {
-  const words = query.match(/[\p{L}\p{N}][\p{L}\p{N}'.-]*/gu) ?? [];
-  if (words.length === 0) return [];
-  const patterns = words.length <= 3 ? [words.join(" ")] : [...words].sort((a, b) => b.length - a.length).slice(0, 2);
-  const { roots, excluded } = await recallFolders(context);
-  const names = excluded.map((folder) => folder.split("/").at(-1) as string);
-  const [grep, find] = await Promise.all([
-    which("rg", context.env)
-      ? run("rg", ["-i", "-F", "-n", "--max-count", "1", "--max-columns", "300", "--max-filesize", "10M",
-        ...names.flatMap((name) => ["--glob", `!${name}/**`]), ...patterns.flatMap((pattern) => ["-e", pattern]), ...roots], context)
-      : null,
-    matchNames(patterns.join(" "), roots, names, context),
-  ]);
-  const matches = (grep?.out ?? "").split("\n").flatMap((match) => {
-    const at = /^(.*?):(\d+):(.*)$/u.exec(match);
-    return at ? [{ path: at[1] as string, line: Number(at[2]), text: `(line ${at[2]})\n    ${oneLine(at[3], 300)}` }] : [];
-  });
-  const named = find.map((path) => ({ path, text: "(name matches)" }));
-  return [...matches, ...named];
-}
-
-/** A source's hit before it is numbered, or a note that the source failed. */
-type Found = { readonly hit: Hit; readonly text: string } | { readonly note: string };
-
-/** Recall's hits by meaning and keywords, then ripgrep's and fd's, run alongside, that Recall did not return. */
-async function searchFiles(query: string, context: ToolContext, limit: number): Promise<Found[]> {
-  const [recall, keywords] = await Promise.all([
-    which("recall", context.env) ? run("recall", ["search", query, "--limit", String(limit)], context) : null,
-    searchKeywords(query, context),
-  ]);
-  const found = !recall || recall.error ? [] : ((json(recall.out) as { hits?: Array<Record<string, unknown>> } | null)?.hits ?? []);
-  const results: Found[] = found.map((hit) => {
-    const location = String(hit.location ?? "");
-    const page = /^(?:page|p\.)\s*(\d+)/u.exec(location)?.[1];
-    return {
-      hit: { kind: "file", path: String(hit.path), segment: typeof hit.segment_id === "number" ? hit.segment_id : null, page: page ? Number(page) : null },
-      text: `${String(hit.path)}${location ? ` (${location})` : ""}\n    ${oneLine(hit.excerpt, 500)}`,
-    };
-  });
-  const seen = new Set(found.map((hit) => String(hit.path)));
-  for (const match of keywords) {
-    if (seen.has(match.path) || results.length >= found.length + 6) continue;
-    seen.add(match.path);
-    results.push({ hit: { kind: "file", path: match.path, segment: null, page: null, ...(match.line ? { line: match.line } : {}) }, text: `${match.path} ${match.text}` });
-  }
-  return results;
-}
-
-/** FTS5 words, each quoted so punctuation cannot become query syntax. */
-function ftsWords(query: string): string[] {
-  return (query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 12).map((word) => `"${word}"`);
-}
-
-/** Lastbook's library index, opened read-only. */
-async function searchLastbook(query: string, context: ToolContext, limit: number): Promise<Found[]> {
-  const path = lastbookSearchDb(context.env, context.home);
-  const words = ftsWords(query);
-  if (words.length === 0 || !existsSync(path)) return [];
-  const { Database } = await import("bun:sqlite");
-  let db: InstanceType<typeof Database> | null = null;
-  try {
-    // A pack's index is static; read-only takes no write lock. (Bun opens paths, not `file:` URIs.)
-    db = new Database(path, { readonly: true });
-    const statement = db.query(
-      "SELECT title, page, path, snippet(pages, 6, '', '', '…', 40) AS excerpt FROM pages WHERE pages MATCH ? ORDER BY bm25(pages, 0, 6, 1, 1, 0, 0, 1) LIMIT ?",
-    );
-    let rows = statement.all(words.join(" "), limit) as Array<{ title: string; page: number; path: string; excerpt: string }>;
-    if (rows.length === 0 && words.length > 1) rows = statement.all(words.join(" OR "), limit) as typeof rows;
-    return rows.map((row) => ({
-      hit: { kind: "lastbook", path: join(path, "..", row.path), page: row.page },
-      text: `Lastbook: ${row.title}, page ${row.page}\n    ${oneLine(row.excerpt, 500)}`,
-    }));
-  } catch (error) {
-    return [{ note: `(Lastbook search failed: ${(error as Error).message})` }];
-  } finally {
-    db?.close();
-  }
-}
-
-/** Cloudmail matches every word, so a long query falls back to its two longest words. */
-async function searchMail(query: string, context: ToolContext): Promise<Found[]> {
-  if (!which("cloudmail", context.env)) return [];
-  const words = query.match(/[\p{L}\p{N}@.'-]+/gu) ?? [];
-  const attempts = [words.join(" "), ...(words.length > 2 ? [[...words].sort((a, b) => b.length - a.length).slice(0, 2).join(" ")] : [])];
-  for (const attempt of attempts) {
-    if (!attempt) continue;
-    const { out, error } = await run("cloudmail", ["search", "--quiet", "-n", "5", ...attempt.split(" ")], context);
-    if (error) return [{ note: `(Mail search failed: ${oneLine(error, 200)})` }];
-    const threads = json(out);
-    if (!Array.isArray(threads) || threads.length === 0) continue;
-    return threads.map((thread: Record<string, unknown>): Found => {
-      const from = thread.from as { name?: string; email?: string } | undefined;
-      const when = typeof thread.last_at === "number" ? new Date(thread.last_at).toISOString().slice(0, 10) : "";
-      return { hit: { kind: "mail", thread: String(thread.id) }, text: `Mail ${when} from ${from?.name ?? from?.email ?? "?"}: ${oneLine(thread.subject, 160)}\n    ${oneLine(thread.snippet, 300)}` };
-    });
-  }
-  return [];
-}
-
-async function searchContacts(query: string, context: ToolContext): Promise<Found[]> {
-  if (!which("icloud-contacts", context.env) || query.split(/\s+/u).length > 3) return [];
-  const { out, error } = await run("icloud-contacts", ["list", "--quiet", query], context);
-  const contacts = error ? null : json(out);
-  if (!Array.isArray(contacts)) return [];
-  return contacts.slice(0, 5).map((contact: Record<string, unknown>): Found => ({
-    hit: { kind: "contact", contact: String(contact.id) },
-    text: `Contact: ${oneLine(contact.name, 120)}${contact.company ? `, ${oneLine(contact.company, 80)}` : ""}`,
-  }));
-}
-
-/**
- * Every source at once. `everything` adds mail and contacts, whose keyword
- * search suits a model's query, not the owner's whole sentence.
+ * Every searchable source at once. `everything` adds mail and contacts,
+ * whose keyword search suits a model's query, not the owner's whole sentence.
  */
 export async function search(query: string, hits: Hits, context: ToolContext, everything = true): Promise<ToolResult> {
   const q = query.trim();
   if (!q) return { text: "A query is needed.", isError: true };
-  const parts = await Promise.all([
-    searchFiles(q, context, 8),
-    searchLastbook(q, context, 4),
-    ...(everything ? [searchMail(q, context), searchContacts(q, context)] : []),
-  ]);
+  const sources = ["files", "lastbook", ...(everything ? ["mail", "contacts"] : [])];
+  const { searchItems, failed } = await searchWithRefs(q, context, sources);
   // Numbered in source order, not finishing order, so S1 is the best file hit.
-  const lines = parts.flat().map((found) => "note" in found ? found.note : `[${hits.add(found.hit)}] ${found.text}`);
+  const lines = [
+    ...searchItems.map(({ item, ref }) => `[${hits.add(ref)}] ${hitText(item)}`),
+    ...failed.map((failure) => `(${failure.source} search failed: ${failure.message})`),
+  ];
   return { text: lines.length ? clip(lines.join("\n")) : "Nothing found.", isError: false };
 }
 
-async function pdfPage(path: string, page: number, context: ToolContext): Promise<ToolResult> {
-  const { out, error } = await run("pdftotext", ["-layout", "-f", String(page), "-l", String(page), path, "-"], context);
-  // Layout mode keeps a table's rows together; its column padding is collapsed, which halves an invoice page.
-  const text = out.replace(/[ \t]{2,}/gu, "  ").trim();
-  return error ? { text: `Cannot read page ${page} of ${path}: ${error}`, isError: true } : { text: clip(text || "(no text on this page)"), isError: false };
+/** The sources' hits with the refs `read` needs; Recall's passage ids ride along for file hits. */
+async function searchWithRefs(query: string, context: ToolContext, sources: readonly string[]) {
+  const ready = new Set(listSources(context).filter((summary) => summary.available).map((summary) => summary.id as string));
+  const [fileHits, rest] = await Promise.all([
+    searchFiles(query, context, 8),
+    searchSources(query, context, { sources: sources.filter((id) => id !== "files" && ready.has(id)), limit: 5 }),
+  ]);
+  const searchItems = [
+    ...fileHits,
+    ...rest.items.map((item) => ({ item, ref: { source: item.source, id: item.id, ...(item.page ? { page: item.page } : {}) } as SourceRef })),
+  ];
+  return { searchItems, failed: rest.failed };
 }
 
-/**
- * A text file's start: enough bytes to hold TOOL_RESULT_CHARS characters
- * (at most 3 UTF-8 bytes each), and whether that is the whole file; null
- * when it holds a NUL byte, so is not text.
- */
-async function textHead(path: string): Promise<{ text: string; whole: boolean } | null> {
-  const file = await open(path, "r");
-  try {
-    const limit = TOOL_RESULT_CHARS * 3;
-    const buffer = Buffer.alloc(limit + 1);
-    const { bytesRead } = await file.read(buffer, 0, limit + 1, 0);
-    const bytes = buffer.subarray(0, Math.min(bytesRead, limit));
-    return bytes.includes(0) ? null : { text: bytes.toString("utf8"), whole: bytesRead <= limit };
-  } finally {
-    await file.close();
-  }
-}
-
-/**
- * Open one hit: a PDF's page, the lines around a ripgrep match, a text file
- * whole when it fits in one result, else Recall's passage, else (a hit
- * Recall did not index) the file's start.
- */
+/** Open one hit, cut to one tool result: a file whole only when it fits. */
 export async function read(id: string, page: number | null, hits: Hits, context: ToolContext): Promise<ToolResult> {
   const hit = hits.get(id);
   if (!hit) return { text: `There is no hit ${id} in this turn; search first.`, isError: true };
+  const ref: SourceRef = page === null ? hit : { ...hit, page };
   try {
-    switch (hit.kind) {
-      case "lastbook":
-        return await pdfPage(hit.path, page ?? hit.page, context);
-      case "mail": {
-        const { out, error } = await run("cloudmail", ["thread", "read", "--quiet", hit.thread], context);
-        return error ? { text: `Cannot read the mail: ${error}`, isError: true } : { text: clip(out), isError: false };
-      }
-      case "contact": {
-        const { out, error } = await run("icloud-contacts", ["show", "--quiet", hit.contact], context);
-        return error ? { text: `Cannot read the contact: ${error}`, isError: true } : { text: clip(out), isError: false };
-      }
-      case "file": {
-        if (/\.pdf$/iu.test(hit.path) && (page ?? hit.page) !== null) return await pdfPage(hit.path, (page ?? hit.page) as number, context);
-        if (hit.line !== undefined) {
-          const lines = (await readFile(hit.path, "utf8")).split("\n");
-          const from = Math.max(0, hit.line - 20);
-          return { text: `${hit.path}, lines ${from + 1}-${Math.min(lines.length, from + 80)}\n\n${clip(lines.slice(from, from + 80).join("\n"))}`, isError: false };
-        }
-        const head = await textHead(hit.path).catch(() => null);
-        if (head?.whole && head.text.length <= TOOL_RESULT_CHARS) return { text: `${hit.path}\n\n${head.text}`, isError: false };
-        if (hit.segment === null) {
-          return head ? { text: `${hit.path}\n\n${clip(head.text)}`, isError: false } : { text: `${hit.path} cannot be read as text.`, isError: true };
-        }
-        const { out, error } = await run("recall", ["text", String(hit.segment)], context);
-        const text = (json(out) as { text?: string } | null)?.text;
-        return error || typeof text !== "string"
-          ? { text: `Cannot read ${hit.path}: ${error ?? "Recall returned no text"}`, isError: true }
-          : { text: `${hit.path} (one passage)\n\n${clip(text)}`, isError: false };
-      }
+    if (FILE_SOURCES.has(ref.source)) {
+      const document = await readFileRef(ref, context, TOOL_RESULT_CHARS);
+      const where = document.part === "passage" ? " (one passage)" : document.part.startsWith("lines") ? `, ${document.part}` : "";
+      return { text: document.part.startsWith("page") ? clip(document.text) : `${document.path}${where}\n\n${clip(document.text)}`, isError: false };
     }
+    return { text: clip((await readSource(ref, context)).text), isError: false };
   } catch (error) {
     return { text: `Cannot read ${id}: ${(error as Error).message}`, isError: true };
   }

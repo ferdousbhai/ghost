@@ -443,6 +443,11 @@ export class SessionHost {
 
   // ── Persona and harness configuration ─────────────────────────────────
 
+  /** Where the owner's sources are read from (CONTRACTS.md "Sources"): the home and environment local turns see. */
+  sourceContext(signal: AbortSignal): { home: string; env: NodeJS.ProcessEnv; signal: AbortSignal } {
+    return { home: this.ownerHome, env: this.env, signal };
+  }
+
   /** The owner's Documents folder, which the prompt names. */
   private documentsDir(): string {
     return resolveDocumentsDirectory(this.env, this.ownerHome);

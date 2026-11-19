@@ -33,6 +33,7 @@ import {
 } from "./turn-events.js";
 import { replacedSinceStart, type RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
+import { listSource, listSources, readSource, searchSources, SOURCE_IDS, type SourceId } from "./sources.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -170,6 +171,19 @@ function numberParam(url: URL, key: string): number | undefined {
   if (raw === null) return undefined;
   const value = Number(raw);
   if (!Number.isFinite(value)) throw new GhostError("invalid_request", `"${key}" must be a number.`, 400);
+  return value;
+}
+
+/** `?limit=`, 1 to `max`, else `fallback`. */
+function boundedLimit(url: URL, fallback: number, max: number): number {
+  const limit = numberParam(url, "limit");
+  if (limit === undefined) return fallback;
+  if (!Number.isInteger(limit) || limit < 1 || limit > max) throw new GhostError("invalid_request", `"limit" must be an integer from 1 to ${max}.`, 400);
+  return limit;
+}
+
+function positiveInteger(value: number, key: string): number {
+  if (!Number.isInteger(value) || value < 1) throw new GhostError("invalid_request", `"${key}" must be a positive integer.`, 400);
   return value;
 }
 
@@ -715,6 +729,54 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         startedAt: new Date(running.startedAt).toISOString(),
         restartNeeded: replacedSinceStart(running),
       });
+    })),
+    // The owner's own data (CONTRACTS.md "Sources"); a guest sees none of it.
+    route("GET", "api/sources", ownerOnly(({ request, response }) => {
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        jsonResponse(response, 200, { sources: listSources(options.host.sourceContext(signal)) });
+      } finally {
+        release();
+      }
+    })),
+    route("GET", "api/sources/:source/items", ownerOnly(async ({ params, request, response, url }) => {
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        const limit = boundedLimit(url, 50, 200);
+        jsonResponse(response, 200, await listSource(params.source ?? "", options.host.sourceContext(signal), limit, url.searchParams.get("cursor")));
+      } finally {
+        release();
+      }
+    })),
+    route("GET", "api/sources/:source/items/:item", ownerOnly(async ({ params, request, response, url }) => {
+      const id = params.item ?? "";
+      if (id.length === 0 || id.length > 4096) throw new GhostError("invalid_request", "An item id is 1 to 4096 characters.", 400);
+      const page = numberParam(url, "page");
+      const line = numberParam(url, "line");
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        const source = params.source ?? "";
+        if (!(SOURCE_IDS as readonly string[]).includes(source)) throw new GhostError("not_found", `There is no source "${source}".`, 404);
+        jsonResponse(response, 200, await readSource({
+          source: source as SourceId, id,
+          ...(page === undefined ? {} : { page: positiveInteger(page, "page") }),
+          ...(line === undefined ? {} : { line: positiveInteger(line, "line") }),
+        }, options.host.sourceContext(signal)));
+      } finally {
+        release();
+      }
+    })),
+    route("GET", "api/search", ownerOnly(async ({ request, response, url }) => {
+      const sources = url.searchParams.get("sources");
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        jsonResponse(response, 200, await searchSources(url.searchParams.get("q") ?? "", options.host.sourceContext(signal), {
+          limit: boundedLimit(url, 8, 50),
+          ...(sources ? { sources: sources.split(",").map((id) => id.trim()).filter(Boolean) } : {}),
+        }));
+      } finally {
+        release();
+      }
     })),
     route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,
       isGuest(context) ? options.registry.list().map(({ name }) => ({ name })) : options.registry.list())),

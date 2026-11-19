@@ -20,7 +20,9 @@ machinery rather than adding a parallel backend. Weigh dependencies by
 installed size as well as code saved; Omarchy-shipped facilities are available
 to reuse. Ask the owner before breaking these rules.
 
-Ghost owns persona, shared history, and harness choice. Harnesses own models,
+Ghost owns persona, shared history, harness choice, and one view over the
+owner's own data ([Sources](#sources)), read through the products that hold
+it. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
@@ -595,7 +597,7 @@ boundary. The configured owner has full access; any other login is refused
 unless `remote.guests` in the config is `"read-only"` (the default is
 `"none"`). Admitted guests are read-only,
 are refused the reads marked owner-only, which show file paths, hook
-commands, or MCP credentials, and see no path in the ghost list;
+commands, MCP credentials, or the owner's own data, and see no path in the ghost list;
 conversations, tool calls included, are shown to them as recorded. Every
 guest write is `403 read_only`.
 Remote access never broadens a ghost's local tool authority.
@@ -622,6 +624,10 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | [Routine inspection and controls](#routine-inspection-and-controls); the GET is owner-only. |
 | `POST /api/ghosts/:ghost/events` | [External event intake](#external-events); the GET event stream remains conversation invalidations. |
+| `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search }] }`: the [sources](#sources). |
+| `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
+| `GET /api/sources/:source/items/:item?page=&line=` | Owner-only `{ title, text, part, path? }` for one item, its id percent-encoded as one segment; `part` says which part (`whole`, `passage`, `start`, `lines a-b`, `page n`, `latest`). A source with no read is `405 not_readable`. |
+| `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
@@ -852,6 +858,38 @@ from selection and snapshot through action without reselecting. Tabs and CLI
 state survive Ghost restarts, rename and deletion; explicitly close a task's tabs when finished, never the owner's
 browser. Setup and recovery are in `ghost help browser`.
 
+### Sources
+
+The owner's own data reaches Ghost through the products that already hold
+it, never a copy: each product keeps its sign-in, sync, local copy, CLI, and
+skill, and its standalone app stays an alternative.
+[`sources.ts`](packages/daemon/src/sources.ts) adapts each one to the same
+three operations, `list` (newest first, paged by an opaque `cursor`), `read`
+(one item), and `search`, returning items
+`{ source, id, title, snippet, at, path?, page?, line? }` (`at` in
+milliseconds or null; `id` is what `read` takes). The local model's search
+and the API below are this one layer; a source whose product is missing is
+`available: false`, and using it is `409 source_unavailable`.
+
+| Source | Product and what Ghost uses | list | read | search |
+|---|---|---|---|---|
+| `files` | Recall plus ripgrep and fd+fzf over Recall's folders minus its exclusions (the home folder without Recall) | | a file inside those folders only | yes |
+| `notes` | icloud-notes: `list`, `read` | yes | yes | Recall, its vault |
+| `reminders` | icloud-reminders' lists, `Documents/Reminders/*.md`, one item per list | yes | yes | Recall, that folder |
+| `whatsapp` | wacli's chat folders, `~/WhatsApp/<account>/WhatsApp Chat - <name>/_chat.txt`, by last change; a read is the chat's latest 256 KiB | yes | yes | Recall, that folder |
+| `drive` | icloud-drive's `~/iCloud Drive` | | yes | Recall, that folder |
+| `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
+| `contacts` | icloud-contacts from its last sync (`--cached`), by name | yes | yes | yes |
+| `calendar` | cloud-calendar `agenda`, 14 days a page from today (live) | yes | | |
+| `photos` | icloud-photos' catalog: `list`, `info` | yes | yes | |
+| `lastbook` | Lastbook's library index, read-only | | a page inside its library | yes |
+
+A file hit is labelled with the source whose folder holds it (the Notes
+vault and Reminders under the owner's Documents folder, `~/WhatsApp`,
+`~/iCloud Drive`), so one meaning index, Recall's, serves every file-backed
+source and nothing is indexed twice. A search across sources names each one
+that failed rather than failing whole. Reads are cut at 256 KiB.
+
 ### Local model
 
 `local` in `~/.config/ghost/config.json` is
@@ -885,21 +923,15 @@ provider as `local`. It offers three tools
 ([`local-tools.ts`](packages/daemon/src/local-tools.ts)) for at most three
 rounds, then makes one more call without them:
 
-- `search(query)`: Recall over its folders by meaning and keywords, and
-  alongside it the search Omarchy ships: ripgrep for the words in files and
-  fd's file list ranked by name with fzf (Omarchy's `ff`; fd's substring
-  match without fzf), over Recall's folders minus its exclusions (the home
-  folder without Recall), adding what Recall did not return; so a file
+- `search(query)`: the [sources](#sources) `files` (which finds a file
   Recall has not indexed yet, or every file when Recall is missing or
-  failing, is still found. Lastbook's library index (opened read-only, when
-  present), and, for the model's queries but not the first search,
-  `cloudmail search` and `icloud-contacts list`. Hits are numbered `S1`,
-  `S2`, … in that source order for this pass only.
+  failing) and `lastbook`, and, for the model's queries but not the first
+  search, `mail` and `contacts`. Hits are numbered `S1`, `S2`, … in that
+  source order for this pass only.
 - `read(id, page?)`: one hit by its id, never a path: a PDF's page (column
-  padding collapsed), the lines around a ripgrep match, a mail thread
-  (`cloudmail thread read`), a contact, or a text file whole when it fits in
-  one result, else Recall's passage, else (a hit Recall did not index) the
-  file's start.
+  padding collapsed), the lines around a ripgrep match, a mail thread, a
+  contact, or a text file whole when it fits in one result, else Recall's
+  passage, else (a hit Recall did not index) the file's start.
 - `delegate(task)`: one headless run of a harness, in the conversation's
   directory with the ghost's persona and MCP servers, tried in the order
   above minus `local`; its reply, not its tool calls, returns to the model.

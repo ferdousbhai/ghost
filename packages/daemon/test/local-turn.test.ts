@@ -193,9 +193,9 @@ describe("the local model", () => {
     writeFileSync(small, "short note");
     writeFileSync(mid, "x".repeat(TOOL_RESULT_CHARS + 2_000));
     const hits = new Hits();
-    const smallId = hits.add({ kind: "file", path: small, segment: 7, page: null });
-    const midId = hits.add({ kind: "file", path: mid, segment: 7, page: null });
-    const unindexedId = hits.add({ kind: "file", path: mid, segment: null, page: null });
+    const smallId = hits.add({ source: "files", id: small, segment: 7 });
+    const midId = hits.add({ source: "files", id: mid, segment: 7 });
+    const unindexedId = hits.add({ source: "files", id: mid });
 
     expect(await read(smallId, null, hits, context)).toEqual({ text: `${small}\n\nshort note`, isError: false });
     expect(await read(midId, null, hits, context)).toEqual({ text: `${mid} (one passage)\n\npassage`, isError: false });
