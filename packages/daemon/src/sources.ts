@@ -71,7 +71,17 @@ interface Source {
   list?(context: SourceContext, limit: number, cursor: string | null): Promise<SourcePage>;
   read?(context: SourceContext, ref: SourceRef): Promise<SourceDocument>;
   search?(context: SourceContext, query: string, limit: number): Promise<SourceItem[]>;
+  /** The file holding a small picture of one item. */
+  picture?(context: SourceContext, id: string): Promise<string>;
 }
+
+export interface SourcePicture {
+  readonly type: "image/jpeg" | "image/png";
+  readonly bytes: Buffer;
+}
+
+/** The largest picture served; a product's thumbnail is a small fraction of it. */
+const PICTURE_BYTES = 4 * 1024 * 1024;
 
 /** The most text one read returns; a model's result is cut far shorter. */
 const READ_CHARS = 256 * 1024;
@@ -596,7 +606,21 @@ const photos: Source = {
   async read(context, ref) {
     const info = (await cliData("icloud-photos", ["info", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
     if (!info || typeof info !== "object") throw new GhostError("not_found", "No such photo.", 404);
-    return { title: oneLine(info.filename, 200), text: JSON.stringify(info, null, 2), part: "whole" };
+    const albums = (Array.isArray(info.albums) ? info.albums : []).map((album) => oneLine((album as { name?: unknown })?.name ?? album, 80)).filter(Boolean);
+    const size = typeof info.size === "number" && info.size > 0 ? `, ${(info.size / 1e6).toFixed(1)} MB` : "";
+    const text = [
+      `Taken: ${oneLine(info.created, 40)}`,
+      `Kind: ${oneLine(info.kind ?? "photo", 20)}, ${Number(info.width ?? 0)}×${Number(info.height ?? 0)}${size}`,
+      ...(albums.length > 0 ? [`Albums: ${albums.join(", ")}`] : []),
+      typeof info.local_path === "string" ? `File: ${info.local_path}` : "Not downloaded to this computer.",
+    ].join("\n");
+    return { title: oneLine(info.filename, 200), text, part: "whole", ...(typeof info.local_path === "string" ? { path: info.local_path } : {}) };
+  },
+  /** iCloud's thumbnail, which icloud-photos fetches into its cache on first use. */
+  async picture(context, id) {
+    const thumb = (await cliData("icloud-photos", ["thumb", "--quiet", "--", id], context)) as { path?: unknown } | null;
+    if (typeof thumb?.path !== "string") throw new GhostError("not_found", "No such photo.", 404);
+    return thumb.path;
   },
 };
 
@@ -654,12 +678,14 @@ export interface SourceSummary {
   readonly list: boolean;
   readonly read: boolean;
   readonly search: boolean;
+  /** Its items have pictures, so a client shows them as a grid. */
+  readonly pictures: boolean;
 }
 
 export function listSources(context: SourceContext): SourceSummary[] {
   return SOURCE_IDS.map((id) => {
     const source = SOURCES[id];
-    return { id, label: source.label, available: source.available(context), list: Boolean(source.list), read: Boolean(source.read), search: Boolean(source.search) };
+    return { id, label: source.label, available: source.available(context), list: Boolean(source.list), read: Boolean(source.read), search: Boolean(source.search), pictures: Boolean(source.picture) };
   });
 }
 
@@ -681,6 +707,20 @@ export async function readSource(ref: SourceRef, context: SourceContext): Promis
   if (!found.read) throw new GhostError("not_readable", `${found.label} items are read from its list.`, 405);
   const document = await found.read(context, ref);
   return document.text.length > READ_CHARS ? { ...document, text: document.text.slice(0, READ_CHARS) } : document;
+}
+
+/** One item's small picture. Only bytes that are a JPEG or a PNG leave, whatever file the product named. */
+export async function pictureOf(id: string, item: string, context: SourceContext): Promise<SourcePicture> {
+  const found = source(id, context);
+  if (!found.picture) throw new GhostError("no_pictures", `${found.label} items have no pictures.`, 405);
+  const path = await found.picture(context, item);
+  const info = await stat(path).catch(() => null);
+  if (!info?.isFile() || info.size > PICTURE_BYTES) throw new GhostError("not_found", "That item has no picture.", 404);
+  const bytes = await readFile(path);
+  const type = bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) ? "image/jpeg"
+    : bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? "image/png" : null;
+  if (!type) throw new GhostError("not_found", "That item has no picture.", 404);
+  return { type, bytes };
 }
 
 /** Search one source, or every searchable one; a failing source is named, not fatal. */

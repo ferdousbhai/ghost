@@ -255,3 +255,10 @@ textview.composer, textview.composer > text { background: transparent; color: @g
 .result label.dim, .result label.meta { color: @gh_dim_text; }
 /* `.sidebar` is also a class of GTK's own theme, which draws its light border on it. */
 list.sidebar { border: none; }
+
+/* A grid of pictures (Photos): each tile is square, its picture cropped to fill it. */
+flowbox.tiles { background: transparent; }
+flowbox.tiles > flowboxchild { border-radius: 6px; padding: 3px; transition: background-color 160ms ease-out; }
+flowbox.tiles > flowboxchild:hover { background: alpha(@gh_accent, 0.18); }
+flowbox.tiles overlay { border-radius: 4px; }
+box.tile { background: alpha(@gh_text, 0.06); }

@@ -39,6 +39,8 @@ pub struct SourceInfo {
     pub label: String,
     pub list: bool,
     pub search: bool,
+    /// Its items have pictures: shown as a grid.
+    pub pictures: bool,
 }
 
 fn icon_of(source: &str) -> &'static str {
@@ -201,15 +203,22 @@ impl App {
                             label: row["label"].as_str().unwrap_or_default().to_string(),
                             list: row["list"].as_bool().unwrap_or(false),
                             search: row["search"].as_bool().unwrap_or(false),
+                            pictures: row["pictures"].as_bool().unwrap_or(false),
                         };
                         this.add_row(&info.id, &info.label, icon_of(&info.id));
                         this.sources.borrow_mut().push(info);
                     }
                     // For scripted checks: `GHOST_WINDOW_OPEN=<source id>` starts on that source (`ask:<prompt>` is the Ask page's).
-                    if let Ok(open) = std::env::var("GHOST_WINDOW_OPEN")
-                        && this.sources.borrow().iter().any(|info| info.id == open)
-                    {
-                        this.navigate(Route::Source(open));
+                    // `<source id>/<item id>` starts on that item.
+                    if let Ok(open) = std::env::var("GHOST_WINDOW_OPEN") {
+                        let (source, item) = open.split_once('/').unwrap_or((&open, ""));
+                        if this.sources.borrow().iter().any(|info| info.id == source) {
+                            this.navigate(if item.is_empty() {
+                                Route::Source(source.into())
+                            } else {
+                                Route::Item { source: source.into(), id: item.into(), title: item.into(), page: None, line: None }
+                            });
+                        }
                     }
                 }
                 Err(error) => this.ask().note(&error.message),
@@ -235,6 +244,10 @@ impl App {
 
     pub fn source_label(&self, id: &str) -> String {
         self.sources.borrow().iter().find(|info| info.id == id).map(|info| info.label.clone()).unwrap_or_else(|| id.to_string())
+    }
+
+    pub fn has_pictures(&self, id: &str) -> bool {
+        self.sources.borrow().iter().any(|info| info.id == id && info.pictures)
     }
 
     /// Go somewhere new: what lay forward in history is dropped, as in a browser.

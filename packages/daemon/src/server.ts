@@ -33,7 +33,7 @@ import {
 } from "./turn-events.js";
 import { replacedSinceStart, type RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
-import { listSource, listSources, readSource, searchSources, SOURCE_IDS, type SourceId } from "./sources.js";
+import { listSource, listSources, pictureOf, readSource, searchSources, SOURCE_IDS, type SourceId } from "./sources.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -762,6 +762,16 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
           ...(page === undefined ? {} : { page: positiveInteger(page, "page") }),
           ...(line === undefined ? {} : { line: positiveInteger(line, "line") }),
         }, options.host.sourceContext(signal)));
+      } finally {
+        release();
+      }
+    })),
+    route("GET", "api/sources/:source/items/:item/picture", ownerOnly(async ({ params, request, response }) => {
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        const picture = await pictureOf(params.source ?? "", params.item ?? "", options.host.sourceContext(signal));
+        response.writeHead(200, { "content-type": picture.type, "content-length": picture.bytes.length, "cache-control": "no-store" });
+        response.end(picture.bytes);
       } finally {
         release();
       }

@@ -631,9 +631,10 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | [Routine inspection and controls](#routine-inspection-and-controls); the GET is owner-only. |
 | `POST /api/ghosts/:ghost/events` | [External event intake](#external-events); the GET event stream remains conversation invalidations. |
-| `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search }] }`: the [sources](#sources). |
+| `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search, pictures }] }`: the [sources](#sources); `pictures` says its items have one each. |
 | `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
 | `GET /api/sources/:source/items/:item?page=&line=` | Owner-only `{ title, text, part, path? }` for one item, its id percent-encoded as one segment; `part` says which part (`whole`, `passage`, `start`, `lines a-b`, `page n`, `latest`). A source with no read is `405 not_readable`. |
+| `GET /api/sources/:source/items/:item/picture` | Owner-only. The item's small picture as `image/jpeg` or `image/png` bytes (Photos: iCloud's thumbnail, fetched into icloud-photos' cache on first use). Whatever file the product names, only a JPEG or PNG of at most 4 MiB is sent; anything else is `404 not_found`, and a source without pictures `405 no_pictures`. |
 | `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
@@ -787,13 +788,13 @@ runtime preserves owner data.
   app in the Omarchy theme, the stack and look of lastbook-for-omarchy, which
   follows [Strata](https://github.com/lgse/strata). It is a client of the
   API like the HUD and keeps no data: a sidebar of Ask and each available
-  [source](#sources), a page per source (its list, a search of it, and a
-  reader for one item), and Ask, a conversation of the default ghost
+  [source](#sources), a page per source (its list, or a grid of pictures
+  when its items have them, a search of it, and a reader for one item), and Ask, a conversation of the default ghost
   (`ghost use`, else the first ghost) whose answer's `[S1]` citations open
   the item the turn's `sources` event names. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
-  `GHOST_WINDOW_OPEN` starts it on a source id or asks `ask:<prompt>`, for
+  `GHOST_WINDOW_OPEN` starts it on a source id, on `<source id>/<item id>`, or asks `ask:<prompt>`, for
   [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
   nested Hyprland against a scratch ghostd and sample data. It is a workspace
   package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
@@ -910,7 +911,7 @@ and the API below are this one layer; a source whose product is missing is
 | `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
 | `contacts` | icloud-contacts from its last sync (`--cached`), by name | yes | yes | yes |
 | `calendar` | cloud-calendar `agenda`, 14 days a page from today (live) | yes | | |
-| `photos` | icloud-photos' catalog: `list`, `info` | yes | yes | |
+| `photos` | icloud-photos' catalog: `list`, `info`, and `thumb` for an item's picture | yes | yes | |
 | `lastbook` | Lastbook's library index, read-only | | a page inside its library | yes |
 
 A file hit is labelled with the source whose folder holds it (the Notes

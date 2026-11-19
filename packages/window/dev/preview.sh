@@ -8,7 +8,7 @@ set -Eeuo pipefail
 #
 #   preview.sh <screenshot.png> [route]
 #
-# `route` is GHOST_WINDOW_OPEN: a source id (`notes`), or `ask:<prompt>`.
+# `route` is GHOST_WINDOW_OPEN: a source id (`notes`), `<source id>/<item id>`, or `ask:<prompt>`.
 if (( $# < 1 || $# > 2 )); then
   echo "usage: $0 <screenshot.png> [route]" >&2
   exit 2
@@ -108,9 +108,12 @@ stub icloud-contacts "case \"\$1\" in
 esac"
 stub cloud-calendar "printf '[{\"id\":\"e1\",\"title\":\"Ferry to the island\",\"start\":\"$(date -d tomorrow +%Y-%m-%d)T09:00:00+00:00\",\"end\":\"$(date -d tomorrow +%Y-%m-%d)T10:30:00+00:00\",\"all_day\":false,\"calendar\":\"Home\"}]'"
 stub icloud-photos "case \"\$1\" in
-  list) printf '[{\"id\":\"p1\",\"filename\":\"IMG_0001.HEIC\",\"created\":\"2026-11-13T06:40:22Z\",\"kind\":\"photo\",\"width\":4032,\"height\":3024}]' ;;
-  info) printf '{\"id\":\"p1\",\"filename\":\"IMG_0001.HEIC\",\"kind\":\"photo\",\"albums\":[\"Trip\"]}' ;;
+  list) printf '[' ; for n in 1 2 3 4 5 6 7; do printf '{\"id\":\"p%s\",\"filename\":\"IMG_000%s.HEIC\",\"created\":\"2026-11-1%sT06:40:22Z\",\"kind\":\"photo\",\"width\":4032,\"height\":3024},' \$n \$n \$n; done; printf '{\"id\":\"p8\",\"filename\":\"IMG_0008.MOV\",\"created\":\"2026-11-09T06:40:22Z\",\"kind\":\"video\",\"width\":1920,\"height\":1080}]' ;;
+  thumb) printf '{\"id\":\"%s\",\"path\":\"$root/pictures/%s.png\"}' \"\$4\" \"\$4\" ;;
+  info) printf '{\"id\":\"p1\",\"filename\":\"IMG_0001.HEIC\",\"created\":\"2026-11-11T06:40:22Z\",\"kind\":\"photo\",\"width\":4032,\"height\":3024,\"size\":2100000,\"albums\":[{\"id\":\"a1\",\"name\":\"Trip\"}]}' ;;
 esac"
+mkdir -p "$root/pictures"
+"$bun_bin" "$here/sample-picture.ts" "$root/pictures" 8
 # The stand-ins, then only what ghostd and its file search need.
 tools=$root/tools
 mkdir -p "$tools"

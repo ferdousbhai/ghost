@@ -4,7 +4,7 @@
 //! GTK main loop awaits, as lastbook-for-omarchy's engine does; a turn's server-sent events arrive one by one.
 
 use std::{
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::PathBuf,
     sync::{
         Arc,
@@ -133,6 +133,22 @@ impl Api {
 
     pub async fn get(&self, path: String) -> Result<Value, ApiError> {
         self.call("GET", path, None).await
+    }
+
+    /// A picture's bytes (`GET …/picture`), run off the main loop.
+    pub async fn bytes(&self, path: String) -> Result<Vec<u8>, ApiError> {
+        let (tx, rx) = async_channel::bounded(1);
+        let request = self.request("GET", &path).timeout(Duration::from_secs(60));
+        std::thread::spawn(move || {
+            let result = request.call().map_err(error_of).and_then(|response| {
+                let mut bytes = Vec::new();
+                // ghostd sends at most 4 MiB; the cap is only against a daemon that is not ghostd.
+                response.into_reader().take(8 * 1024 * 1024).read_to_end(&mut bytes).map_err(|error| ApiError { message: error.to_string() })?;
+                Ok(bytes)
+            });
+            let _ = tx.send_blocking(result);
+        });
+        rx.recv().await.unwrap_or_else(|_| Err(ApiError { message: "The request was lost.".into() }))
     }
 
     /// A turn's server-sent events (CONTRACTS.md "Turn wire"), one `Frame` each, then `End`.

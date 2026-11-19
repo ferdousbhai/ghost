@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
 import { readFileSync } from "node:fs";
-import { addReminder, listSource, listSources, readSource, saveNote, searchSources, type SourceContext } from "../src/sources.js";
+import { addReminder, listSource, listSources, pictureOf, readSource, saveNote, searchSources, type SourceContext } from "../src/sources.js";
 import { tempDir } from "./helpers/fixtures.js";
 
 let cleanups: Array<() => void> = [];
@@ -159,7 +159,7 @@ describe("sources", () => {
   it("says what a source cannot do, and which sources are set up", async () => {
     const context = owner({ cloudmail: "printf '[]'" });
     const summary = listSources(context);
-    expect(summary.find((row) => row.id === "mail")).toEqual({ id: "mail", label: "Mail", available: true, list: true, read: true, search: true });
+    expect(summary.find((row) => row.id === "mail")).toEqual({ id: "mail", label: "Mail", available: true, list: true, read: true, search: true, pictures: false });
     expect(summary.find((row) => row.id === "photos")?.available).toBe(false);
     await expect(listSource("photos", context, 10, null)).rejects.toMatchObject({ code: "source_unavailable", status: 409 });
     await expect(listSource("files", context, 10, null)).rejects.toMatchObject({ code: "not_listable", status: 405 });
@@ -176,12 +176,27 @@ describe("sources", () => {
         `  *) echo "taken as an option: $*" >&2; exit 2 ;;`,
         `esac`,
       ].join("\n"),
-      "icloud-photos": `[ "$*" = "info --quiet -- --data-dir=/x" ] && printf '{"filename":"a.jpg"}' || exit 2`,
+      "icloud-photos": `[ "$*" = "info --quiet -- --data-dir=/x" ] && printf '{"filename":"a.jpg","created":"2026-11-13T06:40:22Z","kind":"photo","width":4032,"height":3024,"size":2100000,"albums":[{"id":"a1","name":"Trip"}]}' || exit 2`,
     });
     const found = await searchSources("-n 9999", context, { sources: ["mail"] });
     expect(found).toEqual({ items: [expect.objectContaining({ id: "t1", title: "found" })], failed: [] });
     expect((await readSource({ source: "mail", id: "--all" }, context)).title).toBe("read");
-    expect((await readSource({ source: "photos", id: "--data-dir=/x" }, context)).title).toBe("a.jpg");
+    expect(await readSource({ source: "photos", id: "--data-dir=/x" }, context)).toEqual({
+      title: "a.jpg", part: "whole",
+      text: "Taken: 2026-11-13T06:40:22Z\nKind: photo, 4032×3024, 2.1 MB\nAlbums: Trip\nNot downloaded to this computer.",
+    });
+  });
+
+  it("serves a photo's thumbnail only when the file the product names is a picture", async () => {
+    const context = owner({ "icloud-photos": `printf '{"id":"%s","path":"%s"}' "$4" "$HOME/$4"` });
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    writeFileSync(join(context.home, "p1"), jpeg);
+    writeFileSync(join(context.home, "secret"), "token=abc");
+    expect(await pictureOf("photos", "p1", context)).toEqual({ type: "image/jpeg", bytes: jpeg });
+    await expect(pictureOf("photos", "secret", context)).rejects.toMatchObject({ code: "not_found" });
+    await expect(pictureOf("photos", "missing", context)).rejects.toMatchObject({ code: "not_found" });
+    await expect(pictureOf("notes", "p1", context)).rejects.toMatchObject({ code: "no_pictures", status: 405 });
+    expect(listSources(context).filter((source) => source.pictures).map((source) => source.id)).toEqual(["photos"]);
   });
 
   it("names a failing source and still returns the others", async () => {
