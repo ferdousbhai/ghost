@@ -13,8 +13,8 @@ name = "ghost-window"
 path = "src/main.rs"
 
 [dependencies]
-# The look and the shared widgets, pinned by commit (v0.1.0).
-omui = { git = "https://github.com/ferdousbhai/omui", rev = "5684d051c33f13b1349f5f86302b5b9269a98854" }
+# The look and the shared widgets, pinned by commit (v0.4.0).
+omui = { git = "https://github.com/ferdousbhai/omui", rev = "2d34cf50a29a8ad5338d94d4d9e46c1587f7ef40" }
 # The GTK 4 stack omui is built on; cargo resolves both to one gtk4.
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_14"] }
 glib = "0.22.9"
