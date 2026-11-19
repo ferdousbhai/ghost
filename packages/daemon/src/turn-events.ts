@@ -7,6 +7,17 @@ import { requireConversationId } from "./conversation-log.js";
 import { type DesktopContext, parseDesktopContext } from "./desktop-context.js";
 import { GhostError } from "./errors.js";
 
+/** One citable hit: its key in the answer, and the item `GET /api/sources/:source/items/:id` reads. */
+export interface SourceHit {
+  readonly key: string;
+  readonly source: string;
+  readonly id: string;
+  readonly title: string;
+  readonly path?: string;
+  readonly page?: number;
+  readonly line?: number;
+}
+
 export type TurnEvent =
   | { type: "start" }
   /** A pass starting on this harness: the first, or the next after one failed. */
@@ -50,6 +61,8 @@ export type TurnEvent =
       isError: boolean;
       summary?: string;
     }
+  /** Search hits the local model may cite as `[S1]`; each search adds its own. */
+  | { type: "sources"; items: readonly SourceHit[] }
   | { type: "done" }
   | LimitReachedEvent
   | {

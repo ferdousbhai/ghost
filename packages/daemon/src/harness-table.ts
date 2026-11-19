@@ -10,6 +10,7 @@
  * in its output (a `session` event), and the host hands that id back as
  * `HarnessTurnInput.sessionId`.
  */
+import type { SourceHit } from "./turn-events.js";
 import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
@@ -47,6 +48,8 @@ export type HarnessEvent =
   | { readonly type: "thinking"; readonly block: string; readonly delta: string }
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
+  /** The local model's search hits, by the key its answer cites them with. */
+  | { readonly type: "sources"; readonly items: readonly SourceHit[] }
   | { readonly type: "session"; readonly id: string }
   /** The model answering, as the harness names it; `provider` and `effort` where it says. */
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }

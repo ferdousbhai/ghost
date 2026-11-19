@@ -1171,6 +1171,9 @@ export class SessionHost {
           stream.emit({ type: "tool_execution_end", id: event.id, toolName: tool.name, isError: event.isError, ...(summary ? { summary } : {}) });
           return;
         }
+        case "sources":
+          stream.emit({ type: "sources", items: event.items });
+          return;
         case "model":
           model = event;
           return;

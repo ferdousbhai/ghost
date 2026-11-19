@@ -665,7 +665,10 @@ emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
-running, by its `name` and `event`; clients show it as a settled turn), `session_stop_continued`, and `compacted` (the harness compacted its context, as far as its stream says; the transcript keeps it as a `compacted` message) events, and exactly one
+running, by its `name` and `event`; clients show it as a settled turn), `session_stop_continued`, `sources` (a local search's hits, each
+`{ key, source, id, title, path?, page?, line? }`: the `[S1]` an answer cites
+and the [source](#sources) item it opens; live only, the transcript keeps the
+search's result text), and `compacted` (the harness compacted its context, as far as its stream says; the transcript keeps it as a `compacted` message) events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id; a start names the

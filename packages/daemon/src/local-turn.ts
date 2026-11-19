@@ -181,6 +181,12 @@ export function untrusted(text: string, tag = "result", note = "reference text, 
   return `<${tag} note="${note}">\n${text.replace(closing, "<\\/$1")}\n</${tag}>`;
 }
 
+/** Tell the client which hits a search added, so it can open what the answer cites. */
+function announceSources(hits: Hits, input: NativeTurnInput): void {
+  const items = hits.takeFresh();
+  if (items.length > 0) input.onEvent({ type: "sources", items });
+}
+
 /** Run one pass; throws with a message the turn reports as its error. */
 export async function runLocalTurn(model: LocalModel, input: NativeTurnInput): Promise<void> {
   const context: ToolContext = { home: input.home, env: input.env, signal: input.signal };
@@ -192,6 +198,7 @@ export async function runLocalTurn(model: LocalModel, input: NativeTurnInput): P
     input.onEvent({ type: "tool_start", id: "found", name: "search", args: { query: input.message } });
     const found = await search(input.message, hits, context, false);
     input.onEvent({ type: "tool_end", id: "found", isError: found.isError, output: found.text });
+    announceSources(hits, input);
     // The top hits' own text, so an answer need not rest on an excerpt or a file name.
     const passages = await Promise.all(hits.documents(OPENED_HITS).map(async (id) => {
       const opened = await read(id, null, hits, context);
@@ -210,6 +217,7 @@ export async function runLocalTurn(model: LocalModel, input: NativeTurnInput): P
         input.onEvent({ type: "tool_start", id: call.id, name: call.function.name, args });
         const result = await runTool(call, args, hits, context, input);
         input.onEvent({ type: "tool_end", id: call.id, isError: result.isError, output: result.text });
+        announceSources(hits, input);
         messages.push({ role: "tool", tool_call_id: call.id, content: untrusted(result.text) });
       }
     }

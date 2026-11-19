@@ -107,6 +107,10 @@ describe("the local model", () => {
     const events = await turn(sessions, "When does the boat leave?");
 
     expect(text(events)).toBe("Nine, from the north pier (trip.md).");
+    // The client learns what [S1] is, to open it from the answer.
+    expect(events.find((event) => event.type === "sources")).toEqual({
+      type: "sources", items: [{ key: "S1", source: "files", id: expect.stringContaining("trip.md"), title: "trip.md", path: expect.stringContaining("trip.md") }],
+    });
     expect(server.requests[0]?.messages[1]?.content).toContain("[S1]");
     expect(server.requests[0]?.messages[1]?.content).toContain("The boat leaves at nine.");
     // The top hit's own text is in the prompt before the model asks for it.

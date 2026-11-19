@@ -6,6 +6,7 @@
  * are the sources' own ("Sources"); this file numbers the hits and shapes
  * the text the model sees.
  */
+import type { SourceHit } from "./turn-events.js";
 import { listSources, readFileRef, readSource, searchFiles, searchSources, type SourceContext, type SourceItem, type SourceRef } from "./sources.js";
 
 /** The characters of one tool result the model is given. */
@@ -29,10 +30,23 @@ const FILE_SOURCES = new Set(["files", "notes", "reminders", "whatsapp", "drive"
 /** One pass's search hits, keyed `S1`, `S2`, …; a pass's ids mean nothing in the next. */
 export class Hits {
   private readonly byId = new Map<string, SourceRef>();
-  add(ref: SourceRef): string {
+  private fresh: SourceHit[] = [];
+  add(ref: SourceRef, item?: SourceItem): string {
     const id = `S${this.byId.size + 1}`;
     this.byId.set(id, ref);
+    if (item) {
+      this.fresh.push({
+        key: id, source: item.source, id: item.id, title: item.title,
+        ...(item.path ? { path: item.path } : {}), ...(item.page ? { page: item.page } : {}), ...(item.line ? { line: item.line } : {}),
+      });
+    }
     return id;
+  }
+  /** The hits added since the last call, for the turn's `sources` event. */
+  takeFresh(): SourceHit[] {
+    const fresh = this.fresh;
+    this.fresh = [];
+    return fresh;
   }
   /** The ids of the first `count` hits that are files or library pages, in search order. */
   documents(count: number): string[] {
@@ -85,7 +99,7 @@ export async function search(query: string, hits: Hits, context: ToolContext, ev
   const { searchItems, failed } = await searchWithRefs(q, context, sources);
   // Numbered in source order, not finishing order, so S1 is the best file hit.
   const lines = [
-    ...searchItems.map(({ item, ref }) => `[${hits.add(ref)}] ${hitText(item)}`),
+    ...searchItems.map(({ item, ref }) => `[${hits.add(ref, item)}] ${hitText(item)}`),
     ...failed.map((failure) => `(${failure.source} search failed: ${failure.message})`),
   ];
   return { text: lines.length ? clip(lines.join("\n")) : "Nothing found.", isError: false };
