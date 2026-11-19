@@ -67,7 +67,7 @@ const PRODUCTS_AFTER = [
   "",
   "Use the unified products even when another tool could reach the same service:",
   "Gmail through Cloudmail, Google/iCloud calendars through Cloud Calendar.",
-  "Contacts and reminders are iCloud's, through `icloud-contacts` and",
+  "Contacts (iCloud and Google) go through `cloud-contacts`, reminders through",
   "`icloud-reminders` (the `icloud` skill). Use the gws skills only for Drive,",
   "Docs, and Sheets. Provider CLIs (`gws`, `hey`,",
   "`icloud-session`) are dependencies those products manage.",

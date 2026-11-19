@@ -177,7 +177,7 @@ describe("tailnet identity", () => {
 
   it("refuses guests the hook commands, MCP configuration, the owner's sources, and hook completions", async () => {
     const base = await serve();
-    for (const path of ["/api/hooks/config", "/api/ghosts/casper/mcp", "/api/sources", "/api/sources/notes/items", "/api/sources/files/items/x", "/api/sources/photos/items/x/picture", "/api/search?q=x"]) {
+    for (const path of ["/api/hooks/config", "/api/ghosts/casper/mcp", "/api/sources", "/api/connections", "/api/sources/notes/items", "/api/sources/files/items/x", "/api/sources/photos/items/x/picture", "/api/search?q=x"]) {
       const guest = await fetch(`${base}${path}`, { headers: asTailnet("guest@example.com") });
       expect(guest.status).toBe(403);
       expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });

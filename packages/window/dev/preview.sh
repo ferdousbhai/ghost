@@ -8,7 +8,7 @@ set -Eeuo pipefail
 #
 #   preview.sh <screenshot.png> [route]
 #
-# `route` is GHOST_WINDOW_OPEN: a source id (`notes`), `<source id>/<item id>`, or `ask:<prompt>`.
+# `route` is GHOST_WINDOW_OPEN: `connect`, a source id (`notes`), `<source id>/<item id>`, or `ask:<prompt>`.
 if (( $# < 1 || $# > 2 )); then
   echo "usage: $0 <screenshot.png> [route]" >&2
   exit 2
@@ -97,12 +97,13 @@ stub() {
   chmod 755 "$root/bin/$1"
 }
 now_ms=$(( $(date +%s) * 1000 ))
-stub recall "case \"\$1\" in config) printf '{\"roots\":[\"$HOME\"]}' ;; search) printf '{\"hits\":[]}' ;; esac"
+stub icloud-session "printf '{\"signed_in\":true,\"apple_id\":\"sam@example.com\"}'"
+stub recall "case \"\$1\" in status) printf '{\"state\":\"idle\",\"files\":1204,\"searchable\":1198}' ;; config) printf '{\"roots\":[\"$HOME\"]}' ;; search) printf '{\"hits\":[]}' ;; esac"
 stub cloudmail "case \"\$1\" in
   inbox|search) printf '[{\"id\":\"t_1\",\"subject\":\"Your ferry booking\",\"snippet\":\"Two adults, north pier, 09:00.\",\"from\":{\"name\":\"Island Ferries\"},\"last_at\":$now_ms},{\"id\":\"t_2\",\"subject\":\"Hotel confirmation\",\"snippet\":\"Check-in from 14:00.\",\"from\":{\"name\":\"Harbour Hotel\"},\"last_at\":$(( now_ms - 7200000 ))}]' ;;
   thread) printf '{\"thread\":{\"subject\":\"Your ferry booking\"},\"messages\":[{\"from\":{\"name\":\"Island Ferries\",\"email\":\"bookings@example.com\"},\"date\":$now_ms,\"text\":\"Two adults, north pier, 09:00. Please arrive 15 minutes early.\"}]}' ;;
 esac"
-stub icloud-contacts "case \"\$1\" in
+stub cloud-contacts "case \"\$1\" in
   list) printf '[{\"id\":\"c1\",\"name\":\"Sara Example\",\"company\":\"Island Ferries\",\"phones\":[{\"value\":\"+1 555 0100\"}],\"emails\":[{\"value\":\"sara@example.com\"}]}]' ;;
   show) printf '{\"id\":\"c1\",\"name\":\"Sara Example\",\"company\":\"Island Ferries\",\"phones\":[{\"label\":\"mobile\",\"value\":\"+1 555 0100\"}]}' ;;
 esac"
@@ -120,7 +121,9 @@ mkdir -p "$tools"
 for tool in rg fd fzf sh bash env cat printf date sed pdftotext; do
   path=$(command -v "$tool" 2>/dev/null) && ln -sf "$path" "$tools/$tool"
 done
-daemon_path=$root/bin:$tools:$(dirname "$bun_bin")
+# bun by link, not by its directory: /usr/bin would bring the owner's real product CLIs and accounts with it.
+ln -sf "$bun_bin" "$tools/bun"
+daemon_path=$root/bin:$tools
 
 # A scratch ghostd on a spare port, with the stand-in model server.
 port=$("$bun_bin" -e 'const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); console.log(s.port); s.stop();')

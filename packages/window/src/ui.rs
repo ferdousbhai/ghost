@@ -13,6 +13,7 @@ use serde_json::Value;
 use crate::{
     api::Api,
     ask::AskPage,
+    connect::ConnectPage,
     source::{ReaderPage, SourcePage},
     theme::Theme,
 };
@@ -21,6 +22,8 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub enum Route {
     Ask,
+    /// What the owner can connect, and how.
+    Connect,
     Source(String),
     /// One item of a source, with a search hit's page or line.
     Item {
@@ -33,7 +36,7 @@ pub enum Route {
 }
 
 /// A source as `GET /api/sources` lists it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SourceInfo {
     pub id: String,
     pub label: String,
@@ -83,6 +86,7 @@ pub struct App {
     pages: RefCell<HashMap<String, Rc<SourcePage>>>,
     ask: RefCell<Option<Rc<AskPage>>>,
     reader: RefCell<Option<Rc<ReaderPage>>>,
+    connect: RefCell<Option<Rc<ConnectPage>>>,
 }
 
 impl App {
@@ -107,10 +111,12 @@ impl App {
         let sidebar = gtk::ListBox::new();
         sidebar.add_css_class("sidebar");
         sidebar.set_selection_mode(gtk::SelectionMode::Single);
-        let footer = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let footer_content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        footer_content.append(&gtk::Image::from_icon_name("list-add-symbolic"));
+        footer_content.append(&gtk::Label::new(Some("Connect your data")));
+        let footer = gtk::Button::new();
+        footer.set_child(Some(&footer_content));
         footer.add_css_class("sidebar-footer");
-        footer.append(&gtk::Image::from_icon_name("computer-symbolic"));
-        footer.append(&gtk::Label::new(Some("On this computer")));
         let sidebar_shell = gtk::Box::new(gtk::Orientation::Vertical, 0);
         sidebar_shell.add_css_class("sidebar-shell");
         sidebar_shell.set_size_request(200, -1);
@@ -146,6 +152,7 @@ impl App {
             pages: RefCell::new(HashMap::new()),
             ask: RefCell::new(None),
             reader: RefCell::new(None),
+            connect: RefCell::new(None),
         });
 
         let ask = AskPage::build(&app);
@@ -154,7 +161,20 @@ impl App {
         let reader = ReaderPage::build(&app);
         app.stack.add_named(&reader.root, Some("item"));
         *app.reader.borrow_mut() = Some(reader);
+        let connect = ConnectPage::build(&app);
+        app.stack.add_named(&connect.root, Some("connect"));
+        *app.connect.borrow_mut() = Some(connect);
         app.add_row("ask", "Ask", "user-idle-symbolic");
+        let this = app.clone();
+        footer.connect_clicked(move |_| this.navigate(Route::Connect));
+        // Coming back from a product's terminal: what it connected shows without asking.
+        let this = app.clone();
+        app.window.connect_is_active_notify(move |window| {
+            if window.is_active() && this.history.borrow().get(this.pos.get()) == Some(&Route::Connect) {
+                this.connect().refresh();
+                this.load_sources(None);
+            }
+        });
 
         let this = app.clone();
         app.sidebar.connect_row_selected(move |_, row| {
@@ -192,38 +212,20 @@ impl App {
         app.navigate(Route::Ask);
         app.window.present();
 
-        // The sources that are set up here become the sidebar's rows.
-        let this = app.clone();
-        glib::spawn_future_local(async move {
-            match this.api.get("/api/sources".into()).await {
-                Ok(body) => {
-                    for row in body["sources"].as_array().into_iter().flatten().filter(|row| row["available"].as_bool() == Some(true)) {
-                        let info = SourceInfo {
-                            id: row["id"].as_str().unwrap_or_default().to_string(),
-                            label: row["label"].as_str().unwrap_or_default().to_string(),
-                            list: row["list"].as_bool().unwrap_or(false),
-                            search: row["search"].as_bool().unwrap_or(false),
-                            pictures: row["pictures"].as_bool().unwrap_or(false),
-                        };
-                        this.add_row(&info.id, &info.label, icon_of(&info.id));
-                        this.sources.borrow_mut().push(info);
-                    }
-                    // For scripted checks: `GHOST_WINDOW_OPEN=<source id>` starts on that source (`ask:<prompt>` is the Ask page's).
-                    // `<source id>/<item id>` starts on that item.
-                    if let Ok(open) = std::env::var("GHOST_WINDOW_OPEN") {
-                        let (source, item) = open.split_once('/').unwrap_or((&open, ""));
-                        if this.sources.borrow().iter().any(|info| info.id == source) {
-                            this.navigate(if item.is_empty() {
-                                Route::Source(source.into())
-                            } else {
-                                Route::Item { source: source.into(), id: item.into(), title: item.into(), page: None, line: None }
-                            });
-                        }
-                    }
+        let open = std::env::var("GHOST_WINDOW_OPEN").ok();
+        if open.is_none() {
+            // A first run, with nothing connected yet, starts where connecting is.
+            let this = app.clone();
+            glib::spawn_future_local(async move {
+                if let Ok(body) = this.api.get("/api/connections".into()).await
+                    && body["connections"].as_array().is_some_and(|rows| rows.iter().all(|row| row["state"] != "connected"))
+                    && this.history.borrow().len() == 1
+                {
+                    this.navigate(Route::Connect);
                 }
-                Err(error) => this.ask().note(&error.message),
-            }
-        });
+            });
+        }
+        app.load_sources(open);
         app
     }
 
@@ -236,6 +238,57 @@ impl App {
         content.append(&gtk::Label::new(Some(label)));
         row.set_child(Some(&content));
         self.sidebar.append(&row);
+    }
+
+    /// The sources that are set up here become the sidebar's rows, after Ask. `open` is `GHOST_WINDOW_OPEN`, for
+    /// scripted checks: `connect`, a source id, or `<source id>/<item id>` (`ask:<prompt>` is the Ask page's).
+    fn load_sources(self: &Rc<Self>, open: Option<String>) {
+        let this = self.clone();
+        glib::spawn_future_local(async move {
+            let body = match this.api.get("/api/sources".into()).await {
+                Ok(body) => body,
+                Err(error) => return this.ask().note(&error.message),
+            };
+            let sources: Vec<SourceInfo> = body["sources"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|row| row["available"].as_bool() == Some(true))
+                .map(|row| SourceInfo {
+                    id: row["id"].as_str().unwrap_or_default().to_string(),
+                    label: row["label"].as_str().unwrap_or_default().to_string(),
+                    list: row["list"].as_bool().unwrap_or(false),
+                    search: row["search"].as_bool().unwrap_or(false),
+                    pictures: row["pictures"].as_bool().unwrap_or(false),
+                })
+                .collect();
+            if *this.sources.borrow() != sources {
+                this.syncing.set(true);
+                while let Some(row) = this.sidebar.row_at_index(1) {
+                    this.sidebar.remove(&row);
+                }
+                this.syncing.set(false);
+                for info in &sources {
+                    this.add_row(&info.id, &info.label, icon_of(&info.id));
+                }
+                *this.sources.borrow_mut() = sources;
+            }
+            let Some(open) = open else { return };
+            let (source, item) = open.split_once('/').unwrap_or((&open, ""));
+            if open == "connect" {
+                this.navigate(Route::Connect);
+            } else if this.sources.borrow().iter().any(|info| info.id == source) {
+                this.navigate(if item.is_empty() {
+                    Route::Source(source.into())
+                } else {
+                    Route::Item { source: source.into(), id: item.into(), title: item.into(), page: None, line: None }
+                });
+            }
+        });
+    }
+
+    fn connect(&self) -> Rc<ConnectPage> {
+        self.connect.borrow().clone().expect("the connect page")
     }
 
     fn ask(&self) -> Rc<AskPage> {
@@ -282,6 +335,10 @@ impl App {
     fn show(self: &Rc<Self>, route: &Route) {
         let (page, section, title) = match route {
             Route::Ask => ("ask".to_string(), "ask".to_string(), "Ask".to_string()),
+            Route::Connect => {
+                self.connect().refresh();
+                ("connect".to_string(), "connect".to_string(), "Connect".to_string())
+            }
             Route::Source(id) => {
                 let info = self.sources.borrow().iter().find(|info| &info.id == id).cloned();
                 let Some(info) = info else { return };

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
 import { readFileSync } from "node:fs";
 import { addReminder, listSource, listSources, pictureOf, readSource, saveNote, searchSources, type SourceContext } from "../src/sources.js";
+import { listConnections } from "../src/connections.js";
 import { tempDir } from "./helpers/fixtures.js";
 
 let cleanups: Array<() => void> = [];
@@ -199,10 +200,25 @@ describe("sources", () => {
     expect(listSources(context).filter((source) => source.pictures).map((source) => source.id)).toEqual(["photos"]);
   });
 
+  it("says what is missing, what is signed out and what is connected, with the product's own next step", async () => {
+    const context = owner({
+      "icloud-session": `printf '{"signed_in":false}'`,
+      "cloud-calendar": `printf '{"accounts":[{"label":"Home","provider":"icloud","ok":true},{"label":"Work","provider":"google","ok":false}]}'`,
+      wacli: "exit 1",
+    });
+    const rows = Object.fromEntries((await listConnections(context)).map((row) => [row.id, row]));
+    expect(Object.keys(rows)).toEqual(["search", "icloud", "mail", "calendar", "contacts", "whatsapp", "lastbook"]);
+    expect(rows.mail).toMatchObject({ state: "missing", actions: [{ label: "Install", command: "curl -fsSL https://ferdousbhai.com/cloudmail/install.sh | sudo bash" }] });
+    expect(rows.icloud).toMatchObject({ state: "disconnected", detail: "", actions: [{ label: "Sign in", command: "icloud-session sign-in" }] });
+    expect(rows.calendar).toMatchObject({ state: "connected", detail: "Home, Work (needs sign-in)" });
+    expect(rows.calendar?.actions.map((action) => action.command)).toContain("cloud-calendar account add google");
+    expect(rows.whatsapp).toMatchObject({ state: "disconnected", actions: [{ label: "Link WhatsApp", command: "wacli auth" }] });
+  });
+
   it("names a failing source and still returns the others", async () => {
     const context = owner({
       cloudmail: "echo 'worker unreachable' >&2; exit 5",
-      "icloud-contacts": `printf '%s' '[{"id":"p1","name":"Sara","company":"Emy Terra","phones":[{"value":"+1 555"}]}]'`,
+      "cloud-contacts": `printf '%s' '[{"id":"p1","name":"Sara","company":"Emy Terra","phones":[{"value":"+1 555"}]}]'`,
     });
     const result = await searchSources("Sara", context, { sources: ["mail", "contacts"] });
     expect(result.items).toEqual([expect.objectContaining({ source: "contacts", title: "Sara", snippet: "Emy Terra · +1 555" })]);

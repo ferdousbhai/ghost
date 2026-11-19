@@ -94,11 +94,17 @@ button.sidebar-toggle { color: @gh_accent; }
 .sidebar-row:selected, .sidebar-row:selected:hover { background: alpha(@gh_accent, 0.18); color: @gh_text; }
 .sidebar-row:selected image { color: @gh_accent; }
 
-.sidebar-footer {
+button.sidebar-footer {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  box-shadow: none;
   color: @gh_dim_text;
   font-size: 0.88em;
-  padding: 8px 10px;
+  margin: 5px;
+  padding: 6px 8px;
 }
+button.sidebar-footer:hover { background: alpha(@gh_text, 0.06); color: @gh_text; }
 .sidebar-footer image { color: @gh_accent; }
 
 /* --------------------------------------------------------------------------------------------------- fields -- */

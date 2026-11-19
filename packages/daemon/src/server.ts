@@ -33,6 +33,7 @@ import {
 } from "./turn-events.js";
 import { replacedSinceStart, type RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
+import { listConnections } from "./connections.js";
 import { listSource, listSources, pictureOf, readSource, searchSources, SOURCE_IDS, type SourceId } from "./sources.js";
 
 export interface ServerOptions {
@@ -772,6 +773,14 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         const picture = await pictureOf(params.source ?? "", params.item ?? "", options.host.sourceContext(signal));
         response.writeHead(200, { "content-type": picture.type, "content-length": picture.bytes.length, "cache-control": "no-store" });
         response.end(picture.bytes);
+      } finally {
+        release();
+      }
+    })),
+    route("GET", "api/connections", ownerOnly(async ({ request, response }) => {
+      const { signal, release } = abortOnClose(request, response);
+      try {
+        jsonResponse(response, 200, { connections: await listConnections(options.host.sourceContext(signal)) });
       } finally {
         release();
       }

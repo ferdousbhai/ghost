@@ -635,6 +635,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
 | `GET /api/sources/:source/items/:item?page=&line=` | Owner-only `{ title, text, part, path? }` for one item, its id percent-encoded as one segment; `part` says which part (`whole`, `passage`, `start`, `lines a-b`, `page n`, `latest`). A source with no read is `405 not_readable`. |
 | `GET /api/sources/:source/items/:item/picture` | Owner-only. The item's small picture as `image/jpeg` or `image/png` bytes (Photos: iCloud's thumbnail, fetched into icloud-photos' cache on first use). Whatever file the product names, only a JPEG or PNG of at most 4 MiB is sent; anything else is `404 not_found`, and a source without pictures `405 no_pictures`. |
+| `GET /api/connections` | Owner-only `{ connections: [{ id, label, brings, state, detail, actions: [{ label, command }] }] }`: the [connections](#connections). |
 | `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
@@ -789,12 +790,16 @@ runtime preserves owner data.
   follows [Strata](https://github.com/lgse/strata). It is a client of the
   API like the HUD and keeps no data: a sidebar of Ask and each available
   [source](#sources), a page per source (its list, or a grid of pictures
-  when its items have them, a search of it, and a reader for one item), and Ask, a conversation of the default ghost
+  when its items have them, a search of it, and a reader for one item),
+  Connect (the [connections](#connections); a first run with none connected
+  starts there, and a step runs in Omarchy's floating terminal, else
+  `xdg-terminal-exec`), and Ask, a conversation of the default ghost
   (`ghost use`, else the first ghost) whose answer's `[S1]` citations open
   the item the turn's `sources` event names. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
-  `GHOST_WINDOW_OPEN` starts it on a source id, on `<source id>/<item id>`, or asks `ask:<prompt>`, for
+  `GHOST_WINDOW_OPEN` starts it on `connect`, a source id, or
+  `<source id>/<item id>`, or asks `ask:<prompt>`, for
   [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
   nested Hyprland against a scratch ghostd and sample data. It is a workspace
   package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
@@ -909,7 +914,7 @@ and the API below are this one layer; a source whose product is missing is
 | `whatsapp` | wacli's chat folders, `~/WhatsApp/<account>/WhatsApp Chat - <name>/_chat.txt`, by last change; a read is the chat's latest 256 KiB | yes | yes | Recall, that folder |
 | `drive` | icloud-drive's `~/iCloud Drive` | | yes | Recall, that folder |
 | `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
-| `contacts` | icloud-contacts from its last sync (`--cached`), by name | yes | yes | yes |
+| `contacts` | cloud-contacts (iCloud and Google) from its last fetch (`--cached`), by name | yes | yes | yes |
 | `calendar` | cloud-calendar `agenda`, 14 days a page from today (live) | yes | | |
 | `photos` | icloud-photos' catalog: `list`, `info`, and `thumb` for an item's picture | yes | yes | |
 | `lastbook` | Lastbook's library index, read-only | | a page inside its library | yes |
@@ -919,6 +924,28 @@ vault and Reminders under the owner's Documents folder, `~/WhatsApp`,
 `~/iCloud Drive`), so one meaning index, Recall's, serves every file-backed
 source and nothing is indexed twice. A search across sources names each one
 that failed rather than failing whole. Reads are cut at 256 KiB.
+
+### Connections
+
+Onboarding is the products' own. [`connections.ts`](packages/daemon/src/connections.ts)
+lists what the owner can connect (`search`: Recall, `icloud`, `mail`,
+`calendar`, `contacts`, `whatsapp`, `lastbook`), each with a `state` and
+the next steps as `actions`, a label and a shell command line:
+
+- `missing`: the product's command is not installed. The one action is its
+  published installer (`curl … install.sh | sudo bash`, which adds the
+  product's signed package repository).
+- `disconnected`: installed, with no sign-in or account (its own status
+  command says so; one that does not answer reads as this).
+- `connected`: `detail` names the accounts. Actions that add another
+  account stay.
+
+Ghost runs none of these commands. Each asks the owner something (a
+password, a sign-in window, a code to scan, and for mail on the owner's own
+domain `cloudmail init` asks before it moves a domain to Cloudflare), so the
+window runs the chosen one in a terminal on the owner's desktop and reads
+the list again when the window is next focused. The commands are constants
+of this table, never text from a product or a model.
 
 ### Local model
 

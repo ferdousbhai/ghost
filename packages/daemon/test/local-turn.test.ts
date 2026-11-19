@@ -63,7 +63,7 @@ function fakeTools(note: string): string {
     `esac`,
   ].join("\n"));
   tool("cloudmail", "printf '[]'");
-  tool("icloud-contacts", "printf '[]'");
+  tool("cloud-contacts", "printf '[]'");
   return bin.path;
 }
 

@@ -4,6 +4,7 @@
 
 mod api;
 mod ask;
+mod connect;
 mod md;
 mod source;
 mod theme;

@@ -536,7 +536,7 @@ const mail: Source = {
   },
 };
 
-// ── Contacts: icloud-contacts, from its last sync ─────────────────────
+// ── Contacts: cloud-contacts (iCloud and Google), from its last fetch ─────────────────────
 
 function contactItem(contact: Record<string, unknown>): SourceItem {
   const first = (value: unknown) => records(value)[0]?.value;
@@ -547,18 +547,28 @@ function contactItem(contact: Record<string, unknown>): SourceItem {
 const contacts: Source = {
   id: "contacts",
   label: "Contacts",
-  available: (context) => which("icloud-contacts", context.env) !== null,
+  available: (context) => which("cloud-contacts", context.env) !== null,
   async list(context, limit, cursor) {
-    return offsetPage(records(await cliData("icloud-contacts", ["list", "--cached", "--quiet"], context)).map(contactItem), limit, cursor);
+    return offsetPage(records(await cliData("cloud-contacts", ["list", "--cached", "--quiet"], context)).map(contactItem), limit, cursor);
   },
   async read(context, ref) {
-    const contact = (await cliData("icloud-contacts", ["show", "--cached", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
+    const contact = (await cliData("cloud-contacts", ["show", "--cached", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
     if (!contact || typeof contact !== "object") throw new GhostError("not_found", "No such contact.", 404);
-    return { title: oneLine(contact.name, 200), text: JSON.stringify(contact, null, 2), part: "whole" };
+    const values = (label: string, rows: unknown) => records(rows).map((row) => `${label}: ${oneLine(row.value, 200)}${row.label ? ` (${oneLine(row.label, 40)})` : ""}`);
+    const work = [contact.job_title, contact.company].filter(Boolean).map((value) => oneLine(value, 120)).join(", ");
+    const text = [
+      ...(work ? [work] : []),
+      ...values("Phone", contact.phones), ...values("Email", contact.emails), ...values("Link", contact.urls),
+      ...records(contact.addresses).map((address) => `Address: ${[address.street, address.city, address.state, address.postal_code, address.country].filter(Boolean).map((part) => oneLine(part, 120)).join(", ")}`),
+      ...(contact.birthday ? [`Birthday: ${oneLine(contact.birthday, 40)}`] : []),
+      ...(contact.notes ? [`\n${String(contact.notes).trim()}`] : []),
+      `\nIn ${oneLine(contact.account ?? contact.provider, 80)}.`,
+    ].join("\n");
+    return { title: oneLine(contact.name, 200), text, part: "whole" };
   },
   async search(context, query, limit) {
     if (query.split(/\s+/u).length > 3) return [];
-    return records(await cliData("icloud-contacts", ["list", "--cached", "--quiet", "--", query], context)).slice(0, limit).map(contactItem);
+    return records(await cliData("cloud-contacts", ["list", "--cached", "--quiet", "--", query], context)).slice(0, limit).map(contactItem);
   },
 };
 
