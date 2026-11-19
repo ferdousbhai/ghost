@@ -51,11 +51,11 @@ const CEILINGS: Record<string, number> = {
   "Character file": 560,
   "Computer use": 273,
   "Ghost": 753,
-  "Owner context": 555,
+  "Owner context": 616,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 2462;
+const TOTAL_CEILING = 2523;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(
@@ -99,7 +99,7 @@ describe("the stable prompt policy budget", () => {
 });
 
 /** Only a local pass adds it, after the stable policy; it has its own ceiling. */
-const LOCAL_CEILING = 643;
+const LOCAL_CEILING = 761;
 
 describe("the local model's section", () => {
   it("stays at or below its ceiling", () => {

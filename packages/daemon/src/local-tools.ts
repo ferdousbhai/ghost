@@ -1,13 +1,14 @@
 /**
  * The local model's tools (CONTRACTS.md "Local model"): `search` over the
- * owner's sources, `read` of one search hit by its id, and `delegate`, which
- * the turn hands to a harness. Like Lastbook's, the tools take ids, never
+ * owner's sources, `read` of one search hit by its id, `save_note` and
+ * `add_reminder`, which write only Ghost's own Notes and Reminders folders,
+ * and `delegate`, which the turn hands to a harness. Like Lastbook's, the tools take ids, never
  * paths: the model reads only what a search returned. Searching and reading
  * are the sources' own ("Sources"); this file numbers the hits and shapes
  * the text the model sees.
  */
 import type { SourceHit } from "./turn-events.js";
-import { listSources, readFileRef, readSource, searchFiles, searchSources, type SourceContext, type SourceItem, type SourceRef } from "./sources.js";
+import { addReminder, listSources, readFileRef, readSource, saveNote, searchFiles, searchSources, type SourceContext, type SourceItem, type SourceRef } from "./sources.js";
 
 /** The characters of one tool result the model is given. */
 export const TOOL_RESULT_CHARS = 8_000;
@@ -67,6 +68,10 @@ export const LOCAL_TOOLS: readonly ToolSpec[] = [
     { query: { type: "string", description: "What to look for. For mail and contacts, a few keywords or a name work best." } }, ["query"]),
   spec("read", "Read one search hit, by its id (S1, S2, …): a short file whole, else its passage or opening.",
     { id: { type: "string", description: "The hit's id." }, page: { type: "integer", description: "For a PDF, a page other than the hit's." } }, ["id"]),
+  spec("save_note", "Keep something for later conversations (a fact about the owner, a decision, a plan): a new note, or more text at the end of the note with that title.",
+    { title: { type: "string", description: "The note's title; reuse an existing note's title to add to it." }, text: { type: "string", description: "What to keep, as Markdown." } }, ["title", "text"]),
+  spec("add_reminder", "Add a reminder to one of the owner's lists.",
+    { text: { type: "string", description: "What to be reminded of, one line." }, list: { type: "string", description: "The list's name; Reminders when unsure." }, due: { type: "string", description: "When it is due: YYYY-MM-DD, or YYYY-MM-DD HH:MM." } }, ["text"]),
   spec("delegate",
     "Hand a task you cannot do with search and read (acting, sending, changing, anything on the web or in code) to a cloud agent on this computer, which has full access. It answers with what it did. The task leaves this computer: include only what it needs.",
     { task: { type: "string", description: "The whole task, self-contained." } }, ["task"]),
@@ -117,6 +122,21 @@ async function searchWithRefs(query: string, context: ToolContext, sources: read
     ...rest.items.map((item) => ({ item, ref: { source: item.source, id: item.id, ...(item.page ? { page: item.page } : {}) } as SourceRef })),
   ];
   return { searchItems, failed: rest.failed };
+}
+
+/** Write a note or a reminder; the result says where it went. */
+export async function write(name: "save_note" | "add_reminder", args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
+  const text = (key: string) => typeof args[key] === "string" ? (args[key] as string) : "";
+  try {
+    if (name === "save_note") {
+      const saved = await saveNote(context, text("title"), text("text"));
+      return { text: `${saved.created ? "Saved a new note" : "Added to the note"}: ${saved.path}`, isError: false };
+    }
+    const added = await addReminder(context, text("text"), text("list").trim() || undefined, text("due").trim() || undefined);
+    return { text: `Added to ${added.path}: ${added.line}`, isError: false };
+  } catch (error) {
+    return { text: (error as Error).message, isError: true };
+  }
 }
 
 /** Open one hit, cut to one tool result: a file whole only when it fits. */

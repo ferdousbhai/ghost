@@ -446,6 +446,8 @@ impl AskPage {
                 step(match event["toolName"].as_str().unwrap_or_default() {
                     "search" => format!("Searching: {}", arguments["query"].as_str().unwrap_or_default()),
                     "read" => format!("Reading {}", arguments["id"].as_str().unwrap_or_default()),
+                    "save_note" => format!("Saving a note: {}", arguments["title"].as_str().unwrap_or_default()),
+                    "add_reminder" => format!("Adding a reminder: {}", arguments["text"].as_str().unwrap_or_default()),
                     "delegate" => "Handing a task to a cloud agent…".to_string(),
                     name => format!("Running {name}…"),
                 });

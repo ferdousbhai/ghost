@@ -77,8 +77,9 @@ never loaded into a conversation automatically. No daemon restart is needed.
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
-it with its harness's native file tools, its own notes included, kept in
-your existing project and topic folders. Ghost does not index the directory
+it with its harness's native file tools. A ghost's own memory is two folders
+there, with or without iCloud: `Notes` (Markdown notes) and `Reminders` (one
+checklist per list). Ghost does not index the directory
 or read any of it until a request calls for it. For search by meaning, a
 ghost can offer to install Recall, which indexes only the folders you choose.
 

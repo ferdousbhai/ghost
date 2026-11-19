@@ -285,15 +285,15 @@ function crashes(input: HelpTopicInput): string[] {
 function memory(): string[] {
   return [
     "# Memory",
-    "Your durable memory is the owner's documents directory (Owner context): Markdown in its existing project and topic folders. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
-    "Known names or terms: guess the folder from its name, then `rg -n -i '<term>' <folder>`, widening to the whole directory only if that finds nothing.",
+    "Your durable memory is the `Notes` and `Reminders` folders of the owner's documents directory (Owner context): Markdown notes, and one checklist per list. They are yours to keep whether or not iCloud syncs them. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
+    "Known names or terms: `rg -n -i '<term>'` in `Notes` and `Reminders`, widening to the whole directory only if that finds nothing.",
     "Unknown wording or location: search by meaning with Recall through its `recall` skill (`ghost help products` gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
     "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
-    "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the existing folder it belongs to, updating the note that covers it and dating what you add; start a folder only for a new project or topic.",
+    "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the note under `Notes` that covers it, dating what you add; start a note only when none does. A thing to do is one line in `Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD` (indented lines under it are its notes), ticked `- [x]` when done; a new file is a new list.",
     "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
     "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked.",
-    "A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to in the folder it belongs to.",
+    "A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to.",
   ];
 }
 

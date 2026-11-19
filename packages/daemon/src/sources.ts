@@ -8,7 +8,7 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { open, readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { GhostError } from "./errors.js";
 import { which } from "./harnesses.js";
@@ -343,26 +343,102 @@ function folderSource(id: SourceId, label: string, list: Source["list"], read?: 
   };
 }
 
-// ── Notes: icloud-notes ───────────────────────────────────────────────
+// ── Notes and reminders: Ghost's own state, as Markdown ────────────────
+//
+// `Documents/Notes` and `Documents/Reminders` are where a ghost keeps what it
+// must know next time, with or without iCloud: icloud-notes and
+// icloud-reminders sync these same folders when the owner connects them, in
+// these same formats, and nothing here needs either installed.
+
+/** A note's text without the `apple-note-id` header icloud-notes keeps at its top. */
+function noteBody(text: string): string {
+  return text.replace(/^---\n[\s\S]*?\n---\n+/u, "");
+}
+
+async function markdownFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const found = await Promise.all(entries.filter((entry) => !entry.name.startsWith(".")).map(async (entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return markdownFiles(path);
+    return entry.isFile() && entry.name.endsWith(".md") ? [path] : [];
+  }));
+  return found.flat();
+}
+
+/** The start of a file, enough for a list row's snippet. */
+async function fileStart(path: string): Promise<string> {
+  const file = await open(path, "r");
+  try {
+    const buffer = Buffer.alloc(1024);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await file.close();
+  }
+}
 
 const notes: Source = {
   ...folderSource("notes", "Notes", async (context, limit, cursor) => {
-    const rows = records(await cliData("icloud-notes", ["list", "--quiet"], context));
-    return timePage(rows.map((row) => ({
-      source: "notes", id: String(row.id ?? row.path), path: String(row.path), title: oneLine(row.title, 200) || basename(String(row.path)),
-      snippet: oneLine(row.snippet, 300), at: ms(row.modified_ms),
-    })), limit, cursor);
+    const root = folderOf("notes", context);
+    const items = await Promise.all((await markdownFiles(root)).map(async (path): Promise<SourceItem> => {
+      const lines = noteBody(await fileStart(path).catch(() => "")).split("\n").map((line) => line.replace(/^#+\s*/u, "").trim()).filter(Boolean);
+      const title = basename(path).replace(/\.md$/u, "");
+      return { source: "notes", id: path, path, title, snippet: oneLine(lines.find((line) => line !== title) ?? "", 300), at: (await stat(path)).mtimeMs };
+    }));
+    return timePage(items, limit, cursor);
   }, async (context, ref) => {
-    const note = (await cliData("icloud-notes", ["read", ref.id, "--quiet"], context)) as Record<string, unknown> | null;
-    if (!note || typeof note.body !== "string") throw new GhostError("not_found", "No such note.", 404);
-    return { title: oneLine(note.title, 200), text: note.body, part: "whole", ...(typeof note.path === "string" ? { path: note.path } : {}) };
+    if (!inside(folderOf("notes", context), ref.id)) throw new GhostError("not_found", "That is not in Notes.", 404);
+    const document = await readFileRef(ref, context);
+    return document.part === "whole" || document.part === "start" ? { ...document, text: noteBody(document.text) } : document;
   }),
-  available: (context) => which("icloud-notes", context.env) !== null,
+  available: () => true,
 };
+
+/** A note's or list's name as a file name: one line, no path separators, not hidden. */
+function fileName(name: string, what: string): string {
+  const clean = name.replace(/[\\/\p{Cc}]/gu, " ").replace(/\s+/gu, " ").replace(/^[.\s]+/u, "").slice(0, 120).trim();
+  if (!clean) throw new GhostError("invalid_request", `${what} needs a name.`, 400);
+  return clean;
+}
+
+async function appendText(path: string, text: string, opening: string): Promise<boolean> {
+  await mkdir(dirname(path), { recursive: true });
+  const existing = await readFile(path, "utf8").catch(() => null);
+  await writeFile(path, existing === null ? `${opening}${text}\n` : `${existing}${existing.endsWith("\n") || existing === "" ? "" : "\n"}${text}\n`);
+  return existing === null;
+}
+
+/** Keep something for later: a new note `Notes/<title>.md`, or more text at the end of that note. */
+export async function saveNote(context: SourceContext, title: string, text: string): Promise<{ path: string; created: boolean }> {
+  const body = text.trim();
+  if (!body) throw new GhostError("invalid_request", "A note needs text.", 400);
+  const name = fileName(title, "A note");
+  const path = join(folderOf("notes", context), `${name}.md`);
+  const created = await appendText(path, body, `# ${name}\n\n`);
+  return { path, created };
+}
+
+/**
+ * Add one reminder to `Reminders/<list>.md`, icloud-reminders' own format:
+ * a `- [ ]` line, its due date after 📅. The date is absolute, so the line
+ * means the same day whenever it is read.
+ */
+export async function addReminder(context: SourceContext, text: string, list = "Reminders", due?: string): Promise<{ path: string; line: string }> {
+  const what = oneLine(text, 500);
+  if (!what) throw new GhostError("invalid_request", "A reminder needs text.", 400);
+  if (due !== undefined && !/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/u.test(due)) {
+    throw new GhostError("invalid_request", "A due date is YYYY-MM-DD, or YYYY-MM-DD HH:MM.", 400);
+  }
+  const name = fileName(list, "A reminder list");
+  const path = join(folderOf("reminders", context), `${name}.md`);
+  const line = `- [ ] ${what}${due ? ` 📅 ${due}` : ""}`;
+  await appendText(path, line, `# ${name}\n\n`);
+  return { path, line };
+}
 
 // ── Reminders: the lists icloud-reminders keeps as Markdown files ──────
 
-const reminders = folderSource("reminders", "Reminders", async (context, limit, cursor) => {
+const reminders: Source = { ...folderSource("reminders", "Reminders", async (context, limit, cursor) => {
   const root = folderOf("reminders", context);
   const names = (await readdir(root).catch(() => [])).filter((name) => name.endsWith(".md"));
   const items = await Promise.all(names.map(async (name): Promise<SourceItem> => {
@@ -375,7 +451,7 @@ const reminders = folderSource("reminders", "Reminders", async (context, limit, 
     };
   }));
   return timePage(items, limit, cursor);
-});
+}), available: () => true };
 
 // ── WhatsApp: wacli's chat folders ─────────────────────────────────────
 

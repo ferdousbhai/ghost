@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LocalModel } from "../src/local-model.js";
@@ -147,6 +147,21 @@ describe("the local model", () => {
     expect(text(await turn(sessions, "Book us a table."))).toBe("Booked.");
     expect(cloud.calls()[0]?.prompt).toContain("Book a table for two.");
     expect(server.requests[1]?.messages.at(-1)).toMatchObject({ role: "tool", content: untrusted("cloud answered:\nfrom the cloud") });
+  });
+
+  it("keeps a note and a reminder in the owner's Notes and Reminders folders, with no cloud agent", async () => {
+    const { sessions, server, cloud } = host([
+      { call: { name: "save_note", args: { title: "Ferry trip", text: "Sara prefers the morning boat." } } },
+      { call: { name: "add_reminder", args: { text: "Buy ferry tickets", list: "Trip", due: "2026-11-20" } } },
+      { text: "Noted, and I will remind you." },
+    ]);
+    expect(text(await turn(sessions, "Remember Sara likes the morning boat, and remind me to buy tickets."))).toBe("Noted, and I will remind you.");
+    const documents = join(temp!.ownerHome, "Documents");
+    expect(readFileSync(join(documents, "Notes", "Ferry trip.md"), "utf8")).toBe("# Ferry trip\n\nSara prefers the morning boat.\n");
+    expect(readFileSync(join(documents, "Reminders", "Trip.md"), "utf8")).toBe("# Trip\n\n- [ ] Buy ferry tickets 📅 2026-11-20\n");
+    expect(server.requests[2]?.messages.at(-1)).toMatchObject({ role: "tool", content: expect.stringContaining("- [ ] Buy ferry tickets 📅 2026-11-20") });
+    expect(server.requests[0]?.tools).toHaveLength(5);
+    expect(cloud.calls()).toHaveLength(0);
   });
 
   it("rests a cloud agent that refuses a delegated task, and ends the rest once it answers one", async () => {

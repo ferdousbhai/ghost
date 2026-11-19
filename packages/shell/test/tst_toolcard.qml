@@ -17,6 +17,10 @@ TestCase {
         compare(ToolTrace.text(search, false, false), "search “passport”");
         const read = { name: "read", status: "completed", arguments: { id: "S3" }, summary: "" };
         compare(ToolTrace.text(read, true, false), "read S3");
+        const note = { name: "save_note", status: "completed", arguments: { title: "Ferry trip", text: "Nine." }, summary: "" };
+        compare(ToolTrace.text(note, true, false), "note “Ferry trip”");
+        const reminder = { name: "add_reminder", status: "running", arguments: { text: "Buy tickets", due: "2026-11-20" }, summary: "" };
+        compare(ToolTrace.text(reminder, false, false), "remind “Buy tickets”");
     }
 
     function test_desktopToolsSayWhatTheyDid(): void {

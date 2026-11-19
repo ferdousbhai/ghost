@@ -263,7 +263,9 @@ describe("ghost help topics", () => {
 
   it("memory: exact search first, Recall for unknown wording, the source file over any index", () => {
     const text = renderHelpTopic("memory", INPUT);
-    expect(text).toContain("rg -n -i '<term>' <folder>");
+    expect(text).toContain("`rg -n -i '<term>'` in `Notes` and `Reminders`");
+    expect(text).toContain("They are yours to keep whether or not iCloud syncs them");
+    expect(text).toContain("`Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD`");
     expect(text).toContain("Recall through its `recall` skill");
     expect(text).toContain("without it, use filenames and `rg`");
     expect(text).toContain("then the source file itself before relying on one");

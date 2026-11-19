@@ -134,6 +134,11 @@ function call(activity, completed, limit) {
     case "find":
     case "glob":
         return compact("find " + argument(activity, "pattern") + " in " + path(argument(activity, "path"), "."), limit);
+    // The local model's writes to the ghost's Notes and Reminders.
+    case "save_note":
+        return "note " + quoted(argument(activity, "title"), limit);
+    case "add_reminder":
+        return "remind " + quoted(argument(activity, "text"), limit);
     // Historical transcripts still carry the retired desktop tools.
     case "desktop_look":
         if (args.image === true || args.region || args.monitor)

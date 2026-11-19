@@ -98,10 +98,6 @@ stub() {
 }
 now_ms=$(( $(date +%s) * 1000 ))
 stub recall "case \"\$1\" in config) printf '{\"roots\":[\"$HOME\"]}' ;; search) printf '{\"hits\":[]}' ;; esac"
-stub icloud-notes "case \"\$1\" in
-  list) printf '[{\"id\":\"n1\",\"path\":\"$HOME/Documents/Notes/Ferry trip.md\",\"title\":\"Ferry trip\",\"snippet\":\"The boat leaves at nine from the north pier.\",\"modified_ms\":$now_ms},{\"id\":\"n2\",\"path\":\"$HOME/Documents/Notes/Packing.md\",\"title\":\"Packing\",\"snippet\":\"Sunscreen, charger, passports\",\"modified_ms\":$(( now_ms - 86400000 ))}]' ;;
-  read) printf '{\"title\":\"Ferry trip\",\"path\":\"$HOME/Documents/Notes/Ferry trip.md\",\"body\":\"The boat leaves at nine from the north pier.\\\\nTickets are in the blue folder.\"}' ;;
-esac"
 stub cloudmail "case \"\$1\" in
   inbox|search) printf '[{\"id\":\"t_1\",\"subject\":\"Your ferry booking\",\"snippet\":\"Two adults, north pier, 09:00.\",\"from\":{\"name\":\"Island Ferries\"},\"last_at\":$now_ms},{\"id\":\"t_2\",\"subject\":\"Hotel confirmation\",\"snippet\":\"Check-in from 14:00.\",\"from\":{\"name\":\"Harbour Hotel\"},\"last_at\":$(( now_ms - 7200000 ))}]' ;;
   thread) printf '{\"thread\":{\"subject\":\"Your ferry booking\"},\"messages\":[{\"from\":{\"name\":\"Island Ferries\",\"email\":\"bookings@example.com\"},\"date\":$now_ms,\"text\":\"Two adults, north pier, 09:00. Please arrive 15 minutes early.\"}]}' ;;

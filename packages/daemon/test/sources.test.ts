@@ -1,8 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
-import { listSource, listSources, readSource, searchSources, type SourceContext } from "../src/sources.js";
+import { readFileSync } from "node:fs";
+import { addReminder, listSource, listSources, readSource, saveNote, searchSources, type SourceContext } from "../src/sources.js";
 import { tempDir } from "./helpers/fixtures.js";
 
 let cleanups: Array<() => void> = [];
@@ -99,15 +100,30 @@ describe("sources", () => {
     expect(second).toEqual({ items: [expect.objectContaining({ id: "c", title: "sc", at: 1000 })], next: null });
   });
 
-  it("lists notes newest first across folders, and reminders as one item per list", async () => {
-    const context = owner({
-      "icloud-notes": `printf '%s' '[{"id":"n1","path":"/v/a.md","title":"Old","modified_ms":${at("2026-01-01")}},{"id":"n2","path":"/v/b.md","title":"New","modified_ms":${at("2026-06-01")}}]'`,
-    });
+  it("lists notes newest first across folders, and reminders as one item per list, with no product installed", async () => {
+    const context = owner({});
+    // Nothing exists yet: Ghost's own folders are still sources, just empty.
+    expect(listSources(context).filter((row) => row.id === "notes" || row.id === "reminders").map((row) => row.available)).toEqual([true, true]);
+    expect(await listSource("notes", context, 10, null)).toEqual({ items: [], next: null });
+    expect(await listSource("reminders", context, 10, null)).toEqual({ items: [], next: null });
+
+    const notes = join(context.home, "Documents", "Notes");
     const reminders = join(context.home, "Documents", "Reminders");
+    mkdirSync(join(notes, "Trips", ".icloud-notes"), { recursive: true });
     mkdirSync(reminders, { recursive: true });
+    const old = join(notes, "Old.md");
+    const fresh = join(notes, "Trips", "New.md");
+    writeFileSync(old, "# Old\n\nfirst line\n");
+    // As icloud-notes leaves a synced note: its id header on top.
+    writeFileSync(fresh, "---\napple-note-id: 1234\n---\n\n# New\n\nThe boat leaves at nine.\n");
+    writeFileSync(join(notes, "Trips", ".icloud-notes", "state.md"), "not a note");
+    utimesSync(old, at("2026-01-01") / 1000, at("2026-01-01") / 1000);
+    utimesSync(fresh, at("2026-06-01") / 1000, at("2026-06-01") / 1000);
     writeFileSync(join(reminders, "Groceries.md"), "- [ ] Milk\n- [x] Eggs\n- [ ] Bread\n");
 
-    expect((await listSource("notes", context, 10, null)).items.map((item) => item.title)).toEqual(["New", "Old"]);
+    const listed = (await listSource("notes", context, 10, null)).items;
+    expect(listed.map((item) => [item.title, item.snippet])).toEqual([["New", "The boat leaves at nine."], ["Old", "first line"]]);
+    expect(await readSource({ source: "notes", id: fresh }, context)).toMatchObject({ text: "# New\n\nThe boat leaves at nine.\n", part: "whole" });
     const chat = join(context.home, "WhatsApp", "+1", "WhatsApp Chat - Sara", "_chat.txt");
     mkdirSync(join(chat, ".."), { recursive: true });
     writeFileSync(chat, "[1/1/26, 09:00:00] Sara: first\n[1/2/26, 10:00:00] Sara: latest\n");
@@ -117,6 +133,27 @@ describe("sources", () => {
     expect((await listSource("reminders", context, 10, null)).items).toEqual([
       expect.objectContaining({ source: "reminders", title: "Groceries", snippet: "2 open: Milk" }),
     ]);
+  });
+
+  it("saves a note and a reminder as Markdown the products sync, inside Ghost's two folders only", async () => {
+    const context = owner({});
+    const saved = await saveNote(context, "Ferry trip", "The boat leaves at nine.");
+    expect(saved).toEqual({ path: join(context.home, "Documents", "Notes", "Ferry trip.md"), created: true });
+    expect(await saveNote(context, "Ferry trip", "Tickets are in the blue folder.")).toMatchObject({ created: false });
+    expect(readFileSync(saved.path, "utf8")).toBe("# Ferry trip\n\nThe boat leaves at nine.\nTickets are in the blue folder.\n");
+    // A title is one file name, never a path.
+    expect((await saveNote(context, "../../.ssh/authorized_keys", "x")).path).toBe(join(context.home, "Documents", "Notes", "ssh authorized_keys.md"));
+    await expect(saveNote(context, " / ", "x")).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(saveNote(context, "Empty", "  ")).rejects.toMatchObject({ code: "invalid_request" });
+
+    const added = await addReminder(context, "Buy ferry\ntickets", "Trip", "2026-11-20");
+    expect(added.line).toBe("- [ ] Buy ferry tickets 📅 2026-11-20");
+    await addReminder(context, "Pack", "Trip", "2026-11-20 08:30");
+    expect(readFileSync(added.path, "utf8")).toBe("# Trip\n\n- [ ] Buy ferry tickets 📅 2026-11-20\n- [ ] Pack 📅 2026-11-20 08:30\n");
+    expect((await addReminder(context, "Call Sara")).path).toBe(join(context.home, "Documents", "Reminders", "Reminders.md"));
+    await expect(addReminder(context, "Later", "Trip", "tomorrow")).rejects.toMatchObject({ code: "invalid_request" });
+    // What was written is what the sources list.
+    expect((await listSource("reminders", context, 10, null)).items.map((item) => item.title).sort()).toEqual(["Reminders", "Trip"]);
   });
 
   it("says what a source cannot do, and which sources are set up", async () => {

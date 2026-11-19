@@ -76,8 +76,9 @@ after its idle minutes. Both can be resident at once for up to that long.
 - **Crush** (2026-11-17): the 26B model through the Crush harness got 22,646
   prompt tokens a turn, almost all Crush's own, which took 309 s, and guessed
   the time four hours off rather than check the clock. That is why Ghost runs
-  the model itself with a prompt of about 1,500 tokens and three tools
-  (search, read, delegate), as Lastbook does.
+  the model itself with a prompt of about 1,500 tokens and a few tools
+  (search, read, delegate, and two that write its own notes and reminders),
+  as Lastbook does.
 
 ## Running one on Omarchy
 

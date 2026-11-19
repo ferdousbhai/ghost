@@ -38,9 +38,10 @@ Durable state has three scopes:
 
 - **Ghost-private:** character, conversations, settings, and runtime
   sidecars live in one ghost home.
-- **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in the
-  owner's XDG Documents directory, in its project and topic folders, which
-  every ghost reads and writes with its runtime's native file and search tools.
+- **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
+  folder of the owner's XDG Documents directory, and tasks in its `Reminders`
+  folder, which every ghost reads and writes ([Character and
+  notes](#character-and-notes)).
 - **External:** browser downloads, screenshots, systemd user timers, and
   each harness's credentials, settings, and own session store stay in the
   machine facility that owns them.
@@ -293,11 +294,17 @@ with a heading naming the persona. Its complete body, bounded by
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
-There is no ghost-private memory store. A ghost's notes — owner facts,
-decisions, tasks, and its own reflections — are Markdown files under the
-owner's Documents directory itself, written and
-read with the harness's native file tools, shared by every ghost and readable
-by the owner ([Product boundary](#product-boundary) says what may index it).
+There is no ghost-private memory store. A ghost's memory across
+conversations is two folders of the owner's Documents directory, kept
+whether or not iCloud is connected: `Notes`, Markdown notes (owner facts,
+decisions, its own reflections), and `Reminders`, one Markdown checklist per
+list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
+notes, `- [x]` done). These are the folders and formats icloud-notes and
+icloud-reminders sync, so connecting iCloud later syncs what is already
+there. A harness writes them with its native file tools; the local model with
+`save_note` and `add_reminder` ([Local model](#local-model)). They are shared
+by every ghost and readable by the owner
+([Product boundary](#product-boundary) says what may index them).
 Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
 owner asks for or schedules as a timer, following `ghost help memory`; Ghost
 runs no memory maintenance of its own.
@@ -893,8 +900,8 @@ and the API below are this one layer; a source whose product is missing is
 | Source | Product and what Ghost uses | list | read | search |
 |---|---|---|---|---|
 | `files` | Recall plus ripgrep and fd+fzf over Recall's folders minus its exclusions (the home folder without Recall) | | a file inside those folders only | yes |
-| `notes` | icloud-notes: `list`, `read` | yes | yes | Recall, its vault |
-| `reminders` | icloud-reminders' lists, `Documents/Reminders/*.md`, one item per list | yes | yes | Recall, that folder |
+| `notes` | `Documents/Notes/**/*.md`, by last change, without icloud-notes' id header; always available | yes | yes | Recall, that folder |
+| `reminders` | `Documents/Reminders/*.md`, one item per list; always available | yes | yes | Recall, that folder |
 | `whatsapp` | wacli's chat folders, `~/WhatsApp/<account>/WhatsApp Chat - <name>/_chat.txt`, by last change; a read is the chat's latest 256 KiB | yes | yes | Recall, that folder |
 | `drive` | icloud-drive's `~/iCloud Drive` | | yes | Recall, that folder |
 | `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
@@ -938,7 +945,7 @@ and opened text in a `<found>` block marked as reference text. Thinking is
 off (`enable_thinking: false`), as in Lastbook. It keeps no session of its
 own, streams the same events a harness parser emits (the first search shows
 as a `search` tool call), and records the model as the file's name and the
-provider as `local`. It offers three tools
+provider as `local`. It offers five tools
 ([`local-tools.ts`](packages/daemon/src/local-tools.ts)) for at most three
 rounds, then makes one more call without them:
 
@@ -951,6 +958,12 @@ rounds, then makes one more call without them:
   padding collapsed), the lines around a ripgrep match, a mail thread, a
   contact, or a text file whole when it fits in one result, else Recall's
   passage, else (a hit Recall did not index) the file's start.
+- `save_note(title, text)` and `add_reminder(text, list?, due?)`: the only
+  writes it has, confined to [the ghost's memory](#character-and-notes): a
+  new `Notes/<title>.md` or more text at that note's end, and one `- [ ]`
+  line at the end of `Reminders/<list>.md` (`Reminders.md` when no list is
+  named; `due` is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`, so the line means the
+  same day whenever it is read). A name becomes one file name, never a path.
 - `delegate(task)`: one headless run of a harness, in the conversation's
   directory with the ghost's persona and MCP servers, tried in the order
   above minus `local`; its reply, not its tool calls, returns to the model.
