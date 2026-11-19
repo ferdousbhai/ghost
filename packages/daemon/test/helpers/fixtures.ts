@@ -108,6 +108,9 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
+    // Renaming or removing a ghost sweeps its systemd timers; a test must
+    // never reach the owner's user manager, and CI has none.
+    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(harness),
   });
   const listening = await startDaemonServer({
