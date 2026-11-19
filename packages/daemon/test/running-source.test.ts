@@ -5,12 +5,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findSourceRoot, readHeadCommit, replacedSinceStart, resolveRunningSource } from "../src/running-source.js";
 
+/**
+ * The environment without git's own variables. A hook (pre-push runs the
+ * gate) exports GIT_DIR, and with it `git -C <temp> init` and `commit` act on
+ * the real repository: it was marked bare and given an empty commit "x".
+ */
+const outsideAnyRepository = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_SYSTEM: "/dev/null",
+};
+
 /** Make `root` a git repository with one commit, and return that commit. */
 function gitCommit(root: string): string {
-  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], {
-    encoding: "utf8",
-    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
-  }).trim();
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", env: outsideAnyRepository }).trim();
   if (!existsSync(join(root, ".git"))) {
     git("init", "-q");
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x");

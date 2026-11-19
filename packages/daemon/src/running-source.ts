@@ -37,10 +37,15 @@ export function findSourceRoot(startDir: string): string | null {
   }
 }
 
-/** The commit `HEAD` names in the checkout at `root`, or null if git cannot say. */
+/**
+ * The commit `HEAD` names in the checkout at `root`, or null if git cannot
+ * say. Git's own variables are dropped: under a hook's GIT_DIR, `-C root`
+ * would answer for the hook's repository instead.
+ */
 export function readHeadCommit(root: string): string | null {
   try {
-    return execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
+    return execFileSync("git", ["-C", root, "rev-parse", "--verify", "-q", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env }).trim() || null;
   } catch {
     return null;
   }
