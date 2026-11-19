@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname> <runtime|ui>'
+usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname> <runtime|ui> [window-binary]'
 source_root="${1:?usage: $usage}"
 runtime_root="${2:?usage: $usage}"
 pkgdir="${3:?usage: $usage}"
@@ -11,6 +11,10 @@ component="${5:?usage: $usage}"
   printf 'unknown package component: %s\n' "$component" >&2
   exit 2
 }
+
+# The UI package carries the built window (packages/window).
+window=""
+[[ "$component" != ui ]] || window="$(realpath -e -- "${6:?usage: $usage}")"
 
 source_root="$(realpath "$source_root")"
 runtime_root="$(realpath "$runtime_root")"
@@ -66,8 +70,11 @@ else
   # a package may not write into a home.
   install_tree "$source_root/packages/shell/qml" "$sharedir/plugin"
 
-  install -Dm644 "$source_root/packages/shell/contrib/ghost.desktop" \
-    "$pkgdir/usr/share/applications/ghost.desktop"
+  # The window is the app the launcher entry opens, named by its app id so
+  # the compositor finds the entry's icon for it.
+  install -Dm755 "$window" "$pkgdir/usr/bin/ghost-window"
+  install -Dm644 "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" \
+    "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
   install -Dm644 "$source_root/packages/shell/contrib/icons/ghost.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/ghost.svg"
   for size in 48 128 256; do

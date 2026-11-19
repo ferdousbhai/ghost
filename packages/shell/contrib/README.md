@@ -1,6 +1,6 @@
 # Desktop integration
 
-The package installs the desktop entry, icons, and keybinding samples here.
+The package installs the icons and keybinding samples here.
 For installation and HUD use, follow
 [getting started](../../../docs/getting-started.md); installed runtime guidance
 is `/usr/share/doc/ghost/ARCH.md`.
@@ -17,9 +17,10 @@ window rule; source it, and change the key there to summon on another. The packa
 `/usr/share/doc/ghost/shell-contrib/hyprland/` as samples; copy the one your
 config uses. Nothing here edits your Omarchy configuration.
 
-## The desktop entry
+## The icon
 
-[`ghost.desktop`](ghost.desktop) and [`icons/`](icons) give Ghost an
-application entry and a hicolor icon so it appears in launchers. The package
-installs both. The entry opens history and settings with `ghost section home`, a
-summon, not a toggle: launching an app shows it, never hides it.
+[`icons/`](icons) is Ghost's hicolor icon, which the package installs. The
+launcher entry is the window's
+([`io.github.ferdousbhai.Ghost.desktop`](../../window/contrib/io.github.ferdousbhai.Ghost.desktop)):
+it opens Ghost's window, not the HUD. The HUD's history and settings open with
+`omarchy-shell ghost section home`, a summon, not a toggle.

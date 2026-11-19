@@ -112,7 +112,9 @@ line.
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
 — it is a plugin inside your own `omarchy-shell`, summoned with
 `omarchy-shell shell toggle ferdousbhai.ghost`; history and settings open with
-`omarchy-shell ghost section home`.
+`omarchy-shell ghost section home`. Ghost in your app launcher opens the
+window (`ghost-window`): your notes, reminders, mail, and other connected
+data in one place, with the ghost answering from them.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -232,8 +234,7 @@ press `Enter` to ask the ghost what you said, or type and use the arrows to
 pick a conversation (the arrows stop the listening, so `Enter` opens it).
 
 History and settings open the way your desktop's own menu does (the ghost
-mark in the Omarchy bar, your app launcher, or
-`omarchy-shell ghost section home`): a card over whatever is open, with a
+mark in the Omarchy bar, or `omarchy-shell ghost section home`): a card over whatever is open, with a
 filter on top and the ghost's conversations and places under it.
 
 | Key | Effect |

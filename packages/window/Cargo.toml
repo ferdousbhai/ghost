@@ -1,6 +1,7 @@
 [package]
 name = "ghost-window"
-version = "0.11.9"
+# Never published as a crate: the release version is the workspace package.json's, which `--version` reports.
+version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Ghost's window: the owner's own data and the ghost, in one GTK 4 app"

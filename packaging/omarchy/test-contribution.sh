@@ -135,7 +135,7 @@ next_epoch=234567890
 mkdir -p -- \
   "$source_root/packaging/arch" \
   "$source_root/packaging/release" \
-  "$source_root/packages/shell/contrib" \
+  "$source_root/packages/window/contrib" \
   "$runtime_root"
 write_manifest() {
   printf '%s\n' "$@" > "$manifest"
@@ -215,7 +215,7 @@ printf '%s\n' \
   'grep -Fxq "source_commit=$commit" "$runtime_root/MANIFEST"' \
   'grep -Fxq "source_date_epoch=$epoch" "$runtime_root/MANIFEST"' \
   > "$source_root/packaging/release/verify-runtime-source.sh"
-cat > "$source_root/packages/shell/contrib/ghost.desktop" <<'EOF'
+cat > "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Ghost
@@ -232,6 +232,8 @@ write_runtime_manifest() {
     "source_date_epoch=$next_epoch" \
     > "$runtime_root/MANIFEST"
 }
+# The window's own tests are cargo's, which the package build runs for real.
+cargo() { [[ "$1" == test ]]; }
 write_runtime_manifest "$next_commit"
 check
 write_runtime_manifest cccccccccccccccccccccccccccccccccccccccc

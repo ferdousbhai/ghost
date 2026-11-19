@@ -136,7 +136,8 @@ impl AskPage {
             if this.syncing.get() {
                 return;
             }
-            let id = row.and_then(|row| this.sessions.borrow().get(row.index() as usize).and_then(|session| session["id"].as_str().map(String::from)));
+            let id =
+                row.and_then(|row| this.sessions.borrow().get(row.index() as usize).and_then(|session| session["id"].as_str().map(String::from)));
             if let Some(id) = id {
                 this.open_chat(id);
             }
@@ -199,7 +200,9 @@ impl AskPage {
         let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_secs()).unwrap_or(0);
         *self.session.borrow_mut() = format!("app-{seconds}");
         self.clear();
-        let hello = gtk::Label::new(Some("Ask about your notes, mail, chats, files and photos.\nAnswers come from this computer and name where each fact is from."));
+        let hello = gtk::Label::new(Some(
+            "Ask about your notes, mail, chats, files and photos.\nAnswers come from this computer and name where each fact is from.",
+        ));
         hello.add_css_class("empty-state");
         hello.set_justify(gtk::Justification::Center);
         hello.set_wrap(true);
@@ -250,7 +253,13 @@ impl AskPage {
             match reply {
                 Ok(body) => {
                     for message in body["messages"].as_array().into_iter().flatten() {
-                        let text: Vec<&str> = message["content"].as_array().into_iter().flatten().filter(|part| part["type"] == "text").filter_map(|part| part["text"].as_str()).collect();
+                        let text: Vec<&str> = message["content"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|part| part["type"] == "text")
+                            .filter_map(|part| part["text"].as_str())
+                            .collect();
                         let text = text.join("\n\n");
                         if text.trim().is_empty() {
                             continue;
@@ -338,7 +347,11 @@ impl AskPage {
         answer.sources.append(&heading);
         for hit in cited {
             let key = hit["key"].as_str().unwrap_or_default().trim_start_matches('S').to_string();
-            let label = format!("[{key}] {} · {}", hit["title"].as_str().unwrap_or_default(), self.app.source_label(hit["source"].as_str().unwrap_or_default()));
+            let label = format!(
+                "[{key}] {} · {}",
+                hit["title"].as_str().unwrap_or_default(),
+                self.app.source_label(hit["source"].as_str().unwrap_or_default())
+            );
             let button = gtk::Button::with_label(&label);
             button.add_css_class("chip");
             button.add_css_class("source-card");
@@ -379,7 +392,11 @@ impl AskPage {
                 this.draw(&drawn, false);
                 this.to_end();
             }
-            if this.live.borrow().as_ref().is_some_and(|(live, _)| Rc::ptr_eq(live, &drawn)) { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
+            if this.live.borrow().as_ref().is_some_and(|(live, _)| Rc::ptr_eq(live, &drawn)) {
+                glib::ControlFlow::Continue
+            } else {
+                glib::ControlFlow::Break
+            }
         });
 
         let this = self.clone();

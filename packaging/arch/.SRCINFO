@@ -3,12 +3,14 @@ pkgbase = ghost-dev
 	pkgver = 0.0.1.r100.g0c04ce7
 	pkgrel = 1
 	url = https://github.com/ferdousbhai/ghost
-	arch = any
+	arch = x86_64
+	arch = aarch64
 	license = Apache-2.0
 	checkdepends = jq
 	checkdepends = nodejs
 	checkdepends = ripgrep
 	makedepends = bun>=1.4.0
+	makedepends = cargo
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
@@ -17,6 +19,7 @@ pkgbase = ghost-dev
 	depends = hyprland>=0.56
 	depends = qrencode
 	depends = systemd
+	depends = gtk4>=4.14
 	depends = jq
 	depends = libnotify>=0.8
 	depends = qt6-5compat>=6.8
@@ -24,6 +27,7 @@ pkgbase = ghost-dev
 	depends = wl-clipboard
 	depends = xdg-utils>=1.2
 	options = !debug
+	options = !lto
 	options = !strip
 	source = ghost::git+https://github.com/ferdousbhai/ghost.git#branch=master
 	sha256sums = SKIP
@@ -31,6 +35,7 @@ pkgbase = ghost-dev
 pkgname = ghost-runtime-dev
 	pkgdesc = Ghost daemon, API, and CLI without the HUD
 	install = ghost-runtime-dev.install
+	arch = any
 	depends = bun>=1.3.14
 	depends = glib2
 	depends = hyprland>=0.56
@@ -45,6 +50,7 @@ pkgname = ghost-dev
 	pkgdesc = An orchestration layer for all your agent harnesses
 	install = ghost-dev.install
 	depends = ghost-runtime-dev=0.0.1.r100.g0c04ce7-1
+	depends = gtk4>=4.14
 	depends = jq
 	depends = libnotify>=0.8
 	depends = qt6-5compat>=6.8

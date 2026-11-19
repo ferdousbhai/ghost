@@ -31,7 +31,8 @@ binary at `.ci/bun/bun`. The workflow prepares these before invoking it.
 ## Runtime with your own UI
 
 Install `ghost-runtime` from the Omarchy package repository for a remote desktop
-where an app supplies the UI. Install `ghost` to add the version-matched HUD:
+where an app supplies the UI. Install `ghost` to add the version-matched HUD
+and window:
 
 ```sh
 sudo pacman -Syu ghost-runtime
@@ -41,8 +42,10 @@ ghost status
 sudo pacman -S ghost
 ```
 
-The runtime package has no Ghost QML, desktop entry, icons, or Quickshell
-requirement. The commands a ghost runs (Hyprland, clipboard, and browser CLIs)
+The runtime package has no Ghost QML, window, desktop entry, icons, or
+Quickshell and GTK requirement, and is the same package on every architecture;
+`ghost` is built per architecture, because the window (`ghost-window`) is
+native code. The commands a ghost runs (Hyprland, clipboard, and browser CLIs)
 still need the supported Hyprland graphical environment. This is an install
 without the Ghost HUD, nothing more.
 The daemon remains bound to the graphical session and loopback. An app uses the
@@ -141,7 +144,7 @@ If only the runtime is installed, name only `ghost-runtime`.
 That removes package-owned files only.
 
 `smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
-desktop entry, Quickshell assets,
+the window and its desktop entry, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive. `pnpm verify` is the gate: the pre-push hook refuses a master push
 until it has passed on that exact tree, and the `Native packages` workflow

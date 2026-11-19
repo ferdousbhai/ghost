@@ -18,11 +18,16 @@ cp "$source_root/THIRD_PARTY_NOTICES.md" "$runtime/licenses/ghost/THIRD_PARTY_NO
 cp "$source_root/LICENSE" "$runtime/licenses/npm/yaml/2.9.0/LICENSE"
 printf 'fixture\n' > "$runtime/BUNDLED-LICENSES"
 
+# A stand-in for the built window: the payload check only asks its version.
+printf '#!/bin/sh\necho 0.3.0\n' > "$work/ghost-window"
+chmod 755 "$work/ghost-window"
+
 for component in runtime ui; do
   name=ghost-runtime
-  [[ "$component" == ui ]] && name=ghost
+  window=()
+  [[ "$component" == ui ]] && name=ghost window=("$work/ghost-window")
   fakeroot bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime" "$work/$component" "$name" "$component"
+    "$source_root" "$runtime" "$work/$component" "$name" "$component" "${window[@]}"
   find "$work/$component" \( -type f -o -type l \) -printf '%P\n' \
     | LC_ALL=C sort > "$work/$component.files"
 done
@@ -59,11 +64,13 @@ verify_recipe() (
   [[ " ${depends[*]} " != *quickshell* && " ${depends[*]} " != *qt6-5compat* && " ${depends[*]} " != *libnotify* ]]
   [[ " ${depends[*]} " == *' bun>='* && " ${depends[*]} " == *' hyprland>='* ]]
   [[ "$(cat "$work/assembly")" == *' runtime' ]]
+  # Only the UI package is native code.
+  [[ "${arch[*]}" == any ]]
   pkgname="ghost$suffix"
   "package_$pkgname"
   [[ " ${depends[*]} " == *" ghost-runtime$suffix=$pkgver-$pkgrel "* ]]
-  [[ " ${depends[*]} " == *quickshell* ]]
-  [[ "$(cat "$work/assembly")" == *' ui' ]]
+  [[ " ${depends[*]} " == *quickshell* && " ${depends[*]} " == *' gtk4>='* ]]
+  [[ "$(cat "$work/assembly")" == *' ui '*'packages/window/target/release/ghost-window' ]]
 )
 verify_recipe "$source_root/packaging/arch/PKGBUILD" -dev
 bash "$source_root/packaging/release/render-arch-package.sh" "$work/recipe-stable" 0.3.0 \

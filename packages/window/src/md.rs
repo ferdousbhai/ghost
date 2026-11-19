@@ -27,7 +27,8 @@ fn cite_links(escaped: &str, cited: &dyn Fn(&str) -> bool) -> String {
         };
         let inner = &after[..end];
         let keys: Vec<&str> = inner.split([',', ';']).map(str::trim).collect();
-        let all_keys = !keys.is_empty() && keys.iter().all(|k| k.len() >= 2 && matches!(&k[..1], "S" | "M") && k[1..].chars().all(|c| c.is_ascii_digit()));
+        let all_keys =
+            !keys.is_empty() && keys.iter().all(|k| k.len() >= 2 && matches!(&k[..1], "S" | "M") && k[1..].chars().all(|c| c.is_ascii_digit()));
         if all_keys {
             for k in keys {
                 let label = k.trim_start_matches('S');
@@ -166,7 +167,7 @@ pub fn render(into: &gtk::Box, md: &str, cited: &dyn Fn(&str) -> bool, on_link: 
         if valid_markup(&markup) {
             label.set_markup(&markup);
         } else {
-            label.set_text(&markup);   // half-written markup mid-stream: shown as text until it closes
+            label.set_text(&markup); // half-written markup mid-stream: shown as text until it closes
         }
         label.add_css_class(class);
         label.set_xalign(0.0);

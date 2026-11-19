@@ -7,7 +7,8 @@ pkgname=(ghost-runtime-dev ghost-dev)
 pkgver=0.0.1.r100.g0c04ce7
 pkgrel=1
 pkgdesc="An orchestration layer for all your agent harnesses"
-arch=('any')
+# The window is native code; the runtime package says `any` for itself.
+arch=('x86_64' 'aarch64')
 url="https://github.com/ferdousbhai/ghost"
 license=('Apache-2.0')
 _runtime_depends=(
@@ -17,10 +18,11 @@ _runtime_depends=(
   'qrencode'
   'systemd'
 )
-_ui_depends=('jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
+_ui_depends=('gtk4>=4.14' 'jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
 makedepends=(
   'bun>=1.4.0'
+  'cargo'
   'desktop-file-utils'
   'git'
   'pnpm>=10.12.2'
@@ -34,7 +36,7 @@ _runtime_optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
   'npm: npx-launched MCP servers'
 )
-options=('!debug' '!strip')
+options=('!debug' '!lto' '!strip')
 source=("ghost::git+${GHOST_SOURCE_REPO:-https://github.com/ferdousbhai/ghost.git}#${GHOST_SOURCE_REF:-branch=master}")
 sha256sums=('SKIP')
 
@@ -53,6 +55,8 @@ build() {
 
   bash packaging/release/prepare-pnpm-engine.sh .
   pnpm install --frozen-lockfile
+  # The window (packages/window) is cargo's; no build or home folder in its panic messages.
+  export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
   pnpm build
   pnpm --filter @ghost/daemon build:runtime
 }
@@ -75,6 +79,7 @@ package_ghost-runtime-dev() {
   optdepends=("${_runtime_optdepends[@]}")
   provides=("ghost-runtime=$pkgver-$pkgrel")
   conflicts=(ghost-runtime)
+  arch=('any')
   install=ghost-runtime-dev.install
   cd -- "$srcdir/ghost"
   bash packaging/release/install-payload.sh \
@@ -89,5 +94,6 @@ package_ghost-dev() {
   install=ghost-dev.install
   cd -- "$srcdir/ghost"
   bash packaging/release/install-payload.sh \
-    . packages/daemon/dist/runtime "$pkgdir" "$pkgname" ui
+    . packages/daemon/dist/runtime "$pkgdir" "$pkgname" ui \
+    packages/window/target/release/ghost-window
 }

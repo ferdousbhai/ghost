@@ -795,9 +795,12 @@ runtime preserves owner data.
   file). One instance: a second launch presents the first.
   `GHOST_WINDOW_OPEN` starts it on a source id or asks `ask:<prompt>`, for
   [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
-  nested Hyprland against a scratch ghostd and sample data. It is not yet in
-  the Arch packages or the gate: build it with `cargo build --release` in
-  `packages/window`.
+  nested Hyprland against a scratch ghostd and sample data. It is a workspace
+  package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
+  `test`), so the gate covers it. The `ghost` package carries it, which makes
+  that package per-architecture (`ghost-runtime` stays `any`), with the
+  launcher entry `io.github.ferdousbhai.Ghost.desktop` that opens it;
+  `--version` prints the release version.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring
   `service` (the daemon connection, the desktop presence, and the
@@ -805,7 +808,7 @@ runtime preserves owner data.
   `bar-widget` (the ghost mark) kinds. How it behaves is its
   [README](packages/shell/README.md); what others rely on:
   - **The summon payload**, sent by the host's toggle and summon, the `ghost`
-    IPC, notifications, and the desktop entry: `{}` opens the presence prompt
+    IPC, and notifications: `{}` opens the presence prompt
     (the HUD while no ghost is listed); `ghost` selects one first, if listed;
     `section` opens the HUD there; `sessionId` with `ghost` opens that
     conversation;

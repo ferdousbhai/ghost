@@ -16,7 +16,9 @@ The inputs:
 3. `SHA256SUMS`.
 
 The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
-`ghost` contains only the Omarchy UI and depends on the exact runtime version;
+`ghost` contains only the Omarchy UI (the HUD, and the window, which the
+recipe compiles from the source snapshot with cargo, fetching its locked
+crates in `prepare()`) and depends on the exact runtime version;
 `ghost-runtime` is independently installable for apps with their own UI (see
 [the install choices](../arch/README.md#runtime-with-your-own-ui)).
 

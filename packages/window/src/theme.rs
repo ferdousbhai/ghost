@@ -78,9 +78,7 @@ pub fn tokens_from_colors(name: &str, source: &str, variant: Variant) -> Option<
     let accent = get("accent")?;
     let selection = get("selection").unwrap_or_else(|| blend(&source_background, &accent, 0.25));
     // Some themes set lighter_background equal to background, which would hide hover.
-    let lighter = get("lighter_background")
-        .filter(|l| *l != source_background)
-        .unwrap_or_else(|| blend(&source_background, &text, 0.10));
+    let lighter = get("lighter_background").filter(|l| *l != source_background).unwrap_or_else(|| blend(&source_background, &text, 0.10));
     let light = match values.get("mode").and_then(|v| v.as_str()) {
         Some("light") => true,
         Some("dark") => false,
@@ -203,7 +201,8 @@ impl Theme {
         gtk::style_context_add_provider_for_display(display, &theme.tokens_css, TOKEN_PRIORITY);
         if let Some(settings) = gtk::Settings::default() {
             let weak = Rc::downgrade(&theme);
-            settings.connect_gtk_xft_dpi_notify(move |_| {   // the desktop's text size changed
+            settings.connect_gtk_xft_dpi_notify(move |_| {
+                // the desktop's text size changed
                 if let Some(t) = weak.upgrade() {
                     t.apply();
                 }
@@ -225,11 +224,7 @@ impl Theme {
 
     /// The desktop's text size, as GTK reads it from the settings portal (gtk-xft-dpi, 96 dpi = 1.0).
     pub fn text_scale() -> f64 {
-        gtk::Settings::default()
-            .map(|s| s.gtk_xft_dpi())
-            .filter(|d| *d > 0)
-            .map(|d| (f64::from(d) / 1024.0 / 96.0).clamp(0.5, 3.0))
-            .unwrap_or(1.0)
+        gtk::Settings::default().map(|s| s.gtk_xft_dpi()).filter(|d| *d > 0).map(|d| (f64::from(d) / 1024.0 / 96.0).clamp(0.5, 3.0)).unwrap_or(1.0)
     }
 
     fn apply(&self) {
@@ -290,7 +285,7 @@ impl Theme {
             if let Some(t) = weak.upgrade() {
                 t.pending.take();
                 t.reload();
-                t.watch();   // the theme directory a switch replaced is a new directory
+                t.watch(); // the theme directory a switch replaced is a new directory
             }
         });
         self.pending.replace(Some(id));

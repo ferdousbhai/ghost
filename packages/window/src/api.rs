@@ -124,9 +124,8 @@ impl Api {
                 Some(body) => request.send_json(body),
                 None => request.call(),
             };
-            let value = result.map_err(error_of).and_then(|response| {
-                response.into_json::<Value>().map_err(|error| ApiError { message: error.to_string() })
-            });
+            let value =
+                result.map_err(error_of).and_then(|response| response.into_json::<Value>().map_err(|error| ApiError { message: error.to_string() }));
             let _ = tx.send_blocking(value);
         });
         rx.recv().await.unwrap_or_else(|_| Err(ApiError { message: "The request was lost.".into() }))
@@ -161,10 +160,10 @@ impl Api {
                         if let Some(rest) = line.strip_prefix("data:") {
                             data.push_str(rest.trim_start());
                         } else if line.is_empty() && !data.is_empty() {
-                            if let Ok(event) = serde_json::from_str::<Value>(&data) {
-                                if tx.send_blocking(Frame::Event(event)).is_err() {
-                                    break;
-                                }
+                            if let Ok(event) = serde_json::from_str::<Value>(&data)
+                                && tx.send_blocking(Frame::Event(event)).is_err()
+                            {
+                                break;
                             }
                             data.clear();
                         }

@@ -57,18 +57,19 @@ if [[ "$component" == runtime ]]; then
   )
   executables=(/usr/bin/ghostd /usr/bin/ghost
     /usr/lib/ghost/package-smoke/service-smoke.sh)
-  absent=(/usr/share/ghost/plugin /usr/share/applications/ghost.desktop
+  absent=(/usr/share/ghost/plugin /usr/share/applications /usr/bin/ghost-window
     /usr/share/icons /usr/share/doc/ghost/shell-contrib)
 else
   data_files=(
     /usr/share/ghost/plugin/manifest.json
     /usr/share/ghost/plugin/Panel.qml
     /usr/share/ghost/plugin/Service.qml
-    /usr/share/applications/ghost.desktop
+    /usr/share/applications/io.github.ferdousbhai.Ghost.desktop
     /usr/share/icons/hicolor/scalable/apps/ghost.svg
     /usr/share/icons/hicolor/128x128/apps/ghost.png
   )
-  absent=(/usr/bin /usr/lib/ghost /usr/lib/systemd /usr/share/doc/ghost/README.md)
+  executables=(/usr/bin/ghost-window)
+  absent=(/usr/bin/ghost /usr/bin/ghostd /usr/lib/ghost /usr/lib/systemd /usr/share/doc/ghost/README.md)
 fi
 for path in "${absent[@]}"; do
   if [[ -e "$root$path" || -L "$root$path" ]]; then
@@ -93,7 +94,10 @@ if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q
 fi
 
 if [[ "$component" == ui ]]; then
-  desktop-file-validate "$root/usr/share/applications/ghost.desktop"
+  desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
+  [[ "$(find "$root/usr/bin" -mindepth 1 | wc -l)" == 1 ]]
+  # Runs without a display: the version is the release's, and printing it proves the binary loads its libraries.
+  "$root/usr/bin/ghost-window" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
   bun -e 'await Bun.file(process.argv[1]).json()' "$root/usr/share/ghost/plugin/manifest.json"
 else
   GHOST_BUN_EXECUTABLE="$(command -v bun)" \

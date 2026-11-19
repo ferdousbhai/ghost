@@ -33,6 +33,8 @@ importers:
 
   packages/shell: {}
 
+  packages/window: {}
+
 packages:
 
   '@biomejs/biome@2.5.10':

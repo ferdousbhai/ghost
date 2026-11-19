@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Ghost
+Comment=Your own data and your ghost, on your machine
+Exec=ghost-window
+Terminal=false
+Icon=ghost
+Categories=Utility;
+Keywords=AI;Assistant;Chat;Notes;Mail;
+StartupNotify=true
+StartupWMClass=io.github.ferdousbhai.Ghost

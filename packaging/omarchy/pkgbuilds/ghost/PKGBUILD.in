@@ -5,7 +5,8 @@ pkgname=(ghost-runtime ghost)
 pkgver=@@VERSION@@
 pkgrel=1
 pkgdesc="An orchestration layer for all your agent harnesses"
-arch=('any')
+# The window is native code; the runtime package says `any` for itself.
+arch=('x86_64' 'aarch64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
 license=('Apache-2.0')
 _runtime_depends=(
@@ -15,10 +16,11 @@ _runtime_depends=(
   'qrencode'
   'systemd'
 )
-_ui_depends=('jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
+_ui_depends=('gtk4>=4.14' 'jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
 makedepends=(
   'bun>=1.4.0'
+  'cargo'
   'desktop-file-utils'
 )
 checkdepends=(
@@ -30,7 +32,7 @@ _runtime_optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
   'npm: npx-launched MCP servers'
 )
-options=('!debug' '!strip')
+options=('!debug' '!lto' '!strip')
 
 # Omarchy's sync-upstream follows the GitHub release named in
 # .omarchy/package.json and rewrites pkgver and both checksum arrays.
@@ -92,12 +94,17 @@ prepare() {
   bash "$srcdir/ghost-${pkgver}/packaging/release/verify-runtime-source.sh" \
     "$runtime_root" "$source_root" "$pkgver" any "$source_commit" \
       "$source_date_epoch" || return 1
+  cargo fetch --locked \
+    --manifest-path "$source_root/packages/window/Cargo.toml" || return 1
 }
 
 build() {
   # The Bun bundles were built from the frozen lock and verified in
-  # prepare(); there is no network build step.
-  :
+  # prepare(); the one thing compiled here is the window, from the crates
+  # prepare() fetched. No build or home folder in its panic messages.
+  RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo" \
+    cargo build --frozen --release \
+      --manifest-path "$srcdir/ghost-${pkgver}/packages/window/Cargo.toml"
 }
 
 check() {
@@ -112,7 +119,9 @@ check() {
     "$runtime_root" "$source_root" "$pkgver" any "$source_commit" \
       "$source_date_epoch" || return 1
   desktop-file-validate \
-    "$source_root/packages/shell/contrib/ghost.desktop" || return 1
+    "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" || return 1
+  cargo test --frozen --release \
+    --manifest-path "$source_root/packages/window/Cargo.toml" || return 1
 }
 
 package_ghost-runtime() {
@@ -120,6 +129,7 @@ package_ghost-runtime() {
   depends=("${_runtime_depends[@]}")
   optdepends=("${_runtime_optdepends[@]}")
   conflicts=(ghost-runtime-dev)
+  arch=('any')
   install=ghost-runtime.install
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-any"
@@ -135,5 +145,6 @@ package_ghost() {
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-any"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_root" "$pkgdir" "$pkgname" ui
+    "$source_root" "$runtime_root" "$pkgdir" "$pkgname" ui \
+    "$source_root/packages/window/target/release/ghost-window"
 }

@@ -10,7 +10,12 @@ use std::{
 use gtk::{gdk, glib, prelude::*};
 use serde_json::Value;
 
-use crate::{api::Api, ask::AskPage, source::{ReaderPage, SourcePage}, theme::Theme};
+use crate::{
+    api::Api,
+    ask::AskPage,
+    source::{ReaderPage, SourcePage},
+    theme::Theme,
+};
 
 /// Where the window can be.
 #[derive(Clone, Debug, PartialEq)]
@@ -18,7 +23,13 @@ pub enum Route {
     Ask,
     Source(String),
     /// One item of a source, with a search hit's page or line.
-    Item { source: String, id: String, title: String, page: Option<u64>, line: Option<u64> },
+    Item {
+        source: String,
+        id: String,
+        title: String,
+        page: Option<u64>,
+        line: Option<u64>,
+    },
 }
 
 /// A source as `GET /api/sources` lists it.
@@ -195,10 +206,10 @@ impl App {
                         this.sources.borrow_mut().push(info);
                     }
                     // For scripted checks: `GHOST_WINDOW_OPEN=<source id>` starts on that source (`ask:<prompt>` is the Ask page's).
-                    if let Ok(open) = std::env::var("GHOST_WINDOW_OPEN") {
-                        if this.sources.borrow().iter().any(|info| info.id == open) {
-                            this.navigate(Route::Source(open));
-                        }
+                    if let Ok(open) = std::env::var("GHOST_WINDOW_OPEN")
+                        && this.sources.borrow().iter().any(|info| info.id == open)
+                    {
+                        this.navigate(Route::Source(open));
                     }
                 }
                 Err(error) => this.ask().note(&error.message),
