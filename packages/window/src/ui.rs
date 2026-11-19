@@ -64,7 +64,6 @@ fn icon_of(source: &str) -> &'static str {
 pub struct App {
     pub api: Api,
     pub window: gtk::ApplicationWindow,
-    shell: Rc<omui::Shell>,
     stack: gtk::Stack,
     sidebar: gtk::ListBox,
     /// The sidebar's pane: the list and the footer under it.
@@ -78,6 +77,7 @@ pub struct App {
     sources: RefCell<Vec<SourceInfo>>,
     pages: RefCell<HashMap<String, Rc<SourcePage>>>,
     reader: RefCell<Option<Rc<ReaderPage>>>,
+    ask: RefCell<Option<Rc<AskPage>>>,
     connect: RefCell<Option<Rc<ConnectPage>>>,
 }
 
@@ -122,12 +122,11 @@ impl App {
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         body.append(&pane);
         body.append(&stack);
-        let shell = omui::Shell::new(&window, &body);
+        window.set_child(Some(&body));
 
         let app = Rc::new(Self {
             api,
             window,
-            shell,
             stack,
             sidebar,
             pane,
@@ -140,11 +139,13 @@ impl App {
             sources: RefCell::new(Vec::new()),
             pages: RefCell::new(HashMap::new()),
             reader: RefCell::new(None),
+            ask: RefCell::new(None),
             connect: RefCell::new(None),
         });
 
         let ask = AskPage::build(&app);
         app.stack.add_named(&ask.root, Some("ask"));
+        *app.ask.borrow_mut() = Some(ask);
         let reader = ReaderPage::build(&app);
         app.stack.add_named(&reader.root, Some("item"));
         *app.reader.borrow_mut() = Some(reader);
@@ -226,7 +227,7 @@ impl App {
         glib::spawn_future_local(async move {
             let body = match this.api.get("/api/sources".into()).await {
                 Ok(body) => body,
-                Err(error) => return this.shell.toast(&error.message),
+                Err(error) => return this.ask().note(&error.message),
             };
             let sources: Vec<SourceInfo> = body["sources"]
                 .as_array()
@@ -264,6 +265,10 @@ impl App {
                 });
             }
         });
+    }
+
+    fn ask(&self) -> Rc<AskPage> {
+        self.ask.borrow().clone().expect("the ask page")
     }
 
     fn connect(&self) -> Rc<ConnectPage> {

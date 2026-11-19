@@ -789,9 +789,7 @@ runtime preserves owner data.
   app whose look (Omarchy's current theme, followed live), icons, and shared
   widgets are [omui](https://github.com/ferdousbhai/omui)'s;
   [`style.css`](packages/window/src/style.css) holds only Ghost's own rules,
-  on omui's `@om_*` colours. Until omui is published the dependency is a
-  path to a local checkout of its 0.1, so only a machine with that checkout
-  builds the window; it becomes a git revision at publication. It is a client of the
+  on omui's `@om_*` colours. It is a client of the
   API like the HUD and keeps no data: a sidebar of Ask and each available
   [source](#sources), a page per source (its list, or a grid of pictures
   when its items have them, a search of it, and a reader for one item),

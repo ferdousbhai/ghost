@@ -179,7 +179,7 @@ impl AskPage {
         page
     }
 
-    fn note(&self, text: &str) {
+    pub fn note(&self, text: &str) {
         self.status.set_text(text);
     }
 
