@@ -214,7 +214,7 @@ async function matchNames(pattern: string, roots: string[], names: string[], con
   if (!which("fd", context.env)) return [];
   const skip = names.flatMap((name) => ["--exclude", name]);
   if (!which("fzf", context.env)) {
-    return (await runCommand("fd", ["-i", "-F", "--max-results", "5", ...skip, pattern, ...roots], context)).out.split("\n").filter(Boolean);
+    return (await runCommand("fd", ["-i", "-F", "--max-results", "5", ...skip, "--", pattern, ...roots], context)).out.split("\n").filter(Boolean);
   }
   const files = await runCommand("fd", ["-t", "f", ...skip, ".", ...roots], context);
   const ranked = await runCommand("fzf", ["--filter", pattern, "--delimiter", "/", "--nth", "-1"], context, files.out);
@@ -256,7 +256,7 @@ function fileTitle(path: string, source: SourceId): string {
 /** Recall's hits by meaning and keywords, then ripgrep's and fd's that Recall did not return; a ref per hit for `read`. */
 export async function searchFiles(query: string, context: SourceContext, limit: number): Promise<Array<{ item: SourceItem; ref: SourceRef }>> {
   const [recall, keywords] = await Promise.all([
-    which("recall", context.env) ? runCommand("recall", ["search", query, "--limit", String(limit)], context) : null,
+    which("recall", context.env) ? runCommand("recall", ["search", "--limit", String(limit), "--", query], context) : null,
     searchKeywords(query, context),
   ]);
   const found = !recall || recall.error ? [] : records((json(recall.out) as { hits?: unknown } | null)?.hits);
@@ -504,7 +504,7 @@ const mail: Source = {
     return { items, next: rows.length > limit ? String(items.at(-1)?.at ?? "") || null : null };
   },
   async read(context, ref) {
-    const body = (await cliData("cloudmail", ["thread", "read", "--quiet", ref.id], context)) as { thread?: Record<string, unknown>; messages?: unknown } | null;
+    const body = (await cliData("cloudmail", ["thread", "read", "--quiet", "--", ref.id], context)) as { thread?: Record<string, unknown>; messages?: unknown } | null;
     if (!body?.thread) throw new GhostError("not_found", "No such mail thread.", 404);
     const text = records(body.messages).map((message) => {
       const from = message.from as { name?: string; email?: string } | undefined;
@@ -519,7 +519,7 @@ const mail: Source = {
     const attempts = [words.join(" "), ...(words.length > 2 ? [[...words].sort((a, b) => b.length - a.length).slice(0, 2).join(" ")] : [])];
     for (const attempt of attempts) {
       if (!attempt) continue;
-      const threads = records(await cliData("cloudmail", ["search", "--quiet", "-n", String(limit), ...attempt.split(" ")], context));
+      const threads = records(await cliData("cloudmail", ["search", "--quiet", "-n", String(limit), "--", ...attempt.split(" ")], context));
       if (threads.length > 0) return threads.map(mailItem);
     }
     return [];
@@ -542,13 +542,13 @@ const contacts: Source = {
     return offsetPage(records(await cliData("icloud-contacts", ["list", "--cached", "--quiet"], context)).map(contactItem), limit, cursor);
   },
   async read(context, ref) {
-    const contact = (await cliData("icloud-contacts", ["show", "--cached", "--quiet", ref.id], context)) as Record<string, unknown> | null;
+    const contact = (await cliData("icloud-contacts", ["show", "--cached", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
     if (!contact || typeof contact !== "object") throw new GhostError("not_found", "No such contact.", 404);
     return { title: oneLine(contact.name, 200), text: JSON.stringify(contact, null, 2), part: "whole" };
   },
   async search(context, query, limit) {
     if (query.split(/\s+/u).length > 3) return [];
-    return records(await cliData("icloud-contacts", ["list", "--cached", "--quiet", query], context)).slice(0, limit).map(contactItem);
+    return records(await cliData("icloud-contacts", ["list", "--cached", "--quiet", "--", query], context)).slice(0, limit).map(contactItem);
   },
 };
 
@@ -594,7 +594,7 @@ const photos: Source = {
     })), limit, cursor);
   },
   async read(context, ref) {
-    const info = (await cliData("icloud-photos", ["info", ref.id, "--quiet"], context)) as Record<string, unknown> | null;
+    const info = (await cliData("icloud-photos", ["info", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
     if (!info || typeof info !== "object") throw new GhostError("not_found", "No such photo.", 404);
     return { title: oneLine(info.filename, 200), text: JSON.stringify(info, null, 2), part: "whole" };
   },

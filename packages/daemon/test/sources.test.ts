@@ -166,6 +166,24 @@ describe("sources", () => {
     await expect(listSource("nope", context, 10, null)).rejects.toBeInstanceOf(GhostError);
   });
 
+  it("hands a product a query or an id as a value, never as an option", async () => {
+    // Each stand-in answers only when what follows `--` is the value alone.
+    const context = owner({
+      cloudmail: [
+        `case "$*" in`,
+        `  "search --quiet -n 8 -- -n 9999") printf '[{"id":"t1","subject":"found","snippet":"x","from":{"name":"A"},"last_at":1}]' ;;`,
+        `  "thread read --quiet -- --all") printf '{"thread":{"subject":"read"},"messages":[]}' ;;`,
+        `  *) echo "taken as an option: $*" >&2; exit 2 ;;`,
+        `esac`,
+      ].join("\n"),
+      "icloud-photos": `[ "$*" = "info --quiet -- --data-dir=/x" ] && printf '{"filename":"a.jpg"}' || exit 2`,
+    });
+    const found = await searchSources("-n 9999", context, { sources: ["mail"] });
+    expect(found).toEqual({ items: [expect.objectContaining({ id: "t1", title: "found" })], failed: [] });
+    expect((await readSource({ source: "mail", id: "--all" }, context)).title).toBe("read");
+    expect((await readSource({ source: "photos", id: "--data-dir=/x" }, context)).title).toBe("a.jpg");
+  });
+
   it("names a failing source and still returns the others", async () => {
     const context = owner({
       cloudmail: "echo 'worker unreachable' >&2; exit 5",
