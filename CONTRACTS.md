@@ -805,10 +805,14 @@ runtime preserves owner data.
   [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
   nested Hyprland against a scratch ghostd and sample data. It is a workspace
   package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
-  `test`), so the gate covers it. The `ghost` package carries it, which makes
-  that package per-architecture (`ghost-runtime` stays `any`), with the
-  launcher entry `io.github.ferdousbhai.Ghost.desktop` that opens it;
-  `--version` prints the release version.
+  `test`), and `test` also walks its main flows with omui's scripted QA
+  ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
+  feature, against the same scratch ghostd and sample data, on a private
+  broadway display), so the gate covers it; the package build's `check()`
+  skips the QA, and no release build has the feature. The `ghost` package
+  carries it, which makes that package per-architecture (`ghost-runtime`
+  stays `any`), with the launcher entry `io.github.ferdousbhai.Ghost.desktop`
+  that opens it; `--version` prints the release version.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring
   `service` (the daemon connection, the desktop presence, and the

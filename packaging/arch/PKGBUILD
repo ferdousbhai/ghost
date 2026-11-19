@@ -67,7 +67,9 @@ check() {
   # Builds the sanitized source archive and runs the packaging checks
   # (test-check-dependencies.sh) inside it.
   bash packaging/release/test-release-source.sh
-  pnpm test
+  # The window's scripted QA needs a window built with its `qa` feature, which a package build does not make;
+  # `pnpm verify` runs it.
+  GHOST_WINDOW_QA=0 pnpm test
   bun test scripts
   pnpm typecheck
   pnpm lint

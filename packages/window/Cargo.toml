@@ -26,6 +26,10 @@ urlencoding = "2.1"
 # Plain HTTP to ghostd on 127.0.0.1: no TLS stack.
 ureq = { version = "2.12", default-features = false, features = ["json"] }
 
+[features]
+# Scripted QA (dev/qa.sh): omui's `OMUI_QA=1` mode. Off in a release build, which carries none of it.
+qa = ["omui/qa"]
+
 [profile.release]
 lto = "thin"
 codegen-units = 4

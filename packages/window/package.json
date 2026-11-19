@@ -6,6 +6,6 @@
   "scripts": {
     "build": "bash dev/cargo.sh build --release --locked",
     "lint": "bash dev/cargo.sh fmt --check && bash dev/cargo.sh clippy --locked -- -D warnings",
-    "test": "bash dev/cargo.sh test --release --locked"
+    "test": "bash dev/cargo.sh test --release --locked && bash dev/qa.sh"
   }
 }
