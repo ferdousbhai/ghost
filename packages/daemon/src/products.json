@@ -36,16 +36,27 @@
       "icloud": "cloud-calendar account add icloud"
     },
     {
+      "id": "cloud-contacts",
+      "need": "iCloud and Google contacts together, optionally kept the same",
+      "name": "Cloud Contacts",
+      "source": "https://github.com/ferdousbhai/cloud-contacts",
+      "cli": "cloud-contacts",
+      "skill": "cloud-contacts",
+      "install": "curl -fsSL https://ferdousbhai.com/cloud-contacts/install.sh | sudo bash",
+      "replaces": "Contacts",
+      "icloud": "cloud-contacts account add icloud"
+    },
+    {
       "id": "icloud",
-      "need": "Apple Notes, Reminders, Contacts, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in",
+      "need": "Apple Notes, Reminders, Photos and Find My as native apps and iCloud Drive as a synced folder, on one iCloud sign in",
       "name": "iCloud for Omarchy",
       "source": "https://github.com/ferdousbhai/icloud-for-omarchy",
       "cli": "icloud-session",
       "skill": "icloud",
       "install": "curl -fsSL https://ferdousbhai.com/icloud/install.sh | sudo bash",
       "site": "/icloud",
-      "replaces": "Notes, Reminders, Contacts, Photos, Find My and iCloud Drive",
-      "note": "it also installs Cloudmail and Cloud Calendar, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
+      "replaces": "Notes, Reminders, Photos, Find My and iCloud Drive",
+      "note": "it also installs Cloudmail, Cloud Calendar and Cloud Contacts, with one sign in for all; [one app alone](https://ferdousbhai.com/icloud#notes)",
       "script": "https://github.com/ferdousbhai/icloud-for-omarchy/releases/latest/download/install.sh"
     },
     {
