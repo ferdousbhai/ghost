@@ -48,7 +48,7 @@ if [[ "$ref" == --worktree ]]; then
         done \
       | tar --null --files-from=- --sort=name --format=gnu \
           --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
-          --transform="s|^|ghost-${version}/|" -cf "$temporary_tar"
+          --transform="s|^|ghost-${version}/|S" -cf "$temporary_tar"
   )
 else
   git -C "$source_root" archive --format=tar --prefix="ghost-${version}/" \

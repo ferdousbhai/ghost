@@ -32,11 +32,13 @@ pnpm lint
 pnpm test
 # Owner scripts outside the workspace packages.
 bun test scripts
-# What the gate checks beyond the workspace: the packaging scripts
-# (they diff packaging/arch/.SRCINFO against a fresh makepkg render and chain
-# the other packaging suites, including the installer this repository
-# publishes).
-bash packaging/arch/test-check-dependencies.sh
+# What the gate checks beyond the workspace, run as the PKGBUILD's check()
+# runs it: inside the sanitized source archive, so a file the archive loses
+# or a link it breaks fails here, not only in the package build. The
+# packaging scripts diff packaging/arch/.SRCINFO against a fresh makepkg
+# render and chain the other packaging suites, including the installer this
+# repository publishes.
+bash packaging/release/test-release-source.sh
 
 # A dirty tree was not what the suite proved, and neither is a HEAD a peer
 # moved mid-run; only the clean tree the run started on earns the marker.
