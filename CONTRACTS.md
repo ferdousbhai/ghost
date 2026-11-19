@@ -786,8 +786,12 @@ runtime preserves owner data.
   HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/window`](packages/window/src/main.rs) is Ghost's window
   (`ghost-window`, app id `io.github.ferdousbhai.Ghost`): a Rust and GTK 4
-  app in the Omarchy theme, the stack and look of lastbook-for-omarchy, which
-  follows [Strata](https://github.com/lgse/strata). It is a client of the
+  app whose look (Omarchy's current theme, followed live), icons, and shared
+  widgets are [omui](https://github.com/ferdousbhai/omui)'s;
+  [`style.css`](packages/window/src/style.css) holds only Ghost's own rules,
+  on omui's `@om_*` colours. Until omui is published the dependency is a
+  path to a local checkout of its 0.1, so only a machine with that checkout
+  builds the window; it becomes a git revision at publication. It is a client of the
   API like the HUD and keeps no data: a sidebar of Ask and each available
   [source](#sources), a page per source (its list, or a grid of pictures
   when its items have them, a search of it, and a reader for one item),

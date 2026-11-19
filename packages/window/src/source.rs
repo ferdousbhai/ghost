@@ -63,11 +63,7 @@ pub fn item_row(item: &Value) -> gtk::ListBoxRow {
     }
     content.append(&head);
     if let Some(snippet) = item["snippet"].as_str().filter(|text| !text.is_empty()) {
-        let label = gtk::Label::new(Some(snippet));
-        label.add_css_class("snippet");
-        label.add_css_class("dim");
-        label.set_xalign(0.0);
-        label.set_wrap(true);
+        let label = omui::label(snippet, "dim-label");
         label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         label.set_lines(2);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -110,7 +106,6 @@ impl SourcePage {
         root.append(&entry);
 
         let list = gtk::ListBox::new();
-        list.add_css_class("results");
         list.set_selection_mode(gtk::SelectionMode::None);
         list.set_visible(!info.pictures);
         let grid = gtk::FlowBox::new();
@@ -121,10 +116,7 @@ impl SourcePage {
         grid.set_column_spacing(4);
         grid.set_valign(gtk::Align::Start);
         grid.set_visible(info.pictures);
-        let status = gtk::Label::new(None);
-        status.add_css_class("empty-state");
-        status.set_wrap(true);
-        status.set_margin_top(18);
+        let status = gtk::Label::builder().css_classes(["status-line"]).wrap(true).margin_top(18).build();
         let more = gtk::Button::with_label("Load more");
         more.add_css_class("chip");
         more.set_halign(gtk::Align::Center);
@@ -178,12 +170,8 @@ impl SourcePage {
     }
 
     fn reset(&self) -> u64 {
-        while let Some(child) = self.list.first_child() {
-            self.list.remove(&child);
-        }
-        while let Some(child) = self.grid.first_child() {
-            self.grid.remove(&child);
-        }
+        omui::clear(&self.list);
+        omui::clear(&self.grid);
         self.waiting.borrow_mut().clear();
         self.items.borrow_mut().clear();
         *self.cursor.borrow_mut() = None;
@@ -306,11 +294,8 @@ impl ReaderPage {
         root.set_margin_start(18);
         root.set_margin_end(18);
         let head = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        let heading = gtk::Label::new(None);
-        heading.add_css_class("page-title");
-        heading.set_xalign(0.0);
+        let heading = omui::label("", "page-title");
         heading.set_hexpand(true);
-        heading.set_wrap(true);
         heading.set_selectable(true);
         let open = gtk::Button::with_label("Open");
         open.add_css_class("chip");
@@ -319,10 +304,7 @@ impl ReaderPage {
         open.set_visible(false);
         head.append(&heading);
         head.append(&open);
-        let meta = gtk::Label::new(None);
-        meta.add_css_class("meta");
-        meta.set_xalign(0.0);
-        meta.set_wrap(true);
+        let meta = omui::label("", "meta");
         meta.set_selectable(true);
         let picture = gtk::Picture::new();
         picture.set_content_fit(gtk::ContentFit::Contain);
@@ -330,7 +312,6 @@ impl ReaderPage {
         picture.set_halign(gtk::Align::Start);
         picture.set_visible(false);
         let text = gtk::TextView::new();
-        text.add_css_class("composer");
         text.set_editable(false);
         text.set_cursor_visible(false);
         text.set_wrap_mode(gtk::WrapMode::WordChar);

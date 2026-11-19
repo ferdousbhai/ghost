@@ -1,5 +1,5 @@
-//! The window shell, as lastbook-for-omarchy's: a header bar, a sidebar with Ask and one row per source that is
-//! set up on this computer, and a stack of pages with browser-style history.
+//! The window shell: omui's header bar and sidebar, with Ask and one row per source that is set up on this
+//! computer, and a stack of pages with browser-style history.
 
 use std::{
     cell::{Cell, RefCell},
@@ -8,6 +8,7 @@ use std::{
 };
 
 use gtk::{gdk, glib, prelude::*};
+use omui::icons::name as icon;
 use serde_json::Value;
 
 use crate::{
@@ -15,7 +16,6 @@ use crate::{
     ask::AskPage,
     connect::ConnectPage,
     source::{ReaderPage, SourcePage},
-    theme::Theme,
 };
 
 /// Where the window can be.
@@ -48,35 +48,28 @@ pub struct SourceInfo {
 
 fn icon_of(source: &str) -> &'static str {
     match source {
-        "notes" => "accessories-text-editor-symbolic",
-        "reminders" => "checkbox-checked-symbolic",
-        "whatsapp" => "user-available-symbolic",
-        "mail" => "mail-unread-symbolic",
-        "contacts" => "avatar-default-symbolic",
-        "calendar" => "x-office-calendar-symbolic",
-        "photos" => "image-x-generic-symbolic",
-        "drive" => "folder-remote-symbolic",
-        "lastbook" => "accessories-dictionary-symbolic",
-        _ => "folder-documents-symbolic",
+        "notes" => icon::DOCUMENT,
+        "reminders" => icon::CHECKED,
+        "whatsapp" => icon::CHAT,
+        "mail" => icon::MAIL,
+        "contacts" => icon::USER,
+        "calendar" => icon::CALENDAR,
+        "photos" => icon::IMAGE,
+        "drive" => icon::CLOUD,
+        "lastbook" => icon::BOOK,
+        _ => icon::FOLDER,
     }
-}
-
-pub fn header_button(icon: &str, tooltip: &str) -> gtk::Button {
-    let button = gtk::Button::from_icon_name(icon);
-    button.add_css_class("header-action");
-    button.set_tooltip_text(Some(tooltip));
-    button
 }
 
 pub struct App {
     pub api: Api,
     pub window: gtk::ApplicationWindow,
-    #[allow(dead_code)]
-    theme: Rc<Theme>,
+    shell: Rc<omui::Shell>,
     stack: gtk::Stack,
     sidebar: gtk::ListBox,
-    sidebar_shell: gtk::Box,
-    title: gtk::Label,
+    /// The sidebar's pane: the list and the footer under it.
+    pane: gtk::Box,
+    title: omui::Title,
     back: gtk::Button,
     forward: gtk::Button,
     history: RefCell<Vec<Route>>,
@@ -84,45 +77,41 @@ pub struct App {
     syncing: Cell<bool>,
     sources: RefCell<Vec<SourceInfo>>,
     pages: RefCell<HashMap<String, Rc<SourcePage>>>,
-    ask: RefCell<Option<Rc<AskPage>>>,
     reader: RefCell<Option<Rc<ReaderPage>>>,
     connect: RefCell<Option<Rc<ConnectPage>>>,
 }
 
 impl App {
-    pub fn build(app: &gtk::Application, api: Api, theme: Rc<Theme>) -> Rc<Self> {
+    /// Builds the window and presents it. It lives as long as the application: its handlers hold it.
+    pub fn build(app: &gtk::Application, api: Api) {
         let window = gtk::ApplicationWindow::builder().application(app).title("Ghost").default_width(1280).default_height(820).build();
 
-        let header = gtk::HeaderBar::new();
-        header.set_show_title_buttons(false); // Hyprland tiles the window and Super+W closes it
-        let toggle = header_button("sidebar-show-symbolic", "Show or hide the sidebar (Ctrl+B)");
+        let toggle = omui::icon_button(icon::SIDEBAR, "Show or hide the sidebar (Ctrl+B)");
         toggle.add_css_class("sidebar-toggle");
-        let back = header_button("go-previous-symbolic", "Back (Alt+Left)");
-        let forward = header_button("go-next-symbolic", "Forward (Alt+Right)");
+        let back = omui::icon_button(icon::BACK, "Back (Alt+Left)");
+        let forward = omui::icon_button(icon::FORWARD, "Forward (Alt+Right)");
+        let title = omui::Title::new("Ask", "");
+        let header = omui::header(Some(title.widget.upcast_ref()));
         header.pack_start(&toggle);
         header.pack_start(&back);
         header.pack_start(&forward);
-        let title = gtk::Label::new(Some("Ask"));
-        title.add_css_class("header-title");
-        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        header.set_title_widget(Some(&title));
         window.set_titlebar(Some(&header));
 
         let sidebar = gtk::ListBox::new();
-        sidebar.add_css_class("sidebar");
         sidebar.set_selection_mode(gtk::SelectionMode::Single);
-        let footer_content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        footer_content.append(&gtk::Image::from_icon_name("list-add-symbolic"));
+        // The gap between the icon and the text is the stylesheet's, as in any button that holds both.
+        let footer_content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        footer_content.append(&omui::icon(icon::ADD));
         footer_content.append(&gtk::Label::new(Some("Connect your data")));
         let footer = gtk::Button::new();
         footer.set_child(Some(&footer_content));
         footer.add_css_class("sidebar-footer");
-        let sidebar_shell = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        sidebar_shell.add_css_class("sidebar-shell");
-        sidebar_shell.set_size_request(200, -1);
+        let pane = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        pane.add_css_class("sidebar");
+        pane.set_size_request(200, -1);
         let scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&sidebar).build();
-        sidebar_shell.append(&scroll);
-        sidebar_shell.append(&footer);
+        pane.append(&scroll);
+        pane.append(&footer);
 
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
@@ -131,17 +120,17 @@ impl App {
         stack.set_hhomogeneous(false);
         stack.set_vhomogeneous(false);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        body.append(&sidebar_shell);
+        body.append(&pane);
         body.append(&stack);
-        window.set_child(Some(&body));
+        let shell = omui::Shell::new(&window, &body);
 
         let app = Rc::new(Self {
             api,
             window,
-            theme,
+            shell,
             stack,
             sidebar,
-            sidebar_shell,
+            pane,
             title,
             back,
             forward,
@@ -150,21 +139,19 @@ impl App {
             syncing: Cell::new(false),
             sources: RefCell::new(Vec::new()),
             pages: RefCell::new(HashMap::new()),
-            ask: RefCell::new(None),
             reader: RefCell::new(None),
             connect: RefCell::new(None),
         });
 
         let ask = AskPage::build(&app);
         app.stack.add_named(&ask.root, Some("ask"));
-        *app.ask.borrow_mut() = Some(ask);
         let reader = ReaderPage::build(&app);
         app.stack.add_named(&reader.root, Some("item"));
         *app.reader.borrow_mut() = Some(reader);
         let connect = ConnectPage::build(&app);
         app.stack.add_named(&connect.root, Some("connect"));
         *app.connect.borrow_mut() = Some(connect);
-        app.add_row("ask", "Ask", "user-idle-symbolic");
+        app.add_row("ask", "Ask", icon::CHAT);
         let this = app.clone();
         footer.connect_clicked(move |_| this.navigate(Route::Connect));
         // Coming back from a product's terminal: what it connected shows without asking.
@@ -187,7 +174,7 @@ impl App {
             }
         });
         let this = app.clone();
-        toggle.connect_clicked(move |_| this.sidebar_shell.set_visible(!this.sidebar_shell.is_visible()));
+        toggle.connect_clicked(move |_| this.pane.set_visible(!this.pane.is_visible()));
         let this = app.clone();
         app.back.connect_clicked(move |_| this.step(-1));
         let this = app.clone();
@@ -202,7 +189,7 @@ impl App {
             match key {
                 gdk::Key::Left if alt => this.step(-1),
                 gdk::Key::Right if alt => this.step(1),
-                gdk::Key::b if ctrl => this.sidebar_shell.set_visible(!this.sidebar_shell.is_visible()),
+                gdk::Key::b if ctrl => this.pane.set_visible(!this.pane.is_visible()),
                 _ => return glib::Propagation::Proceed,
             }
             glib::Propagation::Stop
@@ -226,18 +213,10 @@ impl App {
             });
         }
         app.load_sources(open);
-        app
     }
 
     fn add_row(&self, id: &str, label: &str, icon: &str) {
-        let row = gtk::ListBoxRow::new();
-        row.add_css_class("sidebar-row");
-        row.set_widget_name(id);
-        let content = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        content.append(&gtk::Image::from_icon_name(icon));
-        content.append(&gtk::Label::new(Some(label)));
-        row.set_child(Some(&content));
-        self.sidebar.append(&row);
+        self.sidebar.append(&omui::sidebar_row(id, Some(icon), label, None));
     }
 
     /// The sources that are set up here become the sidebar's rows, after Ask. `open` is `GHOST_WINDOW_OPEN`, for
@@ -247,7 +226,7 @@ impl App {
         glib::spawn_future_local(async move {
             let body = match this.api.get("/api/sources".into()).await {
                 Ok(body) => body,
-                Err(error) => return this.ask().note(&error.message),
+                Err(error) => return this.shell.toast(&error.message),
             };
             let sources: Vec<SourceInfo> = body["sources"]
                 .as_array()
@@ -289,10 +268,6 @@ impl App {
 
     fn connect(&self) -> Rc<ConnectPage> {
         self.connect.borrow().clone().expect("the connect page")
-    }
-
-    fn ask(&self) -> Rc<AskPage> {
-        self.ask.borrow().clone().expect("the ask page")
     }
 
     pub fn source_label(&self, id: &str) -> String {
@@ -358,7 +333,7 @@ impl App {
             }
         };
         self.stack.set_visible_child_name(&page);
-        self.title.set_text(&title);
+        self.title.set_title(&title);
         self.window.set_title(Some(&format!("{title} — Ghost")));
         self.back.set_sensitive(self.pos.get() > 0);
         self.forward.set_sensitive(self.pos.get() + 1 < self.history.borrow().len());

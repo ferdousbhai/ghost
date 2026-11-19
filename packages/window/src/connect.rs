@@ -39,19 +39,13 @@ impl ConnectPage {
         root.set_margin_bottom(14);
         root.set_margin_start(18);
         root.set_margin_end(18);
-        let heading = gtk::Label::new(Some("Connect your data"));
-        heading.add_css_class("page-title");
-        heading.set_xalign(0.0);
-        let about = gtk::Label::new(Some(
+        let heading = omui::label("Connect your data", "page-title");
+        let about = omui::label(
             "Ghost answers from what is connected here. Each step opens a terminal, where the app itself asks for what it needs. \
              Notes and Reminders work without any of them.",
-        ));
-        about.add_css_class("dim");
-        about.set_xalign(0.0);
-        about.set_wrap(true);
-        let status = gtk::Label::new(Some("Loading…"));
-        status.add_css_class("empty-state");
-        status.set_wrap(true);
+            "dim-label",
+        );
+        let status = gtk::Label::builder().label("Loading…").css_classes(["status-line"]).wrap(true).build();
         let list = gtk::Box::new(gtk::Orientation::Vertical, 8);
         list.set_margin_top(10);
         let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -76,9 +70,7 @@ impl ConnectPage {
             }
             match reply {
                 Ok(body) => {
-                    while let Some(child) = this.list.first_child() {
-                        this.list.remove(&child);
-                    }
+                    omui::clear(&this.list);
                     for connection in body["connections"].as_array().into_iter().flatten() {
                         this.list.append(&this.card(connection));
                     }
@@ -94,25 +86,19 @@ impl ConnectPage {
         let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
         card.add_css_class("result");
         let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let title = gtk::Label::new(connection["label"].as_str());
-        title.add_css_class("section-title");
-        title.set_xalign(0.0);
-        head.append(&title);
-        let badge = gtk::Label::new(Some(match state {
-            "connected" => "Connected",
-            "disconnected" => "Not connected",
-            _ => "Not installed",
-        }));
-        badge.add_css_class(if state == "connected" { "badge" } else { "meta" });
-        badge.set_valign(gtk::Align::Center);
-        head.append(&badge);
+        head.append(&omui::label(connection["label"].as_str().unwrap_or_default(), "section-title"));
+        head.append(&match state {
+            "connected" => omui::badge("Connected", ""),
+            other => {
+                let state = omui::label(if other == "disconnected" { "Not connected" } else { "Not installed" }, "meta");
+                state.set_valign(gtk::Align::Center);
+                state
+            }
+        });
         card.append(&head);
-        for (text, class) in [(connection["brings"].as_str(), "dim"), (connection["detail"].as_str(), "snippet")] {
+        for (text, class) in [(connection["brings"].as_str(), "dim-label"), (connection["detail"].as_str(), "snippet")] {
             if let Some(text) = text.filter(|text| !text.is_empty()) {
-                let label = gtk::Label::new(Some(text));
-                label.add_css_class(class);
-                label.set_xalign(0.0);
-                label.set_wrap(true);
+                let label = omui::label(text, class);
                 label.set_selectable(class == "snippet");
                 card.append(&label);
             }
@@ -123,7 +109,7 @@ impl ConnectPage {
             let Some(command) = action["command"].as_str().map(String::from) else { continue };
             let button = gtk::Button::with_label(action["label"].as_str().unwrap_or("Run"));
             // The step that connects something not yet connected stands out.
-            button.add_css_class(if index == 0 && state != "connected" { "primary" } else { "chip" });
+            button.add_css_class(if index == 0 && state != "connected" { "suggested-action" } else { "chip" });
             button.set_tooltip_text(Some(&format!("Runs in a terminal: {command}")));
             let this = self.clone();
             button.connect_clicked(move |_| {

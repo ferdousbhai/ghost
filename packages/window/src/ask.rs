@@ -56,16 +56,16 @@ impl AskPage {
     pub fn build(app: &Rc<App>) -> Rc<Self> {
         let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
 
+        // A second sidebar: the pane's own padding is around the button and the list.
         let column = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        column.add_css_class("chat-column");
+        column.add_css_class("sidebar");
         column.set_size_request(200, -1);
         let fresh = gtk::Button::with_label("New chat");
         fresh.add_css_class("chip");
-        fresh.set_margin_top(8);
-        fresh.set_margin_start(8);
-        fresh.set_margin_end(8);
+        fresh.set_margin_top(3);
+        fresh.set_margin_start(3);
+        fresh.set_margin_end(3);
         let chats = gtk::ListBox::new();
-        chats.add_css_class("chat-list");
         chats.set_selection_mode(gtk::SelectionMode::Single);
         column.append(&fresh);
         column.append(&gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&chats).build());
@@ -86,7 +86,6 @@ impl AskPage {
         let frame = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         frame.add_css_class("composer-frame");
         let composer = gtk::TextView::new();
-        composer.add_css_class("composer");
         composer.set_wrap_mode(gtk::WrapMode::WordChar);
         composer.set_hexpand(true);
         composer.set_accepts_tab(false);
@@ -98,13 +97,11 @@ impl AskPage {
             .child(&composer)
             .build();
         let send = gtk::Button::with_label("Ask");
-        send.add_css_class("primary");
+        send.add_css_class("suggested-action");
         send.set_valign(gtk::Align::End);
         frame.append(&composer_scroll);
         frame.append(&send);
-        let status = gtk::Label::new(None);
-        status.add_css_class("meta");
-        status.set_xalign(0.0);
+        let status = gtk::Label::builder().css_classes(["meta"]).xalign(0.0).build();
         bar.append(&frame);
         bar.append(&status);
         main.append(&bar);
@@ -182,7 +179,7 @@ impl AskPage {
         page
     }
 
-    pub fn note(&self, text: &str) {
+    fn note(&self, text: &str) {
         self.status.set_text(text);
     }
 
@@ -190,24 +187,16 @@ impl AskPage {
         format!("/api/ghosts/{}{rest}", segment(&self.ghost.borrow()))
     }
 
-    fn clear(&self) {
-        while let Some(child) = self.convo.first_child() {
-            self.convo.remove(&child);
-        }
-    }
-
     fn new_chat(&self) {
         let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_secs()).unwrap_or(0);
         *self.session.borrow_mut() = format!("app-{seconds}");
-        self.clear();
-        let hello = gtk::Label::new(Some(
-            "Ask about your notes, mail, chats, files and photos.\nAnswers come from this computer and name where each fact is from.",
-        ));
-        hello.add_css_class("empty-state");
-        hello.set_justify(gtk::Justification::Center);
-        hello.set_wrap(true);
-        hello.set_margin_top(60);
-        self.convo.append(&hello);
+        omui::clear(&self.convo);
+        let hello = omui::EmptyState::new(
+            Some(omui::icons::name::CHAT),
+            "Ask about your notes, mail, chats, files and photos.",
+            Some("Answers come from this computer and name where each fact is from."),
+        );
+        self.convo.append(&hello.widget);
         self.syncing.set(true);
         self.chats.unselect_all();
         self.syncing.set(false);
@@ -218,17 +207,10 @@ impl AskPage {
         let Ok(body) = self.app.api.get(self.ghost_path("/sessions")).await else { return };
         let sessions = body["sessions"].as_array().cloned().unwrap_or_default();
         self.syncing.set(true);
-        while let Some(child) = self.chats.first_child() {
-            self.chats.remove(&child);
-        }
+        omui::clear(&self.chats);
         for session in &sessions {
-            let row = gtk::ListBoxRow::new();
-            row.add_css_class("sidebar-row");
             let title = session["title"].as_str().filter(|title| !title.is_empty()).or(session["preview"].as_str()).unwrap_or("(untitled)");
-            let label = gtk::Label::new(Some(title));
-            label.set_xalign(0.0);
-            label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            row.set_child(Some(&label));
+            let row = omui::sidebar_row(session["id"].as_str().unwrap_or_default(), None, title, None);
             self.chats.append(&row);
             if session["id"].as_str() == Some(self.session.borrow().as_str()) {
                 self.chats.select_row(Some(&row));
@@ -243,7 +225,7 @@ impl AskPage {
             return;
         }
         *self.session.borrow_mut() = id.clone();
-        self.clear();
+        omui::clear(&self.convo);
         let this = self.clone();
         glib::spawn_future_local(async move {
             let reply = this.app.api.get(this.ghost_path(&format!("/sessions/{}/transcript", segment(&id)))).await;
@@ -295,10 +277,7 @@ impl AskPage {
     fn answer(&self) -> Rc<Answer> {
         let frame = gtk::Box::new(gtk::Orientation::Vertical, 6);
         frame.add_css_class("answer");
-        let step = gtk::Label::new(None);
-        step.add_css_class("step");
-        step.set_xalign(0.0);
-        step.set_wrap(true);
+        let step = omui::label("", "step");
         step.set_visible(false);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let sources = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -333,16 +312,12 @@ impl AskPage {
         if !finished {
             return;
         }
-        while let Some(child) = answer.sources.first_child() {
-            answer.sources.remove(&child);
-        }
+        omui::clear(&answer.sources);
         let cited: Vec<Value> = answer.hits.borrow().iter().filter(|hit| hit["key"].as_str().is_some_and(|key| cites(&text, key))).cloned().collect();
         if cited.is_empty() {
             return;
         }
-        let heading = gtk::Label::new(Some("Sources"));
-        heading.add_css_class("section-title");
-        heading.set_xalign(0.0);
+        let heading = omui::label("Sources", "section-title");
         heading.set_margin_top(6);
         answer.sources.append(&heading);
         for hit in cited {
@@ -354,7 +329,6 @@ impl AskPage {
             );
             let button = gtk::Button::with_label(&label);
             button.add_css_class("chip");
-            button.add_css_class("source-card");
             button.set_halign(gtk::Align::Start);
             let this = self.clone();
             button.connect_clicked(move |_| this.app.navigate(route_of(&hit)));
@@ -370,7 +344,7 @@ impl AskPage {
         }
         buffer.set_text("");
         if self.convo.first_child().is_some_and(|child| child.has_css_class("empty-state")) {
-            self.clear();
+            omui::clear(&self.convo);
         }
         self.question(&prompt);
         let answer = self.answer();
@@ -438,10 +412,7 @@ impl AskPage {
     }
 
     fn fail(&self, answer: &Rc<Answer>, message: &str) {
-        let label = gtk::Label::new(Some(message));
-        label.add_css_class("danger");
-        label.set_xalign(0.0);
-        label.set_wrap(true);
+        let label = omui::label(message, "error");
         label.set_selectable(true);
         answer.sources.append(&label);
     }

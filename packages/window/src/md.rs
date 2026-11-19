@@ -153,9 +153,7 @@ pub fn blocks(md: &str, cited: &dyn Fn(&str) -> bool) -> Vec<Block> {
 
 /// The answer as widgets in `into` (emptied first). `on_link` gets "cite:S3" when a citation is clicked.
 pub fn render(into: &gtk::Box, md: &str, cited: &dyn Fn(&str) -> bool, on_link: impl Fn(&str) + Clone + 'static) {
-    while let Some(c) = into.first_child() {
-        into.remove(&c);
-    }
+    omui::clear(into);
     for b in blocks(md, cited) {
         let (markup, class, indent, marker) = match &b {
             Block::Para(m) => (m.clone(), "md-p", 0, None),
@@ -163,15 +161,12 @@ pub fn render(into: &gtk::Box, md: &str, cited: &dyn Fn(&str) -> bool, on_link: 
             Block::Item { depth, marker, markup } => (markup.clone(), "md-li", *depth, Some(marker.clone())),
             Block::Code(m) => (m.clone(), "md-code", 0, None),
         };
-        let label = gtk::Label::new(None);
+        let label = omui::label("", class);
         if valid_markup(&markup) {
             label.set_markup(&markup);
         } else {
             label.set_text(&markup); // half-written markup mid-stream: shown as text until it closes
         }
-        label.add_css_class(class);
-        label.set_xalign(0.0);
-        label.set_wrap(true);
         label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         label.set_selectable(true);
         label.set_hexpand(true);

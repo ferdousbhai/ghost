@@ -13,13 +13,14 @@ name = "ghost-window"
 path = "src/main.rs"
 
 [dependencies]
-# The GTK 4 stack lastbook-for-omarchy and Strata (github.com/lgse/strata) use, whose theme approach this follows.
+# The look and the shared widgets. A path to the frozen 0.1 checkout until omui is published; then a git rev.
+omui = { path = "/home/x/github.com/ferdousbhai/omui-pin-0.1" }
+# The GTK 4 stack omui is built on; cargo resolves both to one gtk4.
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_14"] }
 glib = "0.22.9"
 gio = { version = "0.22.9", features = ["v2_72"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 serde_json = "1.0"
-toml = "1.1"
 async-channel = "2.3"
 urlencoding = "2.1"
 # Plain HTTP to ghostd on 127.0.0.1: no TLS stack.
