@@ -1,5 +1,8 @@
 # Ghost
 
+> **Frozen on 2026-11-20.** No feature work and no releases: official Omarchy 4.5
+> now ships most of what Ghost did. See [docs/status.md](docs/status.md).
+
 **An orchestration layer for all your agent harnesses.** Ghost runs locally
 on [Omarchy](https://omarchy.org), coordinating Claude Code, Codex, Grok,
 Copilot, OpenCode, pi, and other installed agent CLIs. Each harness keeps

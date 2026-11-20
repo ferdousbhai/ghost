@@ -1,5 +1,7 @@
 # ghost
 
+**Frozen on 2026-11-20: no feature work, no releases. Read `docs/status.md` before starting anything.**
+
 Local Omarchy-native AI persona with file-backed state, a daemon API, desktop shell, and Bash browser automation.
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
