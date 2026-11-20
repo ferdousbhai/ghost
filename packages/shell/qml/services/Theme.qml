@@ -264,8 +264,6 @@ Singleton {
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
     readonly property color info: root.pick("blue")
-    /** The bar mark's "found": a hue none of herdr's four states use. */
-    readonly property color finding: root.pick("magenta")
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral

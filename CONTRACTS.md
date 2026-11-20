@@ -64,58 +64,6 @@ planning may exist, but durable owner-visible plans and tasks belong in the
 owner's documents. Background work is the shell's: Ghost keeps no job table
 (see "Background work and hooks").
 
-### External events
-
-An installed authenticated CLI/service selects events and calls
-`ghost event <source> <id> --instructions <owner-instructions> [--thread <key>] [payload|-]`.
-`POST /api/ghosts/:ghost/events` accepts `{ source, id, thread?, instructions, payload }`
-(strings; source 1–128, id and thread 1–512, instructions 1–16384, payload at most 131072
-characters; the rendered prompt must also fit the 200000-character log bound).
-This intake reuses conversations because `ghost say`
-has no atomic deduplication; it adds no public listener or provider credential
-store. Each source/id hashes to one `event-<sha256>` conversation; with a
-`thread`, source/thread hashes to the one its events share, so a ghost sees what
-it said about that subject before. An event whose thread is running a turn takes
-its own source/id conversation instead, so nothing waits. Acceptance
-logs its prompt before returning `202 { sessionId, duplicate: false }`; the turn
-runs independently of the HTTP caller. Repeated matching delivery returns
-`200 { sessionId, duplicate: true }`, even after failure or daemon restart.
-Reusing an id with changed instructions/data is 409. Different events without
-a shared thread run in separate conversations; a repeated busy event is
-acknowledged without queuing another turn. Event data is explicitly untrusted
-and cannot become an owner `!command`. Source and id remain visible in its
-prompt. The title, unless the owner set one, is the first sentence of the last
-text of the latest event's reply, or `<source>: <id>` until one arrives, derived
-on read with no model. Ordinary history, stop, failure reporting, and navigation
-apply to the event conversation.
-An event turn that fails because its model could not be reached (DNS, a
-refused, reset, or timed-out connection: `isUnreachableMessage` in
-`turn-events.ts`) runs again with the same prompt after 1, 2, 4, 8, 16, 32,
-60, and 60 minutes, until a run ends any other way; a rerun is skipped once
-the owner or a later event has added to the conversation (a message or
-`!command`) or while a turn runs there. The waits are in memory. Instead, each
-daemon start reruns, within 24 hours of its acceptance, an event whose prompt,
-the conversation's latest, the last run left
-unfinished: no reply (a crash), a reply that could not reach its model, or one
-a daemon stop cut off (the assistant log entry's `interrupted`; once only, so
-a turn that restarts the daemon cannot loop). The owner's stop is not rerun.
-Meanwhile the conversation is an unread finding whose reply is the failure;
-the rerun's answer follows it in the transcript.
-There is no other automatic replay of an accepted event: inspect its
-conversation and explicitly continue it. Deleting the conversation removes its
-deduplication evidence, so a later replay may run again.
-
-Provider catch-up belongs to the installed service/CLI. `ghost help events`
-gives a `gh` polling recipe using systemd, an overlapping notification window,
-and stable notification/update ids. Fetch or delivery failure fails the native
-unit (journald records it); repeating the window retries unaccepted events and
-suppresses accepted ones. The owner sets catch-up duration and filters. Slack
-requires an existing authenticated Events API/Socket Mode bridge forwarding its
-stable event_id; Ghost supplies no Slack app, tokens, subscription, or bridge.
-Disconnecting the bridge or disabling its systemd timer stops intake;
-reconnecting may replay provider history according to that provider's retention.
-No Ghost endpoint needs public exposure. See `docs/events.md`.
-
 ### Machine watch
 
 Ghost adds no machine-monitoring code: a ghost reads strain with installed
@@ -169,13 +117,6 @@ disable --now` stops it, and an `ignore` regex in the script excludes
 programs and services the owner names. The woken ghost diagnoses read-only and
 proposes a fix with its undo; it changes, files, restarts, or sends nothing
 until the owner says yes in that conversation.
-
-The HUD counts unread `event-` conversations, which only intake creates, as
-the ghost's findings (see the shell README's bar mark), and it lists them apart
-from the rest, a group per event source (the listing's `source`; it folds a
-source only once it has two; a pinned one or one holding a question stays with
-the rest), as the summonghost.com app does in one group, so that id prefix is
-contract.
 
 ### Mobile links and completion delivery
 
@@ -284,7 +225,7 @@ records, `harness` records naming the harness that took over and the
 session id it reported, `compacted` records of a
 harness compacting its own context (its `trigger` and `preTokens`, as far as it
 says: Claude Code's `compact_boundary` and pi's `compaction_end` stream one, and a
-Codex compaction is read from its rollout after the pass). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, `origin: "auto"` prompts, and the retired peers' messages and `sent`/`handed` records); logs are never rewritten. ghostd is the log's
+Codex compaction is read from its rollout after the pass). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, `origin: "auto"` prompts, and the retired peers' messages and `sent`/`handed` records); an `event-…` conversation that the retired event intake opened reads as any other; logs are never rewritten. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads; each harness's own transcript is its resume state, never
@@ -523,8 +464,8 @@ its continuations.
 (`POST /api/ghosts/:name/complete`, below), from the harness a new
 conversation would start on, or from ghostd's loaded local model where a turn
 would run on it, never then a cloud one.
-Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
-external events, and explicit owner command hooks initiate work.
+Ghost starts no automatic idle handoff or next-work turns. Only owner requests
+and explicit owner command hooks initiate work.
 
 ## Daemon HTTP API
 
@@ -566,7 +507,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
-| `POST /api/ghosts/:ghost/events` | [External event intake](#external-events); the GET event stream remains conversation invalidations. |
 | `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search, pictures }] }`: the [sources](#sources); `pictures` says its items have one each. |
 | `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
 | `GET /api/sources/:source/items/:item?page=&line=` | Owner-only `{ title, text, part, path? }` for one item, its id percent-encoded as one segment; `part` says which part (`whole`, `passage`, `start`, `lines a-b`, `page n`, `latest`). A source with no read is `405 not_readable`. |
@@ -585,7 +525,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, source, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry; `source` is the external event source that opened an `event-` conversation (null otherwise); `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, `hook`, or `compacted`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `compacted` message marks where the harness compacted its context. An owner `!command` reads as the owner's `!command` followed by its output. |
@@ -695,9 +635,8 @@ enter logs; the only API response that carries them is the owner's own MCP
 configuration.
 
 Ghosts run unthrottled. Harness limits surface as typed errors, and the
-harness's own retry and fallback behavior applies; Ghost's contributions are
-the per-turn order of installed harnesses above and rerunning an event turn
-that could not reach its model or that a daemon stop cut off ([External events](#external-events)). Omarchy usage records are
+harness's own retry and fallback behavior applies; Ghost's contribution is
+the per-turn order of installed harnesses above. Omarchy usage records are
 informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap.
 
 ## Package boundaries

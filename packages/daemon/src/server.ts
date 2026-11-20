@@ -1,4 +1,3 @@
-import { parseExternalEvent } from "./external-events.js";
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -831,12 +830,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       }
     }),
     route("POST", "api/ghosts/:ghost/messages", handleMessages),
-    route("POST", "api/ghosts/:ghost/events", async ({ ghost, body, response }) => {
-      const accepted = await options.host.admitEvent(ghost, parseExternalEvent(await body()));
-      const admission = accepted.admission;
-      if (admission) startTurnLog(ghost, accepted.sessionId, (emit) => admission.run({ emit }));
-      jsonResponse(response, accepted.admission ? 202 : 200, { sessionId: accepted.sessionId, duplicate: accepted.admission === null });
-    }),
     route("GET", "api/ghosts/:ghost/events", handleConversationEvents),
     // The name is the home directory's name, so a rename moves the whole home
     // and every other route's `:ghost` changes with it.

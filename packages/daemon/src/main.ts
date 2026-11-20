@@ -247,7 +247,6 @@ async function serveDaemon(
     config: config.configPath,
     hooks: config.hooksPath,
   });
-  void host.resumeEventTurns().catch((error: unknown) => logger.warn("event reruns not started", { error: errorMessage(error) }));
 
   await waitForShutdownSignal({
     listening,

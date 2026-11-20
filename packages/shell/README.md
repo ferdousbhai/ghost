@@ -50,10 +50,7 @@ behind it, while every other binding (screenshots, volume, workspaces) keeps
 working, and a compositor close is a dismissal. It opens on the `Launcher`, a
 filter over conversations and places at a fixed height on screen: pinned
 conversations first, then those holding an open question, then unread
-replies, then the rest, newest first. Two or more `event-` conversations of
-one source fold into one row named for it ("Morning check"), placed as its
-first one would be, saying how many are unread; Enter unfolds it and folds it again, and a filter searches them all
-(pinned or asking ones stay out in the list). Enter on a row grows the card into that
+replies, then the rest, newest first. Enter on a row grows the card into that
 view, and Enter with nothing matching asks the ghost. Opened on its list, it
 listens as the prompt does: Voxtype types into the filter, Enter while
 listening asks the ghost what was said, and arrowing to a row or leaving the
@@ -66,10 +63,7 @@ something to another app (a link, an attached image) closes it.
 conversation of the selected ghost, most urgent first: filled red while one
 holds an open question, filled amber while one runs, filled blue while one
 has an unread reply, a green outline otherwise, and a dim outline while
-ghostd is unreachable, in the theme's red, yellow, blue, and green. Ghost's
-own state sits between amber and blue: filled in the theme's magenta while a
-conversation the ghost started on its own (an `event-` conversation: a crash,
-a machine alert) holds an unread reply; the tooltip says how many. It fills
+ghostd is unreachable, in the theme's red, yellow, blue, and green. It fills
 the host's `bar.barSize` across the bar and its 27px icon slot along it, shows
 its tooltip through the host's `bar.showTooltip`/`hideTooltip`, and toggles
 the HUD on a left click through the host's drag-aware `triggerPress`.

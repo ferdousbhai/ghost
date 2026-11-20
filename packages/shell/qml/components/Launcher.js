@@ -68,35 +68,9 @@ function ordered(sessions) {
         .sort(function (a, b) { return rank(a) - rank(b) || time(b) - time(a); });
 }
 
-/** Folds into its source's row: what intake started, unless the owner must see it. */
-function foldsIntoEvents(session) {
-    return String(session.id).indexOf("event-") === 0 && session.pinned !== true && !session.question;
-}
-
-/** An event source as a row names it: `morning-check` is "Morning check". */
-function sourceLabel(source) {
-    var words = String(source || "").replace(/[-_]+/g, " ").trim();
-    return words === "" ? "Events" : words.charAt(0).toUpperCase() + words.slice(1);
-}
-
-/** The one row of a source's two or more event conversations; `open` shows them under it. */
-function eventsRow(source, events, now, open) {
-    var unread = events.filter(function (session) { return session.unread === true; }).length;
-    var newest = events.reduce(function (latest, session) {
-        return Math.max(latest, Date.parse(session.updatedAt || "") || 0);
-    }, 0);
-    return { kind: "events", id: "events:" + source, source: source, open: open,
-        label: sourceLabel(source) + " " + (open ? "▾" : "▸"),
-        detail: unread > 0 ? unread + " unread" : "", meta: newest ? age(new Date(newest).toISOString(), now) : "",
-        unread: unread > 0, running: events.some(function (session) { return session.running === true; }) };
-}
-
 /**
  * The rows for `query` over `sessions`, in `ordered` order. Headers are rows too, but never selectable. `hookCount`, the
- * owner's loaded hooks, is the Hooks row's detail when there are any. With an
- * empty query, the event conversations of one source fold into one row when
- * there are two or more, unfolded when `openSources` holds that source; a
- * query searches them with the rest.
+ * owner's loaded hooks, is the Hooks row's detail when there are any.
  *
  * Empty query: the conversations, then the places. The filter is also where
  * a new conversation starts, so no row repeats it (Ctrl+N opens a blank one).
@@ -104,23 +78,15 @@ function eventsRow(source, events, now, open) {
  * row when nothing matches and the last when something does, so Enter opens
  * what was searched for and still asks when there was nothing to find.
  */
-function rows(query, sessions, ghost, now, hookCount, openSources) {
+function rows(query, sessions, ghost, now, hookCount) {
     var q = String(query || "").trim().toLowerCase();
     var out = [];
     var conversations = [];
     var listed = ordered(sessions);
-    var bySource = {};
-    if (q === "") listed.filter(foldsIntoEvents).forEach(function (session) {
-        var source = session.source || "";
-        (bySource[source] = bySource[source] || []).push(session);
-    });
-    var folded = function (session) {
-        return foldsIntoEvents(session) && (bySource[session.source || ""] || []).length > 1;
-    };
-    var sessionRow = function (session, nested) {
+    var sessionRow = function (session) {
         var title = titleOf(session);
         return {
-            kind: "session", id: session.id, label: title, nested: nested,
+            kind: "session", id: session.id, label: title,
             title: typeof session.title === "string" ? session.title : "",
             // A question is what the owner most needs to read in the row.
             // At rest a row is its title, as the desktop's menu shows one; a
@@ -136,18 +102,9 @@ function rows(query, sessions, ghost, now, hookCount, openSources) {
     };
     for (var i = 0; i < listed.length; i++) {
         var session = listed[i];
-        if (folded(session)) {
-            var source = session.source || "";
-            var events = bySource[source];
-            if (session !== events[0]) continue;
-            var open = (openSources || []).indexOf(source) !== -1;
-            conversations.push(eventsRow(source, events, now, open));
-            if (open) conversations = conversations.concat(events.map(function (event) { return sessionRow(event, true); }));
-            continue;
-        }
         if (q !== "" && !contains(titleOf(session), q) && !contains(session.preview, q)
             && !(session.question && contains(session.question.text, q))) continue;
-        conversations.push(sessionRow(session, false));
+        conversations.push(sessionRow(session));
     }
     var places = [];
     for (var j = 0; j < PLACES.length; j++) {

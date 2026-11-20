@@ -1,10 +1,9 @@
-import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { conversationId, followDefaultGhost, readArgumentFile, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { ArgsError, flagBoolean } from "./args.js";
+import { conversationId, followDefaultGhost, readArgumentFile, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import type { RemoteStatus } from "../remote-serve.js";
-import { acceptedEventLine } from "../external-events.js";
 import type { HarnessChoices } from "../session-host.js";
 
 
@@ -115,18 +114,5 @@ export async function switchCommand(ctx: CliContext): Promise<number> {
     : (await resolveSession(ctx.client, name, undefined)).id);
   const body = await ctx.client.request<{ id: string; harness: string }>("PUT", `${path}/harness`, { harness: id });
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
-  return 0;
-}
-
-export async function eventCommand(ctx: CliContext): Promise<number> {
-  const { parsed } = ctx;
-  const [source, id, input] = parsed.positionals;
-  const instructions = flagString(parsed, "instructions");
-  if (!source || !id || !instructions) throw new ArgsError("ghost event needs source, id, and --instructions");
-  const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
-  const ghost = await resolveGhost(ctx);
-  const thread = flagString(parsed, "thread");
-  const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, ...(thread === undefined ? {} : { thread }), instructions, payload });
-  emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
   return 0;
 }

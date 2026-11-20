@@ -32,15 +32,12 @@ FocusScope {
     property string mode: "home"
     readonly property bool ghostMode: root.mode === "ghosts"
 
-    /** The event sources whose rows show their conversations; kept across opens, for reading through several. */
-    property var openSources: []
-
     property real maxListHeight: 480
     property real now: Date.now()
 
     readonly property var rows: root.ghostMode
         ? Launcher.ghostRows(filter.text, Ghostd.ghosts, Ghostd.activeGhost)
-        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount, root.openSources)
+        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount)
     property int selected: Launcher.first(root.rows)
     readonly property var current: root.selected >= 0 && root.selected < root.rows.length
         ? root.rows[root.selected] : null
@@ -128,13 +125,7 @@ FocusScope {
     }
 
     function activate(row: var): void {
-        if (row && row.kind === "events") {
-            root.openSources = row.open ? root.openSources.filter(source => source !== row.source)
-                : root.openSources.concat([row.source]);
-            // The rows just changed under the selection: it stays on this one.
-            root.selected = root.rows.findIndex(candidate => candidate.id === row.id);
-            list.positionViewAtIndex(root.selected, ListView.Contain);
-        } else if (row && row.kind !== "header") root.activated(row);
+        if (row && row.kind !== "header") root.activated(row);
     }
 
     // The desktop's menu refreshes ages each time it opens; so does this.
@@ -295,7 +286,7 @@ FocusScope {
             required property int index
             readonly property bool header: row.modelData.kind === "header"
             readonly property bool chosen: row.index === root.selected
-            readonly property bool conversational: row.modelData.kind === "session" || row.modelData.kind === "events"
+            readonly property bool conversational: row.modelData.kind === "session"
             readonly property var renaming: root.renameFor(row.modelData)
             readonly property bool editing: row.renaming !== null && row.renaming.editingKey === row.modelData.id
 
@@ -355,7 +346,7 @@ FocusScope {
                 Item {
                     id: mark
                     anchors.left: parent.left
-                    anchors.leftMargin: root.markInset + (row.modelData.nested === true ? Theme.pad : 0)
+                    anchors.leftMargin: root.markInset
                     anchors.verticalCenter: parent.verticalCenter
                     width: root.markWidth
                     height: width
@@ -511,8 +502,6 @@ FocusScope {
                 ? "a name is letters, digits, . _ or -, up to 64, starting with a letter or digit"
             : root.current && root.current.kind === "session"
                 ? "↵ open   ^R rename   ^P pin   del trash   ⇥ ghost   esc close"
-            : root.current && root.current.kind === "events"
-                ? (root.current.open ? "↵ fold" : "↵ unfold") + "   ⇥ ghost   esc close"
             : root.current && root.current.kind === "ghost"
                 ? "↵ switch   ^R rename   del banish   esc back"
             : root.ghostMode ? "↵ summon   esc back"

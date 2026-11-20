@@ -12,7 +12,6 @@ import {
 import {
   characterCommand,
   readCommand,
-  eventCommand,
   remoteCommand,
   renameCommand,
   harnessCommand,
@@ -192,15 +191,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost read -s cli-abc",
     positionals: [0, 0],
     run: readCommand,
-  },
-  {
-    verb: "event",
-    usage: "event <source> <id> --instructions <text> [--thread <key>] [payload|-] [-g <name>] [--json] [-q]",
-    summary: "Accept an external event once, into its own conversation or its --thread's.",
-    example: "ghost event github issue-42 --instructions 'Summarize this issue' -",
-    positionals: [2, 3],
-    flags: { value: ["instructions", "thread"] },
-    run: eventCommand,
   },
   {
     verb: "remote",

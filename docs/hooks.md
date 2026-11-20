@@ -188,12 +188,6 @@ live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `session_stop` and
 `turn_end` changes apply at the next boundary.
 
-External events enter through the delivery contract in
-[docs/events.md](events.md), not a hook boundary. Each accepted event starts a
-normal conversation turn with the normal hooks; duplicate delivery runs no
-hook or harness. Provider authentication/retries belong to the installed
-source service or CLI.
-
 ## `turn_end` protocol
 
 An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,

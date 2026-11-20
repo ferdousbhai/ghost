@@ -10,7 +10,7 @@
 import { BROWSER_LINES, productsLines } from "./help-guides.js";
 import { SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"] as const;
+export const HELP_TOPICS = ["self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "notifications", "browser", "products"] as const;
 type HelpTopic = (typeof HELP_TOPICS)[number];
 
 interface HelpTopicInput {
@@ -47,7 +47,7 @@ function self(): string[] {
     '  --description="<reason>" \\',
     "  systemctl --user restart ghostd.service",
     "```",
-    "The transient unit survives the daemon. Verify afterward with `ghost status` (no `restart needed` line) and `journalctl --user -t ghostd`; restart's only model prompts rerun event turns it cut off.",
+    "The transient unit survives the daemon. Verify afterward with `ghost status` (no `restart needed` line) and `journalctl --user -t ghostd`; a restart sends no model prompt.",
     "A HUD change needs `omarchy-restart-shell`: the HUD is an omarchy-shell plugin, not a unit of yours, and a rescan leaves QML the shell already loaded in place.",
     "Omarchy owns package updates; update a checkout only when the owner asks.",
     "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
@@ -265,31 +265,6 @@ function memory(): string[] {
   ];
 }
 
-function events(input: HelpTopicInput): string[] {
-  return [
-    "# External events",
-    "Use an installed authenticated CLI/service to select events; Ghost stores no provider credentials and exposes no public webhook. Deliver payloads with `ghost event <source> <stable-id> --instructions '<owner instructions>' --ghost <ghost> -` on stdin.",
-    "One source/id means one conversation: replay is acknowledged without another turn, even after failure/restart. Changed data under the same id is refused. Distinct events get separate conversations, unless they name one `--thread <key>` (the subject, e.g. a unit or an issue) to share one, so a ghost sees what it said last time; an event whose thread is busy takes its own. A reply's first sentence titles the conversation. Inspect with `ghost show -s <event-session>`; stop or explicitly continue there. Deleting it also removes deduplication evidence.",
-    "GitHub: gh owns login (`gh auth login`); its notifications API needs notifications or repo scope. Poll with a systemd user timer and a oneshot Bash script like this; replace the repository and instructions deliberately:",
-    "```bash",
-    "set -euo pipefail",
-    "work=$(mktemp -d)",
-    `trap 'rm -rf -- "$work"' EXIT`,
-    "since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)",
-    `gh api --paginate --slurp -X GET notifications -f all=true -f participating=true -f since="$since" > "$work/raw.json"`,
-    `jq -c '.[][] | select(.repository.full_name == "OWNER/REPO") | {id: (.id + ":" + .updated_at), thread: .id, payload: {reason, repository: .repository.full_name, subject}}' "$work/raw.json" > "$work/events.jsonl"`,
-    "failed=0",
-    "while IFS= read -r event; do",
-    `  id=$(jq -r '.id' <<< "$event")`,
-    `  jq -c '.payload' <<< "$event" | ${input.cliPath} event github:OWNER/REPO "$id" --thread "$(jq -r '.thread' <<< "$event")" --ghost ${ghost(input)} --instructions 'Summarize this notification and identify any action I need to take.' - || failed=1`,
-    'done < "$work/events.jsonl"',
-    'exit "$failed"',
-    "```",
-    "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: a refused event fails the systemd unit without stopping the rest, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
-    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Disable the source's systemd timer or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See /usr/share/doc/ghost/docs/events.md (docs/events.md in a checkout).",
-  ];
-}
-
 function notifications(): string[] {
   return [
     "# Mobile completion notifications",
@@ -324,6 +299,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
+  const lines = { self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
   return `${lines.join("\n")}\n`;
 }

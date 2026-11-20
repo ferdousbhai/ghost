@@ -18,7 +18,6 @@ function session(id: string): SessionSummary {
     id,
     title: null,
     preview: null,
-    source: null,
     harness: "claude",
     model: null,
     provider: null,
@@ -343,7 +342,7 @@ describe("ghost help", () => {
       throw new Error(`unexpected request to ${String(input)}`);
     };
     for (const argv of [
-      ...["harness", "sessions", "mcp", "character", "rename x", "event a b"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["harness", "sessions", "mcp", "character", "rename x"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
       ...["list", "new x", "use", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });

@@ -52,7 +52,6 @@ if [[ "$component" == runtime ]]; then
     /usr/lib/systemd/user/ghostd.service
     /usr/lib/ghost/runtime/ghostd.js
     /usr/lib/ghost/runtime/ghost.js
-    /usr/share/doc/ghost/docs/events.md
     /usr/share/doc/ghost/docs/hooks.md
   )
   executables=(/usr/bin/ghostd /usr/bin/ghost

@@ -7,7 +7,6 @@
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
 import { type DesktopContext, renderDesktopContext } from "./desktop-context.js";
-import { eventConversationId, eventPrompt, eventPromptLead, type ExternalEvent } from "./external-events.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
@@ -34,9 +33,7 @@ import {
   requireConversationId,
   readTranscriptPage,
   unseenCommands,
-  isEventPrompt,
   type AssistantPart,
-  type LogEntry,
   type TranscriptMessage,
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
@@ -60,7 +57,7 @@ import {
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
-import { classifyLimitMessage, isUnreachableMessage, statedReturn, type TurnEvent } from "./turn-events.js";
+import { classifyLimitMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import { trashPath } from "./trash.js";
@@ -92,14 +89,6 @@ const MAX_CONVERSATION_TITLE_LENGTH = 120;
  */
 const REST_AFTER_LIMIT_MS = 60 * 60_000;
 const REST_AFTER_FAILURE_MS = 15 * 60_000;
-/**
- * The waits before each rerun of an event turn that could not reach its
- * model: soon for a network still coming up at boot, then up to hourly for a
- * machine offline longer, about three hours in all.
- */
-const EVENT_RETRY_DELAYS_MS = [1, 2, 4, 8, 16, 32, 60, 60].map((minutes) => minutes * 60_000);
-/** How long after its acceptance a daemon start still reruns an unfinished event: past this, its news is stale. */
-const EVENT_RESUME_WINDOW_MS = 24 * 60 * 60_000;
 const MAX_QUESTION_LENGTH = 2_000;
 const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
@@ -126,7 +115,6 @@ export interface SessionHostOptions {
   /** The environment harnesses run with; the daemon's own by default. */
   env?: NodeJS.ProcessEnv;
   /** The waits before rerunning an event turn that could not reach its model; a test supplies short ones. */
-  eventRetryDelays?: readonly number[];
 }
 
 interface RunTurnOptions {
@@ -159,8 +147,6 @@ export interface SessionSummary {
   title: string | null;
   /** First owner text; display-only. */
   preview: string | null;
-  /** The external event source that opened it (an `event-` conversation); null for any other. */
-  source: string | null;
   /** The harness that carried the latest stretch of the conversation. */
   harness: string | null;
   /** What that harness's latest pass ran on, as far as it said; null otherwise. */
@@ -238,18 +224,6 @@ interface PassResult {
 }
 
 type TerminalError = Extract<TurnEvent, { type: "error" }>;
-
-function endedUnreachable(last: LogEntry | undefined): boolean {
-  return last?.type === "assistant" && !!last.error && isUnreachableMessage(last.error);
-}
-
-/** Whether the daemon's last run left this event's prompt, which `entries` start at, unanswered: no reply (a crash), its model unreachable, or cut off by a stop. */
-function leftUnfinished(entries: readonly LogEntry[], last: LogEntry | undefined): boolean {
-  if (last?.type === "user" || endedUnreachable(last)) return true;
-  // Once only, so a turn whose own work restarts the daemon cannot loop.
-  return last?.type === "assistant" && last.interrupted === true
-    && entries.filter((entry) => entry.type === "assistant" && entry.interrupted).length === 1;
-}
 
 function clamp(value: number | undefined, fallback: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -335,7 +309,6 @@ function validQuestion(text: string, options: readonly string[]): OwnerQuestion 
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
-  private readonly eventAdmissions = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
   private readonly conversationUrl: ((ghost: string, id: string) => Promise<string | null>) | undefined;
@@ -357,8 +330,6 @@ export class SessionHost {
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private reportCache?: { at: number; report: Promise<HarnessReport> };
   private shuttingDown = false;
-  private readonly eventRetryDelays: readonly number[];
-  private readonly eventRetries = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(options: SessionHostOptions) {
     this.registry = options.registry;
@@ -375,7 +346,6 @@ export class SessionHost {
     const local = this.localModel;
     const localRow: TurnRow | null = local ? { id: LOCAL_HARNESS, run: (input) => runLocalTurn(local, input) } : null;
     this.rowOf = (id) => id === LOCAL_HARNESS ? localRow : rows(id);
-    this.eventRetryDelays = options.eventRetryDelays ?? EVENT_RETRY_DELAYS_MS;
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -651,29 +621,11 @@ export class SessionHost {
     }
   }
 
-  /** At daemon start, rerun the event turns the last run left unfinished (CONTRACTS.md "External events"). */
-  async resumeEventTurns(): Promise<void> {
-    for (const { name } of this.registry.list()) {
-      const { sessionDir } = ghostPaths(this.registry.get(name).dir);
-      for (const id of await this.conversationIds(sessionDir)) {
-        if (!id.startsWith("event-")) continue;
-        try {
-          const admission = await this.retryEvent(name, id, 0, true);
-          if (!admission) continue;
-          this.logger.info("rerunning an unfinished event turn", { ghost: name, conversation: id });
-          void admission.run({ emit: () => {} }).catch((error: unknown) => this.logger.warn("event rerun failed", { ghost: name, conversation: id, error: errorMessage(error) }));
-        } catch (error) {
-          this.logger.warn("event rerun not started", { ghost: name, conversation: id, error: errorMessage(error) });
-        }
-      }
-    }
-  }
-
   // ── Turns ─────────────────────────────────────────────────────────────
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt" | "desktop"> & { promptRecorded?: boolean },
+    options: Pick<RunTurnOptions, "sessionId" | "prompt" | "desktop">,
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -701,7 +653,7 @@ export class SessionHost {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
-            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId, options.desktop ?? null); }
+            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, turnId, options.desktop ?? null); }
             catch (error) {
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
@@ -720,90 +672,6 @@ export class SessionHost {
     };
   }
 
-  async admitEvent(ghostName: string, event: ExternalEvent): Promise<{ sessionId: string; admission: TurnAdmission | null }> {
-    const alone = eventConversationId(event), prompt = eventPrompt(event), lead = eventPromptLead(event);
-    const thread = event.thread === undefined ? alone : eventConversationId({ source: event.source, id: event.thread });
-    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, alone), async () => {
-      const ghost = this.registry.get(ghostName), { sessionDir } = ghostPaths(ghost.dir);
-      const logs = new Map<string, readonly LogEntry[] | null>();
-      for (const id of [thread, alone]) {
-        if (logs.has(id)) continue;
-        const log = await readLog(sessionDir, id);
-        logs.set(id, log);
-        const earlier = log?.find((entry) => entry.type === "user" && entry.origin === undefined && entry.text.startsWith(lead));
-        if (earlier?.type !== "user") continue;
-        if (earlier.text !== prompt) throw new GhostError("event_conflict", "This source/id already has different instructions or data.", 409);
-        return { sessionId: id, admission: null };
-      }
-      // A busy thread holds up nothing: the event takes its own conversation.
-      const threadKey = keyOf(ghostName, thread);
-      const sessionId = this.admissions.has(threadKey) || this.reservedSessions.has(threadKey) ? alone : thread;
-      const entries = logs.get(sessionId) ?? null;
-      const admission = await this.admitTurn(ghostName, { sessionId, prompt, promptRecorded: true });
-      try {
-        await appendLog(sessionDir, sessionId, [
-          ...(entries === null ? [newConversationEntry(sessionId, new Date())] : []),
-          { type: "user", at: new Date().toISOString(), text: prompt },
-        ]);
-      } catch (error) { this.admissions.delete(keyOf(ghostName, sessionId)); throw error; }
-      this.announce(ghostName, sessionId);
-      return { sessionId, admission: this.retriedWhenUnreachable(ghostName, sessionId, admission, 0) };
-    }));
-  }
-
-  /**
-   * An event turn that ends unable to reach its model runs again after the
-   * next delay, unattended as the first one was (CONTRACTS.md "External events").
-   */
-  private retriedWhenUnreachable(ghostName: string, sessionId: string, admission: TurnAdmission, attempt: number): TurnAdmission {
-    return {
-      sessionId,
-      run: async (options) => {
-        let failure: string | null = null;
-        await admission.run({
-          emit: (event) => {
-            if (event.type === "error" && event.reason === "error") failure = event.errorMessage ?? "";
-            options.emit(event);
-          },
-        });
-        const delay = this.eventRetryDelays[attempt];
-        if (failure === null || !isUnreachableMessage(failure) || delay === undefined || this.shuttingDown) return;
-        this.logger.warn("event turn could not reach its model; retrying", { ghost: ghostName, conversation: sessionId, retry: attempt + 1, delayMs: delay });
-        const timer = setTimeout(() => {
-          this.eventRetries.delete(timer);
-          void this.retryEvent(ghostName, sessionId, attempt + 1)
-            .then((next) => next?.run({ emit: () => {} }))
-            .catch((error: unknown) => this.logger.warn("event retry not started", { ghost: ghostName, conversation: sessionId, error: errorMessage(error) }));
-        }, delay);
-        timer.unref();
-        this.eventRetries.add(timer);
-      },
-    };
-  }
-
-  /**
-   * The event's turn again, while the conversation still ends at the reply
-   * that could not reach its model, or when `resuming`, as the last run left
-   * it unfinished; null once anything else happened there.
-   */
-  private async retryEvent(ghostName: string, sessionId: string, attempt: number, resuming = false): Promise<TurnAdmission | null> {
-    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
-      const key = keyOf(ghostName, sessionId);
-      const entries = (await readLog(ghostPaths(this.registry.get(ghostName).dir).sessionDir, sessionId)) ?? [];
-      const last = entries.findLast((entry) => entry.type === "user" || entry.type === "assistant" || entry.type === "command");
-      const prompt = entries.findLast((entry) => entry.type === "user");
-      // The owner's message after it answers for itself.
-      if (prompt?.type !== "user" || prompt.origin !== undefined || !isEventPrompt(prompt.text)) return null;
-      const due = resuming
-        ? leftUnfinished(entries.slice(entries.indexOf(prompt)), last) && Date.now() - Date.parse(prompt.at) <= EVENT_RESUME_WINDOW_MS
-        : endedUnreachable(last);
-      if (!due) return null;
-      if (this.admissions.has(key) || this.reservedSessions.has(key)) return null;
-      const admission = await this.admitTurn(ghostName, { sessionId, prompt: prompt.text, promptRecorded: true });
-      return this.retriedWhenUnreachable(ghostName, sessionId, admission, attempt);
-    }));
-  }
-
   /** admitTurn then run, in one call, for tests. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     await (await this.admitTurn(ghostName, options)).run(options);
@@ -816,7 +684,6 @@ export class SessionHost {
     command: ReturnType<typeof ownerCommand>,
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
-    promptRecorded = false,
     initialTurnId: string,
     desktop: DesktopContext | null = null,
   ): Promise<string> {
@@ -847,9 +714,7 @@ export class SessionHost {
           turnId = randomUUID();
           ownerPrompt = text;
         }
-        if (!promptRecorded || origin !== undefined) {
-          await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
-        }
+        await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         // The owner's message answers what the ghost was waiting on.
         if (origin !== "hook") await this.dropQuestion(ghost, id);
         // Other clients learn the turn is running with its prompt already readable.
@@ -957,7 +822,6 @@ export class SessionHost {
           harness,
           content: result.content,
           ...(result.error ? { error: result.error } : {}),
-          ...(result.aborted && this.shuttingDown ? { interrupted: true as const } : {}),
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
           ...(effort ? { effort } : {}),
@@ -1364,7 +1228,6 @@ export class SessionHost {
         id,
         title: state.title,
         preview: state.preview,
-        source: state.source,
         harness: state.harness,
         model: state.model,
         provider: state.provider,
@@ -1654,8 +1517,6 @@ export class SessionHost {
 
   async disposeAll(): Promise<void> {
     this.shuttingDown = true;
-    for (const timer of this.eventRetries) clearTimeout(timer);
-    this.eventRetries.clear();
     for (const controller of this.admissions.values()) controller.abort();
     for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
     await this.localModel?.stop("daemon stopping");

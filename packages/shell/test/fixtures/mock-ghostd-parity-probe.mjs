@@ -84,7 +84,7 @@ try {
   assert.equal(sessionsResponse.status, 200);
   const { sessions } = await sessionsResponse.json();
   assert.deepEqual(Object.keys(sessions[0]), [
-    "id", "title", "preview", "source", "harness", "model", "provider", "effort", "updatedAt", "messageCount", "pinned", "unread", "running", "question",
+    "id", "title", "preview", "harness", "model", "provider", "effort", "updatedAt", "messageCount", "pinned", "unread", "running", "question",
   ]);
 
   // A question the ghost asks is on its row until withdrawn.

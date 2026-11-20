@@ -183,7 +183,7 @@ describe("tailnet identity", () => {
       expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
     }
     // Owner-only writes need no route guard: every guest write is refused first.
-    for (const path of ["/api/ghosts/casper/complete", "/api/ghosts/casper/events"]) {
+    for (const path of ["/api/ghosts/casper/complete", "/api/ghosts/casper/messages"]) {
       const guest = await fetch(`${base}${path}`, {
         method: "POST",
         headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },

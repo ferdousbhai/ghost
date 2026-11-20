@@ -39,8 +39,6 @@ export type LogEntry =
     readonly harness: string;
     readonly content: readonly AssistantPart[];
     readonly error?: string;
-    /** A daemon stop cut this turn off; an owner's stop leaves it unset. */
-    readonly interrupted?: true;
     /** The model, its provider, and the reasoning effort, as far as the harness said. */
     readonly model?: string;
     readonly provider?: string;
@@ -140,8 +138,6 @@ interface LogState {
   /** The owner's title, else one derived from the first owner message. */
   readonly title: string | null;
   readonly preview: string | null;
-  /** The source of the external event that opened the conversation; null for any other. */
-  readonly source: string | null;
   readonly messageCount: number;
   /** The harness bound by the last `harness` entry, its session id, and where it ran. */
   readonly harness: string | null;
@@ -195,36 +191,11 @@ export function derivedTitle(text: string): string | null {
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
-/** An event's prompt as intake renders it (external-events.ts), its source and id captured. */
-const EVENT_PROMPT = /^External event ("(?:[^"\\]|\\.)*") \/ ("(?:[^"\\]|\\.)*")\n/u;
-const EVENT_TITLE_MAX = 90;
-
-export function isEventPrompt(text: string): boolean {
-  return EVENT_PROMPT.test(text);
-}
-
-/** An event prompt's source and id. */
-function eventKey(prompt: string): { source: string; id: string } | null {
-  const match = prompt.match(EVENT_PROMPT);
-  return match ? { source: JSON.parse(match[1] as string) as string, id: JSON.parse(match[2] as string) as string } : null;
-}
-
-/** What a reply found: the first sentence of its last text, the answer rather than the narration before its tools. */
-function eventFinding(content: readonly AssistantPart[]): string | null {
-  const reply = content.findLast((part) => part.type === "text");
-  const line = reply?.type === "text" ? firstLine(reply.text.replace(/\*\*|`/gu, "").replace(/^[\s#>*-]+/u, "")) : null;
-  const sentence = line?.split(/(?<=[.?!])\s/u)[0]?.trim();
-  if (!sentence) return null;
-  return sentence.length > EVENT_TITLE_MAX ? `${sentence.slice(0, EVENT_TITLE_MAX).trimEnd()}…` : sentence;
-}
-
 function logStateAccumulator() {
   let title: string | null = null;
   let preview: string | null = null;
-  let source: string | null = null;
   let derived: string | null = null;
   let ownerWrote = false;
-  let eventUnanswered = false;
   let count = 0;
   let harness: string | null = null;
   let harnessSession: string | null = null;
@@ -240,15 +211,7 @@ function logStateAccumulator() {
         title = entry.title;
         break;
       case "user":
-        if (entry.origin === undefined && isEventPrompt(entry.text)) {
-          // Each event of a thread retitles it, then its reply does (below).
-          ownerWrote = eventUnanswered = true;
-          preview ??= firstLine(entry.text);
-          const key = eventKey(entry.text);
-          // A thread's events share one source; before its reply says more, `unit: bt-agent.service-20261104` titles it.
-          source ??= key?.source ?? null;
-          derived = key ? `${key.source}: ${key.id}` : null;
-        } else if (!ownerWrote && entry.origin === undefined) {
+        if (!ownerWrote && entry.origin === undefined) {
           // The first owner message titles the conversation, even after a `!command` previewed it.
           ownerWrote = true;
           // A message of attachments alone still says what it was.
@@ -259,13 +222,6 @@ function logStateAccumulator() {
       case "assistant":
         // A turn that failed before saying or doing anything left nothing to continue.
         if (entry.harness === harness && entry.content.length > 0) harnessStarted = true;
-        if (eventUnanswered && !entry.error && !entry.interrupted) {
-          const finding = eventFinding(entry.content);
-          if (finding) {
-            derived = finding;
-            eventUnanswered = false;
-          }
-        }
         if (entry.harness === harness && (entry.model ?? entry.effort) !== undefined) {
           ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
         }
@@ -287,7 +243,7 @@ function logStateAccumulator() {
         break;
     }
   };
-  return { append, value: (): LogState => ({ title: title ?? derived, preview, source, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {

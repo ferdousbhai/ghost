@@ -19,7 +19,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -399,8 +399,6 @@ const sessionSummary = (name) => (s) => {
     title: s.title ?? null,
     // As in ghostd, the first owner text logged previews it, a `!command` included.
     preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
-    // The event source that opened an `event-` conversation, as ghostd reports it.
-    source: s.source ?? null,
     harness: s.harness ?? null,
     // What the harness reported it ran on; the mock's scripted turns report none.
     model: null,
@@ -858,36 +856,6 @@ const mockServer = createServer(async (req, res) => {
   if (!validGhostName(name)) return badGhostName(res, name);
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return refuse(res, 404, "not_found", `No ghost named ${JSON.stringify(name)}.`);
-
-  // `ghost event` intake, settled at once: the conversation ghostd would
-  // run for it, holding a canned finding, unread — the bar mark's "found".
-  if (parts[3] === "events" && parts.length === 4 && req.method === "POST") {
-    const body = await readBody(req).catch(() => ({}));
-    const { source, id, instructions, payload } = body ?? {};
-    // external-events.ts parseExternalEvent, field by field in its order.
-    for (const [key, value, max, empty] of [["source", source, 128], ["id", id, 512],
-      ...(body?.thread === undefined ? [] : [["thread", body.thread, 512]]),
-      ["instructions", instructions, 16384], ["payload", payload, 131072, true]]) {
-      if (typeof value !== "string" || value.length > max || (!empty && !value.trim()) || value.includes("\0")) {
-        return refuse(res, 400, "invalid_event", `${key} must be ${empty ? "" : "nonempty "}text of at most ${max} characters, without NUL bytes.`);
-      }
-    }
-    const sessionId = `event-${createHash("sha256").update(JSON.stringify([source, id])).digest("hex")}`;
-    const sessions = ghostSessions(name);
-    if (sessions.has(sessionId)) return json(res, 200, { sessionId, duplicate: true });
-    sessions.set(sessionId, seedSession({
-      id: sessionId,
-      source,
-      title: `${source} ${id}`,
-      harness: turnHarness(name, sessionId, undefined),
-      updatedAt: new Date().toISOString(),
-    }, [
-      { role: "user", content: textParts(`${instructions}\n\n${payload}`) },
-      { role: "assistant", content: textParts(`Mock finding for **${source} ${id}**: the cause, its evidence, and a proposed fix would be here.`) },
-    ]));
-    publishConversationUpdated(name, sessionId, sessions.get(sessionId).updatedAt);
-    return json(res, 202, { sessionId, duplicate: false });
-  }
 
   if (parts[3] === "events" && parts.length === 4 && req.method === "GET") {
     res.writeHead(200, {

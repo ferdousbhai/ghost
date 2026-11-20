@@ -15,11 +15,8 @@
 // reads one way: an outline in green when everything is read (idle), filled
 // amber while a turn runs (working), filled blue when a reply is unread
 // (done), filled red when the ghost is waiting on the owner's answer
-// (blocked), and a dim outline while ghostd is unreachable. One state is
-// Ghost's own: filled magenta while conversations the
-// ghost started on its own (`ghost event`: a crash, a machine alert) hold
-// replies nobody has read (found). The state covers every conversation of the
-// selected ghost, not just the one on screen.
+// (blocked), and a dim outline while ghostd is unreachable. The state covers
+// every conversation of the selected ghost, not just the one on screen.
 import QtQuick
 import "services"
 import "services/Plugin.js" as Plugin
@@ -56,23 +53,17 @@ Item {
         Presence.clickedAt = { screen: screen.name, edge: edge, at: Math.max(0, Math.min(1, at)), time: Date.now() };
     }
 
-    /** Unread conversations the ghost started on its own: event conversations, by their id. */
-    readonly property int findings: Ghostd.sessions.filter(session => session && session.unread
-        && typeof session.id === "string" && session.id.startsWith("event-")).length
-
-    /** herdr's states, most urgent first, with "found" before "done": "offline", "blocked", "working", "found", "done", or "idle". */
+    /** herdr's states, most urgent first: "offline", "blocked", "working", "done", or "idle". */
     readonly property string agentState: {
         if (!Ghostd.reachable) return "offline";
         const sessions = Ghostd.sessions;
         if (sessions.some(session => session && session.question)) return "blocked";
         if (Ghostd.anyStreaming || sessions.some(session => session && session.running)) return "working";
-        if (root.findings > 0) return "found";
         if (sessions.some(session => session && session.unread)) return "done";
         return "idle";
     }
 
     readonly property string status: root.agentState === "blocked" ? "waiting for you"
-        : root.agentState === "found" ? (root.findings === 1 ? "found something" : `found ${root.findings} things`)
         : root.agentState === "done" ? "unread reply"
         : root.agentState === "working"
             ? (Ghostd.working && Ghostd.activity !== "" ? Ghostd.activity.replace(/^(thinking|starting):[^]*/, "$1") : "working")
@@ -94,7 +85,6 @@ Item {
 
     readonly property color markTint: root.agentState === "blocked" ? Theme.danger
         : root.agentState === "working" ? Theme.warn
-        : root.agentState === "found" ? Theme.finding
         : root.agentState === "done" ? Theme.info
         : root.agentState === "idle" ? Theme.ok
         : Theme.foregroundDim
