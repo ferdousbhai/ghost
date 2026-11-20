@@ -63,15 +63,6 @@ import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, isUnreachableMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
-import {
-  listGhostRoutines,
-  readRoutineLogs,
-  controlGhostRoutine,
-  resolveScheduleUnitDirectory,
-  sweepGhostSchedules,
-} from "./schedules.js";
-import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, discardRoutineRecoveries, type RoutineConfig } from "./routine-config.js";
-import type { CommandRunner } from "./command-runner.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
 import { completeLocally, runLocalTurn, type DelegateResult } from "./local-turn.js";
@@ -116,10 +107,6 @@ const MAX_QUESTION_OPTION_LENGTH = 120;
 export interface SessionHostOptions {
   registry: GhostRegistry;
   ownerHome?: string;
-  scheduleUnitDir?: string;
-  scheduleCommandRunner?: CommandRunner;
-  scheduleVerifyRunner?: CommandRunner;
-  scheduleJournalRunner?: CommandRunner;
   logger?: Logger;
   hooks?: GhostHookRunner;
   /** The app's link to a conversation for `turn_end`'s `url`, or null. */
@@ -348,12 +335,7 @@ function validQuestion(text: string, options: readonly string[]): OwnerQuestion 
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
-  private readonly scheduleUnitDir: string;
-  private readonly scheduleCommandRunner: CommandRunner | undefined;
-  private readonly scheduleVerifyRunner: CommandRunner | undefined;
-  private readonly scheduleJournalRunner: CommandRunner | undefined;
   private readonly eventAdmissions = new Map<string, Promise<unknown>>();
-  private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
   private readonly conversationUrl: ((ghost: string, id: string) => Promise<string | null>) | undefined;
@@ -381,10 +363,6 @@ export class SessionHost {
   constructor(options: SessionHostOptions) {
     this.registry = options.registry;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
-    this.scheduleUnitDir = resolve(options.scheduleUnitDir ?? resolveScheduleUnitDirectory(this.ownerHome, {}));
-    this.scheduleCommandRunner = options.scheduleCommandRunner;
-    this.scheduleVerifyRunner = options.scheduleVerifyRunner;
-    this.scheduleJournalRunner = options.scheduleJournalRunner;
     this.logger = options.logger ?? silentLogger;
     this.conversationUrl = options.conversationUrl;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
@@ -1560,31 +1538,6 @@ export class SessionHost {
     };
   }
 
-  private routineOperation<T>(ghost: string, action: (options: { unitDir: string; run?: CommandRunner; verify?: CommandRunner }) => Promise<T>): Promise<T> {
-    return this.withGhost(ghost, () => serializeByKey(this.routineChanges, ghost, async () => {
-      this.registry.get(ghost);
-      return action({ unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner, verify: this.scheduleVerifyRunner });
-    }));
-  }
-
-  routineLogs(ghost: string, slug: string) { return this.routineOperation(ghost, (options) => readRoutineLogs(ghost, slug, options, this.scheduleJournalRunner)); }
-  routines(ghost: string) {
-    return this.routineOperation(ghost, async options => ({
-      routines: await listGhostRoutines(ghost, options), recoveries: await listRoutineRecoveries(ghost, options),
-    }));
-  }
-  controlRoutine(ghost: string, slug: string, action: string) {
-    return this.routineOperation(ghost, (options) => controlGhostRoutine(ghost, slug, action, options));
-  }
-  routineConfig(ghost: string, slug: string) { return this.routineOperation(ghost, (options) => readRoutineConfig(ghost, slug, options)); }
-  saveRoutine(ghost: string, slug: string, config: RoutineConfig) {
-    return this.routineOperation(ghost, (options) => saveRoutineConfig(ghost, slug, config, options));
-  }
-  removeRoutine(ghost: string, slug: string, expected: string) {
-    return this.routineOperation(ghost, (options) => removeRoutine(ghost, slug, expected, options));
-  }
-  restoreRoutine(ghost: string, id: string) { return this.routineOperation(ghost, (options) => restoreRoutine(ghost, id, options)); }
-
   /** Move the conversation's directory, log and all, to recoverable Trash. */
   async deleteSession(ghostName: string, sessionId: string): Promise<void> {
     return this.withGhost(ghostName, async () => {
@@ -1661,21 +1614,6 @@ export class SessionHost {
     }));
   }
 
-  /** Release what the daemon holds under a home that is about to move. */
-  private async quiesce(ghost: Ghost, outcome: "deleted" | "renamed"): Promise<void> {
-    try {
-      await sweepGhostSchedules(ghost.name, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner, logger: this.logger });
-      await discardRoutineRecoveries(ghost.name, { unitDir: this.scheduleUnitDir });
-    } catch (error) {
-      this.logger.error(`could not clean up a ghost's schedules before it was ${outcome}`, { ghost: ghost.name, error: errorMessage(error) });
-      throw new GhostError(
-        "schedule_cleanup_failed",
-        `Could not stop and remove this ghost's schedules. The ghost was not ${outcome}; retry after checking its systemd user timers.`,
-        503,
-      );
-    }
-  }
-
   /** The environment `gio trash` resolves the owner's Trash from. */
   private trashEnv(): NodeJS.ProcessEnv {
     return { ...this.env, HOME: this.ownerHome };
@@ -1685,7 +1623,6 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     await this.reserve([ghost.name], "deleting it");
     try {
-      await this.quiesce(ghost, "deleted");
       await trashPath(ghost.dir, this.trashEnv());
       this.closeConversationEventStreams(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name });
@@ -1703,7 +1640,6 @@ export class SessionHost {
     }
     await this.reserve([ghost.name, nextName], "renaming it");
     try {
-      await this.quiesce(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
       this.closeConversationEventStreams(ghost.name);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });

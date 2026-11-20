@@ -25,21 +25,9 @@ describe("ghost help products", () => {
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"]);
-    expect(isHelpTopic("timers")).toBe(true);
+    expect(HELP_TOPICS).toEqual(["self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"]);
+    expect(isHelpTopic("self")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
-  });
-
-  it("timers: both units in the ghost's namespace, the CLI path, and what Persistent= does", () => {
-    const text = renderHelpTopic("timers", { ...INPUT, ghostName: "aria-ops", unitDir: "/srv/owner config/systemd/user" });
-    expect(text).toContain('"/srv/owner config/systemd/user"');
-    expect(text).toContain("ghost-timer-v1-8-aria-ops-<slug>");
-    expect(text).toContain("[a-z0-9]+(?:-[a-z0-9]+)*");
-    expect(text).toContain("ExecStart=/usr/bin/ghost say --new --ghost aria-ops");
-    expect(text).toContain("`Persistent=true` runs one catch-up");
-    expect(text).toContain("`Persistent=false` drops them");
-    expect(text).toContain("not a timer primitive");
-    expect(text).toContain("systemctl --user list-timers");
   });
 
   it("self: follows repository rules and restarts without a model prompt", () => {
@@ -273,13 +261,11 @@ describe("ghost help topics", () => {
     expect(text).toContain("keep both claims and tell the owner which is uncertain");
     expect(text).toContain("dead end (what was tried, why it failed)");
     expect(text).toContain("dating what you add");
-    expect(text).toContain("only when the owner asks or a timer they approved runs it");
+    expect(text).toContain("Tidying, only when the owner asks, is the one time you read a folder whole");
     expect(text).toContain("Trash with `gio trash`, never `rm`");
     expect(text).toContain("keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`");
     expect(text).toContain("mark a superseded fact with what replaced it and when");
     expect(text).toContain("only an empty note or a duplicate you merged. Then report each changed and trashed path");
-    expect(text).toContain("daily timer (`ghost help timers`, `OnCalendar=daily`)");
-    expect(text).toContain("only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked");
     expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
     expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
     expect(text).toContain("save its steps, commands, and pitfalls as a how-to");

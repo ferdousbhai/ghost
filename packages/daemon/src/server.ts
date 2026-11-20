@@ -815,34 +815,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       await options.host.withGhost(ghost, () => writeCharacter(options.registry.get(ghost).dir, text));
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
-    route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
-      jsonResponse(response, 200, await options.host.routines(ghost));
-    })),
-    route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", async ({ ghost, params, response, body }) => {
-      await body();
-      jsonResponse(response, 200, await options.host.restoreRoutine(ghost, params.recovery ?? ""));
-    }),
-    route("GET", "api/ghosts/:ghost/routines/:slug/logs", ownerOnly(async ({ ghost, params, response }) => {
-      jsonResponse(response, 200, await options.host.routineLogs(ghost, params.slug ?? ""));
-    })),
-    route("GET PUT", "api/ghosts/:ghost/routines/:slug/config", ownerOnly(async ({ ghost, params, method, response, body }) => {
-      const slug = params.slug ?? "";
-      if (method === "GET") jsonResponse(response, 200, await options.host.routineConfig(ghost, slug));
-      else {
-        const input = await body();
-        jsonResponse(response, 200, await options.host.saveRoutine(ghost, slug, {
-          timer: stringField(input, "timer"), service: stringField(input, "service"), revision: stringField(input, "revision"),
-        }));
-      }
-    })),
-    route("DELETE", "api/ghosts/:ghost/routines/:slug", async ({ ghost, params, url, response }) => {
-      jsonResponse(response, 200, await options.host.removeRoutine(ghost, params.slug ?? "", url.searchParams.get("revision") ?? ""));
-    }),
-    route("POST", "api/ghosts/:ghost/routines/:slug/:action", async ({ ghost, params, response, body }) => {
-      await body();
-      await options.host.controlRoutine(ghost, params.slug ?? "", params.action ?? "");
-      jsonResponse(response, 200, { ok: true });
-    }),
     route("GET", "api/ghosts/:ghost/harness", async ({ ghost, response }) => {
       jsonResponse(response, 200, await options.host.listHarnesses(ghost));
     }),

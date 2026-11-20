@@ -29,11 +29,10 @@ export function parseExternalEvent(input: Record<string, unknown>): ExternalEven
 export function eventConversationId(event: Pick<ExternalEvent, "source" | "id">): string {
   return `event-${createHash("sha256").update(JSON.stringify([event.source, event.id])).digest("hex")}`;
 }
-/** The line `ghost event` prints, which `ghost routines logs` reads back out of a routine's journal. */
+/** The line `ghost event` prints. */
 export function acceptedEventLine(ghost: string, sessionId: string, duplicate: boolean): string {
   return `${duplicate ? "Already accepted" : "Accepted"}: ${ghost}/${sessionId}`;
 }
-export const ACCEPTED_EVENT_LINE = /(?:Already accepted|Accepted): ([^/\s]+)\/(event-[a-f0-9]{64})(?:\s|$)/u;
 
 /** What every prompt of this source/id starts with, whatever its data: how a thread finds an event it already holds. */
 export function eventPromptLead(event: Pick<ExternalEvent, "source" | "id">): string {

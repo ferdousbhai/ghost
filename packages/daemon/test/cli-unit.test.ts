@@ -226,14 +226,14 @@ describe("a ghost's own shell addresses its conversation", () => {
 
 describe("ghost help <topic>", () => {
   it("renders a recipe for the ghost the shell belongs to, without a daemon", async () => {
-    const result = await runCli(["help", "timers"], {
+    const result = await runCli(["help", "machine"], {
       env: { GHOSTD_PORT: "7718", GHOST: "casper", XDG_CONFIG_HOME: "/tmp/ghost-cli-unit/xdg", PATH: "/nonexistent" },
       home: "/tmp/ghost-cli-unit",
     });
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("ghost-timer-v1-6-casper-<slug>");
+    expect(result.stdout).toContain("# ghost-timer-v1-6-casper-machine-watch.timer");
     expect(result.stdout).toContain('"/tmp/ghost-cli-unit/xdg/systemd/user"');
-    expect(result.stdout).toContain("ExecStart=/usr/bin/ghost say --new --ghost casper");
+    expect(result.stdout).toContain("/usr/bin/ghost event battery");
   });
 
   it("renders every recipe before any ghost is named", async () => {
@@ -241,7 +241,7 @@ describe("ghost help <topic>", () => {
       const result = await runCli(["help", topic], { env: { PATH: "/nonexistent" }, home: "/tmp/ghost-cli-unit" });
       expect(result.stderr, topic).toBe("");
       expect(result.code, topic).toBe(0);
-      if (topic === "timers") expect(result.stdout).toContain("ghost-timer-v1-<name-length>-<ghost>-<slug>");
+      if (topic === "machine") expect(result.stdout).toContain("ghost-timer-v1-<name-length>-<ghost>-machine-watch");
     }
   });
 
@@ -343,7 +343,7 @@ describe("ghost help", () => {
       throw new Error(`unexpected request to ${String(input)}`);
     };
     for (const argv of [
-      ...["harness", "sessions", "mcp", "character", "rename x", "routines", "event a b"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["harness", "sessions", "mcp", "character", "rename x", "event a b"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
       ...["list", "new x", "use", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
@@ -351,7 +351,7 @@ describe("ghost help", () => {
       expect(result.stderr, argv.join(" ")).toContain("Unknown option");
     }
     // -g still renders a recipe for the named ghost.
-    expect(await runCli(["help", "timers", "-g", "casper"], { env: {}, home: "/tmp/ghost-cli-unit", fetch })).toMatchObject({ code: 0 });
+    expect(await runCli(["help", "machine", "-g", "casper"], { env: {}, home: "/tmp/ghost-cli-unit", fetch })).toMatchObject({ code: 0 });
   });
 
   it("refuses a missing or malformed input file before asking the daemon anything", async () => {
@@ -368,8 +368,6 @@ describe("ghost help", () => {
         [["mcp", "set", "github", missing], "ENOENT"],
         [["hooks", "set", malformed], `${malformed} is not valid JSON`],
         [["character", "set", missing], "ENOENT"],
-        [["routines", "edit", "daily", missing], "ENOENT"],
-        [["routines", "edit", "daily", malformed], `${malformed} is not valid JSON`],
       ] as const) {
         const result = await runCli([...argv], { env: { GHOST: "casper" }, home: dir, fetch });
         expect(result.code, argv.join(" ")).toBe(2);
@@ -401,9 +399,9 @@ describe("ghost help", () => {
   });
 
   it("refuses a topic it does not know, as it refuses an unknown verb", async () => {
-    const result = await runCli(["help", "timer"]);
+    const result = await runCli(["help", "machin"]);
     expect(result).toMatchObject({ code: 2, stdout: "" });
-    expect(result.stderr).toBe("ghost: Unknown help topic: timer\n");
+    expect(result.stderr).toBe("ghost: Unknown help topic: machin\n");
   });
 });
 
@@ -456,13 +454,11 @@ describe("CLI API adaptation", () => {
       const path = new URL(input).pathname;
       if (path === "/api/ghosts") return jsonResponse([]);
       if (path.endsWith("/sessions")) return jsonResponse({ sessions: [] });
-      if (path.endsWith("/routines")) return jsonResponse({ routines: [], recoveries: [] });
       throw new Error(`unexpected request to ${path}`);
     };
     for (const [argv, sentence] of [
       [["list"], "No ghosts.\n"],
       [["sessions"], "No conversations.\n"],
-      [["routines", "recoveries"], "No recovery checkpoints.\n"],
     ] as const) {
       const run = (...flags: string[]) => runCli([...argv, ...flags], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(await run(), argv.join(" ")).toMatchObject({ code: 0, stdout: sentence });

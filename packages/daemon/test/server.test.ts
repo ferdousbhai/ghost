@@ -26,7 +26,7 @@ import {
   type ServerOptions,
 } from "../src/server.js";
 import { TurnBuffer } from "../src/turn-buffer.js";
-import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { SessionHost } from "../src/session-host.js";
 import { SIDECAR_FILENAMES } from "../src/sidecars.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
@@ -57,7 +57,6 @@ async function serve(
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
-    scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
     streamCutBytes?: number;
   } = {},
 ) {
@@ -68,8 +67,6 @@ async function serve(
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleCommandRunner: serverOptions.scheduleCommandRunner
-      ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
     ...onlyHarnesses(harness),
   });
   const mcp = new McpCatalog({
@@ -506,45 +503,6 @@ describe("POST /api/ghosts", () => {
     });
     expect(traversal.status).toBe(400);
     expect(await traversal.json()).toMatchObject({ error: { code: "invalid_name" } });
-  });
-
-  it("blocks old-name reuse until a whole-home rename releases its reservation", async () => {
-    const cleanupEntered = Promise.withResolvers<void>();
-    const resumeCleanup = Promise.withResolvers<void>();
-    let paused = false;
-    const base = await serve(undefined, {
-      scheduleCommandRunner: async () => {
-        if (!paused) {
-          paused = true;
-          cleanupEntered.resolve();
-          await resumeCleanup.promise;
-        }
-        return { stdout: "", stderr: "", code: 0 };
-      },
-    });
-    const renaming = fetch(`${base}/api/ghosts/casper/name`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "wisp" }),
-    });
-    await cleanupEntered.promise;
-
-    const blocked = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "casper" }),
-    });
-    expect(blocked.status).toBe(409);
-    expect(await blocked.json()).toMatchObject({ error: { code: "ghost_busy" } });
-
-    resumeCleanup.resolve();
-    expect((await renaming).status).toBe(200);
-    const reused = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "casper" }),
-    });
-    expect(reused.status).toBe(201);
   });
 });
 
@@ -1131,24 +1089,6 @@ describe("PUT /api/ghosts/:name/name", () => {
       `${base}/api/ghosts/wisp/sessions/conv-1/transcript`,
     )).status).toBe(200);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`)).status).toBe(404);
-  });
-
-  it("returns a retryable 503 without moving the home when schedule cleanup fails", async () => {
-    const base = await serve(undefined, {
-      scheduleCommandRunner: async () => ({
-        stdout: "",
-        stderr: "systemd manager unavailable",
-        code: 1,
-      }),
-    });
-
-    const response = await rename(base, "casper", { name: "wisp" });
-    expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
-      error: { code: "schedule_cleanup_failed" },
-    });
-    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
-    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
   });
 
   it("refuses a bad name, an unknown ghost, and a taken name", async () => {

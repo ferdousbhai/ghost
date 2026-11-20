@@ -1,9 +1,8 @@
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { conversationId, followDefaultGhost, readArgumentFile, readArgumentJson, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { conversationId, followDefaultGhost, readArgumentFile, stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
-import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
 import { acceptedEventLine } from "../external-events.js";
 import type { HarnessChoices } from "../session-host.js";
@@ -129,57 +128,5 @@ export async function eventCommand(ctx: CliContext): Promise<number> {
   const thread = flagString(parsed, "thread");
   const result = await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, ...(thread === undefined ? {} : { thread }), instructions, payload });
   emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
-  return 0;
-}
-
-export async function routinesCommand(ctx: CliContext): Promise<number> {
-  const { parsed } = ctx;
-  const request = <T = unknown>(method: string, path: string, body?: unknown) => ctx.client.request<T>(method, path, body, 120000);
-  const [action = "list", slug, file] = parsed.positionals;
-  const noArg = ["list", "recoveries"].includes(action), oneArg = ["pause", "resume", "run", "config", "logs", "remove", "restore"].includes(action);
-  if ((noArg && slug) || (oneArg && (!slug || file)) || (action === "edit" && (!slug || !file)) || (!noArg && !oneArg && action !== "edit")) {
-    throw new ArgsError("ghost routines takes list, pause/resume/run/config/logs/remove <slug>, edit <slug> <file>, recoveries, or restore <id>");
-  }
-  let config: unknown;
-  if (action === "edit") {
-    if (file === "-") {
-      try { config = JSON.parse(await stdinText(ctx.runtime.stdin)); }
-      catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
-    } else config = readArgumentJson(file as string);
-  }
-  const ghost = await resolveGhost(ctx);
-  const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
-  if (action === "list") {
-    const body = await request<{ routines: Routine[] }>("GET", path);
-    emit(ctx, body, () => ({ quiet: body.routines.map((r) => `${r.slug}\n`).join(""), human: body.routines.length ? body.routines.map((r) =>
-      `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n" }));
-  } else if (action === "logs") {
-    const result = await request<{ text: string; truncated: boolean; sessions: string[] }>("GET", `${target}/logs`);
-    emit(ctx, result, () => ({
-      human: `${result.truncated ? "(older log text truncated)\n" : ""}${result.text}\n${result.sessions.map(id => `Conversation: ghost show -g ${ghost} -s ${id}`).join("\n")}\n`,
-      quiet: `${result.text}\n`,
-    }));
-  } else if (action === "config") {
-    const result = await request("GET", `${target}/config`);
-    emit(ctx, result, () => primary(`${JSON.stringify(result, null, 2)}\n`));
-  } else if (action === "recoveries") {
-    const { recoveries } = await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path), result = { recoveries };
-    emit(ctx, result, () => ({
-      human: result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}\n`).join("") || "No recovery checkpoints.\n",
-      quiet: result.recoveries.map(r => `${r.id}\n`).join(""),
-    }));
-  } else {
-    let result: unknown;
-    if (action === "edit") {
-      result = await request("PUT", `${target}/config`, config);
-    } else if (action === "remove") {
-      const config = await request<{ revision: string }>("GET", `${target}/config`);
-      result = await request("DELETE", `${target}?revision=${encodeURIComponent(config.revision)}`);
-    } else {
-      result = await request("POST", action === "restore" ? `${path}/recoveries/${encodeURIComponent(slug as string)}/restore` : `${target}/${action}`, {});
-    }
-    const recovery = (result as { recovery?: string }).recovery;
-    emit(ctx, result, () => `${action.charAt(0).toUpperCase()}${action.slice(1)} accepted for ${ghost}/${slug}.${recovery ? ` Recovery: ${recovery}.` : ""}\n`);
-  }
   return 0;
 }

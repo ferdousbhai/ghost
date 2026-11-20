@@ -73,7 +73,6 @@ function host(fakes: FakeHarness[], options: Partial<SessionHostOptions> = {}): 
   const sessions = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(...fakes),
     ...options,
   });

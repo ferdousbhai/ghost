@@ -467,9 +467,6 @@ Singleton {
         root.cancelAllTranscriptLoads();
         root.retireRemoteRequests();
         root.retire(root, "hookConfigRequest");
-        root.retire(root, "routinesRequest");
-        root.retire(root, "routineActionRequest");
-        root.retire(root, "routineReadRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
@@ -580,65 +577,6 @@ Singleton {
         else xhr.send(body);
     }
 
-
-    property var routines: []
-    property string routinesError: ""
-    property string routineWriteError: ""
-    property var routinesRequest: null
-    property var routineActionRequest: null
-    property var routineRecoveries: []
-    property var routineReadRequest: null
-    signal routineConfigReady(string ghost, string slug, var config)
-    signal routineMutationFinished(bool ok)
-    signal routineLogsReady(string ghost, var logs)
-    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineReadRequest !== null
-
-    function refreshRoutines(): void {
-        if (root.routinesRequest || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "routinesRequest", "GET", root.ghostPath(ghost) + "/routines", null, function (xhr, body) {
-            if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
-            if (xhr.status === 200 && body && Array.isArray(body.routines) && Array.isArray(body.recoveries)) {
-                root.routines = body.routines;
-                root.routineRecoveries = body.recoveries;
-                root.routinesError = "";
-            } else root.routinesError = root.describeError(xhr, "Read routines");
-        });
-    }
-
-    function fetchRoutineLogs(slug: string): void {
-        if (root.routineReadRequest || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "routineReadRequest", "GET", root.ghostPath(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
-            if (root.activeGhost !== ghost) return;
-            if (xhr.status === 200 && body && typeof body.text === "string" && Array.isArray(body.sessions)) root.routineLogsReady(ghost, body);
-            else root.routinesError = root.describeError(xhr, "Read routine logs");
-        });
-    }
-
-    function fetchRoutineConfig(slug: string): void {
-        if (root.routineReadRequest || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "routineReadRequest", "GET", root.ghostPath(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
-            if (root.activeGhost !== ghost) return;
-            if (xhr.status === 200 && body && typeof body.revision === "string" && typeof body.timer === "string") {
-                root.routinesError = "";
-                root.routineWriteError = "";
-                root.routineConfigReady(ghost, slug, body);
-            } else root.routinesError = root.describeError(xhr, "Read routine sources");
-        });
-    }
-
-    function mutateRoutine(ghost: string, suffix: string, method: string, payload: var): void {
-        if (root.routineActionRequest || ghost === "") return;
-        root.request(root, "routineActionRequest", method, root.ghostPath(ghost) + "/routines/" + suffix, payload, function (xhr, body) {
-            if (root.activeGhost !== ghost) return;
-            const ok = xhr.status === 200;
-            if (ok) { root.routinesError = ""; root.refreshRoutines(); }
-            root.routineWriteError = ok ? "" : root.describeError(xhr, "Change routine");
-            root.routineMutationFinished(ok);
-        });
-    }
 
     function refresh(): void {
         root.fetchHookConfig(false);
@@ -822,12 +760,6 @@ Singleton {
         root.clearCharacter();
         root.clearMcp();
         root.clearHarnessChoice();
-        // Another ghost's routines, checkpoints, and errors never show under
-        // this one; a reply still in flight for it re-reads for the new ghost.
-        root.routines = [];
-        root.routineRecoveries = [];
-        root.routinesError = "";
-        root.routineWriteError = "";
     }
 
     function clearHarnessChoice(): void {

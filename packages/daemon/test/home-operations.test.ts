@@ -22,7 +22,6 @@ function makeSessionHost(fixture: TempGhosts): SessionHost {
   return new SessionHost({
     registry: fixture.registry,
     ownerHome: fixture.ownerHome,
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
   });
 }
 

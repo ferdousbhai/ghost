@@ -81,7 +81,6 @@ function host(script: Reply[], cloud: FakeHarness = fakeHarness(replies("from th
   const sessions = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(cloud),
     env: { ...process.env, HOME: temp.ownerHome, PATH: `${fakeTools(note)}:${dirname(process.execPath)}:/usr/bin` },
     localModel: server.model,

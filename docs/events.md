@@ -47,8 +47,7 @@ its conversation removes the deduplication evidence and permits later replay.
 `gh api --paginate --slurp` to fetch an overlapping window of notifications,
 filters one selected repository with `jq`, and delivers each notification/update
 id with `ghost event`. Test the script manually before scheduling it as a
-systemd oneshot and timer (`ghost help timers`). The service's journal contains
-acceptance receipts; the Routines log view links those event conversations.
+systemd oneshot and timer. The service's journal contains acceptance receipts.
 
 `gh` owns sign-in. GitHub's notifications API requires a classic token with
 `notifications` or `repo` scope; Ghost never reads or stores it. Honor GitHub's
@@ -60,8 +59,8 @@ Fetch or delivery failures fail the systemd service, leaving the cause in its
 journal; the next scheduled run retries unaccepted events in that window.
 Increase the window deliberately after longer downtime, within provider
 retention. Notifications coalesce thread updates and do not guarantee a
-separate delivery of every comment. Pause/resume, edit, run now, logs, removal,
-and recovery use the ordinary Routines controls. Execution requires this
+separate delivery of every comment. The timer is systemd's to pause, edit,
+and remove. Execution requires this
 machine and the owner's session to be running and connected.
 
 ## Slack with an existing bridge
@@ -76,6 +75,6 @@ Use the bridge's authenticated local command execution to call `ghost event`;
 keep the daemon loopback-only. Do not point Slack at ghostd or expose its
 machine-local token publicly. Slack's transport and retention determine replay
 and catch-up; reconnecting alone is not a promise that missed events return.
-Disconnect the bridge or pause/remove its native systemd routine to stop intake.
+Disconnect the bridge or disable its systemd timer to stop intake.
 Ghost bundles no Slack app or bridge and creates no external subscription during
 installation.

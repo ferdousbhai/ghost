@@ -18,8 +18,7 @@ itself serves no page there. Set `remote.apps` to `[]` in the config to refuse
 the app, which leaves no remote client.
 
 Guests, only when `remote.guests` is `"read-only"`, can read conversations and
-cannot act or reach owner-only routes. Routines are managed in the HUD or with
-`ghost routines`. See `CONTRACTS.md` for the wire contract.
+cannot act or reach owner-only routes. See `CONTRACTS.md` for the wire contract.
 
 ## Completion alerts
 

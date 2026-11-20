@@ -42,7 +42,6 @@ function host(options: Partial<SessionHostOptions> & { harnesses: FakeHarness[] 
   return new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(...fakes),
     ...rest,
   });

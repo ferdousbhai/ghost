@@ -44,8 +44,8 @@ or todo API.
 - There is no screen control. Desktop work goes through Omarchy's commands,
   app CLIs, and config files; what none of them reach, the ghost says so.
 - Dictation uses Omarchy's Voxtype. Ghost adds no speech stack.
-- Scheduled work uses systemd timers; background work is a shell command.
-  Ghost has no job table or worker manager.
+- Background work is a shell command. Ghost has no scheduler, job table, or
+  worker manager.
 - Hooks are explicit owner commands. Ghost starts no automatic handoff or
   next-work turns and has no built-in review or training loop.
 - Omarchy owns package updates. Git, journald, systemd, and Trash provide code

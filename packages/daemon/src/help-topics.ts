@@ -1,6 +1,6 @@
 /**
  * The long recipes a ghost needs only when it does one particular thing:
- * writing a timer, editing or restarting itself, handing work to another
+ * editing or restarting itself, handing work to another
  * harness, finding a note, transcribing audio. The prompt's Ghost section
  * indexes them by name and `ghost help <topic>` prints them, so their cost
  * lands on the turn that needs them and not on every turn of every ghost. The
@@ -8,9 +8,9 @@
  * index in step (prompt-policy.test.ts checks).
  */
 import { BROWSER_LINES, productsLines } from "./help-guides.js";
-import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
+import { SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"] as const;
+export const HELP_TOPICS = ["self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "events", "notifications", "browser", "products"] as const;
 type HelpTopic = (typeof HELP_TOPICS)[number];
 
 interface HelpTopicInput {
@@ -32,37 +32,6 @@ function ghost(input: HelpTopicInput): string {
 
 function unitPrefix(input: HelpTopicInput): string {
   return input.ghostName ? scheduleUnitPrefix(input.ghostName) : `${SCHEDULE_UNIT_PREFIX}<name-length>-<ghost>-`;
-}
-
-function timers(input: HelpTopicInput): string[] {
-  const unit = `${unitPrefix(input)}<slug>`;
-  return [
-    "# Timers",
-    "Ghost has no scheduler: clock work is a systemd user timer you write. Timers fire only while the owner is logged in, so promise no check-ins while they are away.",
-    "A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
-    `Write both units in ${JSON.stringify(input.unitDir)}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`${SCHEDULE_SLUG_GRAMMAR}\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
-    "The `ghost` CLI authenticates itself:",
-    "```ini",
-    `# ${unit}.service`,
-    "[Service]",
-    "Type=oneshot",
-    "# Or the turn is SIGTERMed after ~90s, mid-answer.",
-    "TimeoutStartSec=infinity",
-    `ExecStart=${input.cliPath} say --new --ghost ${ghost(input)} "<the prompt>"`,
-    "```",
-    "```ini",
-    `# ${unit}.timer`,
-    "[Timer]",
-    "OnCalendar=Mon..Fri 09:00 America/New_York",
-    "# Catch up after sleep or downtime.",
-    "Persistent=true",
-    "[Install]",
-    "WantedBy=timers.target",
-    "```",
-    "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
-    "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
-    "Inspect with `ghost routines` and `ghost routines logs <slug>`. `pause <slug>` stops future triggers, leaving running work alone; `resume <slug>` restores them (persistent timers may catch up); `run <slug>` queues work without changing the timer. Edit with `ghost routines config <slug> > routine.json`, then `ghost routines edit <slug> routine.json`; edit unit files directly only for arrangements it refuses. `remove <slug>` keeps a checkpoint: `recoveries` lists them and `restore <id>` restores one paused. `ghost help events` connects selected external events with installed CLIs/services.",
-  ];
 }
 
 function self(): string[] {
@@ -124,7 +93,7 @@ function machine(input: HelpTopicInput): string[] {
   return [
     "# Machine heat and strain",
     "Heat and fan noise follow sustained work, almost always CPU; charging, a hot room, or blocked vents leave no process to blame. Look with `omarchy system stats`, `systemd-cgtop -b -n 2 -d 5 --raw --depth=6 --order=cpu` (CPU, % of one core, and memory per app and service), /proc/pressure/memory (time stalled waiting for memory), `sensors -j`, and `df -h`.",
-    "The watch wakes you while the machine heats up, with fans above half speed for three checks in a row, because fans follow chips that many machines expose no sensor for; fast charging also raises them, with no process to blame. It also wakes you near harm: a kernel thermal warning, a temperature within 5 °C of its critical limit or a fan at 95% of its maximum (thermal shutdown), available memory under 5%, swap over 85% used, or memory stalls over 20% (the out-of-memory killer), a filesystem 97% full (failing writes); at most one event per kind an hour. One ghost per machine runs it: when the owner wants machine alerts and `systemctl --user list-unit-files '*-machine-watch.timer'` lists none, save this as ~/.config/ghost/machine-watch.sh and install the timer pair (`ghost help timers` for the rest):",
+    `The watch wakes you while the machine heats up, with fans above half speed for three checks in a row, because fans follow chips that many machines expose no sensor for; fast charging also raises them, with no process to blame. It also wakes you near harm: a kernel thermal warning, a temperature within 5 °C of its critical limit or a fan at 95% of its maximum (thermal shutdown), available memory under 5%, swap over 85% used, or memory stalls over 20% (the out-of-memory killer), a filesystem 97% full (failing writes); at most one event per kind an hour. One ghost per machine runs it: when the owner wants machine alerts and \`systemctl --user list-unit-files '*-machine-watch.timer'\` lists none, save this as ~/.config/ghost/machine-watch.sh and write this timer pair in ${JSON.stringify(input.unitDir)}, then \`systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer\`:`,
     "```bash",
     "#!/bin/bash",
     "# Wakes a ghost while the machine heats up, and near harm: thermal shutdown, the out-of-memory killer, a full disk.",
@@ -219,7 +188,7 @@ function crashes(input: HelpTopicInput): string[] {
   return [
     "# Crashes and failed services",
     "The journal records every crash (systemd-coredump; `coredumpctl list`) and every unit that fails, the owner's and the system's.",
-    "The watch wakes you when a program dumps core (at most once per program an hour) or a service fails (once per service a day: failing services tend to repeat), so you can find out why before the owner asks. One ghost per machine runs it: when the owner wants crashes or failures looked into and `systemctl --user list-unit-files '*-crash-watch.timer'` lists none, save this as ~/.config/ghost/crash-watch.sh and install the timer pair (`ghost help timers` for the rest):",
+    `The watch wakes you when a program dumps core (at most once per program an hour) or a service fails (once per service a day: failing services tend to repeat), so you can find out why before the owner asks. One ghost per machine runs it: when the owner wants crashes or failures looked into and \`systemctl --user list-unit-files '*-crash-watch.timer'\` lists none, save this as ~/.config/ghost/crash-watch.sh and write this timer pair in ${JSON.stringify(input.unitDir)}, then \`systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer\`:`,
     "```bash",
     "#!/bin/bash",
     "# Wakes a ghost when a program dumps core or a service fails.",
@@ -278,7 +247,7 @@ function crashes(input: HelpTopicInput): string[] {
     "```",
     "When woken, find the cause read-only. A crash: `coredumpctl info <pid>`, then Omarchy's diagnose-crash skill (/usr/share/omarchy/default/agents/skills/diagnose-crash/SKILL.md) for a symbolized backtrace. A service: the payload's log lines, `systemctl [--user] status <unit>`, `systemctl [--user] cat <unit>`, and `journalctl [--user] -u <unit> -n 200` for earlier runs.",
     "Earlier failures of the same program or service are above in this conversation; say when this one is the same. Change, file, restart, or send nothing. Open with one sentence saying what you found: it titles the conversation. Then the cause, its evidence, and the fix you propose as exact commands, each with its undo, saying which need root; the owner's yes in this conversation is what applies it. A failure they caused on purpose, or one you cannot explain, gets one short line.",
-    "When the owner says to stop looking into a program or service, add its name to `ignore` in the script; removing it resumes. `ghost routines pause crash-watch` stops the watch.",
+    "When the owner says to stop looking into a program or service, add its name to `ignore` in the script; removing it resumes. `systemctl --user disable --now <unit>.timer` stops the watch.",
   ];
 }
 
@@ -291,8 +260,7 @@ function memory(): string[] {
     "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
     "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the note under `Notes` that covers it, dating what you add; start a note only when none does. A thing to do is one line in `Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD` (indented lines under it are its notes), ticked `- [x]` when done; a new file is a new list.",
-    "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
-    "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked.",
+    "Tidying, only when the owner asks, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
     "A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to.",
   ];
 }
@@ -302,7 +270,7 @@ function events(input: HelpTopicInput): string[] {
     "# External events",
     "Use an installed authenticated CLI/service to select events; Ghost stores no provider credentials and exposes no public webhook. Deliver payloads with `ghost event <source> <stable-id> --instructions '<owner instructions>' --ghost <ghost> -` on stdin.",
     "One source/id means one conversation: replay is acknowledged without another turn, even after failure/restart. Changed data under the same id is refused. Distinct events get separate conversations, unless they name one `--thread <key>` (the subject, e.g. a unit or an issue) to share one, so a ghost sees what it said last time; an event whose thread is busy takes its own. A reply's first sentence titles the conversation. Inspect with `ghost show -s <event-session>`; stop or explicitly continue there. Deleting it also removes deduplication evidence.",
-    "GitHub: gh owns login (`gh auth login`); its notifications API needs notifications or repo scope. Poll with a systemd user timer (`ghost help timers`) and a oneshot Bash script like this; replace the repository and instructions deliberately:",
+    "GitHub: gh owns login (`gh auth login`); its notifications API needs notifications or repo scope. Poll with a systemd user timer and a oneshot Bash script like this; replace the repository and instructions deliberately:",
     "```bash",
     "set -euo pipefail",
     "work=$(mktemp -d)",
@@ -318,7 +286,7 @@ function events(input: HelpTopicInput): string[] {
     'exit "$failed"',
     "```",
     "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: a refused event fails the systemd unit without stopping the rest, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
-    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Pause/remove the source's systemd routine or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See /usr/share/doc/ghost/docs/events.md (docs/events.md in a checkout).",
+    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Disable the source's systemd timer or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See /usr/share/doc/ghost/docs/events.md (docs/events.md in a checkout).",
   ];
 }
 
@@ -356,6 +324,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
+  const lines = { self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, events: () => events(input), notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
   return `${lines.join("\n")}\n`;
 }

@@ -247,7 +247,7 @@ filter on top and the ghost's conversations and places under it.
 | `Ctrl+R` / `Ctrl+P` / `Delete` | rename, pin, or trash the selected conversation |
 | `Esc` | close |
 
-A row grows the card into its view: a conversation, **Routines**,
+A row grows the card into its view: a conversation,
 **Character**, **Hooks**, **MCP servers**, or **Remote access**; `‹` or `Esc`
 goes back to the list. **Ghosts** stays a list of the same size. An empty conversation shows the ghost's
 glyph, its name, and the static line `What's on your mind?`.
@@ -369,54 +369,11 @@ omarchy-restart-shell
 A rescan discovers a plugin; it does not replace QML the running shell has
 already loaded, so an upgraded HUD needs the shell restart.
 
-## Inspect scheduled work
-
-Open **Routines** in the HUD, or run:
-
-```sh
-ghost routines -g casper
-ghost routines pause daily-notes -g casper
-ghost routines resume daily-notes -g casper
-ghost routines run daily-notes -g casper
-```
-
-The view reports the existing systemd user timers, their schedule, next trigger,
-last service start, and latest service result when available. Pause disables
-future triggers and leaves running work alone. Resume enables the timer;
-persistent timers may catch up. Run now queues the service without changing the
-timer and returns before the work finishes. Refresh to inspect its state.
-Guests, when admitted at all, cannot inspect routines or control them.
-
-Use **Edit sources** in the HUD to change the timer and service together.
-Saves verify the units, detect source conflicts, reload systemd, and keep a
-checkpoint. **Remove** also keeps a checkpoint. Recovery
-entries restore the old source paused; resume explicitly when ready.
-
-```sh
-ghost routines config daily-notes -g casper > routine.json
-# Edit timer/service in the JSON, preserving revision.
-ghost routines edit daily-notes routine.json -g casper
-ghost routines remove daily-notes -g casper
-ghost routines recoveries -g casper
-ghost routines restore <recovery-id> -g casper
-ghost routines logs daily-notes -g casper
-```
-
-The editor supports regular same-name unit pairs without drop-ins. Use native
-systemd tools for other arrangements. Checkpoints live under
-`.ghost-routine-recovery/` beside the user units; native file tools can inspect
-or move them to Trash. A stale checkpoint refuses to overwrite later edits.
-The Logs action reads bounded service journal output and links conversations
-named by event acceptance receipts. Journald remains the log store.
-
-Create new units with `ghost help timers`. Connect selected external events
-through `ghost help events` and [the external event guide](events.md).
-
 ## Machine heat and strain
 
 To have a ghost woken before the machine gets into trouble, ask it: "watch my
-machine". It installs a minutely `machine-watch` routine (`ghost help machine`),
-visible and pausable under Routines like any other. The routine stays quiet
+machine". It installs a minutely `machine-watch` systemd user timer (`ghost help machine`).
+The watch stays quiet
 under ordinary load and wakes the ghost when fans stay above half speed, or near
 harm: a kernel thermal warning, a temperature close to its critical limit or fans
 at full speed, memory nearly exhausted, or a disk nearly full. Each becomes an
@@ -428,7 +385,7 @@ touching anything else.
 ## Crashes and failed services
 
 To have a ghost look into crashes and failures before you ask, tell it: "look
-into crashes for me". It installs a minutely `crash-watch` routine (`ghost help
+into crashes for me". It installs a minutely `crash-watch` systemd user timer (`ghost help
 crashes`). Each program that dumps core (at most once an hour) and each
 service that fails, yours or the system's (at most once a day; not an
 unnamed `systemd-run` job), becomes an event conversation; the ghost works out

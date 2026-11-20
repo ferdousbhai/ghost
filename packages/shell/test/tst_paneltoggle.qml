@@ -27,7 +27,7 @@ TestCase {
         const hud = findChild(panel, "hud");
         panel.open('{"section":"home"}');
         verify(hud.listening);
-        hud.showSection("routines");
+        hud.showSection("character");
         verify(!hud.listening);
     }
 
@@ -47,7 +47,7 @@ TestCase {
         Ghostd.activeGhost = "dous";
         Dictation.state = "idle";
         const panel = createTemporaryObject(panelComponent, this);
-        panel.open('{"section":"routines"}');
+        panel.open('{"section":"character"}');
         verify(!findChild(panel, "hud").listening);
     }
 
@@ -86,16 +86,16 @@ TestCase {
         Ghostd.activeGhost = "dous";
         const panel = createTemporaryObject(panelComponent, this);
         const hud = findChild(panel, "hud");
-        panel.open('{"section":"routines"}');
+        panel.open('{"section":"character"}');
         verify(hud.shown);
-        compare(hud.currentSection, "routines");
+        compare(hud.currentSection, "character");
         // Another app has the focus, so the panel does not count as open.
         verify(!panel.opened);
 
         Quickshell.detached = [];
         panel.open("");
         verify(!Presence.composing);
-        compare(hud.currentSection, "routines");
+        compare(hud.currentSection, "character");
         compare(Quickshell.detached, [["hyprctl", "dispatch", 'hl.dsp.focus({ window = "title:^Ghost$" })'],
             ["hyprctl", "dispatch", "focuswindow", "title:^Ghost$"]]);
     }
@@ -131,7 +131,7 @@ TestCase {
     function test_summoningANamedGhostOpensItsPrompt(): void {
         Ghostd.activeGhost = "dous";
         const panel = createTemporaryObject(panelComponent, this);
-        panel.open('{"section":"routines"}');
+        panel.open('{"section":"character"}');
         panel.open('{"ghost":"dous"}');
         verify(Presence.composing);
     }

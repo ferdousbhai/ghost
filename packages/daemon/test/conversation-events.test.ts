@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
@@ -29,8 +28,6 @@ async function setup(streamCutBytes?: number): Promise<string> {
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleUnitDir: join(temp.ownerHome, ".config", "systemd", "user"),
-    scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(harness),
   });
   listening = await startDaemonServer({

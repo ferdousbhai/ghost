@@ -47,7 +47,7 @@ Item {
      * first. Without a section or conversation it opens the presence prompt
      * (the window, while there is no ghost to ask), or brings back the prompt,
      * or with no ghost named the window, left open behind another app;
-     * `{"section":"routines"}` opens the window on a section, and `sessionId`
+     * `{"section":"character"}` opens the window on a section, and `sessionId`
      * with `ghost` opens that conversation there.
      */
     function open(payloadJson: string): void {

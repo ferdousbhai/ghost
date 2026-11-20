@@ -12,7 +12,6 @@ import {
 import {
   characterCommand,
   readCommand,
-  routinesCommand,
   eventCommand,
   remoteCommand,
   renameCommand,
@@ -195,14 +194,6 @@ export const COMMANDS: readonly Command[] = [
     run: readCommand,
   },
   {
-    verb: "routines",
-    usage: "routines [list|pause|resume|run|config|logs|edit|remove|recoveries|restore] [slug|id] [file] [-g <name>] [--json] [-q]",
-    summary: "Inspect and control this ghost's systemd timers.",
-    example: "ghost routines pause daily-notes",
-    positionals: [0, 3],
-    run: routinesCommand,
-  },
-  {
     verb: "event",
     usage: "event <source> <id> --instructions <text> [--thread <key>] [payload|-] [-g <name>] [--json] [-q]",
     summary: "Accept an external event once, into its own conversation or its --thread's.",
@@ -274,7 +265,7 @@ export const COMMANDS: readonly Command[] = [
     verb: "help",
     usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}] [-g <name>]`,
     summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
-    example: "ghost help timers",
+    example: "ghost help memory",
     positionals: [0, 1],
     run: (ctx) => {
       const topic = ctx.parsed.positionals[0];

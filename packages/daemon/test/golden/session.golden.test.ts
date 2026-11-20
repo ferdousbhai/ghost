@@ -61,7 +61,6 @@ describe("golden: session", () => {
       },
       { events: [{ type: "text", block: "a", delta: "That you want short answers." }] },
     ]);
-    const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
     // Whether Recall is installed changes the prompt; pin it present with a
     // stub, so the fixture neither depends on the machine nor misses the line.
     const stubBin = join(temp.ownerHome, ".stub-bin");
@@ -71,8 +70,6 @@ describe("golden: session", () => {
     host = new SessionHost({
       registry: temp.registry,
       ownerHome: temp.ownerHome,
-      scheduleUnitDir,
-      scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
       env: { PATH: `${stubBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: temp.ownerHome },
       ...onlyHarnesses(harness),
     });

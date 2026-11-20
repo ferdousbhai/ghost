@@ -34,14 +34,6 @@ TestCase {
                 session_stop: [{ hooks: [{ type: "command", command: "/home/owner/bin/review", name: "Review", timeout: 5 }] }],
                 turn_end: [{ hooks: [{ type: "command", command: "/home/owner/bin/ntfy", name: "Phone alert", timeout: 15 }] }]
             } } });
-            else if (/\/routines$/.test(url)) xhr.complete(200, { routines: [{
-                ghost: "dous", slug: "daily-notes", unit: "ghost-dous-daily-notes.timer", service: "ghost-dous-daily-notes.service",
-                timerPath: "/home/owner/.config/systemd/user/ghost-dous-daily-notes.timer",
-                servicePath: "/home/owner/.config/systemd/user/ghost-dous-daily-notes.service",
-                description: "Tidy my notes", schedule: "OnCalendar=daily", nextRun: "Thu 2026-10-29 00:00:00 EET",
-                lastRun: "Wed 2026-10-28 00:00:03 EET", enabled: "enabled", active: "active",
-                command: "/usr/bin/ghost say --new --ghost dous \"Tidy my notes\"", result: "success", serviceActive: "inactive"
-            }], recoveries: [] });
             else if (/\/character$/.test(url)) xhr.complete(200, { body: "# Dous\n\nYou are Dous, the owner's ghost. Short answers, plain words.\n", limit: 16000 });
             else if (/\/harness$/.test(url)) xhr.complete(200, { harnesses: [
                 { id: "claude", usage: { status: null, stale: false, updatedAt: null, windows: [
@@ -156,7 +148,7 @@ TestCase {
     function test_bubbles(): void {
         snap(bubbleC, { x: 20, y: 20, speaker: "user", body: "What's on my plate today?" }, "bubble-user");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant",
-            body: "Two things are open:\n\n- Ship the launcher redesign\n- Weekly review routine\n\nRun `ghost routines` to see the timers, or open [the notes](https://example.com/notes)." }, "bubble-assistant");
+            body: "Two things are open:\n\n- Ship the launcher redesign\n- Weekly review routine\n\nRun `ghost sessions` to list them, or open [the notes](https://example.com/notes)." }, "bubble-assistant");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant",
             body: "Here is the timer:\n\n```ini\n[Timer]\nOnCalendar=Fri 16:00\nPersistent=true\n```" }, "bubble-code");
         snap(bubbleC, { x: 20, y: 20, speaker: "assistant", body: "",
@@ -181,15 +173,12 @@ TestCase {
         snap(headerC, { x: 20, y: 20 }, "hud-header");
     }
 
-    Component { id: routinesC; Routines { width: 900; height: 520 } }
     Component { id: hooksC; HooksBrowser { width: 900; height: 520 } }
     Component { id: mcpC; McpBrowser { width: 900; height: 520 } }
     // Tall enough to show the app card under the access card.
     Component { id: remoteC; RemoteAccess { width: 900; height: 1040 } }
     Component { id: characterC; CharacterPane { width: 900; height: 520 } }
     function test_panes(): void {
-        Ghostd.refreshRoutines();
-        snap(routinesC, { x: 20, y: 20 }, "pane-routines");
         snap(hooksC, { x: 20, y: 20 }, "pane-hooks");
         snap(mcpC, { x: 20, y: 20 }, "pane-mcp");
         Ghostd.refreshRemote();
@@ -208,8 +197,6 @@ TestCase {
         const hud = hudC.createObject(stage, { x: 0, y: 0 });
         hud.open();
         tc.shot(hud, "hud-home");
-        hud.showSection("routines");
-        tc.shot(hud, "hud-routines");
         Ghostd.fetchCharacter(true);
         hud.showSection("character");
         tc.shot(hud, "hud-character");
@@ -256,15 +243,6 @@ TestCase {
         hooks.beginDraft();
         tc.shot(hooks, "pane-hooks-new");
         hooks.destroy();
-        wait(30);
-
-        Ghostd.refreshRoutines();
-        const routines = routinesC.createObject(stage, { x: 20, y: 20 });
-        tc.answer();
-        Ghostd.routineConfigReady("dous", "daily-notes", { timer: "[Timer]\nOnCalendar=daily\nPersistent=true\n",
-            service: "[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost dous \"Tidy my notes\"\n", revision: "r1" });
-        tc.shot(routines, "pane-routines-editing");
-        routines.destroy();
         wait(30);
 
         const sessions = Ghostd.sessions;

@@ -23,9 +23,6 @@ import { DAEMON_VERSION } from "./version.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
-import {
-  resolveScheduleUnitDirectory,
-} from "./schedules.js";
 
 const USAGE = `ghostd — your ghost, on your machine
 
@@ -201,7 +198,6 @@ async function serveDaemon(
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
-  const scheduleUnitDir = resolveScheduleUnitDirectory(ownerHome);
   // What is running: the source checkout behind this process, if it has one.
   const runningSource = resolveRunningSource(DAEMON_VERSION, fileURLToPath(import.meta.url));
   registry.ensureRoot();
@@ -210,7 +206,6 @@ async function serveDaemon(
   const host = new SessionHost({
     registry,
     ownerHome,
-    scheduleUnitDir,
     conversationUrl: (ghost, id) => remoteServe.conversationUrl(ghost, id),
     logger,
     hooks,

@@ -42,7 +42,7 @@ Durable state has three scopes:
   folder of the owner's XDG Documents directory, and tasks in its `Reminders`
   folder, which every ghost reads and writes ([Character and
   notes](#character-and-notes)).
-- **External:** browser downloads, screenshots, systemd user timers, and
+- **External:** browser downloads, screenshots, and
   each harness's credentials, settings, and own session store stay in the
   machine facility that owns them.
 
@@ -63,64 +63,6 @@ There is no Ghost plan mode, todo store, or plan/todo API. Harness native
 planning may exist, but durable owner-visible plans and tasks belong in the
 owner's documents. Background work is the shell's: Ghost keeps no job table
 (see "Background work and hooks").
-
-### Routine inspection and controls
-
-Systemd remains the only schedule store. `ghost routines`
-and the HUD inspect persistent timers in the configured
-systemd user unit directory, using the exact owning ghost prefix. They expose
-systemd's calendar/monotonic expressions, next trigger and last service start, enablement,
-active state, service command, and latest service result; empty properties are
-unknown, not inferred successes. The daemon projects this native state because the HUD cannot
-inspect the systemd user manager directly; no scheduler or job database is added.
-`GET /api/ghosts/:ghost/routines` returns `{ routines, recoveries }`; each routine row has `ghost`,
-`slug`, `unit`, `service`, `timerPath`, `servicePath`, `description`, `schedule`,
-`nextRun`, `lastRun`, `enabled`, `active`, `command`, `result`, and `serviceActive`
-(strings; absent next trigger/last service start are null). Owner-only, including reads because
-commands and paths are private. Service command/state/result are unknown and
-`servicePath` is empty for a timer targeting a different service. Result stays
-unknown until systemd reports a service start. `POST …/routines/:slug/:action`, with action
-`pause`, `resume`, or `run`, returns `{ ok: true }` after systemd accepts it.
-Pause disables and stops future timer activations, leaving an already running
-service alone; resume enables and starts the timer, including systemd's normal
-persistent catch-up. Run queues the timer's service without changing enablement
-and returns without waiting for the work. A timer targeting anything except its
-same-name owned service is inspectable but run is refused. Invalid slugs/actions
-are 400, missing timers 404, and systemd failures 503. Ghost lifecycle leases
-cover inspection/control so rename/delete waits for accepted operations.
-`GET …/routines/:slug/config` returns `{ timer, service, revision }`, the two
-UTF-8 unit sources (at most 128 KiB each) and their SHA-256 revision (service is null if
-missing). `PUT` accepts the same
-shape with both sources nonempty, verifies them with systemd-analyze, checks the revision, stops
-the timer (enablement unchanged) while replacing files, reloads systemd, and restores its prior active
-state. Only regular, same-name unit pairs without drop-ins may be edited here;
-native tools handle other arrangements. Invalid source is 400, stale source is
-409. `DELETE …/routines/:slug?revision=…` disables/stops the timer and removes
-its pair, leaving any running service alone. Both mutations checkpoint the
-previous source under the private `.ghost-routine-recovery/` directory beside
-the units and return `{ recovery }`. No mutation discards an earlier checkpoint;
-rename/delete discards the ghost's checkpoints with its units.
-The effective reloaded target and drop-ins are checked before restarting;
-no partial INI parser substitutes for systemd. Source is rechecked after stop,
-and failures before writes leave source untouched. Failures roll back changed source and timer state, unless a native save replaced the written
-source; a rollback failure or a kept native save names the retained checkpoint. The `recoveries` of `GET …/routines` give each checkpoint's id, slug,
-createdAt, reason, and `applicable` (the current source matches its expected revision); an unreadable checkpoint is left out, and an unreadable current
-source is not applicable. `POST …/routines/recoveries/:recovery/restore` restores a
-checkpoint only against that expected revision, without re-verifying the bytes it
-puts back, checkpoints the replaced source,
-and leaves the restored timer paused. Restore never silently re-enables work.
-CLI `routines config <slug>` prints editable JSON; `routines edit <slug> <file>`
-saves it, `remove <slug>` reads/checks the current revision before deletion,
-`recoveries` lists checkpoints, and `restore <id>` restores one. The HUD and
-`ghost routines` use the same routes and conflict handling. Changes, controls,
-and source reads are serialized per ghost. `GET …/routines/:slug/logs` and
-`routines logs <slug>` return the last 100
-service journal lines, capped at 64000 characters (`{ text, truncated, sessions }`).
-`sessions` lists event conversation IDs named by CLI acceptance receipts in
-those lines; clients link them to ordinary conversations. Other services have
-no inferred conversation link. These reads are owner-only; journald remains
-the log store. Creation remains native file/systemd work; Ghost owns no
-scheduler or job history.
 
 ### External events
 
@@ -170,7 +112,7 @@ unit (journald records it); repeating the window retries unaccepted events and
 suppresses accepted ones. The owner sets catch-up duration and filters. Slack
 requires an existing authenticated Events API/Socket Mode bridge forwarding its
 stable event_id; Ghost supplies no Slack app, tokens, subscription, or bridge.
-Disconnecting the bridge or pausing/removing its systemd routine stops intake;
+Disconnecting the bridge or disabling its systemd timer stops intake;
 reconnecting may replay provider history according to that provider's retention.
 No Ghost endpoint needs public exposure. See `docs/events.md`.
 
@@ -179,7 +121,7 @@ No Ghost endpoint needs public exposure. See `docs/events.md`.
 Ghost adds no machine-monitoring code: a ghost reads strain with installed
 tools (`omarchy system stats`, batch `systemd-cgtop`, `/proc/pressure`,
 `sensors -j`, `df`), and `ghost help machine` gives the opt-in watch, a minutely
-routine with slug `machine-watch` running a Bash script the ghost saves. It wakes
+systemd user timer, `ghost-timer-v1-<name-length>-<ghost>-machine-watch`, running a Bash script the ghost saves. It wakes
 the ghost while the machine heats up, with fans above half speed for three
 checks in a row, and near harm, never for ordinary load: a kernel thermal warning,
 a temperature within 5 °C of its sensor's critical limit or a fan at 95% of its
@@ -194,8 +136,8 @@ as fast charging stays hourly; exit 6 (an id already accepted with older data) c
 The payload is the tools' own output, naming the busiest units and processes and the agents behind them, from the
 environment a detached job keeps from its agent, including processes above half
 a core earlier in this heating, since a burst may exit before the ghost looks.
-One ghost per machine installs it, only when the owner asks; the routines view
-pauses, inspects, and removes it. The recipe has the ghost fix only its own or
+One ghost per machine installs it, only when the owner asks; `systemctl --user
+disable --now` stops it. The recipe has the ghost fix only its own or
 plainly broken units, least drastic first (CPU weight, freeze, stop), instruct
 an agent behind the load through the agent's own channel, and ask the owner about
 everything else. Low battery reaches a ghost through Omarchy's
@@ -205,8 +147,8 @@ everything else. Low battery reaches a ghost through Omarchy's
 
 Ghost adds no crash- or failure-monitoring code either: the journal records
 every core dump (systemd-coredump) and every failed unit, and `ghost help
-crashes` gives the opt-in watch, a minutely routine with slug `crash-watch`
-running a Bash script the ghost saves. It reads both kinds of entry after a
+crashes` gives the opt-in watch, a minutely systemd user timer,
+`ghost-timer-v1-<name-length>-<ghost>-crash-watch`, running a Bash script the ghost saves. It reads both kinds of entry after a
 journal cursor kept in the service's `StateDirectory=ghost/crash-watch` (a
 leaf, so systemd never changes the mode of `ghost/`, which holds the token),
 advanced only past delivered events and started at the journal's end, so what
@@ -222,8 +164,8 @@ ad-hoc job; one named with `--unit`, or its core dump, is reported), and
 the watch's own unit are skipped; times are UTC; exit 6 counts as delivered.
 A crash's payload is its program, pid, uid, signal, executable, unit, and
 stack trace; a service's is its result and that run's last 40 log lines. One
-ghost per machine installs it, only when the owner asks; the routines view
-pauses, inspects, and removes it, and an `ignore` regex in the script excludes
+ghost per machine installs it, only when the owner asks; `systemctl --user
+disable --now` stops it, and an `ignore` regex in the script excludes
 programs and services the owner names. The woken ghost diagnoses read-only and
 proposes a fix with its undo; it changes, files, restarts, or sends nothing
 until the owner says yes in that conversation.
@@ -275,7 +217,7 @@ refuse new work until they finish, and move the whole home on the same
 filesystem.
 Deletion is `gio trash` into freedesktop Trash, a rename that refuses rather
 than copies; Ghost never recursively removes a home. Machine credentials, owner
-documents, screenshots, downloads, and timers are not moved with it.
+documents, screenshots, and downloads are not moved with it.
 The lifecycle implementation is in
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
@@ -306,7 +248,7 @@ there. A harness writes them with its native file tools; the local model with
 by every ghost and readable by the owner
 ([Product boundary](#product-boundary) says what may index them).
 Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
-owner asks for or schedules as a timer, following `ghost help memory`; Ghost
+owner asks for, following `ghost help memory`; Ghost
 runs no memory maintenance of its own.
 
 ### Ghost-home resources
@@ -365,10 +307,6 @@ directory to recoverable Trash in one rename; there is no fork.
   Ghost keeps no browser screenshot retention manager.
 - Browser downloads belong to agent-browser and Chromium; the Bash caller
   chooses the owner's requested destination or XDG Downloads directory.
-- Scheduled work is a systemd user `.timer`/`.service` pair named
-  `ghost-timer-v1-<name-length>-<ghost>-<slug>`. Ghost prompts author persistent
-  units; rename/delete retire units owned by that prefix. See
-  [`schedules.ts`](packages/daemon/src/schedules.ts).
 - Harness credentials are the harness's own, signed in by the owner with that
   harness; a turn, and a hook's completion, spends the account Omarchy marks
   active for claude, codex, and grok (`omarchy-agent-account-home`). An MCP server's headers or env are
@@ -389,7 +327,6 @@ ghost home directory, which moves as one unit.
 | Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | not removed | unchanged | unchanged | preserved |
 | `settings.yml`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved or renamed | not removed | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
@@ -406,7 +343,7 @@ ls /etc/snapper/configs
 
 Where `/home` is a separate subvolume that snapper does not cover, a rollback of
 `/` restores the packaged install and system configuration and leaves every
-ghost home, the persistent timer units, and the ghost's own checkout exactly
+ghost home and the ghost's own checkout exactly
 as they were. Nothing in this table is a
 backup: Trash and snapper are undo, not retention.
 
@@ -587,7 +524,7 @@ its continuations.
 conversation would start on, or from ghostd's loaded local model where a turn
 would run on it, never then a cloud one.
 Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
-schedules, and explicit owner command hooks initiate work.
+external events, and explicit owner command hooks initiate work.
 
 ## Daemon HTTP API
 
@@ -629,7 +566,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
-| `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | [Routine inspection and controls](#routine-inspection-and-controls); the GET is owner-only. |
 | `POST /api/ghosts/:ghost/events` | [External event intake](#external-events); the GET event stream remains conversation invalidations. |
 | `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search, pictures }] }`: the [sources](#sources); `pictures` says its items have one each. |
 | `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
@@ -1040,10 +976,7 @@ Recall's coverage is its own configuration.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute
-  for undo. The one exception: a ghost's rename or delete removes its timer
-  units and routine checkpoints outright, because a timer that outlived its
-  ghost would fire for a name that is gone or belongs to a later ghost;
-  restoring the home from Trash restores the ghost, not its routines.
+  for undo.
 - Self-restart is a systemd handoff. The daemon never restarts itself in
   process, and there is no guardian process and no rebuild-and-restart tool. A
   ghost restarts ghostd by scheduling `systemctl --user restart ghostd.service`

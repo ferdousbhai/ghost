@@ -3,7 +3,7 @@
  * Shell demo backend. State lives in memory, except what the HUD reads back
  * as files: ghost homes (a temporary root it removes on exit, unless
  * GHOSTS_ROOT names one, in which case it seeds and rewrites no
- * character.md), routine units under that root, and copied attachments.
+ * character.md), and copied attachments.
  * Authentication is intentionally not enforced here; auth behavior is tested
  * against the real daemon.
  *
@@ -24,10 +24,6 @@ import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-const mockRoutines = new Map();
-const mockRoutineConfigs = new Map();
-const mockRoutineRecoveries = new Map();
-const routineRevision = (config) => createHash("sha256").update(JSON.stringify([config?.timer ?? null, config?.service ?? null])).digest("hex");
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name, fallback) => {
@@ -862,107 +858,6 @@ const mockServer = createServer(async (req, res) => {
   if (!validGhostName(name)) return badGhostName(res, name);
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return refuse(res, 404, "not_found", `No ghost named ${JSON.stringify(name)}.`);
-
-  if (parts[3] === "routines") {
-    const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
-    const timerPath = join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath = join(GHOSTS_ROOT, "units", `${unit}.service`);
-    /** The unit files on disk follow the stored sources; none when the routine is removed. */
-    const writeUnits = (sources) => {
-      if (!sources) {
-        rmSync(timerPath, { force: true }); rmSync(servicePath, { force: true });
-        return;
-      }
-      mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
-      writeFileSync(timerPath, sources.timer); writeFileSync(servicePath, sources.service);
-    };
-    if (!mockRoutines.has(name)) {
-      const execStart = `/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"`;
-      const routine = {
-        ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
-        timerPath, servicePath, description: "Daily notes", nextRun: "Fri 2026-10-23 00:00:00 EEST",
-        lastRun: null, enabled: "enabled", active: "active", result: "", serviceActive: "inactive",
-      };
-      const config = { timer: "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n",
-        service: `[Service]\nType=oneshot\nExecStart=${execStart}\n` };
-      writeUnits(config);
-      mockRoutines.set(name, routine); mockRoutineConfigs.set(name, config);
-    }
-    const routine = mockRoutines.get(name), config = mockRoutineConfigs.get(name);
-    const checkpoint = (next, reason) => {
-      const id = randomUUID();
-      mockRoutineRecoveries.set(id, { ghost: name, slug: "daily-notes", createdAt: new Date().toISOString(), reason,
-        config: config ? { ...config } : null, routine: routine ? { ...routine } : null, expectedRevision: routineRevision(next) });
-      return id;
-    };
-    // routine-config.ts's refusals, in its order.
-    const conflict = () => refuse(res, 409, "routine_conflict", "The unit sources changed. Reload before saving or restoring.");
-    const noTimer = () => refuse(res, 404, "not_found", "No such routine timer.");
-    if (parts.length === 7 && parts[4] === "recoveries" && parts[6] === "restore" && req.method === "POST") {
-      await readBody(req);
-      if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(parts[5])) return refuse(res, 400, "invalid_recovery", "Invalid recovery id.");
-      const saved = mockRoutineRecoveries.get(parts[5]);
-      if (!saved) return refuse(res, 404, "not_found", "No such routine checkpoint.");
-      if (saved.ghost !== name) return refuse(res, 404, "not_found", "No such routine checkpoint for this ghost.");
-      if (saved.expectedRevision !== routineRevision(config)) return conflict();
-      const recovery = checkpoint(saved.config, "restore");
-      mockRoutineConfigs.set(name, saved.config);
-      mockRoutines.set(name, saved.routine ? { ...saved.routine, enabled: "disabled", active: "inactive", nextRun: null } : null);
-      writeUnits(saved.config);
-      return json(res, 200, { recovery });
-    }
-    if (parts.length === 4 && req.method === "GET") return json(res, 200, {
-      // As ghostd reads them from the units: the schedule and command are the sources'.
-      routines: routine ? [{ ...routine, schedule: config.timer.match(/^OnCalendar=.*$/m)?.[0] ?? "Schedule unavailable",
-        command: config.service.match(/^ExecStart=(.*)$/m)?.[1] ?? "" }] : [], recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
-        id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
-      })),
-    });
-    if (parts.length < 5 || parts.length > 6) return refuse(res, 404, "not_found", "Not found.");
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(parts[4]) || parts[4].length > 64) return refuse(res, 400, "invalid_routine", "Invalid routine slug.");
-    // The mock holds one routine; any other slug has no units.
-    const exists = routine && parts[4] === routine.slug;
-    if (parts.length === 6 && parts[5] === "logs" && req.method === "GET") {
-      if (!exists) return refuse(res, 404, "not_found", "No such routine.");
-      return json(res, 200, { text: "Mock routine journal: completed successfully.", truncated: false, sessions: [] });
-    }
-    if (parts.length === 6 && parts[5] === "config" && req.method === "GET") {
-      return exists ? json(res, 200, { ...config, revision: routineRevision(config) }) : noTimer();
-    }
-    if (parts.length === 6 && parts[5] === "config" && req.method === "PUT") {
-      const input = await readBody(req).catch(() => ({}));
-      for (const key of ["timer", "service", "revision"]) if (typeof input?.[key] !== "string") return notString(res, key);
-      if (!exists) return noTimer();
-      if (input.revision !== routineRevision(config)) return conflict();
-      if (!input.timer.trim() || !input.service.trim()) {
-        return refuse(res, 400, "invalid_routine", "Each unit source must be nonempty UTF-8 text of at most 128 KiB without NUL bytes.");
-      }
-      const next = { timer: input.timer, service: input.service }, recovery = checkpoint(next, "edit");
-      mockRoutineConfigs.set(name, next);
-      writeUnits(next);
-      return json(res, 200, { recovery });
-    }
-    if (parts.length === 5 && req.method === "DELETE") {
-      if (!exists) return noTimer();
-      if (url.searchParams.get("revision") !== routineRevision(config)) return conflict();
-      const recovery = checkpoint(null, "remove");
-      mockRoutineConfigs.set(name, null); mockRoutines.set(name, null);
-      writeUnits(null);
-      return json(res, 200, { recovery });
-    }
-    const action = parts[5];
-    if (parts.length === 6 && req.method === "POST") {
-      await readBody(req);
-      if (!["pause", "resume", "run"].includes(action)) return refuse(res, 400, "invalid_routine", "Use pause, resume, or run.");
-      if (!exists) return refuse(res, 404, "not_found", "No such routine for this ghost.");
-      if (action === "pause") { routine.enabled = "disabled"; routine.active = "inactive"; routine.nextRun = null; }
-      if (action === "resume") { routine.enabled = "enabled"; routine.active = "active"; routine.nextRun = "Fri 2026-10-23 00:00:00 EEST"; }
-      if (action === "run") { routine.serviceActive = "activating"; routine.lastRun = new Date().toISOString(); }
-      return json(res, 200, { ok: true });
-    }
-    // ghostd answers 405 where the path has a route for another method; the
-    // mock does not track which, and calls both not found.
-    return refuse(res, 404, "not_found", "Not found.");
-  }
 
   // `ghost event` intake, settled at once: the conversation ghostd would
   // run for it, holding a canned finding, unread — the bar mark's "found".

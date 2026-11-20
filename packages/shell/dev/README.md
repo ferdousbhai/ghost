@@ -114,8 +114,7 @@ that has already exited and the preview keeps running.
   nested monitor's size from its corner, the desktop under the theme's menu
   scrim, and the launcher card a fifth of the way down: a
   filter (`Search, or ask casper…`), the mock's conversations with ages and
-  unread dots, then casper's places (Routines,
-  Character, Ghosts, Hooks, MCP servers, Remote access). Typing
+  unread dots, then casper's places (Character, Ghosts, Hooks, MCP servers, Remote access). Typing
   filters; Enter grows the card into the chosen view with a `‹` back to the
   list; Enter on a filter nothing matches asks casper. Ghosts keeps the card's
   size: casper (current, amber) above moaning-myrtle, and a typed free name
@@ -192,8 +191,8 @@ Use this preview for changes involving focus, layout, or notifications;
 mocked unit tests alone cannot prove those behaviors. Check the
 surfaces affected by the change:
 
-- Chat in the HUD and the presence card mark replies read; the launcher,
-  Routines, and a closed HUD preserve unread state.
+- Chat in the HUD and the presence card mark replies read; the launcher
+  and a closed HUD preserve unread state.
 - Notifications replace their prior server ID and open the originating
   conversation when clicked.
 - The bar widget fills its host slot; hover, exit, and clicks use host APIs.
