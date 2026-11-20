@@ -10,8 +10,8 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 ## Glossary
 
-- **owner** — the one person this machine and its ghosts belong to. There is no other user role.
-- **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
+- **owner** — the one person this machine and its ghost belong to. There is no other user role.
+- **ghost** — the owner's one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
 - **daemon** (`ghostd`) — the HTTP API that owns conversations; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
 

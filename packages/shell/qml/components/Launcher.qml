@@ -5,15 +5,10 @@ pragma ComponentBehavior: Bound
 // so Ghost reads as part of the machine rather than an app on it.
 //
 // Typing filters; Up/Down move; Enter opens the row, or asks the ghost what
-// was typed when nothing matches, and unfolds or folds an event source's row. Tab
-// moves to the next ghost. On a
+// was typed when nothing matches. On a
 // conversation, Ctrl+R renames it where it is read, Ctrl+P pins it, and
 // Delete (with the cursor at the end of the filter) asks to trash it. Esc is
 // the HUD's: it closes.
-//
-// The "ghosts" mode is the same card over the ghosts: Enter makes one the
-// HUD's, a free valid name typed into the filter offers to summon it, Ctrl+R
-// renames and Delete asks to banish. Esc, or the ‹, goes back.
 import QtQuick
 import "../services"
 import "Launcher.js" as Launcher
@@ -21,23 +16,15 @@ import "Launcher.js" as Launcher
 FocusScope {
     id: root
 
-    /** A row was chosen, or Ctrl+N: { kind: "new" | "ask" | "session" | "place" | "ghost" | "summon", id, title, detail }. */
+    /** A row was chosen, or Ctrl+N: { kind: "new" | "ask" | "session" | "place", id, title, detail }. */
     signal activated(var row)
     signal deleteRequested(string sessionId, string title)
-    signal banishRequested(string name)
-    signal backRequested()
     signal closeRequested()
-
-    /** "home" (conversations and places) or "ghosts". */
-    property string mode: "home"
-    readonly property bool ghostMode: root.mode === "ghosts"
 
     property real maxListHeight: 480
     property real now: Date.now()
 
-    readonly property var rows: root.ghostMode
-        ? Launcher.ghostRows(filter.text, Ghostd.ghosts, Ghostd.activeGhost)
-        : Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount)
+    readonly property var rows: Launcher.rows(filter.text, Ghostd.sessions, Ghostd.activeGhost, root.now, Ghostd.activeHookCount)
     property int selected: Launcher.first(root.rows)
     readonly property var current: root.selected >= 0 && root.selected < root.rows.length
         ? root.rows[root.selected] : null
@@ -48,14 +35,10 @@ FocusScope {
         commit: (id, draft) => Ghostd.renameConversation(id, draft)
         onFinished: filter.forceActiveFocus()
     }
-    readonly property RenameSession ghostRename: RenameSession {
-        commit: (from, draft) => Ghostd.renameGhost(from, draft)
-        onFinished: filter.forceActiveFocus()
-    }
 
     /** The rename a row's name goes through, or null for rows without one. */
     function renameFor(row: var): var {
-        return row.kind === "session" ? root.rename : row.kind === "ghost" ? root.ghostRename : null;
+        return row.kind === "session" ? root.rename : null;
     }
 
     readonly property int rowHeight: Theme.controlHeight + Theme.gap * 2
@@ -69,13 +52,11 @@ FocusScope {
     implicitHeight: header.height + 1 + list.height + footer.height + Theme.gap * 2
 
     onRowsChanged: root.selected = Launcher.first(root.rows)
-    onModeChanged: root.reset()
 
     /** Fresh on every open: an empty filter, the newest conversations, the keyboard here. */
     function reset(): void {
         root.askAfterDictation = false;
         filter.text = "";
-        Ghostd.ghostRenameError = "";
         root.now = Date.now();
         root.selected = Launcher.first(root.rows);
         list.positionViewAtBeginning();
@@ -141,26 +122,12 @@ FocusScope {
         width: parent.width
         height: Theme.controlHeight + Theme.pad * 1.2
 
-        // The way back from the ghosts to the conversations.
-        GlyphButton {
-            id: back
-            visible: root.ghostMode
-            anchors.left: parent.left
-            anchors.leftMargin: Theme.pad
-            anchors.verticalCenter: parent.verticalCenter
-            text: "‹"
-            name: "Back to the list"
-            restColor: Theme.foregroundDim
-            font.pixelSize: Theme.fontSizeHeading
-            onClicked: root.backRequested()
-        }
-
         TextInput {
             id: filter
             objectName: "launcherFilter"
-            anchors.left: back.visible ? back.right : parent.left
-            anchors.leftMargin: back.visible ? Theme.gap * 1.5 : Theme.pad
-            anchors.right: mic.visible ? mic.left : ghostChip.visible ? ghostChip.left : closeMark.left
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.pad
+            anchors.right: mic.visible ? mic.left : ghostChip.left
             anchors.rightMargin: Theme.gap
             anchors.verticalCenter: parent.verticalCenter
             focus: true
@@ -175,11 +142,10 @@ FocusScope {
                 anchors.fill: parent
                 visible: filter.text === ""
                 verticalAlignment: Text.AlignVCenter
-                text: root.ghostMode ? "Find a ghost, or name a new one…"
-                    : root.askAfterDictation ? "Transcribing…"
+                text: root.askAfterDictation ? "Transcribing…"
                     : Dictation.recording ? "Listening… or type"
                     : Ghostd.activeGhost === "" ? "Search" : "Search, or ask " + Ghostd.activeGhost + "…"
-                color: !root.ghostMode && Dictation.recording ? Theme.ghostAmber : Theme.foregroundFaint
+                color: Dictation.recording ? Theme.ghostAmber : Theme.foregroundFaint
                 font: filter.font
             }
 
@@ -187,14 +153,13 @@ FocusScope {
                 const ctrl = (event.modifiers & Qt.ControlModifier) !== 0;
                 if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_J)) root.move(1);
                 else if (event.key === Qt.Key_Up || (ctrl && event.key === Qt.Key_K)) root.move(-1);
-                else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && Dictation.recording && !root.ghostMode) {
+                else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && Dictation.recording) {
                     // Enter while listening is "that's it": stop, and ask
                     // the ghost what was said once Voxtype has typed it.
                     root.askAfterDictation = true;
                     Dictation.toggle();
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.activate(root.current);
-                else if (event.key === Qt.Key_Tab && !root.ghostMode) Ghostd.selectNextGhost();
-                else if (ctrl && event.key === Qt.Key_N && !root.ghostMode) root.activated({ kind: "new", id: "new" });
+                else if (ctrl && event.key === Qt.Key_N) root.activated({ kind: "new", id: "new" });
                 else if (ctrl && event.key === Qt.Key_P && root.current && root.current.kind === "session")
                     Ghostd.pinConversation(root.current.id, !root.current.pinned);
                 else if (ctrl && event.key === Qt.Key_R && root.current && root.renameFor(root.current))
@@ -202,9 +167,6 @@ FocusScope {
                 else if (event.key === Qt.Key_Delete && filter.cursorPosition === filter.text.length
                         && root.current && root.current.kind === "session")
                     root.deleteRequested(root.current.id, root.current.label);
-                else if (event.key === Qt.Key_Delete && filter.cursorPosition === filter.text.length
-                        && root.current && root.current.kind === "ghost")
-                    root.banishRequested(root.current.id);
                 else return;
                 event.accepted = true;
             }
@@ -212,7 +174,7 @@ FocusScope {
 
         ListeningLight {
             id: mic
-            visible: Dictation.available && !root.ghostMode
+            visible: Dictation.available
             anchors.right: ghostChip.left
             anchors.rightMargin: Theme.gap * 2
             anchors.verticalCenter: parent.verticalCenter
@@ -220,26 +182,17 @@ FocusScope {
             input: filter
         }
 
-        // Whose launcher this is; Tab or a click moves to the next ghost.
+        // Whose launcher this is.
         Text {
             id: ghostChip
             objectName: "ghostChip"
-            visible: !root.ghostMode
             anchors.right: closeMark.left
             anchors.rightMargin: Theme.gap * 2
             anchors.verticalCenter: parent.verticalCenter
-            text: Ghostd.activeGhost + (Ghostd.ghosts.length > 1 ? "  ⇥" : "")
-            color: chipArea.containsMouse ? Theme.menuSelectedText : Theme.foregroundDim
+            text: Ghostd.activeGhost
+            color: Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
-
-            MouseArea {
-                id: chipArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: Ghostd.selectNextGhost()
-            }
         }
 
         // The way out, in sight: Esc does the same, and SUPER+W closes the window.
@@ -356,12 +309,8 @@ FocusScope {
                         visible: !row.conversational
                         size: Theme.fontSize + 2
                         path: row.modelData.kind === "place" ? row.modelData.icon
-                            : row.modelData.kind === "summon" ? "M12 5v14M5 12h14"
                             : "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"
-                        // The current ghost keeps its own amber, as in the bar.
-                        tint: row.modelData.kind === "ghost" && row.modelData.id === Ghostd.activeGhost
-                            ? Theme.ghostAmber
-                            : row.chosen ? Theme.menuSelectedText : Theme.foregroundDim
+                        tint: row.chosen ? Theme.menuSelectedText : Theme.foregroundDim
                     }
 
                     SpectralOrb {
@@ -412,7 +361,7 @@ FocusScope {
                     anchors.right: parent.right
                     anchors.rightMargin: Theme.pad
                     anchors.verticalCenter: parent.verticalCenter
-                    placeholder: row.modelData.kind === "ghost" ? "Rename this ghost" : "Name this conversation"
+                    placeholder: "Name this conversation"
                     session: row.renaming
                     live: row.editing
                 }
@@ -494,19 +443,11 @@ FocusScope {
         height: Theme.fontSizeCaption + Theme.gap * 2
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
-        // A refusal is what the owner most needs to read here; then why a typed
-        // name offers no summon; then the keys the selected row answers to.
-        readonly property bool refused: root.ghostMode && Ghostd.ghostRenameError !== ""
-        text: footer.refused ? Ghostd.ghostRenameError
-            : root.ghostMode && root.rows.length === 0 && filter.text.trim() !== ""
-                ? "a name is letters, digits, . _ or -, up to 64, starting with a letter or digit"
-            : root.current && root.current.kind === "session"
-                ? "↵ open   ^R rename   ^P pin   del trash   ⇥ ghost   esc close"
-            : root.current && root.current.kind === "ghost"
-                ? "↵ switch   ^R rename   del banish   esc back"
-            : root.ghostMode ? "↵ summon   esc back"
-            : "↵ open   ^N new   ⇥ ghost   esc close"
-        color: footer.refused ? Theme.ghostRose : Theme.foregroundFaint
+        // The keys the selected row answers to.
+        text: root.current && root.current.kind === "session"
+            ? "↵ open   ^R rename   ^P pin   del trash   esc close"
+            : "↵ open   ^N new   esc close"
+        color: Theme.foregroundFaint
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeCaption
     }

@@ -14,7 +14,6 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -102,7 +101,6 @@ const harnessSnapshot = (name) => ({
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
-const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
 const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
 const REMOTE_PROBLEM = opt("--remote-problem", "");
 
@@ -225,9 +223,6 @@ if (OWNS_GHOSTS_ROOT) {
 
 /** @type {Map<string, Map<string, { id, title, harness, updatedAt, messages }>>} */
 const sessionStore = new Map();
-
-/** Every per-ghost store: re-keyed when a ghost is renamed, dropped when it is banished. */
-const perGhostStores = [sessionStore, writtenCharacter, ghostDefaultHarness];
 
 // Persisted messages carry an `entryId`, `e<n>` for log entry n as
 // CONTRACTS.md's transcript row says: entries count from 0, the conversation
@@ -535,11 +530,7 @@ function* script(name, prompt, harness) {
 
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
-const ghostIsAnswering = (name) => [...activeTurns.keys()].some((key) => JSON.parse(key)[0] === name);
-/** Banishing and renaming both refuse while the ghost is answering (session-host.ts reserve). */
-const ghostBusy = (res, operation) => refuse(res, 409, "ghost_busy",
-  `Wait for this ghost's conversations to finish before ${operation}.`);
-/** ghosts.ts's ghost-name grammar, which creation, rename and every route share. */
+/** ghosts.ts's ghost-name grammar, which every route shares. */
 const validGhostName = (name) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(name);
 /** ghosts.ts assertValidGhostName. */
 const badGhostName = (res, name) => refuse(res, 400, "invalid_name",
@@ -761,20 +752,6 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts.length === 2 && req.method === "GET") return json(res, 200, ghosts);
 
-  if (parts.length === 2 && req.method === "POST") {
-    const body = await readBody(req).catch(() => null);
-    const name = body?.name;
-    if (typeof name !== "string") return notString(res, "name");
-    if (!validGhostName(name)) return badGhostName(res, name);
-    if (ghosts.some((g) => g.name === name)) {
-      return refuse(res, 409, "already_exists", `A ghost named ${JSON.stringify(name)} already exists.`);
-    }
-    const ghost = { name, dir: join(GHOSTS_ROOT, name) };
-    ghosts.push(ghost);
-    if (OWNS_GHOSTS_ROOT) seedMockHome(name);
-    return json(res, 201, ghost);
-  }
-
   let name;
   try {
     name = decodeURIComponent(parts[2] ?? "");
@@ -822,45 +799,6 @@ const mockServer = createServer(async (req, res) => {
     writtenCharacter.set(name, body);
     if (OWNS_GHOSTS_ROOT) writeFileSync(join(ghost.dir, "character.md"), body, "utf8");
     return json(res, 200, { ok: true, limit: CHARACTER_LIMIT });
-  }
-
-  // Banishing: ghostd moves the home to the XDG trash; the mock deletes its
-  // own scratch copy and answers the same `trash` path.
-  if (parts.length === 3 && req.method === "DELETE") {
-    if (url.searchParams.get("confirm") !== name) {
-      return refuse(res, 400, "confirmation_required",
-        `Deleting a ghost needs its name repeated: ?confirm=${encodeURIComponent(name)}.`);
-    }
-    if (ghostIsAnswering(name)) return ghostBusy(res, "deleting it");
-    if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
-    ghosts.splice(ghosts.indexOf(ghost), 1);
-    for (const store of perGhostStores) store.delete(name);
-    return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
-  }
-
-  // Renaming a ghost moves its home directory; conversation ids survive it
-  // untouched, so the mock re-keys the ghost's state under the new name rather
-  // than rebuilding any of it.
-  if (parts.length === 4 && parts[3] === "name" && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
-    const next = body?.name;
-    if (typeof next !== "string") return notString(res, "name");
-    if (!validGhostName(next)) return badGhostName(res, next);
-    if (next === name) return json(res, 200, { ok: true, name });
-    if (ghosts.some((g) => g.name === next)) {
-      return refuse(res, 409, "already_exists", `A ghost named ${JSON.stringify(next)} already exists.`);
-    }
-    if (ghostIsAnswering(name)) return ghostBusy(res, "renaming it");
-    for (const store of perGhostStores) {
-      if (store.has(name)) {
-        store.set(next, store.get(name));
-        store.delete(name);
-      }
-    }
-    if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
-    ghost.name = next;
-    ghost.dir = join(GHOSTS_ROOT, next);
-    return json(res, 200, { ok: true, name: next });
   }
 
   if (parts[3] === "messages" && req.method === "POST") {

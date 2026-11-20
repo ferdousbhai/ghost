@@ -18,7 +18,7 @@ export interface ParsedCliArgs {
   flags: Record<string, boolean | string>;
 }
 
-const SHORT: Readonly<Record<string, string>> = { help: "h", quiet: "q", ghost: "g", session: "s", message: "m", version: "v" };
+const SHORT: Readonly<Record<string, string>> = { help: "h", quiet: "q", session: "s", message: "m", version: "v" };
 
 /** `--help`, `--json`, and `--quiet` plus the spec's flags; anything else is an ArgsError. */
 export function parseArgs(argv: readonly string[], spec: ArgsSpec = {}): ParsedCliArgs {

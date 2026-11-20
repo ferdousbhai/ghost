@@ -76,7 +76,7 @@ never loaded into a conversation automatically. No daemon restart is needed.
 ## 2. Where shared notes go
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
-usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
+usually `~/Documents`) is the owner-shared scope: the ghost reads and writes
 it with its harness's native file tools. A ghost's own memory is two folders
 there, with or without iCloud: `Notes` (Markdown notes) and `Reminders` (one
 checklist per list). Ghost does not index the directory
@@ -151,24 +151,19 @@ fail?" needs no explaining. Anything in the title that looks like a password or
 token is blanked first, and nothing else on screen is read: no selection,
 clipboard, or screenshot. Prompts from your phone or the CLI carry none of it.
 
-## 4. Create a ghost
+## 4. Your ghost
 
-Terminal:
+You have one ghost. The first time ghostd starts and finds no ghost home, it
+makes `~/ghosts/ghost/` with a seeded `character.md`; `ghost status` prints the
+name. The directory name *is* the ghost's name. To use another (1–64
+characters of letters, digits, `.`, `_`, or `-`, starting with a letter or
+digit), rename the directory while ghostd is stopped:
 
 ```sh
-ghost new sage
-ghost use sage        # save it as your default ghost (~/.config/ghost/cli.json)
-ghost list
+systemctl --user stop ghostd.service
+mv ~/ghosts/ghost ~/ghosts/sage
+systemctl --user start ghostd.service
 ```
-
-HUD: open the ghost mark in the bar, choose **Ghosts**, type a name, and press
-Enter on **Summon sage**. The same list switches ghosts (Enter), renames one
-(`Ctrl+R`), and banishes one (`Delete`, then type its name to confirm).
-
-Either route posts to the same daemon route, which creates `~/ghosts/sage/`
-with a seeded `character.md`.
-Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, starting with
-a letter or digit. The directory name *is* the ghost's name.
 
 While `character.md` is still the seed, the ghost knows it has not met you: it
 helps with what you asked first, learns about you in the gaps, and offers a
@@ -219,7 +214,7 @@ Press `SUPER+CTRL+G` (or run `omarchy-shell shell toggle ferdousbhai.ghost`).
 The screen edges glow and a prompt opens near the bottom of the focused
 monitor, already listening if Voxtype is installed. Speak or type, then press
 `Enter`; with nothing typed, `Enter` stops the recording and sends what was
-heard. `Tab` picks another ghost, and `Esc` or a click outside closes the
+heard. `Esc` or a click outside closes the
 prompt.
 
 The prompt closes and the ghost works in the background: a thin shimmer stays
@@ -242,14 +237,13 @@ filter on top and the ghost's conversations and places under it.
 | typing | filter conversations and places |
 | `Up` / `Down` (`Ctrl+K` / `Ctrl+J`) | move |
 | `Enter` | open the row; with nothing matching, ask the ghost what you typed |
-| `Tab` | the next ghost's list |
 | `Ctrl+N` | new conversation |
 | `Ctrl+R` / `Ctrl+P` / `Delete` | rename, pin, or trash the selected conversation |
 | `Esc` | close |
 
 A row grows the card into its view: a conversation,
 **Character**, **Hooks**, or **Remote access**; `‹` or `Esc`
-goes back to the list. **Ghosts** stays a list of the same size. An empty conversation shows the ghost's
+goes back to the list. An empty conversation shows the ghost's
 glyph, its name, and the static line `What's on your mind?`.
 
 In a conversation, type, and:
@@ -295,8 +289,7 @@ answer. It continues the most recently updated conversation unless you pass
 conversation becomes its next turn, which is how a ghost's own background
 command reports back.
 
-The CLI picks its ghost in this order: `-g/--ghost`, `$GHOST`, the default
-saved by `ghost use`, then the sole installed ghost; the session is `-s`,
+The CLI talks to your one ghost (`$GHOST` names it in the ghost's own shell); the session is `-s`,
 then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
 carries both variables. It never edits a ghost home directly: every change to
 a ghost goes through the daemon, so the HUD sees everything it does
@@ -313,7 +306,6 @@ codes.
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, and `sessions/<id>/`, one directory per conversation |
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
-| `~/.config/ghost/cli.json` | the `ghost use` default, private to your login; `ghost rename` and `ghost rm` keep it true, `ghost use --none` clears it |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | XDG Pictures | browser screenshots, unless you name another destination |
 

@@ -3,7 +3,7 @@
 # server: never the owner's ghosts, data, accounts, session bus, or port 7717.
 #
 #   stand_in_home      exports HOME, the XDG directories and GHOSTS_ROOT under $root, and seeds them
-#   stand_in_ghostd    starts ghostd on a spare port (sets daemon_pid, exports GHOSTD_PORT) with the ghost `casper`
+#   stand_in_ghostd    starts ghostd on a spare port (sets daemon_pid, exports GHOSTD_PORT) with the ghost home its first start makes
 #
 # The caller sets `root` (an empty directory of its own) and a private XDG_RUNTIME_DIR, and kills `daemon_pid` when
 # it ends.
@@ -84,6 +84,4 @@ stand_in_ghostd() {
     kill -0 "$daemon_pid" 2>/dev/null || { echo "stand-in: ghostd exited" >&2; sed -n '1,40p' "$root/ghostd.log" >&2; exit 1; }
     sleep 0.1
   done
-  curl -fsS -o /dev/null -X POST -H "Authorization: Bearer $(cat "$token_file")" -H 'content-type: application/json' \
-    -d '{"name":"casper"}' "http://127.0.0.1:$port/api/ghosts"
 }

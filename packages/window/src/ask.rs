@@ -12,7 +12,7 @@ use gtk::{gdk, glib, prelude::*};
 use serde_json::{Value, json};
 
 use crate::{
-    api::{Cancel, Frame, default_ghost, segment},
+    api::{Cancel, Frame, segment},
     md,
     ui::{App, route_of},
 };
@@ -156,13 +156,10 @@ impl AskPage {
         });
         page.composer.add_controller(keys);
 
-        // The ghost to talk to: the CLI's default (`ghost use`), else the first one.
+        // The ghost to talk to: the machine's one, the first ghostd lists.
         let this = page.clone();
         glib::spawn_future_local(async move {
-            let name = match default_ghost() {
-                Some(name) => Some(name),
-                None => this.app.api.get("/api/ghosts".into()).await.ok().and_then(|ghosts| ghosts[0]["name"].as_str().map(String::from)),
-            };
+            let name = this.app.api.get("/api/ghosts".into()).await.ok().and_then(|ghosts| ghosts[0]["name"].as_str().map(String::from));
             match name {
                 Some(name) => {
                     *this.ghost.borrow_mut() = name;
@@ -173,7 +170,7 @@ impl AskPage {
                         this.ask();
                     }
                 }
-                None => this.note("No ghost yet: create one with `ghost new <name>`."),
+                None => this.note("No ghost yet: ghostd makes one when it starts."),
             }
         });
         page

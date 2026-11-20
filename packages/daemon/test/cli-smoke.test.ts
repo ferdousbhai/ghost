@@ -36,7 +36,7 @@ describe("ghost smoke", () => {
     expect(result.code, result.stderr).toBe(0);
     expect(result.stdout.trim().split("\n").map((line) => JSON.parse(line))).toEqual([
       { step: "daemon", ok: true, detail: "ok" },
-      { step: "new probe", ok: true },
+      { step: "ghost", ok: true, detail: "ghost" },
       { step: "turn", ok: true, detail: "skipped (--no-turn)" },
     ]);
   }, 20_000);

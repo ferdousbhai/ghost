@@ -19,7 +19,6 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import "GhostRename.js" as GhostRename
 import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
 import "Attachments.js" as Attachments
@@ -50,13 +49,6 @@ Singleton {
     property bool reachable: false
     /** Human-readable last failure, or "". */
     property string lastError: ""
-    property string deletingGhost: ""
-    readonly property bool renamingGhost: root.renameGhostRequest !== null
-    property string ghostDeleteError: ""
-    /** Why the last ghost rename was refused, or "". Presentable as-is. Kept
-        apart from `ghostDeleteError`: that one renders inside the banish
-        modal, and a rename is typed in the launcher row itself. */
-    property string ghostRenameError: ""
 
     // Remote access is daemon-global rather than ghost- or conversation-scoped,
     // so its owner/request state survives ghost and conversation switches.
@@ -346,9 +338,6 @@ Singleton {
 
     // An XHR must be held by a property (see request()).
     property var listRequest: null
-    property var createGhostRequest: null
-    property var deleteGhostRequest: null
-    property var renameGhostRequest: null
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -580,9 +569,8 @@ Singleton {
             root.ghosts = Array.isArray(list) ? list : [];
             root.reachable = true;
             root.lastError = "";
-            // One banished elsewhere (the CLI, another shell) is gone; a
-            // rename in flight is still listed under its old name.
-            if (root.activeGhost !== "" && !root.renamingGhost
+            // A home the owner moved away is gone.
+            if (root.activeGhost !== ""
                     && !root.ghosts.some(ghost => ghost && ghost.name === root.activeGhost))
                 root.forgetGhost(root.activeGhost);
             if (root.activeGhost === "" && root.ghosts.length > 0)
@@ -593,133 +581,6 @@ Singleton {
                 root.refreshCurrentTranscript();
             }
         });
-    }
-
-    function createGhost(name: string): void {
-        const trimmed = name.trim();
-        if (trimmed === "") return;
-        root.retire(root, "createGhostRequest");
-        root.request(root, "createGhostRequest", "POST", "/api/ghosts", { name: trimmed },
-            function (xhr, created) {
-                if (xhr.status !== 200 && xhr.status !== 201) {
-                    root.fail(root.describeError(xhr, "POST /api/ghosts"));
-                    return;
-                }
-                const createdName = created && typeof created.name === "string"
-                    && created.name !== "" ? created.name : trimmed;
-                if (created && !root.ghosts.some(ghost => ghost && ghost.name === createdName))
-                    root.ghosts = root.ghosts.concat([created]);
-                root.switchGhost(createdName);
-                // The roster, not the POST echo, is the authoritative listing.
-                root.refresh();
-            });
-    }
-
-    /**
-     * Delete a ghost home. The daemon wants the name echoed back in `confirm`
-     * byte-for-byte and answers 400 confirmation_required otherwise, so the UI
-     * types it and we only carry it; the home is moved to the XDG trash
-     * (~/.local/share/Trash/files/) rather than unlinked, which is what makes
-     * this recoverable from the desktop.
-     *
-     * A refusal (409 ghost_busy, most often) leaves the selection untouched and
-     * lands in `ghostDeleteError` for the row that asked. One at a time: the
-     * confirmation is per row and a second in-flight delete would have no row.
-     */
-    function deleteGhost(name: string): void {
-        if (name === "" || root.deletingGhost !== "") return;
-        root.deletingGhost = name;
-        root.ghostDeleteError = "";
-        root.request(root, "deleteGhostRequest", "DELETE", root.ghostPath(name)
-            + "?confirm=" + encodeURIComponent(name), null, function (xhr) {
-                root.deletingGhost = "";
-                if (xhr.status !== 200) {
-                    root.ghostDeleteError = root.refusal(xhr, "DELETE ghost");
-                    return;
-                }
-                root.forgetGhost(name);
-                // activeGhost is "" now if this was the active one, so the
-                // listing picks the next ghost the way the first one does.
-                root.refresh();
-            });
-    }
-
-    /**
-     * Rename a ghost. The home directory is what moves; every conversation id
-     * survives it, so nothing here reloads a transcript — but everything the
-     * shell keys by ghost name has to follow it, or the active ghost's own
-     * conversations are stranded under a name that no longer exists.
-     *
-     * Optimistic, because the name is the window title and the composer's
-     * placeholder: both of them lagging a round trip behind the field reads as
-     * the edit not having taken. A refusal — `409 ghost_busy` most often — puts
-     * every one of those keys back and says why in `ghostRenameError`.
-     */
-    function renameGhost(from: string, to: string): void {
-        const next = to.trim();
-        if (from === "" || next === "" || next === from) return;
-        if (root.renamingGhost || root.deletingGhost !== "") return;
-        const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
-        if (!transaction.ok) {
-            root.ghostRenameError = transaction.code === "already_exists"
-                ? "A ghost named “" + next + "” already exists."
-                : "The ghost being renamed is no longer available.";
-            return;
-        }
-        root.ghostRenameError = "";
-        const before = transaction.before;
-        root.installGhostRenameState(transaction.after);
-        root.moveTurnStates(from, next);
-        root.request(root, "renameGhostRequest", "PUT", root.ghostPath(from) + "/name",
-            { name: next }, function (xhr, body) {
-                if (xhr.status === 200) {
-                    // The daemon has the last word on the name it actually wrote.
-                    const settled = body && typeof body.name === "string" && body.name !== ""
-                        ? body.name : next;
-                    if (settled !== next) root.applyGhostRename(next, settled);
-                    root.refresh();
-                    return;
-                }
-                root.moveTurnStates(next, from);
-                root.installGhostRenameState(before);
-                root.ghostRenameError = root.refusal(xhr, "PUT ghost name");
-            });
-    }
-
-    function ghostRenameState(): var {
-        return {
-            ghosts: root.ghosts,
-            sessionIds: root.sessionIds,
-            activeGhost: root.activeGhost
-        };
-    }
-
-    function installGhostRenameState(state: var): void {
-        root.ghosts = state.ghosts;
-        root.sessionIds = state.sessionIds;
-        root.activeGhost = state.activeGhost;
-    }
-
-    function applyGhostRename(from: string, to: string): void {
-        root.installGhostRenameState(GhostRename.move(root.ghostRenameState(), from, to));
-        root.moveTurnStates(from, to);
-    }
-
-    function moveTurnStates(from: string, to: string): void {
-        if (from === to) return;
-        const next = ({});
-        for (const key of Object.keys(root.turnStates)) {
-            const state = root.turnStates[key];
-            if (state && state.ghost === from) {
-                state.ghost = to;
-                state.key = root.conversationKey(to, state.sessionId);
-                next[state.key] = state;
-            } else {
-                next[key] = state;
-            }
-        }
-        root.turnStates = next;
-        root.updateLiveConversationKeys();
     }
 
     /** Drop every trace of a ghost that is no longer there. */
@@ -877,13 +738,6 @@ Singleton {
             });
     }
 
-    /** Tab's step to the next ghost in the roster; one ghost has nowhere to go. */
-    function selectNextGhost(): void {
-        const names = root.ghosts.map(g => g.name);
-        if (names.length < 2) return;
-        root.selectGhost(names[(names.indexOf(root.activeGhost) + 1) % names.length]);
-    }
-
     /**
      * A summon or notification names its ghost as outside input: once a
      * roster has loaded, only a listed one is selected. Before it, a summon
@@ -896,8 +750,7 @@ Singleton {
 
     /**
      * Make `name` the active ghost and drop the previous one's state, without
-     * fetching; selectGhost fetches, and a create lets refresh()'s
-     * listing do it. False when there is nothing to switch.
+     * fetching; selectGhost fetches. False when there is nothing to switch.
      */
     function switchGhost(name: string): bool {
         if (name === "" || name === root.activeGhost) return false;

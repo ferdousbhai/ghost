@@ -12,18 +12,16 @@ import {
   characterCommand,
   readCommand,
   remoteCommand,
-  renameCommand,
   harnessCommand,
   switchCommand,
 } from "./admin.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { delegateCommand } from "./delegate.js";
-import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { hooksCommand } from "./hooks.js";
 import { sayCommand } from "./say.js";
-import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
+import { askCommand, removeCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
 import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
@@ -37,7 +35,7 @@ import { errorMessage } from "../errors.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
-  /** Flags this verb alone accepts, on top of `CLI_ARGS` and the `-g`/`-s` its usage lists. */
+  /** Flags this verb alone accepts, on top of `CLI_ARGS` and the `-s` its usage lists. */
   flags?: ArgsSpec;
   run(ctx: CliContext): number | Promise<number>;
 }
@@ -49,7 +47,7 @@ const CLI_ARGS: ArgsSpec = {
 export const COMMANDS: readonly Command[] = [
   {
     verb: "say",
-    usage: "say [text] [-m <text>] [--new|--follow-up] [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "say [text] [-m <text>] [--new|--follow-up] [-s <id>] [--json] [-q]",
     summary: "Send a turn, or follow up on one.",
     example: 'ghost say --new "Start fresh"',
     positionals: [0, Number.POSITIVE_INFINITY],
@@ -58,58 +56,33 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "stop",
-    usage: "stop [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "stop [-s <id>] [--json] [-q]",
     summary: "Stop a conversation's running turn.",
     example: "ghost stop -s cli-abc",
     positionals: [0, 0],
     run: stopCommand,
   },
   {
-    verb: "list",
-    usage: "list [--json] [-q]",
-    summary: "List ghosts and their home directories.",
-    example: "ghost list --json",
-    positionals: [0, 0],
-    run: (ctx) => ghostsCommand("list", ctx),
-  },
-  {
-    verb: "new",
-    usage: "new <name> [--json] [-q]",
-    summary: "Create a ghost through ghostd.",
-    example: "ghost new sage",
-    positionals: [1, 1],
-    run: (ctx) => ghostsCommand("new", ctx),
-  },
-  {
     verb: "rm",
-    usage: "rm <name> --yes | rm -s <id> --yes [-g <name>] [--json] [-q]",
-    summary: "Move a ghost or conversation to recoverable Trash.",
-    example: "ghost rm sage --yes",
-    positionals: [0, 1],
+    usage: "rm -s <id> --yes [--json] [-q]",
+    summary: "Move a conversation to recoverable Trash.",
+    example: "ghost rm -s cli-abc --yes",
+    positionals: [0, 0],
     flags: { boolean: ["yes"] },
-    run: (ctx) => ghostsCommand("rm", ctx),
-  },
-  {
-    verb: "use",
-    usage: "use [<name>|--none] [--json] [-q]",
-    summary: "Print, persist, or clear (--none) the private default ghost.",
-    example: "ghost use sage",
-    positionals: [0, 1],
-    flags: { boolean: ["none"] },
-    run: (ctx) => ghostsCommand("use", ctx),
+    run: removeCommand,
   },
   {
     verb: "sessions",
-    usage: "sessions [-g <name>] [--json] [-q]",
+    usage: "sessions [--json] [-q]",
     summary: "List conversations.",
-    example: "ghost sessions -g sage",
+    example: "ghost sessions --json",
     positionals: [0, 0],
     run: sessionsCommand,
   },
   {
     verb: "show",
     flags: { value: ["limit", "offset"] },
-    usage: "show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>] [--json] [-q]",
+    usage: "show [-s <id>] [--limit <n>] [--offset <n>] [--json] [-q]",
     summary: "Print a conversation transcript as Markdown: its newest page, or the page from --offset (counted from the oldest).",
     example: "ghost show -s cli-abc",
     positionals: [0, 0],
@@ -117,7 +90,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "title",
-    usage: "title <text> [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "title <text> [-s <id>] [--json] [-q]",
     summary: "Rename a conversation.",
     example: 'ghost title "Release notes" -s cli-abc',
     positionals: [1, 1],
@@ -126,7 +99,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "ask",
     flags: { boolean: ["clear"] },
-    usage: "ask <question> [<answer>...] [--clear] [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "ask <question> [<answer>...] [--clear] [-s <id>] [--json] [-q]",
     summary: "Ask the owner; their next message in the conversation answers.",
     example: 'ghost ask "Ship it tonight?" yes "wait for review"',
     positionals: [0, 7],
@@ -134,7 +107,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "pin",
-    usage: "pin [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "pin [-s <id>] [--json] [-q]",
     summary: "Pin a conversation.",
     example: "ghost pin -s cli-abc",
     positionals: [0, 0],
@@ -142,7 +115,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "unpin",
-    usage: "unpin [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "unpin [-s <id>] [--json] [-q]",
     summary: "Unpin a conversation.",
     example: "ghost unpin -s cli-abc",
     positionals: [0, 0],
@@ -157,16 +130,8 @@ export const COMMANDS: readonly Command[] = [
     run: hooksCommand,
   },
   {
-    verb: "rename",
-    usage: "rename <new-name> [-g <name>] [--json] [-q]",
-    summary: "Rename a ghost and move its whole home.",
-    example: "ghost rename wisp -g casper",
-    positionals: [1, 1],
-    run: renameCommand,
-  },
-  {
     verb: "character",
-    usage: "character [show|set <file>] [-g <name>] [--json] [-q]",
+    usage: "character [show|set <file>] [--json] [-q]",
     summary: "Print or replace the persona file.",
     example: "ghost character set ./casper.md",
     positionals: [0, 2],
@@ -174,7 +139,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "read",
-    usage: "read [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "read [-s <id>] [--json] [-q]",
     summary: "Mark a conversation read.",
     example: "ghost read -s cli-abc",
     positionals: [0, 0],
@@ -206,7 +171,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "harness",
-    usage: "harness [<agent>|--none] [-g <name>] [--json] [-q]",
+    usage: "harness [<agent>|--none] [--json] [-q]",
     summary: "Show or set the agent a ghost prefers (--none: automatic).",
     example: "ghost harness claude",
     positionals: [0, 1],
@@ -215,7 +180,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "switch",
-    usage: "switch <agent> [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "switch <agent> [-s <id>] [--json] [-q]",
     summary: "Run a conversation's next turn on another agent, handing it the conversation so far.",
     example: "ghost switch codex",
     positionals: [1, 1],
@@ -265,17 +230,13 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 /**
- * The common flags plus one verb's own; `-g` and `-s` only where its usage
- * lists them, so a stray one is the unknown option it is, not silently ignored.
+ * The common flags plus one verb's own; `-s` only where its usage lists it,
+ * so a stray one is the unknown option it is, not silently ignored.
  */
 function commandArgs(command: Command): ArgsSpec {
-  const addressing = [
-    ...command.usage.includes("-g <name>") ? ["ghost"] : [],
-    ...command.usage.includes("-s <id>") ? ["session"] : [],
-  ];
   return {
     boolean: [...CLI_ARGS.boolean ?? [], ...command.flags?.boolean ?? []],
-    value: [...addressing, ...command.flags?.value ?? []],
+    value: [...command.usage.includes("-s <id>") ? ["session"] : [], ...command.flags?.value ?? []],
   };
 }
 

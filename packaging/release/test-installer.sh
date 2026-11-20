@@ -55,7 +55,7 @@ for discovery in delayed missing; do
     [[ "$result" == 0 ]]
     [[ "$(cat "$work/count")" == 3 ]]
     grep -Fxq enabled "$work/actions"
-    grep -Fq 'ghost new <name>' "$work/output"
+    grep -Fq 'ghost say "hello"' "$work/output"
   else
     [[ "$result" != 0 ]]
     [[ "$(cat "$work/count")" == 40 ]]

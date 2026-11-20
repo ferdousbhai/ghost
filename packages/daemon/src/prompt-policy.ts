@@ -1,5 +1,5 @@
 /**
- * The stable policy sections every ghost's system prompt carries, beside the
+ * The stable policy sections the ghost's system prompt carries, beside the
  * character's own. Each holds only what a ghost must follow before it would
  * think to look anything up; the `ghost` CLI documents itself: `ghost help
  * <topic>` prints each recipe the Ghost section indexes.
@@ -31,12 +31,12 @@ export const GHOST_POLICY = [
     + "`ghost --help` lists every command.",
 ].join("\n");
 
-/** The owner's own directory: deliverables and notes every ghost on this machine shares. */
+/** The owner's own directory: deliverables and the ghost's notes. */
 export function renderOwnerContextPolicy(documentsDir: string): string {
   return [
     "## Owner context",
-    `${JSON.stringify(documentsDir)} is the owner's documents directory, shared by every ghost on `
-      + "this machine. A file made for the owner goes where they asked, else here; never into your "
+    `${JSON.stringify(documentsDir)} is the owner's documents directory. `
+      + "A file made for the owner goes where they asked, else here; never into your "
       + "persona or this conversation's directory. Your memory across conversations is its `Notes` "
       + "folder (Markdown: owner facts, preferences, decisions, your reflections; update a note "
       + "rather than add a second) and `Reminders/<List>.md` (things to do, "

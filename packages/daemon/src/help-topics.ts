@@ -3,7 +3,7 @@
  * editing or restarting itself, handing work to another
  * harness, finding a note, transcribing audio. The prompt's Ghost section
  * indexes them by name and `ghost help <topic>` prints them, so their cost
- * lands on the turn that needs them and not on every turn of every ghost. The
+ * lands on the turn that needs them and not on every turn. The
  * text is still contract text the ghost acts on: keep it exact, and keep the
  * index in step (prompt-policy.test.ts checks).
  */
@@ -22,7 +22,7 @@ function self(): string[] {
     "Any part of your code is yours to change to fit the owner. `ghost status` says whether the daemon runs from the package (which you cannot write) or a checkout. From a packaged install, first run yourself from your own clone: `git clone https://github.com/ferdousbhai/ghost ~/src/ghost`, then `pnpm install && pnpm build` in it (without pnpm, run `omarchy-launch-floating-terminal-with-presentation 'omarchy-pkg-add pnpm'` alone in the foreground and the owner types their password there), then switch over as /usr/share/doc/ghost/docs/self-maintenance.md shows; its \"Back to the package\" undoes it. Tell the owner before you switch.",
     "Read the checkout's AGENTS.md and CONTRACTS.md; follow its authorized branch, commit, and push workflow. Edit, test the affected package, typecheck, commit with the reason, build, and restart.",
     "Commit your own changes; preserve other sessions' edits. Never restore, stash, or discard changes you did not make.",
-    "The checkout is shared by every ghost. CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",
+    "CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",
     "To restart yourself, finish the turn and tell the owner first; a restart aborts every running turn:",
     "```sh",
     'systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \\',
@@ -65,7 +65,7 @@ function background(): string[] {
     "systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20 \\",
     "  setsid -f bash -c 'cmd > \"$XDG_RUNTIME_DIR/<name>.log\" 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log $XDG_RUNTIME_DIR/<name>.log\" >/dev/null 2>&1'",
     "```",
-    "`$GHOST` and `$GHOST_SESSION` are set in your shell, so `ghost` verbs address this conversation without `-g`/`-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
+    "`$GHOST` and `$GHOST_SESSION` are set in your shell, so `ghost` verbs address this conversation without `-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
     "The job is its own low-priority unit: it yields the CPU to the owner's apps, survives a daemon restart (so its log is outside your private /tmp), and `systemctl --user stop <unit>` ends it. Nothing else watches it: read its log.",
   ];
 }

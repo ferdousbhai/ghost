@@ -4,7 +4,7 @@
 on [Omarchy](https://omarchy.org), coordinating Claude Code, Codex, Grok,
 Copilot, OpenCode, pi, and other installed agent CLIs. Each harness keeps
 its own sign-in, tools, and limits. If one cannot take a turn, Ghost tries
-the next. Each ghost has its own character and conversation history.
+the next. Your ghost keeps one character and conversation history across them.
 
 Talk to it in the desktop HUD or the terminal; both share one conversation
 history, and `ghost say` joins the most recent conversation:

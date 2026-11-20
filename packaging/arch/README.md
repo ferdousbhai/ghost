@@ -73,7 +73,7 @@ archives; install just the `ghost-runtime-dev` archive when supplying your own U
 ## Owner-shared state
 
 Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
-Documents directory. Every ghost reads and writes it with its runtime's native
+Documents directory. The ghost reads and writes it with its runtime's native
 file tools; the package installs nothing there and gates nothing on it.
 
 ## Optional integrations

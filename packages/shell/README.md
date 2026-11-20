@@ -18,7 +18,7 @@ how it behaves is here.
 prompt on the focused monitor takes the keyboard, already listening if
 Voxtype is installed, and every screen's edges glow. Enter sends; Enter on an
 empty prompt while recording stops it and sends the transcript once Voxtype
-has typed it; Tab picks another ghost; Esc, a click outside, or SUPER+W
+has typed it; Esc, a click outside, or SUPER+W
 dismisses it. Sending starts a new conversation, or continues the presence's
 while its ticker or reply card is up, unless the owner chose `new ×`. The
 prompt then closes, the glow thins to a shimmer, and a ticker that takes no
@@ -40,7 +40,7 @@ the keyboard) the ring flows and breathes, the HUD's a softer one on its own
 screen; behind another app it goes out. Reduced motion keeps the colour and
 drops the sweep and the breathing.
 
-**The HUD** (history, character, ghosts, hooks, remote
+**The HUD** (history, character, hooks, remote
 access) opens from the bar mark, a notification, the card's `open`, or any
 summon naming a section, drawn the way the desktop draws its own menu, with
 the theme's `[menu]` tokens (`Theme.menu*`). It and the prompt are windows,

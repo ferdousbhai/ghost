@@ -149,14 +149,16 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
     };
     const status = await runScratchCli(["status", "-q"], options);
     report("daemon", true, status.trim());
-    step = "new probe";
-    await runScratchCli(["new", "probe", "-q"], options);
-    report("new probe", true);
+    // A first start makes the ghost home; every later step talks to it.
+    step = "ghost";
+    const { ghost } = JSON.parse(await runScratchCli(["status", "--json"], options)) as { ghost: string | null };
+    if (!ghost) throw new Error("the daemon made no ghost home on its first start");
+    report("ghost", true, ghost);
     const harness = flagString(parsed, "harness");
     if (harness) {
       step = "harness";
       // Through the daemon, as every CLI change to a ghost goes (CONTRACTS.md).
-      await runScratchCli(["harness", harness, "-g", "probe", "-q"], options);
+      await runScratchCli(["harness", harness, "-q"], options);
       report("harness", true, harness);
     }
     step = "turn";
@@ -167,8 +169,6 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
         "say",
         "-q",
         "--new",
-        "-g",
-        "probe",
         "Reply with the single word: pong",
       ], options);
       const reply = turn.trim();
@@ -179,13 +179,11 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
       // session: the reply must show the conversation kept its context.
       step = "second turn";
       const sessionId = readSessionId(
-        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)),
+        (await runScratchCli(["sessions", "--json"], options)),
       );
       const followUp = await runScratchCli([
         "say",
         "-q",
-        "-g",
-        "probe",
         "-s",
         sessionId,
         "Repeat the word you just said, and nothing else.",
@@ -199,7 +197,7 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
 
       step = "accounting";
       const listed = readSession(
-        (await runScratchCli(["sessions", "-g", "probe", "--json"], options)),
+        (await runScratchCli(["sessions", "--json"], options)),
         sessionId,
       );
       if (listed.messageCount < 4) {

@@ -441,25 +441,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   /**
-   * Trash one ghost. `?confirm=<name>` must repeat the name exactly: a DELETE
-   * is one path segment away from every other ghost route, and this is the
-   * API-level guard against an accidental or scripted one taking a persona and
-   * its conversations with it. The deletion itself is a move into the
-   * system trash, never an erase.
-   */
-  const handleDeleteGhost = async ({ ghost: ghostName, url, response }: RequestContext): Promise<void> => {
-    if (url.searchParams.get("confirm") !== ghostName) {
-      throw new GhostError(
-        "confirmation_required",
-        `Deleting a ghost needs its name repeated: ?confirm=${encodeURIComponent(ghostName)}.`,
-        400,
-      );
-    }
-    await options.host.deleteGhost(ghostName);
-    jsonResponse(response, 200, { ok: true });
-  };
-
-  /**
    * Passive conversation-list invalidations. This subscription never opens a
    * hosted session; disconnect cleanup drops both its listener and keepalive.
    */
@@ -794,20 +775,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     })),
     route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,
       isGuest(context) ? options.registry.list().map(({ name }) => ({ name })) : options.registry.list())),
-    route("POST", "api/ghosts", async ({ response, body }) => {
-      const ghost = options.host.createGhost(stringField(await body(), "name"));
-      logger.info("ghost created", { ghost: ghost.name });
-      jsonResponse(response, 201, ghost);
-    }),
-    route("DELETE", "api/ghosts/:ghost", handleDeleteGhost),
     route("GET", "api/ghosts/:ghost/character", async ({ ghost, response }) => {
-      const character = await options.host.withGhost(ghost, () =>
-        readCharacter(options.registry.get(ghost).dir, { enforceLimit: false }));
+      const character = await readCharacter(options.registry.get(ghost).dir, { enforceLimit: false });
       jsonResponse(response, 200, { body: character?.body ?? "", limit: MAX_CHARACTER_BODY_LENGTH });
     }),
     route("PUT", "api/ghosts/:ghost/character", async ({ ghost, response, body }) => {
       const text = stringField(await body(), "body");
-      await options.host.withGhost(ghost, () => writeCharacter(options.registry.get(ghost).dir, text));
+      await writeCharacter(options.registry.get(ghost).dir, text);
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
     route("GET", "api/ghosts/:ghost/harness", async ({ ghost, response }) => {
@@ -827,12 +801,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     route("POST", "api/ghosts/:ghost/messages", handleMessages),
     route("GET", "api/ghosts/:ghost/events", handleConversationEvents),
-    // The name is the home directory's name, so a rename moves the whole home
-    // and every other route's `:ghost` changes with it.
-    route("PUT", "api/ghosts/:ghost/name", async ({ ghost, response, body }) => {
-      const renamed = await options.host.renameGhost(ghost, stringField(await body(), "name"));
-      jsonResponse(response, 200, { ok: true, name: renamed.name });
-    }),
     route("GET", "api/ghosts/:ghost/sessions", async ({ ghost, response }) => {
       jsonResponse(response, 200, { sessions: await options.host.listSessions(ghost) });
     }),

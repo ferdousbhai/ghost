@@ -51,4 +51,4 @@ echo "Ghost is installed, and in your app launcher."
 # no Lua, sources /usr/share/doc/ghost/shell-contrib/hyprland/ghost.conf.
 echo "Summon it with Super + Ctrl + G."
 echo ""
-echo "Then make a ghost:  ghost new <name>   (its turns run on the agent CLIs you are signed into)"
+echo "Then talk to your ghost:  ghost say \"hello\"   (its turns run on the agent CLIs you are signed into)"

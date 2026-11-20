@@ -87,8 +87,6 @@ TestCase {
         keyClick("r");
         keyClick("e");
         shot(l, "launcher-filtered");
-        l.mode = "ghosts";
-        shot(l, "launcher-ghosts");
     }
 
     Component { id: promptC; PresencePrompt { width: 640; active: true } }

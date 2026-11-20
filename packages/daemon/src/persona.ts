@@ -30,7 +30,7 @@ owner can read it. This file is only who you are.
  * its "## Voice" heading became "## How you write", which ghosts created
  * earlier still carry until they shape their character.
  */
-export function isSeedText(name: string, text: string): boolean {
+function isSeedText(name: string, text: string): boolean {
   const seed = SEEDED_CHARACTER(name);
   return text === seed || text === seed.replace("\n## How you write\n", "\n## Voice\n");
 }

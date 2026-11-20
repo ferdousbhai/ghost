@@ -1,9 +1,7 @@
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -101,93 +99,16 @@ describe("GhostRegistry.create", () => {
   });
 });
 
-describe("GhostRegistry.rename", () => {
-  it("moves the home and re-renders an untouched seed under the new name", () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    const dir = temp.registry.create("casper").dir;
-
-    const renamed = temp.registry.rename("casper", "wisp");
-
-    expect(renamed).toMatchObject({ name: "wisp", dir: join(temp.root, "wisp") });
-    expect(existsSync(dir)).toBe(false);
-    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["wisp"]);
-    const character = readFileSync(ghostPaths(renamed.dir).characterFile, "utf8");
-    expect(character).toMatch(/^# wisp\n/);
-    expect(character).toContain("You are wisp.");
-    expect(character).not.toContain("title:");
-    expect(isSeededCharacter("wisp", character)).toBe(true);
-  });
-
+describe("a seeded character", () => {
   // A ghost seeded before "## Voice" became "## How you write" is still
-  // unshaped: it keeps its first meeting, and a rename re-seeds it.
+  // unshaped: it keeps its first meeting.
   it("still knows a seed written before the heading changed", () => {
     const legacy = SEEDED_CHARACTER("mina").replace("\n## How you write\n", "\n## Voice\n");
     expect(legacy).not.toBe(SEEDED_CHARACTER("mina"));
     expect(isSeededCharacter("mina", legacy)).toBe(true);
     expect(isSeededCharacter("mina", legacy.replace("You are mina.", "You are Mina, a printer."))).toBe(false);
   });
-
-  it("leaves owner-authored Markdown alone", () => {
-    temp = makeTempGhosts();
-    const archivist = "## The Archivist\n\nHello.\n";
-    const markdown = "# mina\n\nNo frontmatter here.\n";
-    seedGhost(temp.root, { name: "casper", character: archivist });
-    seedGhost(temp.root, { name: "mina", character: markdown });
-
-    expect(readFileSync(ghostPaths(temp.registry.rename("casper", "wisp").dir).characterFile, "utf8"))
-      .toBe(archivist);
-    expect(readFileSync(ghostPaths(temp.registry.rename("mina", "vera").dir).characterFile, "utf8"))
-      .toBe(markdown);
-  });
-
-  it("preserves every byte and the mode of an owner-authored character", () => {
-    temp = makeTempGhosts();
-    const character = "## Letterpress\r\n\r\nKeep  two spaces.\r\n";
-    const dir = seedGhost(temp.root, {
-      name: "casper",
-      character,
-    });
-    chmodSync(ghostPaths(dir).characterFile, 0o640);
-
-    const renamed = temp.registry.rename("casper", "wisp");
-
-    expect(readFileSync(ghostPaths(renamed.dir).characterFile, "utf8"))
-      .toBe(character);
-    expect(statSync(ghostPaths(renamed.dir).characterFile).mode & 0o777).toBe(0o640);
-  });
-
-  it("keeps the move when the renamed seed cannot be written, with the old seed text", () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    const dir = temp.registry.create("casper").dir;
-    const before = readFileSync(ghostPaths(dir).characterFile, "utf8");
-    chmodSync(dir, 0o500);
-    const moved = join(temp.root, "wisp");
-
-    try {
-      expect(temp.registry.rename("casper", "wisp")).toEqual({ name: "wisp", dir: moved });
-      expect(existsSync(dir)).toBe(false);
-      expect(readFileSync(ghostPaths(moved).characterFile, "utf8")).toBe(before);
-    } finally {
-      chmodSync(moved, 0o700);
-    }
-  });
-
-  it("refuses an unknown ghost, an invalid name, and any occupied target", () => {
-    temp = makeTempGhosts();
-    const dir = seedGhost(temp.root, { name: "casper" });
-    // Not a ghost home, but the owner's directory all the same.
-    mkdirSync(join(temp.root, "notes"), { recursive: true });
-
-    expect(() => temp!.registry.rename("nobody", "wisp")).toThrowError(GhostError);
-    expect(() => temp!.registry.rename("casper", "../escape")).toThrowError(/Ghost names/);
-    expect(() => temp!.registry.rename("casper", "notes"))
-      .toThrowError(/already taken/);
-    expect(existsSync(dir)).toBe(true);
-  });
 });
-
 
 describe("GhostRegistry.get", () => {
   it("throws a 404-shaped error for an unknown ghost", () => {

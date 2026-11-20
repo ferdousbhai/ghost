@@ -37,7 +37,7 @@ import {
   type TranscriptMessage,
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
-import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
+import { ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles, type HarnessExit } from "./harness-process.js";
 import {
@@ -258,10 +258,6 @@ function keyOf(ghostName: string, id: string): string {
   return JSON.stringify([ghostName, id]);
 }
 
-function ghostOfKey(key: string): string {
-  return (JSON.parse(key) as [string, string])[0];
-}
-
 /** The fields every hook event carries (docs/hooks.md). */
 function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: AbortSignal): GhostHookEventBase {
   return {
@@ -320,9 +316,6 @@ export class SessionHost {
   private readonly admissions = new Map<string, AbortController>();
   /** A session being switched or trashed cannot admit a turn or another mutation. */
   private readonly reservedSessions = new Set<string>();
-  private readonly reservedGhosts = new Set<string>();
-  /** File work in flight per ghost, which a delete or rename waits out. */
-  private readonly leases = new Map<string, { count: number; drained?: () => void }>();
   private readonly metadataWrites = new Map<string, Promise<unknown>>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private reportCache?: { at: number; report: Promise<HarnessReport> };
@@ -568,9 +561,7 @@ export class SessionHost {
     if (id !== null) this.requireRow(id);
     // The owner naming it is the retry.
     if (id !== null) this.resting.delete(id);
-    await this.withGhost(ghostName, async () => {
-      await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
-    });
+    await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
     return this.listHarnesses(ghostName);
   }
 
@@ -591,15 +582,14 @@ export class SessionHost {
     }
     this.reservedSessions.add(key);
     try {
-      await this.withGhost(ghost.name, async () => {
-        const { sessionDir } = ghostPaths(ghost.dir);
-        const entries = await readLog(sessionDir, conversation);
-        if (entries !== null && logState(entries).harness === id) return;
+      const { sessionDir } = ghostPaths(ghost.dir);
+      const entries = await readLog(sessionDir, conversation);
+      if (entries === null || logState(entries).harness !== id) {
         await appendLog(sessionDir, conversation, [
           ...(entries === null ? [newConversationEntry(conversation, new Date())] : []),
           { type: "harness", at: new Date().toISOString(), harness: id, session: null, dir: conversationDir(sessionDir, conversation) },
         ]);
-      });
+      }
       this.announce(ghost.name, conversation);
       return { id: conversation, harness: id };
     } finally {
@@ -617,9 +607,6 @@ export class SessionHost {
     const id = requireConversationId(options.sessionId ?? "default");
     const key = keyOf(ghost.name, id);
     if (this.shuttingDown) throw new GhostError("shutting_down", "ghostd is shutting down.", 503);
-    if (this.reservedGhosts.has(ghost.name)) {
-      throw new GhostError("ghost_busy", "Wait for this ghost to finish moving before starting a turn.", 409);
-    }
     if (this.admissions.has(key) || this.reservedSessions.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
     }
@@ -633,20 +620,18 @@ export class SessionHost {
       run: async (stream) => {
         let settled: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
         try {
-          await this.withGhost(ghost.name, async () => {
-            let terminal: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
-            const emit = (event: TurnEvent) => {
-              if (event.type === "done" || event.type === "error") terminal = event;
-              else stream.emit(event);
-            };
-            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, turnId, options.desktop ?? null); }
-            catch (error) {
-              terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
-            }
-            terminal ??= { type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." };
-            stream.emit(terminal);
-            settled = terminal;
-          });
+          let terminal: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
+          const emit = (event: TurnEvent) => {
+            if (event.type === "done" || event.type === "error") terminal = event;
+            else stream.emit(event);
+          };
+          try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, turnId, options.desktop ?? null); }
+          catch (error) {
+            terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
+          }
+          terminal ??= { type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." };
+          stream.emit(terminal);
+          settled = terminal;
         } finally {
           this.admissions.delete(key);
           this.announce(ghost.name, id);
@@ -1060,20 +1045,16 @@ export class SessionHost {
   ): Promise<void> {
     if (!this.hooks.hasHandlers("turn_end") || signal.aborted || (terminal.type === "error" && terminal.reason === "aborted")) return;
     try {
-      // The lease covers reading the home, not the handlers, so a slow notifier never holds up a rename or delete.
-      const event = await this.withGhost(ghost.name, async () => {
-        const { sessionDir } = ghostPaths(ghost.dir), entries = (await readLog(sessionDir, id)) ?? [];
-        const last = entries.findLast(entry => entry.type === "assistant" || entry.type === "command");
-        const text = terminal.type === "error" ? terminal.errorMessage
-          : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
-          : last?.type === "command" ? last.output : "";
-        return { title: (logState(entries).title ?? ghost.name).slice(0, 160), text, sessionDir };
-      });
+      const { sessionDir } = ghostPaths(ghost.dir), entries = (await readLog(sessionDir, id)) ?? [];
+      const last = entries.findLast(entry => entry.type === "assistant" || entry.type === "command");
+      const text = terminal.type === "error" ? terminal.errorMessage
+        : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
+        : last?.type === "command" ? last.output : "";
       const url = await this.conversationUrl?.(ghost.name, id).catch(() => null) ?? null;
       await this.hooks.emitTurnEnd({
-        type: "turn_end", turn_id: turnId, outcome: terminal.type, title: event.title,
-        excerpt: (event.text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url,
-        ...hookEventBase(ghost, id, event.sessionDir, signal),
+        type: "turn_end", turn_id: turnId, outcome: terminal.type, title: (logState(entries).title ?? ghost.name).slice(0, 160),
+        excerpt: (text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url,
+        ...hookEventBase(ghost, id, sessionDir, signal),
       });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
   }
@@ -1188,11 +1169,7 @@ export class SessionHost {
     return names.filter((name) => isValidConversationId(name) && existsSync(logPath(sessionDir, name)));
   }
 
-  listSessions(ghostName: string): Promise<SessionSummary[]> {
-    return this.withGhost(ghostName, () => this.listSessionsLeased(ghostName));
-  }
-
-  private async listSessionsLeased(ghostName: string): Promise<SessionSummary[]> {
+  async listSessions(ghostName: string): Promise<SessionSummary[]> {
     const ghost = this.registry.get(ghostName);
     const { sessionDir } = ghostPaths(ghost.dir);
     const [ids, pins, reads, questions] = await Promise.all([
@@ -1238,17 +1215,15 @@ export class SessionHost {
   }
 
   async setPinned(ghostName: string, sessionId: string, pinned: boolean): Promise<void> {
-    await this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      const { sessionDir } = ghostPaths(ghost.dir);
-      await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
-        const existing = new Set(await this.conversationIds(sessionDir));
-        const kept = (await readPins(sessionDir)).filter((pin) => pin !== id && existing.has(pin));
-        await writePins(sessionDir, pinned ? [...kept, id] : kept);
-      });
-      this.announce(ghost.name, id);
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    const { sessionDir } = ghostPaths(ghost.dir);
+    await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
+      const existing = new Set(await this.conversationIds(sessionDir));
+      const kept = (await readPins(sessionDir)).filter((pin) => pin !== id && existing.has(pin));
+      await writePins(sessionDir, pinned ? [...kept, id] : kept);
     });
+    this.announce(ghost.name, id);
   }
 
   /**
@@ -1258,22 +1233,18 @@ export class SessionHost {
    */
   async setQuestion(ghostName: string, sessionId: string, text: string, options: readonly string[]): Promise<OwnerQuestion> {
     const question = validQuestion(text, options);
-    await this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      await this.updateQuestions(ghost, (questions) => ({ ...questions, [id]: question }));
-      this.announce(ghost.name, id);
-    });
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    await this.updateQuestions(ghost, (questions) => ({ ...questions, [id]: question }));
+    this.announce(ghost.name, id);
     return question;
   }
 
   /** Withdraw a conversation's open question without answering it. */
   async dismissQuestion(ghostName: string, sessionId: string): Promise<void> {
-    await this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      if (await this.dropQuestion(ghost, id)) this.announce(ghost.name, id);
-    });
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    if (await this.dropQuestion(ghost, id)) this.announce(ghost.name, id);
   }
 
   /** The ghost has asked the owner something in this conversation that is still open. */
@@ -1313,20 +1284,18 @@ export class SessionHost {
   }
 
   async markRead(ghostName: string, sessionId: string, openedAt = new Date()): Promise<string> {
-    return this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      const { sessionDir } = ghostPaths(ghost.dir);
-      let readAt = openedAt.toISOString();
-      await serializeByKey(this.metadataWrites, readsPath(sessionDir), async () => {
-        const existing = new Set(await this.conversationIds(sessionDir));
-        const kept = Object.fromEntries(Object.entries(await readReads(sessionDir)).filter(([read]) => existing.has(read)));
-        readAt = kept[id] && kept[id] > readAt ? kept[id] : readAt;
-        await writeReads(sessionDir, { ...kept, [id]: readAt });
-      });
-      this.announce(ghost.name, id);
-      return readAt;
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    const { sessionDir } = ghostPaths(ghost.dir);
+    let readAt = openedAt.toISOString();
+    await serializeByKey(this.metadataWrites, readsPath(sessionDir), async () => {
+      const existing = new Set(await this.conversationIds(sessionDir));
+      const kept = Object.fromEntries(Object.entries(await readReads(sessionDir)).filter(([read]) => existing.has(read)));
+      readAt = kept[id] && kept[id] > readAt ? kept[id] : readAt;
+      await writeReads(sessionDir, { ...kept, [id]: readAt });
     });
+    this.announce(ghost.name, id);
+    return readAt;
   }
 
   async renameConversation(ghostName: string, sessionId: string, title: string): Promise<string> {
@@ -1338,40 +1307,30 @@ export class SessionHost {
     if (!/\P{C}/u.test(trimmed)) {
       throw new GhostError("invalid_request", "A conversation title needs at least one printable character.", 400);
     }
-    return this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
-      this.announce(ghost.name, id);
-      return trimmed;
-    });
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
+    this.announce(ghost.name, id);
+    return trimmed;
   }
 
   /** Store an image in the conversation directory, which need not hold a turn yet. */
-  saveAttachment(ghostName: string, sessionId: string, bytes: Uint8Array): Promise<string> {
-    return this.withGhost(ghostName, () => saveAttachment(this.attachmentDir(ghostName, sessionId), bytes));
+  async saveAttachment(ghostName: string, sessionId: string, bytes: Uint8Array): Promise<string> {
+    return saveAttachment(this.attachmentDir(ghostName, sessionId), bytes);
   }
 
-  readAttachment(ghostName: string, sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
-    return this.withGhost(ghostName, () => readAttachment(this.attachmentDir(ghostName, sessionId), name));
+  async readAttachment(ghostName: string, sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
+    return readAttachment(this.attachmentDir(ghostName, sessionId), name);
   }
 
   private attachmentDir(ghostName: string, sessionId: string): string {
     return conversationDir(ghostPaths(this.registry.get(ghostName).dir).sessionDir, requireConversationId(sessionId));
   }
 
-  readTranscript(
+  async readTranscript(
     ghostName: string,
     sessionId: string,
     options: { limit?: number; offset?: number } = {},
-  ): Promise<Transcript> {
-    return this.withGhost(ghostName, () => this.readTranscriptLeased(ghostName, sessionId, options));
-  }
-
-  private async readTranscriptLeased(
-    ghostName: string,
-    sessionId: string,
-    options: { limit?: number; offset?: number },
   ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(sessionId);
@@ -1389,114 +1348,31 @@ export class SessionHost {
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
   async deleteSession(ghostName: string, sessionId: string): Promise<void> {
-    return this.withGhost(ghostName, async () => {
-      const ghost = this.registry.get(ghostName);
-      const id = await this.requireConversation(ghost, sessionId);
-      const key = keyOf(ghost.name, id);
-      if (this.admissions.has(key) || this.reservedSessions.has(key)) {
-        throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
-      }
-      this.reservedSessions.add(key);
-      try {
-        const { sessionDir } = ghostPaths(ghost.dir);
-        await trashPath(conversationDir(sessionDir, id), this.trashEnv());
-        await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
-          const pins = await readPins(sessionDir);
-          if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
-        });
-        await this.dropQuestion(ghost, id);
-        this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
-        this.announce(ghost.name, id);
-      } finally {
-        this.reservedSessions.delete(key);
-      }
-    });
-  }
-
-  // ── Ghost lifecycle ───────────────────────────────────────────────────
-
-  private ghostBusy(ghostName: string): boolean {
-    return [...this.admissions.keys(), ...this.reservedSessions].some((key) => ghostOfKey(key) === ghostName);
-  }
-
-  createGhost(name: string): Ghost {
-    assertValidGhostName(name);
-    if (this.reservedGhosts.has(name)) {
-      throw new GhostError("ghost_busy", "Wait for the previous ghost home to finish moving before reusing this name.", 409);
+    const ghost = this.registry.get(ghostName);
+    const id = await this.requireConversation(ghost, sessionId);
+    const key = keyOf(ghost.name, id);
+    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
+      throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
     }
-    return this.registry.create(name);
-  }
-
-  /**
-   * Run file work under a ghost's home. A move in progress refuses it, and a
-   * move waits for whatever was already running.
-   */
-  async withGhost<T>(ghostName: string, operation: () => T | Promise<T>): Promise<T> {
-    if (this.reservedGhosts.has(ghostName)) {
-      throw new GhostError("ghost_busy", "Wait for this ghost's home move to finish before changing its files.", 409);
-    }
-    const lease = this.leases.get(ghostName) ?? { count: 0 };
-    lease.count += 1;
-    this.leases.set(ghostName, lease);
+    this.reservedSessions.add(key);
     try {
-      return await operation();
+      const { sessionDir } = ghostPaths(ghost.dir);
+      await trashPath(conversationDir(sessionDir, id), this.trashEnv());
+      await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
+        const pins = await readPins(sessionDir);
+        if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
+      });
+      await this.dropQuestion(ghost, id);
+      this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
+      this.announce(ghost.name, id);
     } finally {
-      lease.count -= 1;
-      if (lease.count === 0) {
-        this.leases.delete(ghostName);
-        lease.drained?.();
-      }
+      this.reservedSessions.delete(key);
     }
-  }
-
-  /** Claim names for a move, refusing a running conversation and waiting out file work. */
-  private async reserve(names: readonly string[], operation: string): Promise<void> {
-    for (const name of names) {
-      if (this.reservedGhosts.has(name) || this.ghostBusy(name)) {
-        throw new GhostError("ghost_busy", `Wait for this ghost's conversations to finish before ${operation}.`, 409);
-      }
-    }
-    for (const name of names) this.reservedGhosts.add(name);
-    await Promise.all(names.map((name) => {
-      const lease = this.leases.get(name);
-      return lease ? new Promise<void>((resolve) => { lease.drained = resolve; }) : undefined;
-    }));
   }
 
   /** The environment `gio trash` resolves the owner's Trash from. */
   private trashEnv(): NodeJS.ProcessEnv {
     return { ...this.env, HOME: this.ownerHome };
-  }
-
-  async deleteGhost(ghostName: string): Promise<void> {
-    const ghost = this.registry.get(ghostName);
-    await this.reserve([ghost.name], "deleting it");
-    try {
-      await trashPath(ghost.dir, this.trashEnv());
-      this.closeConversationEventStreams(ghost.name);
-      this.logger.info("trashed ghost", { ghost: ghost.name });
-    } finally {
-      this.reservedGhosts.delete(ghost.name);
-    }
-  }
-
-  async renameGhost(ghostName: string, nextName: string): Promise<Ghost> {
-    assertValidGhostName(nextName);
-    const ghost = this.registry.get(ghostName);
-    if (nextName === ghost.name) return ghost;
-    if (existsSync(join(this.registry.root, nextName))) {
-      throw new GhostError("already_exists", `A ghost named ${JSON.stringify(nextName)} already exists.`, 409);
-    }
-    await this.reserve([ghost.name, nextName], "renaming it");
-    try {
-      const renamed = this.registry.rename(ghost.name, nextName);
-      this.closeConversationEventStreams(ghost.name);
-      this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
-      return renamed;
-    } finally {
-      this.reservedGhosts.delete(ghost.name);
-      this.reservedGhosts.delete(nextName);
-    }
   }
 
   // ── Shutdown ──────────────────────────────────────────────────────────

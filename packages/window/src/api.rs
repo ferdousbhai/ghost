@@ -191,10 +191,3 @@ impl Api {
         (rx, cancel)
     }
 }
-
-/// The default ghost the CLI keeps (`ghost use`), if any.
-pub fn default_ghost() -> Option<String> {
-    let text = std::fs::read_to_string(config_dir().join("cli.json")).ok()?;
-    let config: Value = serde_json::from_str(&text).ok()?;
-    config.get("ghost")?.as_str().map(str::trim).filter(|name| !name.is_empty()).map(String::from)
-}

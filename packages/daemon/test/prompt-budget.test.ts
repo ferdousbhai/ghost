@@ -51,11 +51,11 @@ const CEILINGS: Record<string, number> = {
   "Character file": 560,
   "Computer use": 273,
   "Ghost": 666,
-  "Owner context": 616,
+  "Owner context": 577,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 2436;
+const TOTAL_CEILING = 2397;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

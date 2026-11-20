@@ -9,8 +9,7 @@ belongs in its README.
 
 ## Product boundary
 
-Ghost is an owner-local Omarchy application: one owner, one machine, any number
-of ghosts.
+Ghost is an owner-local Omarchy application: one owner, one machine, one ghost.
 
 Changes simplify: state what they delete or why nothing can be deleted.
 Prefer an installed CLI plus its skill, the harness, or Omarchy over a new
@@ -40,7 +39,7 @@ Durable state has three scopes:
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
   folder of the owner's XDG Documents directory, and tasks in its `Reminders`
-  folder, which every ghost reads and writes ([Character and
+  folder, which the ghost reads and writes ([Character and
   notes](#character-and-notes)).
 - **External:** browser downloads, screenshots, and
   each harness's credentials, settings, and own session store stay in the
@@ -56,8 +55,8 @@ the directory. A ghost searches it on demand, as a task needs
 possibly stale candidates, and the source file is authoritative; `ghost help
 memory` points a ghost at it for things whose words or place are unknown.
 
-Document content is unaffected by creating, renaming, deleting, or
-uninstalling a ghost.
+Document content is unaffected by moving or removing a ghost home, or by
+uninstalling Ghost.
 
 There is no Ghost plan mode, todo store, or plan/todo API. Harness native
 planning may exist, but durable owner-visible plans and tasks belong in the
@@ -88,7 +87,8 @@ boundary. No configured handler means no outbound notification.
 
 ## Ghost home (`ghost-home/v2`)
 
-The default root is `~/ghosts`; each direct child is one ghost:
+The default root is `~/ghosts`; a direct child holding a `character.md` is a
+ghost home, and its directory name is the ghost's name:
 
 ```text
 ~/ghosts/<name>/
@@ -97,20 +97,17 @@ The default root is `~/ghosts`; each direct child is one ghost:
   sessions/<id>/       (one directory per conversation)
 ```
 
-The directory is the atomic lifecycle unit. Rename and deletion refuse a
-ghost with a conversation running, wait out file work already in flight,
-refuse new work until they finish, and move the whole home on the same
-filesystem.
-Deletion is `gio trash` into freedesktop Trash, a rename that refuses rather
-than copies; Ghost never recursively removes a home. Machine credentials, owner
-documents, screenshots, and downloads are not moved with it.
-The lifecycle implementation is in
-[`session-host.ts`](packages/daemon/src/session-host.ts).
+The owner has one ghost. A daemon start that finds no ghost home under the
+root makes `<root>/ghost/` with a seeded `character.md`
+([`main.ts`](packages/daemon/src/main.ts)); that is the only way Ghost makes
+one, and it never renames, moves, or removes a home. Every client addresses the
+first home by name (`GET /api/ghosts`); a second home is served by its routes
+but nothing selects it. The directory is the whole ghost: to rename it, stop
+ghostd, rename the directory, and start ghostd; to remove it, `gio trash` it.
+Machine credentials, owner documents, screenshots, and downloads are not in it.
 
 The checkout a ghost may edit is the clone the daemon was built from
-(`GET /api/status` `source.root`), and it is the same for every ghost on the
-machine: one daemon powers them all, so a self-edit powers all of them after a
-build and restart. A packaged install has no checkout. No per-ghost setting
+(`GET /api/status` `source.root`). A packaged install has no checkout. No setting
 names one; the checkout's own rules, MCP, and skills never enter a session.
 `settings.yml` names no cwd: every conversation runs in its own directory.
 
@@ -130,8 +127,8 @@ list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
 notes, `- [x]` done). These are the folders and formats icloud-notes and
 icloud-reminders sync, so connecting iCloud later syncs what is already
 there. A harness writes them with its native file tools; the local model with
-`save_note` and `add_reminder` ([Local model](#local-model)). They are shared
-by every ghost and readable by the owner
+`save_note` and `add_reminder` ([Local model](#local-model)). They are
+readable by the owner
 ([Product boundary](#product-boundary) says what may index them).
 Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
 owner asks for, following `ghost help memory`; Ghost
@@ -204,17 +201,17 @@ directory to recoverable Trash in one rename; there is no fork.
 ### State survival
 
 What each kind of state does under the events that move it. "The home" is the
-ghost home directory, which moves as one unit.
+ghost home directory, which the owner may rename while ghostd is stopped.
 
-| State | Daemon restart | Ghost rename | Ghost delete | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
-| --- | --- | --- | --- | --- | --- | --- |
-| `character.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
-| Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | not removed | unchanged | unchanged | preserved |
-| `settings.yml` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| Screenshots in the XDG Pictures directory | survive | not moved or renamed | not removed | unchanged | unchanged | preserved |
-| The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
-| The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
+| State | Daemon restart | Home renamed by the owner | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
+| --- | --- | --- | --- | --- | --- |
+| `character.md` | survives | moves with the home, byte for byte | unchanged | unchanged | preserved |
+| Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | unchanged | unchanged | preserved |
+| Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | unchanged | unchanged | preserved |
+| `settings.yml` | survives | moves with the home | unchanged | unchanged | preserved |
+| Screenshots in the XDG Pictures directory | survive | not moved or renamed | unchanged | unchanged | preserved |
+| The clone the daemon runs from | untouched | untouched | it is the source | unchanged | unchanged |
+| The running build | re-execs the same build | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
 The rollback column assumes Omarchy's btrfs layout, where `/` is the `@`
 subvolume and `/home` is `@home` with no snapper config of its own (verified
@@ -447,9 +444,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/connections` | Owner-only `{ connections: [{ id, label, brings, state, detail, actions: [{ label, command }] }] }`: the [connections](#connections). |
 | `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
-| `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
-| `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
-| `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
+| `GET /api/ghosts` | `[{ name, dir }]`, the ghost homes by name; a tailnet guest's list carries only names. No route makes, renames, or removes one ([Ghost home](#ghost-home-ghost-homev2)). |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, usage, effort, resting}], ghostDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which the HUD's and `ghost harness`'s "automatic" name. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
@@ -509,7 +504,7 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches, except attaching a photo and reading the follow-up queue, is a
-named verb there (ghost list, rename, character, sessions
+named verb there (character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), hooks, remote, and status), so a
@@ -517,7 +512,7 @@ ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
 a verb's primary output: what a read prints (a transcript without its paging
 note, a character, ids or names, `ok` for status), and nothing for a change.
 A change acknowledges in one capitalised sentence ending in a full stop; an
-empty list prints a sentence saying so (`No ghosts.`), and nothing under `-q`.
+empty list prints a sentence saying so (`No conversations.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
@@ -543,16 +538,14 @@ passed is dropped. `stale` marks a record older than 15 minutes; the verb never
 refreshes one, and `refresh` is the Omarchy command that does (null without
 Omarchy). `-q` prints the
 eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
-`-g`, then `$GHOST`, then the `ghost use` default, then the sole ghost, and
+`$GHOST`, else the first ghost home ghostd lists, and
 `-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
-owner's `!` commands in a conversation, carry both variables. A session is an
+owner's `!` commands in a conversation, carry both variables. No verb takes a ghost's name; `ghost status` prints it. A session is an
 id or unique prefix of a listed conversation; `say` and `switch` also take an
 unlisted id as given, since one no message has landed in yet is not listed.
-`-g` and `-s` exist only on the verbs whose usage lists them; elsewhere they
-are unknown options. `ghost rename` moves the `ghost use` default
-(`$XDG_CONFIG_HOME/ghost/cli.json`) to the new name and `ghost rm` clears it
-when it names that ghost; `ghost use --none` clears it. Signing in is
+`-s` exists only on the verbs whose usage lists it; elsewhere it
+is an unknown option. Signing in is
 the harness's own (`claude`, `codex login`, …); Ghost has no login or model
 commands. There are no plan or todo commands.
 
@@ -600,8 +593,8 @@ runtime preserves owner data.
   when its items have them, a search of it, and a reader for one item),
   Connect (the [connections](#connections); a first run with none connected
   starts there, and a step runs in Omarchy's floating terminal, else
-  `xdg-terminal-exec`), and Ask, a conversation of the default ghost
-  (`ghost use`, else the first ghost) whose answer's `[S1]` citations open
+  `xdg-terminal-exec`), and Ask, a conversation of the ghost
+  (the first `GET /api/ghosts` lists) whose answer's `[S1]` citations open
   the item the turn's `sources` event names. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
@@ -626,8 +619,8 @@ runtime preserves owner data.
   [README](packages/shell/README.md); what others rely on:
   - **The summon payload**, sent by the host's toggle and summon, the `ghost`
     IPC, and notifications: `{}` opens the presence prompt
-    (the HUD while no ghost is listed); `ghost` selects one first, if listed;
-    `section` opens the HUD there; `sessionId` with `ghost` opens that
+    (the HUD while no ghost is listed); `section` opens the HUD there;
+    `sessionId` with `ghost`, the listed ghost's name, opens that
     conversation;
     `restore: true` puts the HUD back after a reload without igniting or
     listening. With nothing named, a prompt or HUD left open behind another
@@ -675,7 +668,7 @@ runtime preserves owner data.
     is distributed only by the `ghost` package, never as an
     `omarchy plugin add` checkout: the HUD and the daemon are one product
     and must be the same version, and a second channel cannot hold that lock.
-    Setup ends with `ghost new <name>`; harness sign-in is external.
+    Setup ends with ghostd's first start, which makes the ghost home; harness sign-in is external.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   prints the daemon restart that loads the new bundle. A release is cut locally
@@ -701,7 +694,7 @@ separate tabs; cooperating callers lock tab selection and each operation with
 one owner-wide `flock`. Tab selection invalidates snapshot refs; separate
 operations use semantic or CSS selectors. Ref-based sequences hold the lock
 from selection and snapshot through action without reselecting. Tabs and CLI
-state survive Ghost restarts, rename and deletion; explicitly close a task's tabs when finished, never the owner's
+state survive Ghost restarts; explicitly close a task's tabs when finished, never the owner's
 browser. Setup and recovery are in `ghost help browser`.
 
 ### Sources
@@ -825,8 +818,8 @@ Recall's coverage is its own configuration.
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
-- Home rename/delete and conversation deletion use explicit
-  leases and publish only durable state.
+- Conversation deletion reserves its conversation and publishes only durable
+  state.
 - Control files are bounded (1 MiB), validated, and replaced atomically by
   rename; malformed bytes are refused, and a symlinked file is followed like
   any other. Every process involved runs as the owner, so ghostd defends

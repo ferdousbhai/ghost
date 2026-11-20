@@ -117,10 +117,10 @@ describe("tailnet identity", () => {
     expect(await guestGhosts.json()).toEqual([{ name: "casper" }]);
     const ownerGhosts = await (await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).json() as unknown[];
     expect(ownerGhosts[0]).toHaveProperty("dir");
-    const write = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
+    const write = await fetch(`${base}/api/ghosts/casper/character`, {
+      method: "PUT",
       headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
-      body: JSON.stringify({ name: "intruder" }),
+      body: JSON.stringify({ body: "# Intruder\n" }),
     });
     expect(write.status).toBe(403);
     expect(await write.json()).toMatchObject({ error: { code: "read_only" } });
@@ -139,12 +139,12 @@ describe("tailnet identity", () => {
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
       .toEqual({ role: "owner" });
-    const create = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
+    const ownerWrite = await fetch(`${base}/api/ghosts/casper/character`, {
+      method: "PUT",
       headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
-      body: JSON.stringify({ name: "owner-created" }),
+      body: JSON.stringify({ body: "# Casper\n" }),
     });
-    expect(create.status).toBe(201);
+    expect(ownerWrite.status).toBe(200);
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com", { origin: "https://evil.example" }) })).status).toBe(403);
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: { authorization: `Bearer ${TOKEN}` } })).json())

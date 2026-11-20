@@ -245,24 +245,24 @@ describe("ghost help <topic>", () => {
 describe("CLI argv parser", () => {
   it("parses long, equals, short-value, boolean, and terminator forms", () => {
     expect(parseArgs([
-      "--ghost=casper",
+      "--harness=claude",
       "-s",
       "abc",
       "--json",
       "--",
       "--literal",
-    ], { value: ["ghost", "session"] })).toEqual({
+    ], { value: ["harness", "session"] })).toEqual({
       positionals: ["--literal"],
-      flags: { ghost: "casper", session: "abc", json: true },
+      flags: { harness: "claude", session: "abc", json: true },
     });
   });
 
   it("keeps a lone dash positional and rejects unknown flags", () => {
     expect(parseArgs(["-"]).positionals).toEqual(["-"]);
     expect(() => parseArgs(["--wat"])).toThrow(ArgsError);
-    expect(() => parseArgs(["--ghost", "--json"], { value: ["ghost"] })).toThrow("'--ghost' argument is ambiguous");
-    expect(() => parseArgs(["--ghost"], { value: ["ghost"] })).toThrow("argument missing");
-    expect(() => parseArgs(["--ghost="], { value: ["ghost"] })).toThrow("--ghost requires a value");
+    expect(() => parseArgs(["--session", "--json"], { value: ["session"] })).toThrow("'--session' argument is ambiguous");
+    expect(() => parseArgs(["--session"], { value: ["session"] })).toThrow("argument missing");
+    expect(() => parseArgs(["--session="], { value: ["session"] })).toThrow("--session requires a value");
     expect(parseArgs(["--q", "model", "-q"], { value: ["q"] })).toEqual({
       positionals: [],
       flags: { q: "model", quiet: true },
@@ -321,13 +321,13 @@ describe("ghost help", () => {
     }
   });
 
-  it("refuses -g or -s on a verb whose usage does not list it", async () => {
+  it("refuses -s on a verb whose usage does not list it, and -g everywhere", async () => {
     const fetch: CliFetch = async (input) => {
       throw new Error(`unexpected request to ${String(input)}`);
     };
     for (const argv of [
-      ...["harness", "sessions", "character", "rename x"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
-      ...["list", "new x", "use", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
+      ...["harness", "sessions", "character", "status"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["say hi", "sessions", "show", "harness", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);
@@ -431,18 +431,19 @@ describe("CLI API adaptation", () => {
   it("an empty list says so in a sentence, and -q prints nothing", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
-      if (path === "/api/ghosts") return jsonResponse([]);
       if (path.endsWith("/sessions")) return jsonResponse({ sessions: [] });
       throw new Error(`unexpected request to ${path}`);
     };
-    for (const [argv, sentence] of [
-      [["list"], "No ghosts.\n"],
-      [["sessions"], "No conversations.\n"],
-    ] as const) {
-      const run = (...flags: string[]) => runCli([...argv, ...flags], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
-      expect(await run(), argv.join(" ")).toMatchObject({ code: 0, stdout: sentence });
-      expect(await run("-q"), argv.join(" ")).toMatchObject({ code: 0, stdout: "" });
-    }
+    const run = (...flags: string[]) => runCli(["sessions", ...flags], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(await run()).toMatchObject({ code: 0, stdout: "No conversations.\n" });
+    expect(await run("-q")).toMatchObject({ code: 0, stdout: "" });
+  });
+
+  it("says how a ghost home comes to be when ghostd lists none", async () => {
+    const fetch: CliFetch = async () => jsonResponse([]);
+    const result = await runCli(["sessions"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result).toMatchObject({ code: 5, stdout: "" });
+    expect(result.stderr).toContain("ghostd makes one when it starts");
   });
 
   it("ghost hooks status prints each hook's event, name, and description", async () => {

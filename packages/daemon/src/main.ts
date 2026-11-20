@@ -11,7 +11,7 @@ import {
 } from "./config.js";
 import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
-import { GhostRegistry } from "./ghosts.js";
+import { FIRST_GHOST_NAME, GhostRegistry } from "./ghosts.js";
 import { type ConfiguredHookRunner, GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
@@ -43,7 +43,7 @@ Subcommands:
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
-      --ghosts-root <dir>  Directory holding one sub-directory per ghost
+      --ghosts-root <dir>  Directory holding the ghost home (default ~/ghosts)
       --config <file>      Config file (default ~/.config/ghost/config.json)
       --log-level <level>  info | warn | error (default info)
   -h, --help               Show this message
@@ -200,6 +200,7 @@ async function serveDaemon(
   // What is running: the source checkout behind this process, if it has one.
   const runningSource = resolveRunningSource(DAEMON_VERSION, fileURLToPath(import.meta.url));
   registry.ensureRoot();
+  if (registry.list().length === 0) logger.info("made the ghost home", { ghost: registry.create(FIRST_GHOST_NAME).name });
 
   const remoteServe = new RemoteServe(config.port, config.remote);
   const host = new SessionHost({

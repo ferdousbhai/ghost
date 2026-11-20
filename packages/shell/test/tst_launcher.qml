@@ -38,7 +38,7 @@ TestCase {
         compare(rows[4].kind, "header");
         compare(rows[4].label, "casper");
         compare(rows.filter(row => row.kind === "place").map(row => row.id),
-            ["character", "ghosts", "hooks", "remote"]);
+            ["character", "hooks", "remote"]);
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 
@@ -122,22 +122,6 @@ TestCase {
         compare(Launcher.step(rows, 1, -1), 1);
         const last = rows.length - 1;
         compare(Launcher.step(rows, last, 1), last);
-    }
-
-    function test_ghostsListTheCurrentFirstAndOfferToSummonAFreeName(): void {
-        const ghosts = [{ name: "moaning-myrtle" }, { name: "casper" }, { name: "nick" }];
-        const rows = Launcher.ghostRows("", ghosts, "nick");
-        compare(kinds(rows), ["ghost:nick", "ghost:casper", "ghost:moaning-myrtle"]);
-        compare(rows[0].detail, "current");
-
-        compare(kinds(Launcher.ghostRows("cas", ghosts, "nick")), ["ghost:casper", "summon:summon"]);
-        const summon = Launcher.ghostRows("sage", ghosts, "nick");
-        compare(kinds(summon), ["summon:summon"]);
-        compare(summon[0].title, "sage");
-        compare(summon[0].label, "Summon sage");
-        // A taken name, in any case, is only found; an invalid one offers nothing.
-        compare(kinds(Launcher.ghostRows("Casper", ghosts, "nick")), ["ghost:casper"]);
-        compare(Launcher.ghostRows("-bad name", ghosts, "nick"), []);
     }
 
     // The component: keys on the filter reach the row they mean.
@@ -289,37 +273,6 @@ TestCase {
         compare(launcher.rename.draft, "Fix the README");
         keyClick(Qt.Key_Escape);
         compare(launcher.rename.editingKey, "");
-    }
-
-    function test_ghostsModeSwitchesRenamesAndBanishes(): void {
-        Ghostd.ghosts = [{ name: "casper" }, { name: "nick" }];
-        const launcher = createTemporaryObject(launcherComponent, tc, { mode: "ghosts" });
-        const chosen = [];
-        const banished = [];
-        launcher.activated.connect(row => chosen.push(row.kind + ":" + row.id));
-        launcher.banishRequested.connect(name => banished.push(name));
-        launcher.reset();
-        compare(launcher.current.id, "casper");
-
-        keyClick(Qt.Key_Down);
-        keyClick(Qt.Key_Return);
-        compare(chosen, ["ghost:nick"]);
-
-        keyClick(Qt.Key_Delete);
-        compare(banished, ["nick"]);
-
-        keyClick(Qt.Key_R, Qt.ControlModifier);
-        compare(launcher.ghostRename.editingKey, "nick");
-        compare(launcher.ghostRename.draft, "nick");
-        keyClick(Qt.Key_Escape);
-
-        // Tab and Ctrl+N belong to the conversations list, not this one.
-        keyClick(Qt.Key_N, Qt.ControlModifier);
-        compare(chosen.length, 1);
-
-        for (const letter of "sage") keyClick(letter);
-        keyClick(Qt.Key_Return);
-        compare(chosen[1], "summon:summon");
     }
 
     function test_ctrlPPinsTheSelectedConversation(): void {

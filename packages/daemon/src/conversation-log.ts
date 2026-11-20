@@ -532,7 +532,7 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
 
 /**
  * How a shell command started in a conversation names it: the variables the
- * `ghost` CLI reads in place of `-g` and `-s`. Every harness turn and owner
+ * `ghost` CLI reads to address this conversation. Every harness turn and owner
  * `!` command runs with them.
  */
 export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string } {

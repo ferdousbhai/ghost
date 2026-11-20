@@ -35,22 +35,20 @@ FloatingWindow {
 
     /** Driven by Panel.qml. Bound to `visible`. */
     property bool shown: false
-    /** "home" or "ghosts" (the launcher's two lists), or one of `sections`. */
+    /** "home" (the launcher's list), or one of `sections`. */
     property string currentSection: "home"
     /** The views a row opens, in the body stack's order. */
     readonly property var sections: ["chat", "character", "hooks", "remote"]
     /** The card is a list: the launcher, over conversations or over ghosts. */
-    readonly property bool home: hud.currentSection === "home" || hud.currentSection === "ghosts"
+    readonly property bool home: hud.currentSection === "home"
 
-    // Deleting a conversation and banishing a ghost are asked in a modal over
+    // Deleting a conversation is asked in a modal over
     // the whole card rather than in the row: a row is one line of a scrolling
     // list, and a question that costs something deserves the middle of the
-    // screen. One question stands at a time, as { kind: "conversation" |
-    // "ghost", id, title } or null. It lives here, not in the list that raised it, because the dialog
+    // screen. It stands as { id, title } or null. It lives here, not in the list that raised it, because the dialog
     // outlives the delegate (a refresh rebuilds every row).
     property var pending: null
-    readonly property string pendingSession: hud.pendingId("conversation")
-    readonly property string pendingGhost: hud.pendingId("ghost")
+    readonly property string pendingSession: hud.pending !== null ? hud.pending.id : ""
 
     visible: hud.shown
     // DesktopKeys' rules find it by this title (a plugin's windows carry the
@@ -130,7 +128,7 @@ FloatingWindow {
 
     /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
-        if (section !== "home" && section !== "ghosts" && hud.sections.indexOf(section) < 0) return;
+        if (section !== "home" && hud.sections.indexOf(section) < 0) return;
         hud.currentSection = section;
         if (hud.home) launcher.reset();
         else if (section === "chat") composer.take();
@@ -154,21 +152,11 @@ FloatingWindow {
             hud.showSection("chat");
         } else if (row.kind === "place") {
             hud.showSection(row.id);
-        } else if (row.kind === "ghost") {
-            Ghostd.selectGhost(row.id);
-            hud.showSection("home");
-        } else if (row.kind === "summon") {
-            Ghostd.createGhost(row.title);
-            hud.showSection("home");
         }
     }
 
-    function pendingId(kind: string): string {
-        return hud.pending !== null && hud.pending.kind === kind ? hud.pending.id : "";
-    }
-
-    function ask(kind: string, id: string, title: string): void {
-        hud.pending = ({ kind: kind, id: id, title: title });
+    function ask(id: string, title: string): void {
+        hud.pending = ({ id: id, title: title });
         hud.clearPendingError();
     }
 
@@ -183,7 +171,6 @@ FloatingWindow {
     // error is cleared when the question opens and when it closes.
     function clearPendingError(): void {
         if (hud.pendingSession !== "") Ghostd.sessionsError = "";
-        if (hud.pendingGhost !== "") Ghostd.ghostDeleteError = "";
     }
 
     // Closing makes the host destroy the panel inside `shownChanged`, before
@@ -218,19 +205,6 @@ FloatingWindow {
         function onDeletingSessionIdChanged(): void {
             if (hud.pendingSession === "" || Ghostd.deletingSessionId !== "") return;
             if (Ghostd.sessionsError === "") hud.dismissPending();
-        }
-
-        function onDeletingGhostChanged(): void {
-            if (hud.pendingGhost === "" || Ghostd.deletingGhost !== "") return;
-            if (Ghostd.ghostDeleteError === "") hud.dismissPending();
-        }
-
-        // A name that left the listing (banished here, or from another shell)
-        // has nothing left to confirm.
-        function onGhostsChanged(): void {
-            if (hud.pendingGhost === "" || Ghostd.deletingGhost !== "") return;
-            if (!Ghostd.ghosts.some(ghost => ghost.name === hud.pendingGhost))
-                hud.dismissPending();
         }
 
         function onComposerDraft(text: string): void {
@@ -405,12 +379,9 @@ FloatingWindow {
             anchors.right: parent.right
             visible: hud.home
             focus: hud.home
-            mode: hud.currentSection === "ghosts" ? "ghosts" : "home"
             maxListHeight: hud.height - card.listTop - card.inset - Theme.controlHeight * 4
             onActivated: row => hud.launch(row)
-            onDeleteRequested: (sessionId, title) => hud.ask("conversation", sessionId, title)
-            onBanishRequested: name => hud.ask("ghost", name, "")
-            onBackRequested: hud.showSection("home")
+            onDeleteRequested: (sessionId, title) => hud.ask(sessionId, title)
             onCloseRequested: hud.close()
         }
 
@@ -593,26 +564,6 @@ FloatingWindow {
             busy: deleteDialog.open && Ghostd.deletingSessionId === hud.pendingSession
             error: deleteDialog.open ? Ghostd.sessionsError : ""
             onConfirmed: Ghostd.deleteConversation(hud.pendingSession)
-            onDismissed: hud.dismissPending()
-        }
-
-
-        // Banishing a ghost is the same question one notch louder: the daemon
-        // wants the name echoed back byte for byte, so the dialog collects it.
-        ConfirmDialog {
-            id: banishDialog
-
-            anchors.fill: parent
-            open: hud.pendingGhost !== ""
-            title: "Banish " + hud.pendingGhost + "?"
-            body: "Its persona, memories, credentials, and conversations move to Trash. "
-                + "The owner's own documents stay on this machine. Type “"
-                + hud.pendingGhost + "” to confirm."
-            challenge: hud.pendingGhost
-            confirmText: "Banish"
-            busy: banishDialog.open && Ghostd.deletingGhost === hud.pendingGhost
-            error: banishDialog.open ? Ghostd.ghostDeleteError : ""
-            onConfirmed: Ghostd.deleteGhost(hud.pendingGhost)
             onDismissed: hud.dismissPending()
         }
     }

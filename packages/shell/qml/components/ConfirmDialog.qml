@@ -23,13 +23,6 @@ Item {
     property bool busy: false
     /** The failure to show in place of nothing happening, or "". */
     property string error: ""
-    /** When set, the confirm stays locked until this exact string is typed
-        back — the gate an erased home directory earns over a stray Return. */
-    property string challenge: ""
-
-    readonly property bool answered: root.challenge === ""
-        || challengeField.text === root.challenge
-
     signal confirmed()
     signal dismissed()
 
@@ -44,7 +37,7 @@ Item {
     }
 
     function accept(): void {
-        if (root.busy || !root.answered) return;
+        if (root.busy) return;
         root.confirmed();
     }
 
@@ -54,14 +47,8 @@ Item {
     }
 
     // The dialog owns the keyboard while it is up; the composer gets focus back
-    // from the owner once it closes. A challenge takes the caret itself — the
-    // answer is the next thing to type.
-    onOpenChanged: {
-        if (!root.open) return;
-        challengeField.text = "";
-        if (root.challenge !== "") challengeField.forceActiveFocus();
-        else root.forceActiveFocus();
-    }
+    // from the owner once it closes.
+    onOpenChanged: if (root.open) root.forceActiveFocus()
 
     focus: root.open
     Keys.onEscapePressed: event => {
@@ -140,45 +127,8 @@ Item {
                 lineHeight: Theme.lineHeight
             }
 
-            // Type-the-name gate. Plain TextInput, not a Controls TextField,
-            // for the reason Composer.qml gives.
-            Rectangle {
-                width: parent.width
-                height: Theme.controlHeight - Theme.gap
-                visible: root.challenge !== ""
-                radius: Theme.radius / 2
-                color: Theme.film(0.06)
-                border.width: 1
-                border.color: root.answered ? Theme.rose(0.50) : Theme.film(0.10)
-
-                Behavior on border.color {
-                    enabled: !Theme.reducedMotion
-                    ColorAnimation { duration: Theme.durFast }
-                }
-
-                TextInput {
-                    id: challengeField
-                    anchors.fill: parent
-                    anchors.leftMargin: Theme.gap / 2
-                    anchors.rightMargin: Theme.gap / 2
-                    verticalAlignment: TextInput.AlignVCenter
-                    enabled: !root.busy
-                    color: Theme.foregroundBright
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize
-                    selectByMouse: true
-                    selectionColor: Theme.selection
-                    clip: true
-                    onAccepted: root.accept()
-                    Keys.onEscapePressed: event => {
-                        event.accepted = true;
-                        root.reject();
-                    }
-                }
-            }
-
             // The daemon's own words when the confirm fails (a conversation
-            // still streaming, a busy ghost), so the dialog stays up with the
+            // still streaming), so the dialog stays up with the
             // reason instead of closing on a no-op.
             Text {
                 width: parent.width
@@ -208,7 +158,7 @@ Item {
                     ActionButton {
                         label: root.busy ? "…" : root.confirmText
                         danger: true
-                        enabled: !root.busy && root.answered
+                        enabled: !root.busy
                         onClicked: root.accept()
                     }
                 }

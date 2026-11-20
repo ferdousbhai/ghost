@@ -1,6 +1,6 @@
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
-import { listGhosts, readDefaultGhost } from "./common.js";
+import { listGhosts } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -18,12 +18,11 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
     ctx.client.request<RemoteStatus>("GET", "/api/remote"),
     ctx.client.request<DaemonStatus>("GET", "/api/status"),
   ]);
-  const defaultGhost = readDefaultGhost(ctx.runtime) ?? null;
+  const ghost = ghosts[0]?.name ?? null;
   const result = {
     daemon: ctx.client.baseUrl,
     tokenFile: ctx.client.tokenPath,
-    ghostCount: ghosts.length,
-    defaultGhost,
+    ghost,
     version: ctx.version,
     daemonVersion: daemon.version,
     source: daemon.source,
@@ -35,8 +34,7 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
     const lines = [
       `daemon         ${ctx.client.baseUrl}`,
       `token file     ${ctx.client.tokenPath}`,
-      `ghosts         ${ghosts.length}`,
-      `default ghost  ${defaultGhost ?? "—"}`,
+      `ghost          ${ghost ?? "—"}`,
       `version        ${ctx.version}`,
     ];
     lines.push(`daemon version ${daemon.version}`);

@@ -11,7 +11,6 @@ TestCase {
 
     function init(): void {
         Ghostd.retire(Ghostd, "listRequest");
-        Ghostd.retire(Ghostd, "createGhostRequest");
         requests = [];
         Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/ghosts$/);
         Ghostd.apiToken = "test-token";
@@ -22,50 +21,8 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.retire(Ghostd, "listRequest");
-        Ghostd.retire(Ghostd, "createGhostRequest");
         Ghostd.requestFactory = null;
         requests = [];
-    }
-
-    function test_listAndCreateKeepIndependentOwners(): void {
-        Ghostd.refresh();
-        compare(requests.length, 1);
-        const listing = requests[0];
-
-        Ghostd.createGhost("new-ghost");
-        compare(requests.length, 2);
-        const create = requests[1];
-        compare(Ghostd.listRequest, listing);
-        compare(Ghostd.createGhostRequest, create);
-        compare(listing.method, "GET");
-        compare(create.method, "POST");
-        compare(JSON.parse(create.body), { name: "new-ghost" });
-
-        listing.complete(200, []);
-        compare(Ghostd.listRequest, null);
-        compare(Ghostd.createGhostRequest, create);
-        create.complete(409, {
-            error: { code: "conflict", message: "already exists" }
-        });
-        compare(Ghostd.createGhostRequest, null);
-        verify(Ghostd.lastError.indexOf("already exists") >= 0);
-    }
-
-    // A created ghost is switched to like a picked one: the previous ghost's
-    // conversations are gone at once, and the roster is listed once.
-    function test_createdGhostDropsThePreviousGhostsStateAndListsOnce(): void {
-        Ghostd.activeGhost = "existing";
-        Ghostd.sessions = [{ id: "old-conversation" }];
-
-        Ghostd.createGhost("new-ghost");
-        requests[0].complete(201, { name: "new-ghost", dir: "/tmp/ghosts/new-ghost" });
-        compare(Ghostd.activeGhost, "new-ghost");
-        compare(Ghostd.sessions.length, 0);
-
-        compare(requests.length, 2);
-        compare(requests[1].method, "GET");
-        verify(requests[1].url.endsWith("/api/ghosts"));
-        Ghostd.retire(Ghostd, "listRequest");
     }
 
     function test_newerListRetiresAndIgnoresOlderCompletion(): void {
@@ -84,26 +41,7 @@ TestCase {
         compare(Ghostd.listRequest, null);
     }
 
-    function test_newerCreateRetiresAndIgnoresOlderCompletion(): void {
-        Ghostd.createGhost("older");
-        const older = requests[0];
-        Ghostd.createGhost("newer");
-        const newer = requests[1];
-
-        compare(older.abortCount, 1);
-        compare(Ghostd.createGhostRequest, newer);
-        older.complete(201, { name: "older", dir: "/tmp/ghosts/older" });
-        compare(Ghostd.ghosts.length, 1);
-        compare(Ghostd.ghosts[0].name, "existing");
-
-        newer.complete(409, {
-            error: { code: "conflict", message: "newer conflict" }
-        });
-        compare(Ghostd.createGhostRequest, null);
-        verify(Ghostd.lastError.indexOf("newer conflict") >= 0);
-    }
-
-    // A ghost banished elsewhere (the CLI, another shell) leaves the listing:
+    // A ghost home the owner moved away leaves the listing:
     // the HUD moves to a listed one rather than keep showing it and polling
     // its missing event stream.
     function test_aListingWithoutTheActiveGhostMovesToAListedOne(): void {

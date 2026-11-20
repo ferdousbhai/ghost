@@ -21,9 +21,9 @@ spend, or concurrency caps.
 ## Why files own durable context
 
 A ghost home keeps its character, conversations, and configuration together
-for recoverable rename and deletion. Notes and plans live in the `Notes`
+in one directory the owner can move or trash. Notes and plans live in the `Notes`
 folder of the owner's Documents directory, and tasks as checklists in its
-`Reminders` folder: Markdown shared by all ghosts, editable with ordinary
+`Reminders` folder: Markdown editable with ordinary
 file tools, and synced by iCloud only if you connect it. Ghost names that
 directory in the prompt but neither indexes it nor injects its contents; a
 ghost searches it when a task needs it. Recall, an optional separate product,

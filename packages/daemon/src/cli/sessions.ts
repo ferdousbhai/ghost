@@ -120,3 +120,13 @@ export async function sessionActionCommand(verb: "title" | "pin" | "unpin", ctx:
   });
   return 0;
 }
+
+/** `ghost rm -s <id> --yes`: move one conversation to recoverable Trash. */
+export async function removeCommand(ctx: CliContext): Promise<number> {
+  if (!flagBoolean(ctx.parsed, "yes")) throw new ArgsError("ghost rm requires --yes");
+  if (!flagString(ctx.parsed, "session")) throw new ArgsError("ghost rm needs -s <id>");
+  const { path, session } = await resolveTarget(ctx);
+  const response = await ctx.client.request("DELETE", path);
+  emit(ctx, response, () => `Trashed ${session.id}.\n`);
+  return 0;
+}

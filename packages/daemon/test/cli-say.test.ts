@@ -61,7 +61,7 @@ const successEvents = [
 describe("ghost say", () => {
   it("streams text, reports tool activity, and sends a new raw cli id", async () => {
     const fake = await fakeDaemon(successEvents);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });
@@ -83,7 +83,7 @@ describe("ghost say", () => {
       { type: "text_delta", contentIndex: 0, delta: "lo" },
       { type: "done" },
     ]);
-    const result = await runCli(["say", "hi", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    const result = await runCli(["say", "hi", "--new"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("hello\n");
     expect(fake.resumedFrom()).toMatch(/^\/api\/ghosts\/casper\/sessions\/cli-[^/]+\/stream\?turn=turn-1&from=2$/);
@@ -97,11 +97,11 @@ describe("ghost say", () => {
       { type: "tool_execution_end", id: "bash-1", toolName: "bash", isError: true, summary: "a\nb\nls: c: No such file" },
       { type: "done" },
     ]);
-    const result = await runCli(["say", "!ls", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    const result = await runCli(["say", "!ls", "--new"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("a\nb\nls: c: No such file\n");
     expect(result.stderr).not.toContain("✗");
-    const quiet = await runCli(["say", "!ls", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    const quiet = await runCli(["say", "!ls", "--new", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(quiet.stdout).toBe("a\nb\nls: c: No such file\n");
   });
 
@@ -117,7 +117,7 @@ describe("ghost say", () => {
       { type: "text_delta", contentIndex: 1, delta: "It failed at 3am." },
       { type: "done" },
     ]);
-    const result = await runCli(["say", "why", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    const result = await runCli(["say", "why", "--new", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.stdout).toBe("I'll check the log.\n\nIt failed at 3am.\n");
   });
 
@@ -142,7 +142,7 @@ describe("ghost say", () => {
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
-    const running = runCli(["say", "hold on", "--new", "-g", "casper"], {
+    const running = runCli(["say", "hold on", "--new"], {
       env: { GHOSTD_PORT: String(port) },
       home: "/tmp/ghost-cli-home",
     });
@@ -169,7 +169,7 @@ describe("ghost say", () => {
     await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
-    const result = await runCli(["stop", "-g", "casper", "-s", "remote-1"], { env: { GHOSTD_PORT: String(port) }, home: "/tmp/ghost-cli-home" });
+    const result = await runCli(["stop", "-s", "remote-1"], { env: { GHOSTD_PORT: String(port) }, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("Stopped remote-1.\n");
     expect(requests).toContain("POST /api/ghosts/casper/sessions/remote-1/stop");
@@ -177,7 +177,7 @@ describe("ghost say", () => {
 
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
+    const result = await runCli(["say", "hello", "--new", "--json"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });
@@ -187,7 +187,7 @@ describe("ghost say", () => {
 
   it("reads piped stdin", async () => {
     const fake = await fakeDaemon(successEvents);
-    const result = await runCli(["say", "--new", "-g", "casper", "-q"], {
+    const result = await runCli(["say", "--new", "-q"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
       stdin: "from stdin",
@@ -198,7 +198,7 @@ describe("ghost say", () => {
 
   it("returns one for an error event", async () => {
     const fake = await fakeDaemon([{ type: "start" }, { type: "error", reason: "model", errorMessage: "broken", usage: {} }]);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });
@@ -208,7 +208,7 @@ describe("ghost say", () => {
 
   it("names the harness and the limit it reached on stderr", async () => {
     const fake = await fakeDaemon([{ type: "start" }, { type: "limit_reached", harness: "codex", kind: "usage_limit" }, { type: "done", usage: {} }]);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });
@@ -217,7 +217,7 @@ describe("ghost say", () => {
 
   it("words an overloaded harness as such, not as a limit", async () => {
     const fake = await fakeDaemon([{ type: "start" }, { type: "limit_reached", harness: "claude", kind: "overloaded" }, { type: "done", usage: {} }]);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper"], {
+    const result = await runCli(["say", "hello", "--new"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });
@@ -227,7 +227,7 @@ describe("ghost say", () => {
   it("keeps JSON error events machine-readable and reports the failure on stderr", async () => {
     const events = [{ type: "start" }, { type: "error", reason: "model", errorMessage: "broken", usage: {} }];
     const fake = await fakeDaemon(events);
-    const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
+    const result = await runCli(["say", "hello", "--new", "--json"], {
       env: fake.env,
       home: "/tmp/ghost-cli-home",
     });

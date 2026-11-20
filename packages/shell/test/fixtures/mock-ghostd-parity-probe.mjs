@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -179,15 +178,6 @@ try {
   assert.deepEqual((await settle(defaultTurn, "default")).at(-1), { type: "done" });
   const defaultLog = await (await fetch(`${base}/sessions/default/transcript`)).json();
   assert.ok(JSON.stringify(defaultLog.messages).includes("probe the default conversation"));
-
-  const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "fresh-mock-ghost" }),
-  });
-  assert.equal(createdResponse.status, 201);
-  const created = await createdResponse.json();
-  assert.ok(existsSync(created.dir));
 
   const turnResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
     method: "POST",

@@ -166,10 +166,10 @@ describe("the content type of a mutating request", () => {
   it("refuses the other two simple-request types as well", async () => {
     const base = await serve();
     for (const type of ["application/x-www-form-urlencoded", "multipart/form-data"]) {
-      const response = await fetch(`${base}/api/ghosts`, {
+      const response = await fetch(`${base}/api/ghosts/casper/messages`, {
         method: "POST",
         headers: { ...auth, "content-type": type },
-        body: "name=ghoul",
+        body: "prompt=hello",
       });
       expect(response.status, type).toBe(415);
     }
@@ -177,7 +177,7 @@ describe("the content type of a mutating request", () => {
 
   it("refuses a POST with no content type at all", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
+    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "" },
       body: "{}",
@@ -187,12 +187,12 @@ describe("the content type of a mutating request", () => {
 
   it("accepts application/json with parameters", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
+    const response = await fetch(`${base}/api/ghosts/casper/character`, {
+      method: "PUT",
       headers: { ...auth, "content-type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ name: "ghoul" }),
+      body: JSON.stringify({ body: "# Casper\n" }),
     });
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(200);
   });
 
   it("leaves GET alone — a body-less read has nothing to smuggle", async () => {

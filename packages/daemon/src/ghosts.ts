@@ -1,15 +1,11 @@
-import { randomUUID } from "node:crypto";
 import {
-  existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
-  renameSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { CHARACTER_FILENAME, isSeedText, SEEDED_CHARACTER } from "./persona.js";
+import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "./persona.js";
 import { GhostError } from "./errors.js";
 
 export interface Ghost {
@@ -18,6 +14,8 @@ export interface Ghost {
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
+/** The home a first start makes: the owner has one ghost, and a root without one gets this. */
+export const FIRST_GHOST_NAME = "ghost";
 const GHOST_SETTINGS_FILENAME = "settings.yml";
 
 /**
@@ -133,44 +131,5 @@ export class GhostRegistry {
       flag: "wx",
     });
     return { name, dir };
-  }
-
-  /**
-   * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
-   * because the directory name is the name. One same-filesystem rename carries
-   * the persona, sessions, and owner state together, and leaves every
-   * conversation id (a conversation directory name inside the home) valid. Machine
-   * credentials are service/account scoped and are not renamed.
-   *
-   * The target must not exist at all, not merely "not be a ghost": renaming
-   * onto an occupied path would either fail deep in `rename` or bury whatever
-   * the owner had put there.
-   */
-  rename(name: string, nextName: string): Ghost {
-    const ghost = this.get(name);
-    assertValidGhostName(nextName);
-    const target = join(this.root, nextName);
-    if (existsSync(target)) {
-      throw new GhostError(
-        "already_exists",
-        `${JSON.stringify(nextName)} is already taken in the ghosts root.`,
-        409,
-      );
-    }
-    renameSync(ghost.dir, target);
-    // The daemon-written seed names the ghost, so an untouched one is
-    // re-rendered under the new name; owner-authored text stays byte for byte.
-    // A failure here leaves the old name in the seed, not a half-renamed ghost.
-    const file = ghostPaths(target).characterFile;
-    try {
-      if (isSeedText(name, readFileSync(file, "utf8"))) {
-        const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-        writeFileSync(temporary, SEEDED_CHARACTER(nextName), { flag: "wx", mode: statSync(file).mode & 0o777 });
-        renameSync(temporary, file);
-      }
-    } catch {
-      // The home moved, which is what the rename was.
-    }
-    return { name: nextName, dir: target };
   }
 }

@@ -195,7 +195,7 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 > **A shared tree is not a safe clone to run from.** If other agent sessions
 > or you edit the same working tree, the ghost's branch, its `git status`, and
 > its build will collide with yours, and a restart will ship whatever happened
-> to be built last. Give the ghosts their own clone.
+> to be built last. Give the ghost its own clone.
 
 ## Back to the package
 

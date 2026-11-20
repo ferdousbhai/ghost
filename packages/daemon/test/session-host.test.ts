@@ -4,7 +4,7 @@
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
 import { fileURLToPath } from "node:url";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
@@ -269,11 +269,11 @@ describe("harness choice", () => {
     expect(call?.prompt.endsWith("And now?")).toBe(true);
   });
 
-  it("hands the log to the harness again after a home rename moves the conversation", async () => {
+  it("hands the log to the harness again after the owner moved the home under another name", async () => {
     const fake = harness(replies("I am Casper.", "Still here."));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "Who are you?");
-    await sessions.renameGhost("casper", "wisp");
+    renameSync(join(temp.root, "casper"), join(temp.root, "wisp"));
     const events: TurnEvent[] = [];
     await sessions.runTurn("wisp", { sessionId: "c1", prompt: "And now?", emit: (event) => events.push(event) });
 
@@ -784,25 +784,6 @@ describe("conversation metadata", () => {
     expect(Object.keys((await readReads(sessionDir()))).sort()).toEqual(["c1", "c2"]);
   });
 
-  it("refuses metadata changes and conversation deletion while the ghost home is moving", async () => {
-    const sessions = host({ harnesses: [harness(replies("hi"))] });
-    await turn(sessions, "hello");
-    let release = () => {};
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const lease = sessions.withGhost("casper", () => held);
-    const deleting = sessions.deleteGhost("casper");
-    try {
-      await expect(sessions.setPinned("casper", "c1", true)).rejects.toMatchObject({ code: "ghost_busy" });
-      await expect(sessions.markRead("casper", "c1")).rejects.toMatchObject({ code: "ghost_busy" });
-      await expect(sessions.renameConversation("casper", "c1", "Moved")).rejects.toMatchObject({ code: "ghost_busy" });
-      await expect(sessions.deleteSession("casper", "c1")).rejects.toMatchObject({ code: "ghost_busy" });
-    } finally {
-      release();
-      await lease;
-      await deleting;
-    }
-  });
-
   it("lists, titles, pins, reads, and trashes a conversation", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "Plan the zine\nwith details");
@@ -902,7 +883,6 @@ describe("completion delivery", () => {
     await waitFor(() => notifications.length === 1);
     expect((await turn(sessions, "Second")).at(-1)?.type).toBe("done");
     await waitFor(() => notifications.length === 2);
-    await sessions.renameGhost("casper", "renamed");
     release();
   });
   it("reports failed turns and fails open when the delivery service is unavailable", async () => {

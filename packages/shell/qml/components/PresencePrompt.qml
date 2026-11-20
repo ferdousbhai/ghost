@@ -116,7 +116,7 @@ Rectangle {
                         Presence.dismiss();
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Tab) {
-                        if (!Presence.continuing) Ghostd.selectNextGhost();
+                        // One line of talk takes no tab character.
                         event.accepted = true;
                     } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                             && !(event.modifiers & Qt.ShiftModifier)) {

@@ -1,13 +1,10 @@
-import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
-import { readPrivateFileText, writePrivateJsonAtomic } from "../private-file.js";
-import { dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString } from "./args.js";
-import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
-import type { CliContext, CliRuntime, CliStdin } from "./types.js";
+import { notFound, type DaemonClient } from "./client.js";
+import type { CliContext, CliStdin } from "./types.js";
 import { errorMessage } from "../errors.js";
-import { xdgBaseDir } from "../xdg-user-dirs.js";
 
 export async function stdinText(stdin: CliStdin): Promise<string> {
   if (typeof stdin === "string") return stdin;
@@ -36,86 +33,20 @@ export function stdinIsTty(stdin: CliStdin): boolean {
   return typeof stdin !== "string" && stdin.isTTY === true;
 }
 
-interface CliConfigFile {
-  ghost?: unknown;
-}
-
-export function cliConfigPath(runtime: Pick<CliRuntime, "env" | "home">): string {
-  return join(xdgBaseDir(runtime.env, "XDG_CONFIG_HOME", runtime.home), "ghost", "cli.json");
-}
-
-export function readDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): string | undefined {
-  const path = cliConfigPath(runtime);
-  try {
-    const text = readPrivateFileText(path);
-    if (text === null) return undefined;
-    const parsed = JSON.parse(text) as CliConfigFile;
-    return typeof parsed.ghost === "string" && parsed.ghost.trim() ? parsed.ghost : undefined;
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new CliError(EXIT_CODE.usage, `${path} is not valid JSON`);
-    throw new CliError(EXIT_CODE.failure, `cannot read ${path}: ${errorMessage(error)}`);
-  }
-}
-
-export async function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">, ghost: string): Promise<string> {
-  const path = cliConfigPath(runtime);
-  const directory = dirname(path);
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  chmodSync(directory, 0o700);
-  await writePrivateJsonAtomic(path, { ghost });
-  return path;
-}
-
-/** Forget the `ghost use` default; addressing falls through to the sole ghost. */
-export function clearDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): string {
-  const path = cliConfigPath(runtime);
-  rmSync(path, { force: true });
-  return path;
-}
-
-/**
- * Keep the `ghost use` default true after the ghost it names is renamed
- * (`next`) or trashed (null). A default naming another ghost, or a file that
- * cannot be read, is left alone: the change itself already happened.
- */
-export async function followDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">, previous: string, next: string | null): Promise<void> {
-  let stored: string | undefined;
-  try { stored = readDefaultGhost(runtime); } catch { return; }
-  if (stored !== previous) return;
-  if (next) await writeDefaultGhost(runtime, next);
-  else clearDefaultGhost(runtime);
-}
-
 export function listGhosts(client: DaemonClient): Promise<Ghost[]> {
   return client.request<Ghost[]>("GET", "/api/ghosts");
 }
 
 /**
- * The ghost the owner named, without asking anyone which ghosts exist: `-g`,
- * then `$GHOST` (which a ghost's own shell carries), then the private
- * `ghost use` default. This half of the addressing order is identical for
- * daemon-backed and daemon-free verbs.
+ * The ghost a verb addresses: `$GHOST`, which a ghost's own shell carries,
+ * else the machine's one ghost, the first home ghostd lists.
  */
-export function preferredGhostName(
-  runtime: Pick<CliRuntime, "env" | "home">,
-  requested?: string,
-): string | undefined {
-  return requested?.trim() || runtime.env.GHOST?.trim() || readDefaultGhost(runtime);
-}
-
-/** The tail of the addressing order: the sole ghost, or make the owner choose. */
-function soleGhostName(names: readonly string[]): string {
-  const only = names[0];
-  if (names.length === 1 && only) return only;
-  if (names.length === 0) throw new ArgsError("No ghosts exist. Create one with `ghost new <name>`.");
-  throw new ArgsError(`Choose a ghost with -g/--ghost. Available: ${names.join(", ")}`);
-}
-
-export async function resolveGhost(ctx: Pick<CliContext, "client" | "runtime" | "parsed">): Promise<string> {
-  const name = preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost"));
-  if (name) return name;
-  const ghosts = await listGhosts(ctx.client);
-  return soleGhostName(ghosts.map((ghost) => ghost.name));
+export async function resolveGhost(ctx: Pick<CliContext, "client" | "runtime">): Promise<string> {
+  const named = ctx.runtime.env.GHOST?.trim();
+  if (named) return named;
+  const [ghost] = await listGhosts(ctx.client);
+  if (!ghost) throw notFound("a ghost home (ghostd makes one when it starts; restart ghostd.service)");
+  return ghost.name;
 }
 
 export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {

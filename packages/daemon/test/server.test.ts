@@ -295,40 +295,6 @@ describe("session Connect routes", () => {
   });
 });
 
-describe("POST /api/ghosts", () => {
-  it("creates a ghost home with a seeded character.md", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "mina" }),
-    });
-    expect(response.status).toBe(201);
-    const ghost = await response.json() as { name: string; dir: string };
-    expect(ghost.name).toBe("mina");
-    expect(existsSync(join(ghost.dir, "character.md"))).toBe(true);
-  });
-
-  it("rejects a duplicate with 409 and a bad name with 400", async () => {
-    const base = await serve();
-    const duplicate = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "casper" }),
-    });
-    expect(duplicate.status).toBe(409);
-    expect(await duplicate.json()).toMatchObject({ error: { code: "already_exists" } });
-
-    const traversal = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "../escape" }),
-    });
-    expect(traversal.status).toBe(400);
-    expect(await traversal.json()).toMatchObject({ error: { code: "invalid_name" } });
-  });
-});
-
 describe("POST /api/ghosts/:name/messages", () => {
   it("streams one well-formed turn", async () => {
     const base = await serve([{
@@ -883,58 +849,6 @@ describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
   });
 });
 
-describe("PUT /api/ghosts/:name/name", () => {
-  const rename = (base: string, name: string, body: unknown) => fetch(
-    `${base}/api/ghosts/${encodeURIComponent(name)}/name`,
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
-
-  it("renames the ghost, moves its home, and keeps the conversation id valid", async () => {
-    const base = await serve();
-    await postTurn(base, TURN_BODY);
-
-    const renamed = await rename(base, "casper", { name: "wisp" });
-    expect(renamed.status).toBe(200);
-    expect(await renamed.json()).toEqual({ ok: true, name: "wisp" });
-    expect(existsSync(join(temp!.root, "casper"))).toBe(false);
-    expect(existsSync(join(temp!.root, "wisp"))).toBe(true);
-
-    const { sessions } = await (await fetch(`${base}/api/ghosts/wisp/sessions`)).json() as {
-      sessions: Array<{ id: string }>;
-    };
-    expect(sessions.map((session) => session.id)).toEqual(["conv-1"]);
-    expect((await fetch(
-      `${base}/api/ghosts/wisp/sessions/conv-1/transcript`,
-    )).status).toBe(200);
-    expect((await fetch(`${base}/api/ghosts/casper/sessions`)).status).toBe(404);
-  });
-
-  it("refuses a bad name, an unknown ghost, and a taken name", async () => {
-    const base = await serve();
-    await (await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "mina" }),
-    })).json();
-
-    for (const body of [{}, { name: 7 }, { name: ".hidden" }, { name: "with/slash" }]) {
-      const response = await rename(base, "casper", body);
-      expect(response.status, JSON.stringify(body)).toBe(400);
-    }
-    expect((await rename(base, "nobody", { name: "wisp" })).status).toBe(404);
-    const taken = await rename(base, "casper", { name: "mina" });
-    expect(taken.status).toBe(409);
-    expect(await taken.json()).toMatchObject({ error: { code: "already_exists" } });
-    // Its own name is a no-op, not a collision.
-    expect((await rename(base, "casper", { name: "casper" })).status).toBe(200);
-    expect((await fetch(`${base}/api/ghosts/casper/name`)).status).toBe(405);
-  });
-});
-
 describe("DELETE /api/ghosts/:name/sessions/:id", () => {
   it("moves a stored conversation to recoverable Trash", async () => {
     const base = await serve();
@@ -958,72 +872,6 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
     });
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
-  });
-});
-
-describe("DELETE /api/ghosts/:name", () => {
-  it("moves the ghost home into the XDG trash once the name is confirmed", async () => {
-    const base = await serve();
-    await postTurn(base, TURN_BODY);
-    const dir = join(temp!.root, "casper");
-
-    const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-    expect(deleted.status).toBe(200);
-    expect(await deleted.json()).toEqual({ ok: true });
-    expect(existsSync(join(temp!.trashDir, "info", "casper.trashinfo"))).toBe(true);
-    // A move, never an rm: the persona is still readable where it went.
-    expect(existsSync(dir)).toBe(false);
-    expect(existsSync(join(temp!.trashDir, "files", "casper", "character.md"))).toBe(true);
-
-    expect(await (await fetch(`${base}/api/ghosts`)).json()).toEqual([]);
-  });
-
-  it("refuses a missing or mismatched confirmation without touching the home", async () => {
-    const base = await serve();
-    const dir = join(temp!.root, "casper");
-
-    for (const path of ["/api/ghosts/casper", "/api/ghosts/casper?confirm=Casper"]) {
-      const response = await fetch(`${base}${path}`, { method: "DELETE" });
-      expect(response.status, path).toBe(400);
-      expect(await response.json(), path)
-        .toMatchObject({ error: { code: "confirmation_required" } });
-    }
-    expect(existsSync(dir)).toBe(true);
-  });
-
-  it("404s an unknown ghost", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/nobody?confirm=nobody`, { method: "DELETE" });
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
-  });
-
-  it("409s while any of the ghost's conversations is answering", async () => {
-    const { base, release } = await serveHeld();
-    const turn = postTurn(base, turnBody("conv-held"));
-    await waitForLaunches(1);
-
-    const renameBusy = await fetch(`${base}/api/ghosts/casper/name`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "wisp" }),
-    });
-    expect(renameBusy.status).toBe(409);
-    expect(await renameBusy.json()).toMatchObject({ error: { code: "ghost_busy" } });
-    const busy = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-    expect(busy.status).toBe(409);
-    expect(await busy.json()).toMatchObject({ error: { code: "ghost_busy" } });
-    const sessionBusy = await fetch(`${base}/api/ghosts/casper/sessions/conv-held`, { method: "DELETE" });
-    expect(sessionBusy.status).toBe(409);
-    expect(await sessionBusy.json()).toMatchObject({ error: { code: "session_busy" } });
-    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
-    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
-
-    release();
-    await turn;
-
-    const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-    expect(deleted.status).toBe(200);
   });
 });
 
@@ -1064,27 +912,6 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     }
   });
 
-  it("reads the renamed home's conversation after a rename and nothing under a recreated old name", async () => {
-    const base = await serve(replies("Original-home answer."));
-    await postTurn(base, TURN_BODY);
-    expect((await fetch(`${base}/api/ghosts/casper/name`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "wisp" }),
-    })).status).toBe(200);
-    expect((await fetch(`${base}/api/ghosts`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "casper" }),
-    })).status).toBe(201);
-
-    const renamed = await fetch(`${base}/api/ghosts/wisp/sessions/conv-1/transcript`);
-    expect(renamed.status).toBe(200);
-    expect(JSON.stringify(await renamed.json())).toContain("Original-home answer.");
-    expect(await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`)).json())
-      .toMatchObject({ id: "conv-1", messages: [], total: 0 });
-  });
-
   it("reads a conversation with no log yet as empty, and 404s an unknown ghost", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
@@ -1105,11 +932,22 @@ describe("routing and transport", () => {
     const base = await serve();
     expect((await fetch(`${base}/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/other`)).status).toBe(404);
-    expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(405);
+    expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`, { method: "POST" })).status)
       .toBe(405);
     expect((await fetch(`${base}/api/ghosts/casper/messages`)).status).toBe(405);
+  });
+
+  it("has no route that makes, renames, or removes a ghost", async () => {
+    const base = await serve();
+    const send = (method: string, path: string, body?: unknown) => fetch(`${base}${path}`, {
+      method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    expect((await send("POST", "/api/ghosts", { name: "wisp" })).status).toBe(405);
+    expect((await send("PUT", "/api/ghosts/casper/name", { name: "wisp" })).status).toBe(404);
+    expect((await send("DELETE", "/api/ghosts/casper?confirm=casper")).status).toBe(404);
+    expect(temp!.registry.list().map((ghost) => ghost.name)).toEqual(["casper"]);
   });
 
   it("returns a typed 400 for malformed percent-encoding in dynamic path segments", async () => {
@@ -1154,10 +992,10 @@ describe("routing and transport", () => {
 
   it("refuses an oversized body", async () => {
     const base = await serve(undefined, { maxBodyBytes: 256 });
-    const response = await fetch(`${base}/api/ghosts`, {
-      method: "POST",
+    const response = await fetch(`${base}/api/ghosts/casper/character`, {
+      method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "x".repeat(1_000) }),
+      body: JSON.stringify({ body: "x".repeat(1_000) }),
     });
     expect(response.status).toBe(413);
     expect(await response.json()).toMatchObject({ error: { code: "payload_too_large" } });

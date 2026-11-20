@@ -18,7 +18,7 @@ function plainRows(commands: readonly CommandDocumentation[]): string {
 }
 
 export function renderUsage(commands: readonly CommandDocumentation[]): string {
-  return `ghost — talk to a ghost through ghostd
+  return `ghost — talk to your ghost through ghostd
 
 Usage:
   ghost <verb> [args] [flags]
@@ -28,7 +28,6 @@ Commands:
 ${plainRows(commands)}
 
 Common flags:
-  -g, --ghost <name>       Select a ghost (verbs that list it)
   -s, --session <id>       Select by id or unique prefix (verbs that list it)
       --json               Emit API JSON (streams use one object per line)
   -q, --quiet              Suppress secondary output
@@ -36,7 +35,7 @@ Common flags:
   -v, --version            Show the ghost package version
 
 ghostd runs the machine (tokens, remote access, and conversations, each turn a
-headless run of an installed agent CLI); ghost talks to a ghost.
+headless run of an installed agent CLI); ghost talks to the ghost.
 `;
 }
 

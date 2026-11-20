@@ -1,23 +1,11 @@
 import { ArgsError, flagBoolean } from "./args.js";
-import { conversationId, followDefaultGhost, readArgumentFile, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { conversationId, readArgumentFile, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import type { RemoteStatus } from "../remote-serve.js";
 import type { HarnessChoices } from "../session-host.js";
 
-
-/** `ghost rename <new-name>`: move the whole ghost home under the new spelling. */
-export async function renameCommand(ctx: CliContext): Promise<number> {
-  const { parsed } = ctx;
-  const next = parsed.positionals[0];
-  if (!next) throw new ArgsError("ghost rename needs the new name");
-  const name = await resolveGhost(ctx);
-  const body = await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next });
-  await followDefaultGhost(ctx.runtime, name, next);
-  emit(ctx, body, () => `Renamed ${name} to ${next}.\n`);
-  return 0;
-}
 
 /** `ghost character [set <file>]`: print or replace `character.md` through the daemon's validating writer. */
 export async function characterCommand(ctx: CliContext): Promise<number> {
