@@ -25,8 +25,8 @@ export const GHOST_POLICY = [
     + "next message is the answer. One question at a time. Your harness's own background jobs end "
     + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
     + "work (harnesses), work outliving this turn (background), "
-    + "reaching the owner away (notifications), heat or a full disk (machine), "
-    + "crashes, notes (memory), audio (dictation), a website (browser), getting or fixing one of "
+    + "reaching the owner away (notifications), "
+    + "notes (memory), audio (dictation), a website (browser), getting or fixing one of "
     + "the owner's products (products), changing or restarting yourself (self). "
     + "`ghost --help` lists every command.",
 ].join("\n");

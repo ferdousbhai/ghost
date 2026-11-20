@@ -8,30 +8,12 @@
  * index in step (prompt-policy.test.ts checks).
  */
 import { BROWSER_LINES, productsLines } from "./help-guides.js";
-import { SCHEDULE_UNIT_PREFIX, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["self", "harnesses", "background", "machine", "crashes", "memory", "dictation", "notifications", "browser", "products"] as const;
+export const HELP_TOPICS = ["self", "harnesses", "background", "memory", "dictation", "notifications", "browser", "products"] as const;
 type HelpTopic = (typeof HELP_TOPICS)[number];
-
-interface HelpTopicInput {
-  /** The ghost the recipe is for; placeholders stand in when none is named. */
-  readonly ghostName: string | undefined;
-  /** Where the ghost's systemd user units go. */
-  readonly unitDir: string;
-  /** The `ghost` executable a unit may exec. */
-  readonly cliPath: string;
-}
 
 export function isHelpTopic(value: string): value is HelpTopic {
   return (HELP_TOPICS as readonly string[]).includes(value);
-}
-
-function ghost(input: HelpTopicInput): string {
-  return input.ghostName ?? "<ghost>";
-}
-
-function unitPrefix(input: HelpTopicInput): string {
-  return input.ghostName ? scheduleUnitPrefix(input.ghostName) : `${SCHEDULE_UNIT_PREFIX}<name-length>-<ghost>-`;
 }
 
 function self(): string[] {
@@ -88,169 +70,6 @@ function background(): string[] {
   ];
 }
 
-function machine(input: HelpTopicInput): string[] {
-  const unit = `${unitPrefix(input)}machine-watch`;
-  return [
-    "# Machine heat and strain",
-    "Heat and fan noise follow sustained work, almost always CPU; charging, a hot room, or blocked vents leave no process to blame. Look with `omarchy system stats`, `systemd-cgtop -b -n 2 -d 5 --raw --depth=6 --order=cpu` (CPU, % of one core, and memory per app and service), /proc/pressure/memory (time stalled waiting for memory), `sensors -j`, and `df -h`.",
-    `The watch wakes you while the machine heats up, with fans above half speed for three checks in a row, because fans follow chips that many machines expose no sensor for; fast charging also raises them, with no process to blame. It also wakes you near harm: a kernel thermal warning, a temperature within 5 °C of its critical limit or a fan at 95% of its maximum (thermal shutdown), available memory under 5%, swap over 85% used, or memory stalls over 20% (the out-of-memory killer), a filesystem 97% full (failing writes); at most one event per kind an hour. One ghost per machine runs it: when the owner wants machine alerts and \`systemctl --user list-unit-files '*-machine-watch.timer'\` lists none, save this as ~/.config/ghost/machine-watch.sh and write this timer pair in ${JSON.stringify(input.unitDir)}, then \`systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer\`:`,
-    "```bash",
-    "#!/bin/bash",
-    "# Wakes a ghost while the machine heats up, and near harm: thermal shutdown, the out-of-memory killer, a full disk.",
-    "set -uo pipefail",
-    "alerts=\"\"",
-    "if awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} /^SwapTotal:/ {st=$2} /^SwapFree:/ {sf=$2}",
-    "  END {exit !(a < 0.05 * t || (st > 0 && st - sf > 0.85 * st))}' /proc/meminfo ||",
-    "  awk '/^full/ {split($3, f, \"=\"); exit !(f[2] >= 20)}' /proc/pressure/memory 2>/dev/null; then",
-    "  alerts+=\" memory\"",
-    "fi",
-    "df --output=pcent / \"$HOME\" | awk 'NR > 1 && $1 + 0 >= 97 {hit=1} END {exit !hit}' && alerts+=\" disk\"",
-    "hot=$(sensors -j 2>/dev/null | jq -r 'to_entries[] | .key as $chip | .value | objects | to_entries[] | .key as $f | .value | objects",
-    "  | (to_entries | map(select(.key | test(\"^temp[0-9]+_input$\")))[0].value) as $t",
-    "  | (to_entries | map(select(.key | test(\"^temp[0-9]+_crit$\")))[0].value) as $c",
-    "  | (to_entries | map(select(.key | test(\"^fan[0-9]+_input$\")))[0].value) as $fan",
-    "  | (to_entries | map(select(.key | test(\"^fan[0-9]+_max$\")))[0].value) as $max",
-    "  | select(($t != null and ($c // 0) > 0 and $t >= $c - 5) or ($fan != null and ($max // 0) > 0 and $fan >= 0.95 * $max))",
-    "  | \"\\($chip) \\($f): \\($t // $fan) of \\($c // $max)\"' 2>/dev/null)",
-    "journalctl -k -q --no-pager --case-sensitive=no --since=-70s -g 'thermal pressure|critical temperature|thermal shutdown|temperature above threshold' 2>/dev/null | grep -q . && hot+=$'\\nkernel thermal warning'",
-    "[[ -n $hot ]] && alerts+=\" heat\"",
-    "# Who is behind the busiest processes and those holding the GPU, which ps shows no load for. Detached jobs keep their agent's environment.",
-    "find_agents() {",
-    "  { ps -eo pid= --sort=-pcpu | head -8; find /proc/[0-9]*/fd -lname '/dev/dri/renderD*' 2>/dev/null | cut -d/ -f3; } | awk '!seen[$1 + 0]++ {print $1}' | while read -r pid; do",
-    "    vars=$(tr '\\0' '\\n' 2>/dev/null <\"/proc/$pid/environ\") || continue",
-    "    conversation=$(sed -n 's/^GHOST_SESSION=//p' <<<\"$vars\"); claude=$(sed -n 's/^CLAUDE_CODE_SESSION_ID=//p' <<<\"$vars\"); owner=\"\"",
-    "    if [[ -n $conversation ]]; then owner=\"ghost conversation $conversation\"",
-    "    elif [[ -n $claude ]]; then owner=\"claude session $(jq -r --arg id \"$claude\" 'select(.sessionId == $id) | .name // .sessionId' ~/.claude/sessions/*.json 2>/dev/null | head -1)\"",
-    "    else",
-    "      parent=$pid",
-    "      while parent=$(ps -o ppid= -p \"$parent\" 2>/dev/null | tr -d ' ') && [[ -n $parent && $parent != 0 && $parent != 1 ]]; do",
-    "        comm=$(ps -o comm= -p \"$parent\" 2>/dev/null)",
-    "        [[ $comm =~ ^(claude|codex|pi|omp|grok|agy|opencode|crush|copilot|ori)$ ]] && { owner=\"$comm pid $parent\"; break; }",
-    "      done",
-    "    fi",
-    "    [[ -n $owner ]] && echo \"$owner: $(ps -o pid=,pcpu=,args= -p \"$pid\" 2>/dev/null | cut -c1-200)\"",
-    "  done | sort",
-    "}",
-    "fan=$(sensors -j 2>/dev/null | jq -r '[.. | objects | to_entries | (map(select(.key | test(\"^fan[0-9]+_input$\")))[0].value) as $f | (map(select(.key | test(\"^fan[0-9]+_max$\")))[0].value) as $m | select($f != null and ($m // 0) > 0) | 100 * $f / $m] | max // 0 | floor' 2>/dev/null)",
-    "streak=\"$XDG_RUNTIME_DIR/ghost-machine-watch-fans\"",
-    "[[ -n $fan ]] || fan=0",
-    "if (( fan >= 50 )); then checks=$(( $(cat \"$streak\" 2>/dev/null || echo 0) + 1 )); echo \"$checks\" >\"$streak\"; find_agents | awk -F': ' '{split($2, p, \" \"); if (p[2] + 0 >= 50) print}' >>\"$streak.agents\"; else checks=0; rm -f \"$streak\" \"$streak.agents\"; fi",
-    "(( checks >= 3 )) && [[ -z $hot ]] && alerts+=\" heating\"",
-    "[[ -n $alerts ]] || exit 0",
-    "agents=$( { find_agents; cat \"$streak.agents\" 2>/dev/null; } | awk -F': ' '{split($2, p, \" \"); if (!seen[$1 \" \" p[1]]++) print}' | head -20)",
-    "payload=$(",
-    "  echo \"Alert:$alerts\"; echo \"$hot\"; echo \"Fans at $fan% of maximum\"",
-    "  echo \"Agents behind the load:\"; if [[ -n $agents ]]; then echo \"$agents\"; else echo \"none found\"; fi",
-    "  grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo; cat /proc/pressure/memory; df -h / \"$HOME\"",
-    "  echo \"Busiest units (cgroup, tasks, % of one core, memory bytes):\"",
-    "  systemd-cgtop -b -n 2 -d 5 --raw --depth=6 --order=cpu |",
-    "    awk '$1 ~ /\\.(service|scope)$/ && $1 !~ /user@[0-9]+\\.service$/ && $3 != \"-\" {print $1, $2, $3, $4}' | sort -k3 -gr | head -10",
-    "  ps -eo pid,pcpu,rss,etime,args --sort=-rss | head -8 | cut -c1-300",
-    ")",
-    "failed=0",
-    "for kind in $alerts; do",
-    "  thread=$kind; [[ $kind == heating ]] && thread=heat",
-    "  # Heating repeats each quarter hour while the machine is busy; idle heat, such as fast charging, stays hourly.",
-    "  id=$kind-$(date +%Y%m%d%H)",
-    "  [[ $kind == heating ]] && (( $(cut -d. -f1 /proc/loadavg) * 2 >= $(nproc) )) && id+=-$(( 10#$(date +%M) / 15 ))",
-    `  ${input.cliPath} event machine "$id" --thread "$thread" --ghost ${ghost(input)} --instructions 'The machine is heating up or near harm. Find the cause and handle it as ghost help machine says.' "$payload"`,
-    "  # 6: this hour's alert was already accepted with earlier data.",
-    "  status=$?; (( status == 0 || status == 6 )) || failed=1",
-    "done",
-    "exit \"$failed\"",
-    "```",
-    "```ini",
-    `# ${unit}.service`,
-    "[Service]",
-    "Type=oneshot",
-    "ExecStart=/bin/bash %h/.config/ghost/machine-watch.sh",
-    "```",
-    "```ini",
-    `# ${unit}.timer`,
-    "[Timer]",
-    "OnCalendar=minutely",
-    "[Install]",
-    "WantedBy=timers.target",
-    "```",
-    "When woken, confirm the cause from the payload with `ps`, `systemctl --user status <unit>`, and `journalctl`, then:",
-    "- An agent's work, named under \"Agents behind the load\", which includes processes that ran above half a core during this heating and may since have exited, because a burst comes back: instruct that agent now, before anything is throttled. Say the machine is heating, name its processes, and ask it to cap threads, pace its work, run one heavy job at a time, and stop idle servers, then reply to the owner. For a Claude session: `claude -p 'Use SendMessage to send session <name> exactly this: <instructions>' --tools SendMessage,ToolSearch`. For one of your own conversations: `ghost say --follow-up -s <id> '<instructions>'`. Another agent has no way in, so tell the owner which one it is.",
-    "- Work the owner started on purpose (a build, an export, a game): tell them what it risks; leave it.",
-    "- Yours (`ghost-job-*`, a browser you opened) or plainly broken (a leftover, a loop, a leak): least drastic first, `systemctl --user set-property --runtime <unit> CPUWeight=idle`, then `systemctl --user freeze <unit>` (`thaw` resumes it exactly), then `stop`. `ghostd.service` runs every ghost's turns, you included: never freeze or stop it; end the process you started in it by PID.",
-    "- Anything else, and every system unit, is the owner's: ask before throttling or stopping it. A full disk: find what grew (`du -xh -d1 <dir> | sort -h`) and ask; trash with `gio trash`, never `rm`.",
-    "- No unit to blame: say what the sensors suggest.",
-    "Open with one sentence saying what you found: it titles the conversation. Tell the owner what you changed and the command that undoes it. Earlier alerts of this kind are above in this conversation.",
-    `Low battery: Omarchy runs each script in ~/.config/omarchy/hooks/battery-low.d/ with the level as $1; one running \`${input.cliPath} event battery "low-$(date +%Y%m%d%H)" --thread low --ghost ${ghost(input)} --instructions '<what to do>' "$1"\` wakes you.`,
-  ];
-}
-
-function crashes(input: HelpTopicInput): string[] {
-  const unit = `${unitPrefix(input)}crash-watch`;
-  return [
-    "# Crashes and failed services",
-    "The journal records every crash (systemd-coredump; `coredumpctl list`) and every unit that fails, the owner's and the system's.",
-    `The watch wakes you when a program dumps core (at most once per program an hour) or a service fails (once per service a day: failing services tend to repeat), so you can find out why before the owner asks. One ghost per machine runs it: when the owner wants crashes or failures looked into and \`systemctl --user list-unit-files '*-crash-watch.timer'\` lists none, save this as ~/.config/ghost/crash-watch.sh and write this timer pair in ${JSON.stringify(input.unitDir)}, then \`systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer\`:`,
-    "```bash",
-    "#!/bin/bash",
-    "# Wakes a ghost when a program dumps core or a service fails.",
-    "set -uo pipefail",
-    "# Programs and services the owner asked you not to look into: an extended regex over the name.",
-    "ignore='^$'",
-    "# systemd makes the directory (StateDirectory= below).",
-    "cursor_file=$STATE_DIRECTORY/cursor",
-    "crash=fc2e22bc6ee647b6b90729ab34a250b1 failure=d9b373ed55a64feb8242e02dbe79a49c",
-    "# The first run starts from now: what failed before the watch is not news.",
-    "[[ -s $cursor_file ]] || { journalctl -q -n 0 --cursor-file=\"$cursor_file\"; exit; }",
-    "cursor=$(<\"$cursor_file\")",
-    "failed=0",
-    "while IFS= read -r entry; do",
-    "  at=$(jq -r '.__REALTIME_TIMESTAMP | tonumber / 1e6 | floor' <<< \"$entry\")",
-    "  if [[ $(jq -r '.MESSAGE_ID' <<< \"$entry\") == \"$crash\" ]]; then",
-    "    source=crash name=$(jq -r '.COREDUMP_COMM // \"unknown\"' <<< \"$entry\") id=$(date -ud \"@$at\" +%Y%m%d%H)",
-    "    # CMake's feature probes (cmTC_<hash>) crash on purpose.",
-    "    [[ $name == cmTC_* ]] && name=\"\"",
-    "    payload=$(jq -r '\"\\(.COREDUMP_COMM) (pid \\(.COREDUMP_PID), uid \\(.COREDUMP_UID)) died of \\(.COREDUMP_SIGNAL_NAME // .COREDUMP_SIGNAL)\",",
-    "      \"exe: \\(.COREDUMP_EXE // \"unknown\")\", \"unit: \\(.COREDUMP_USER_UNIT // .COREDUMP_UNIT // \"none\")\", \"\", (.MESSAGE | strings | .[:20000])' <<< \"$entry\")",
-    "  else",
-    "    source=unit name=$(jq -r '.UNIT // .USER_UNIT // \"\"' <<< \"$entry\") id=$(date -ud \"@$at\" +%Y%m%d)",
-    "    # Services only; a core dump is already its own crash event, this watch's own failure is no news to it, and a systemd-run command's (run-u<N>, run-p<pid>-i<N>) is someone's ad-hoc job.",
-    "    [[ $name == *.service && $name != *-crash-watch.service && ! $name =~ ^run-(u[0-9]+|p[0-9]+-i[0-9]+)\\.service$ && $(jq -r '.UNIT_RESULT' <<< \"$entry\") != core-dump ]] || name=\"\"",
-    "    run=$(jq -r '.INVOCATION_ID // .USER_INVOCATION_ID // \"\"' <<< \"$entry\")",
-    "    payload=$(jq -r '\"\\(.UNIT // .USER_UNIT) (\\(if .UNIT then \"system\" else \"user\" end) unit) failed: \\(.UNIT_RESULT // \"unknown\")\"' <<< \"$entry\"",
-    "      echo \"Its last log lines:\"",
-    "      [[ -n $run ]] && journalctl -q -o cat -n 40 _SYSTEMD_INVOCATION_ID=\"$run\" + USER_INVOCATION_ID=\"$run\" | cut -c1-500)",
-    "  fi",
-    "  if [[ -n $name && ! $name =~ $ignore ]]; then",
-    "    printf '%s\\nat %s\\n' \"$payload\" \"$(date -ud \"@$at\" +%FT%TZ)\" |",
-    `      ${input.cliPath} event "$source" "$name-$id" --thread "$name" --ghost ${ghost(input)} --instructions 'Something on this machine failed. Find out why and propose a fix as ghost help crashes says.' -`,
-    "    # 6: this one's event for the hour (crash) or day (service) was already accepted.",
-    "    status=$?; (( status == 0 || status == 6 )) || { failed=1; break; }",
-    "  fi",
-    "  cursor=$(jq -r '.__CURSOR' <<< \"$entry\")",
-    "done < <(journalctl -q -o json --after-cursor=\"$cursor\" MESSAGE_ID=\"$crash\" MESSAGE_ID=\"$failure\")",
-    "# Only delivered events move the cursor, so the next run retries a refused one.",
-    "printf '%s\\n' \"$cursor\" > \"$cursor_file\"",
-    "exit \"$failed\"",
-    "```",
-    "```ini",
-    `# ${unit}.service`,
-    "[Service]",
-    "Type=oneshot",
-    "StateDirectory=ghost/crash-watch",
-    "ExecStart=/bin/bash %h/.config/ghost/crash-watch.sh",
-    "```",
-    "```ini",
-    `# ${unit}.timer`,
-    "[Timer]",
-    "OnCalendar=minutely",
-    "[Install]",
-    "WantedBy=timers.target",
-    "```",
-    "When woken, find the cause read-only. A crash: `coredumpctl info <pid>`, then Omarchy's diagnose-crash skill (/usr/share/omarchy/default/agents/skills/diagnose-crash/SKILL.md) for a symbolized backtrace. A service: the payload's log lines, `systemctl [--user] status <unit>`, `systemctl [--user] cat <unit>`, and `journalctl [--user] -u <unit> -n 200` for earlier runs.",
-    "Earlier failures of the same program or service are above in this conversation; say when this one is the same. Change, file, restart, or send nothing. Open with one sentence saying what you found: it titles the conversation. Then the cause, its evidence, and the fix you propose as exact commands, each with its undo, saying which need root; the owner's yes in this conversation is what applies it. A failure they caused on purpose, or one you cannot explain, gets one short line.",
-    "When the owner says to stop looking into a program or service, add its name to `ignore` in the script; removing it resumes. `systemctl --user disable --now <unit>.timer` stops the watch.",
-  ];
-}
-
 function memory(): string[] {
   return [
     "# Memory",
@@ -298,7 +117,7 @@ function dictation(): string[] {
 }
 
 /** One topic's text, as `ghost help <topic>` prints it. */
-export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { self, harnesses, background, machine: () => machine(input), crashes: () => crashes(input), memory, dictation, notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
+export function renderHelpTopic(topic: HelpTopic): string {
+  const lines = { self, harnesses, background, memory, dictation, notifications, browser: () => [...BROWSER_LINES], products: productsLines }[topic]();
   return `${lines.join("\n")}\n`;
 }

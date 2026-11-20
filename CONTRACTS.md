@@ -64,60 +64,6 @@ planning may exist, but durable owner-visible plans and tasks belong in the
 owner's documents. Background work is the shell's: Ghost keeps no job table
 (see "Background work and hooks").
 
-### Machine watch
-
-Ghost adds no machine-monitoring code: a ghost reads strain with installed
-tools (`omarchy system stats`, batch `systemd-cgtop`, `/proc/pressure`,
-`sensors -j`, `df`), and `ghost help machine` gives the opt-in watch, a minutely
-systemd user timer, `ghost-timer-v1-<name-length>-<ghost>-machine-watch`, running a Bash script the ghost saves. It wakes
-the ghost while the machine heats up, with fans above half speed for three
-checks in a row, and near harm, never for ordinary load: a kernel thermal warning,
-a temperature within 5 °C of its sensor's critical limit or a fan at 95% of its
-maximum, available memory
-under 5%, swap over 85% used (systemd-oomd acts at 90%), or memory full-stall
-avg60 of 20% or more, or `/` or `$HOME` 97% full. Each condition is a `ghost
-event machine <kind>-<YYYYMMDDHH> --thread <kind>` (heat, memory, disk), so at
-most one per kind an hour, each kind one conversation; `heating-<YYYYMMDDHH>`
-shares the heat thread, so a later heat event still arrives, and repeats each
-quarter hour (`-<0-3>`) while load is at least half the cores, so idle heat such
-as fast charging stays hourly; exit 6 (an id already accepted with older data) counts as delivered.
-The payload is the tools' own output, naming the busiest units and processes and the agents behind them, from the
-environment a detached job keeps from its agent, including processes above half
-a core earlier in this heating, since a burst may exit before the ghost looks.
-One ghost per machine installs it, only when the owner asks; `systemctl --user
-disable --now` stops it. The recipe has the ghost fix only its own or
-plainly broken units, least drastic first (CPU weight, freeze, stop), instruct
-an agent behind the load through the agent's own channel, and ask the owner about
-everything else. Low battery reaches a ghost through Omarchy's
-`battery-low` hook calling `ghost event`.
-
-### Crash watch
-
-Ghost adds no crash- or failure-monitoring code either: the journal records
-every core dump (systemd-coredump) and every failed unit, and `ghost help
-crashes` gives the opt-in watch, a minutely systemd user timer,
-`ghost-timer-v1-<name-length>-<ghost>-crash-watch`, running a Bash script the ghost saves. It reads both kinds of entry after a
-journal cursor kept in the service's `StateDirectory=ghost/crash-watch` (a
-leaf, so systemd never changes the mode of `ghost/`, which holds the token),
-advanced only past delivered events and started at the journal's end, so what
-failed before the watch is not replayed. A crash is a `ghost event crash
-<program>-<YYYYMMDDHH>`, at most one per program an hour; a failed service,
-system or user, is a `ghost event unit <unit>-<YYYYMMDD>`, at most one per
-service a day, since failing services tend to repeat. Each names its program or
-unit as `--thread`, so its repeats share a conversation. CMake's feature probes
-(`cmTC_<hash>`, which crash on purpose), units that are not
-services, failures whose result is `core-dump` (already a crash event),
-`systemd-run`'s generated `run-u<N>`/`run-p<pid>-i<N>` services (someone's
-ad-hoc job; one named with `--unit`, or its core dump, is reported), and
-the watch's own unit are skipped; times are UTC; exit 6 counts as delivered.
-A crash's payload is its program, pid, uid, signal, executable, unit, and
-stack trace; a service's is its result and that run's last 40 log lines. One
-ghost per machine installs it, only when the owner asks; `systemctl --user
-disable --now` stops it, and an `ignore` regex in the script excludes
-programs and services the owner names. The woken ghost diagnoses read-only and
-proposes a fix with its undo; it changes, files, restarts, or sends nothing
-until the owner says yes in that conversation.
-
 ### Mobile links and completion delivery
 
 The summonghost.com app keeps the selected conversation in its URL,
@@ -589,7 +535,6 @@ empty list prints a sentence saying so (`No ghosts.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
-rendered for the ghost `-g`, `$GHOST`, or the `ghost use` default names and
 needing no daemon; they
 are prompt-visible contract text like the policy sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands

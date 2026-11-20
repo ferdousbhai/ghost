@@ -368,27 +368,3 @@ omarchy-restart-shell
 
 A rescan discovers a plugin; it does not replace QML the running shell has
 already loaded, so an upgraded HUD needs the shell restart.
-
-## Machine heat and strain
-
-To have a ghost woken before the machine gets into trouble, ask it: "watch my
-machine". It installs a minutely `machine-watch` systemd user timer (`ghost help machine`).
-The watch stays quiet
-under ordinary load and wakes the ghost when fans stay above half speed, or near
-harm: a kernel thermal warning, a temperature close to its critical limit or fans
-at full speed, memory nearly exhausted, or a disk nearly full. Each becomes an
-event conversation naming the busiest programs and the agents behind them. The
-ghost tells a Claude session or one of its own conversations to slow down, fixes
-what is its own or plainly broken, least drastic first, and asks you before
-touching anything else.
-
-## Crashes and failed services
-
-To have a ghost look into crashes and failures before you ask, tell it: "look
-into crashes for me". It installs a minutely `crash-watch` systemd user timer (`ghost help
-crashes`). Each program that dumps core (at most once an hour) and each
-service that fails, yours or the system's (at most once a day; not an
-unnamed `systemd-run` job), becomes an event conversation; the ghost works out
-why and proposes a fix, changing nothing until you say yes there. Unread
-findings fill the bar mark in the theme's magenta. Tell the ghost to stop
-looking into a program or service and it adds it to the watch's ignore list.

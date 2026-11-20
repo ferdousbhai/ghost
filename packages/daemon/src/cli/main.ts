@@ -5,7 +5,6 @@ import { isDirectInvocation } from "../direct-invocation.js";
 import {
   ArgsError,
   flagBoolean,
-  flagString,
   parseArgs,
   type ArgsSpec,
 } from "./args.js";
@@ -22,8 +21,6 @@ import { delegateCommand } from "./delegate.js";
 import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
-import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
-import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
@@ -253,19 +250,15 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "help",
-    usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}] [-g <name>]`,
+    usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}]`,
     summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
     example: "ghost help memory",
     positionals: [0, 1],
     run: (ctx) => {
       const topic = ctx.parsed.positionals[0];
       if (topic !== undefined && isHelpTopic(topic)) {
-        // Rendered for the ghost the shell belongs to; no daemon needed.
-        ctx.runtime.stdout.write(renderHelpTopic(topic, {
-          ghostName: preferredGhostName(ctx.runtime, flagString(ctx.parsed, "ghost")),
-          unitDir: resolveScheduleUnitDirectory(ctx.runtime.home, ctx.runtime.env),
-          cliPath: ghostCliPath(ctx.runtime.env),
-        }));
+        // No daemon needed.
+        ctx.runtime.stdout.write(renderHelpTopic(topic));
         return EXIT_CODE.success;
       }
       if (topic === undefined) ctx.runtime.stdout.write(USAGE);
