@@ -101,6 +101,15 @@
       "section": "keep-going"
     },
     {
+      "id": "lastbook",
+      "need": "An offline survival library: manuals, videos, encyclopedias, a world map and a local AI that cites its sources",
+      "name": "Lastbook",
+      "source": "https://github.com/ferdousbhai/lastbook-for-omarchy",
+      "cli": "lastbook",
+      "install": "curl -fsSL https://ferdousbhai.com/lastbook/install.sh | sudo bash",
+      "site": "/lastbook"
+    },
+    {
       "id": "omdrop",
       "need": "AirDrop with nearby Apple devices",
       "name": "Omdrop",
