@@ -9,7 +9,6 @@
 import {
   existsSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, join } from "node:path";
@@ -18,7 +17,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { parseHooksDocument } from "../src/hook-policy.js";
-import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
 import type { TurnEvent, TurnResumeEvent } from "../src/turn-events.js";
 import {
   startDaemonServer,
@@ -56,7 +54,6 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
-    mcpReadProbe?: McpCatalogOptions["readProbe"];
     streamCutBytes?: number;
   } = {},
 ) {
@@ -69,17 +66,10 @@ async function serve(
     ownerHome: temp.ownerHome,
     ...onlyHarnesses(harness),
   });
-  const mcp = new McpCatalog({
-    registry: temp.registry,
-    ...(serverOptions.mcpReadProbe === undefined
-      ? {}
-      : { readProbe: serverOptions.mcpReadProbe }),
-  });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
     ...serverServices(temp.registry),
-    mcp,
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
@@ -110,15 +100,6 @@ async function waitForLaunches(count: number): Promise<void> {
   while (harness!.calls().length < count) {
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} harness launch(es)`);
     await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-/** Until a move holds casper's home: its file routes then answer ghost_busy. */
-async function waitForHomeMove(base: string): Promise<void> {
-  const deadline = Date.now() + 3_000;
-  while ((await fetch(`${base}/api/ghosts/casper/character`)).status !== 409) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for the move to hold the home");
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -311,164 +292,6 @@ describe("session Connect routes", () => {
       });
       expect(posted.status).toBe(404);
     }
-  });
-});
-
-describe("ghost MCP routes", () => {
-  const jsonRequest = (url: string, method: string, body?: unknown) => fetch(url, {
-    method,
-    ...(body === undefined ? {} : {
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }),
-  });
-
-  const requestHomeMove = (base: string, move: "rename" | "delete") => move === "rename"
-    ? jsonRequest(`${base}/api/ghosts/casper/name`, "PUT", { name: "wisp" })
-    : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-
-  const movedHomeFrom = async (
-    response: Response,
-    move: "rename" | "delete",
-  ): Promise<string> => {
-    expect(response.status).toBe(200);
-    return move === "rename" ? join(temp!.root, "wisp") : join(temp!.trashDir, "files", "casper");
-  };
-
-  const recreateOldName = async (base: string): Promise<string> => {
-    const response = await jsonRequest(`${base}/api/ghosts`, "POST", { name: "casper" });
-    expect(response.status).toBe(201);
-    return join(temp!.root, "casper");
-  };
-
-  it("keeps malformed MCP values out of HTTP and rejects them on mutation", async () => {
-    const base = await serve();
-    const collection = `${base}/api/ghosts/casper/mcp`;
-    const sentinel = "MCP_HTTP_MALFORMED_SENTINEL";
-    const ghostDir = join(temp!.root, "casper");
-    writeFileSync(join(ghostDir, "mcp.json"), JSON.stringify({
-      mcpServers: {
-        valid: { type: "stdio", command: process.execPath, args: ["--version"] },
-        malformed: { type: "http", url: { secret: sentinel } },
-      },
-    }));
-
-    const listed = await fetch(collection);
-    expect(listed.status).toBe(200);
-    const listedText = await listed.text();
-    expect(listedText).not.toContain(sentinel);
-    expect(JSON.parse(listedText)).toMatchObject({
-      servers: [expect.objectContaining({ name: "valid" })],
-      skipped: [expect.objectContaining({
-        path: "mcp.json#mcpServers.malformed",
-      })],
-    });
-
-    const mutation = await jsonRequest(collection, "POST", {
-      name: "rejected",
-      config: { type: "stdio", command: { secret: sentinel } },
-    });
-    expect(mutation.status).toBe(400);
-    expect(await mutation.text()).not.toContain(sentinel);
-  });
-
-  it.each(["rename", "delete"] as const)(
-    "finishes an admitted catalog list before %s and isolates old-name reuse",
-    async (move) => {
-      const readEntered = Promise.withResolvers<void>();
-      const releaseRead = Promise.withResolvers<void>();
-      let readCount = 0;
-      let resolvedHome = "";
-      const base = await serve(undefined, {
-        mcpReadProbe: async (home) => {
-          readCount += 1;
-          if (readCount !== 1) return;
-          resolvedHome = home;
-          readEntered.resolve();
-          await releaseRead.promise;
-        },
-      });
-      const originalHome = join(temp!.root, "casper");
-      writeFileSync(join(originalHome, "mcp.json"), JSON.stringify({
-        mcpServers: { original: { type: "stdio", command: "/bin/true" } },
-      }));
-      const originalInode = statSync(originalHome, { bigint: true }).ino;
-
-      const listing = fetch(`${base}/api/ghosts/casper/mcp`);
-      await readEntered.promise;
-      expect(resolvedHome).toBe(originalHome);
-      const moving = requestHomeMove(base, move);
-      await waitForHomeMove(base);
-
-      releaseRead.resolve();
-      const listResponse = await listing;
-      expect(listResponse.status).toBe(200);
-      expect(await listResponse.json()).toMatchObject({
-        servers: [expect.objectContaining({ name: "original" })],
-      });
-      const movedHome = await movedHomeFrom(await moving, move);
-      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
-
-      const replacementHome = await recreateOldName(base);
-      expect(statSync(replacementHome, { bigint: true }).ino).not.toBe(originalInode);
-      expect(await (await fetch(`${base}/api/ghosts/casper/mcp`)).json())
-        .toEqual({ servers: [], skipped: [] });
-      expect(JSON.parse(readFileSync(join(movedHome, "mcp.json"), "utf8")))
-        .toMatchObject({ mcpServers: { original: expect.any(Object) } });
-    },
-  );
-
-  it("keeps inherited-object MCP names as ordinary own entries over HTTP", async () => {
-    const base = await serve();
-    const collection = `${base}/api/ghosts/casper/mcp`;
-    const names = ["__proto__", "constructor", "toString"];
-    for (const name of names) {
-      const response = await jsonRequest(collection, "POST", {
-        name,
-        config: { type: "stdio", command: `${name}-before`, enabled: true },
-      });
-      expect(response.status).toBe(201);
-    }
-
-    const listed = await (await fetch(collection)).json() as {
-      servers: Array<{ name: string; source: string; path: string }>;
-    };
-    const listedByName = new Map(listed.servers.map((server) => [server.name, server]));
-    for (const name of names) {
-      expect(listedByName.get(name)).toMatchObject({
-        name,
-        path: "mcp.json",
-      });
-    }
-
-    expect((await jsonRequest(`${collection}/__proto__`, "PUT", {
-      config: { type: "stdio", command: "proto-after" },
-    })).status).toBe(200);
-    expect((await jsonRequest(`${collection}/constructor/enabled`, "PUT", {
-      enabled: "yes",
-    })).status).toBe(400);
-    expect((await jsonRequest(`${collection}/constructor/enabled`, "PUT", {
-      enabled: false,
-    })).status).toBe(200);
-    expect((await jsonRequest(`${collection}/toString`, "DELETE")).status).toBe(200);
-
-    const final = await (await fetch(collection)).json() as {
-      servers: Array<{ name: string; enabled: boolean; config: { command?: string } }>;
-    };
-    const finalByName = new Map(final.servers.map((server) => [server.name, server]));
-    expect(finalByName.get("__proto__")).toMatchObject({
-      enabled: true,
-      config: { command: "proto-after" },
-    });
-    expect(finalByName.get("constructor")).toMatchObject({ enabled: false });
-    expect(finalByName.has("toString")).toBe(false);
-
-    const persisted = JSON.parse(readFileSync(join(temp!.root, "casper", "mcp.json"), "utf8")) as {
-      mcpServers: Record<string, unknown>;
-    };
-    expect(Object.hasOwn(persisted.mcpServers, "__proto__")).toBe(true);
-    expect(Object.hasOwn(persisted.mcpServers, "constructor")).toBe(true);
-    expect(Object.hasOwn(persisted.mcpServers, "toString")).toBe(false);
   });
 });
 

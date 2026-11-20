@@ -4,8 +4,8 @@
  * Two turns through the session host on a scripted harness. Turn one runs a
  * tool and answers; turn two resumes the harness's own session. The fixture
  * pins, per turn: the persona the harness found in its directory (`AGENTS.md`),
- * the prompt and resume flag it was launched with, the MCP servers it was
- * handed, and the whole turn event stream; then the conversation listing, the
+ * the prompt and resume flag it was launched with, and the whole turn event
+ * stream; then the conversation listing, the
  * rendered transcript, the conversation directory's layout, and the ghost
  * home on disk.
  *
@@ -106,7 +106,6 @@ describe("golden: session", () => {
           cwd: call!.cwd,
           ghost: call!.ghost,
           session: call!.session,
-          mcp: call!.mcp,
         }),
       });
       sections.push({

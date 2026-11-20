@@ -30,7 +30,6 @@ checkdepends=(
 )
 _runtime_optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
-  'npm: npx-launched MCP servers'
 )
 options=('!debug' '!lto' '!strip')
 

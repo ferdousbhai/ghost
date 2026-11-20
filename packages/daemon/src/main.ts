@@ -17,7 +17,6 @@ import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { LocalModel } from "./local-model.js";
 import { DAEMON_HOST } from "./loopback.js";
-import { McpCatalog } from "./mcp-catalog.js";
 import { resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
 import { RemoteServe } from "./remote-serve.js";
@@ -211,14 +210,12 @@ async function serveDaemon(
     hooks,
     localModel: config.local ? new LocalModel(config.local, logger.child({ part: "local-model" })) : null,
   });
-  const mcp = new McpCatalog({ registry });
 
   let listening: ListeningServer;
   try {
     listening = await startDaemonServer({
       registry,
       host,
-      mcp,
       hooks,
       runningSource,
       logger,

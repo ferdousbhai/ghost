@@ -38,7 +38,7 @@ FloatingWindow {
     /** "home" or "ghosts" (the launcher's two lists), or one of `sections`. */
     property string currentSection: "home"
     /** The views a row opens, in the body stack's order. */
-    readonly property var sections: ["chat", "character", "hooks", "mcp", "remote"]
+    readonly property var sections: ["chat", "character", "hooks", "remote"]
     /** The card is a list: the launcher, over conversations or over ghosts. */
     readonly property bool home: hud.currentSection === "home" || hud.currentSection === "ghosts"
 
@@ -572,8 +572,6 @@ FloatingWindow {
                 // hooks are edited in place. It never creates or selects a
                 // conversation merely to show status.
                 HooksBrowser {}
-
-                McpBrowser {}
 
                 RemoteAccess {
                     onCloseRequested: hud.showSection("home")

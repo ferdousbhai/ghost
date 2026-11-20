@@ -12,8 +12,8 @@
  * Only surfaces Ghost owns:
  *
  * - **The persona** a harness finds in its conversation directory.
- * - **The launch**: prompt, resume flag, harness session, cwd, conversation
- *   identity, and MCP servers handed to the harness.
+ * - **The launch**: prompt, resume flag, harness session, cwd, and conversation
+ *   identity.
  * - **The turn event stream** of every turn, canonicalised.
  * - **The rendered transcript** and the conversation listing.
  * - **The ghost home on disk** after the conversation.

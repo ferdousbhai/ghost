@@ -95,21 +95,6 @@ describe("ghost CLI against a real daemon server", () => {
     expect(await cli(["browser", "allow"])).toMatchObject({ code: 2 });
   });
 
-  it("acknowledges an MCP change in one sentence and lists the table only for list", async () => {
-    mkdirSync(env.XDG_CONFIG_HOME!, { recursive: true });
-    const file = join(env.XDG_CONFIG_HOME!, "notes.json");
-    writeFileSync(file, JSON.stringify({ command: "/usr/bin/notes-mcp" }));
-    expect(await cli(["mcp", "add", "notes", file])).toMatchObject({ code: 0, stdout: "Added notes, disabled until `ghost mcp enable notes`.\n" });
-    expect(await cli(["mcp", "enable", "notes"])).toMatchObject({ code: 0, stdout: "Enabled notes.\n" });
-    expect(await cli(["mcp", "set", "notes", file, "-q"])).toMatchObject({ code: 0, stdout: "" });
-    const listed = await cli(["mcp"]);
-    expect(listed.stdout).toContain("SERVER");
-    expect(listed.stdout).toContain("notes");
-    const disabled = await cli(["mcp", "disable", "notes", "--json"]);
-    expect(JSON.parse(disabled.stdout)).toMatchObject({ servers: [expect.objectContaining({ name: "notes", enabled: false })] });
-    expect(await cli(["mcp", "rm", "notes"])).toMatchObject({ code: 0, stdout: "Removed notes.\n" });
-  });
-
   it("shows and sets the agent a ghost prefers, and switches a conversation", async () => {
     const shown = await cli(["harness", "-g", "casper"]);
     expect(shown).toMatchObject({ code: 0 });

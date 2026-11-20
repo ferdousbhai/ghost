@@ -22,7 +22,6 @@ import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { hooksCommand } from "./hooks.js";
-import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { askCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
 import { smokeCommand } from "./smoke.js";
@@ -148,14 +147,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost unpin -s cli-abc",
     positionals: [0, 0],
     run: (ctx) => sessionActionCommand("unpin", ctx),
-  },
-  {
-    verb: "mcp",
-    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>] [-g <name>] [--json] [-q]",
-    summary: "Inspect or change this ghost's MCP servers (new ones start disabled).",
-    example: "ghost mcp enable github",
-    positionals: [0, 3],
-    run: mcpCommand,
   },
   {
     verb: "hooks",

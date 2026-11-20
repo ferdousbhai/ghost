@@ -44,7 +44,6 @@ import {
   harnessRow,
   SUPPORTED_HARNESSES,
   type HarnessEvent,
-  type HarnessMcpServer,
   type HarnessRow,
   type TurnRow,
 } from "./harness-table.js";
@@ -55,8 +54,6 @@ import {
   GHOST_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import { expandMcpServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
-import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
@@ -421,17 +418,6 @@ export class SessionHost {
       }),
       character: characterSection({ ghostName: ghost.name, character }),
     };
-  }
-
-  /** The MCP servers a turn loads: the ghost's enabled `mcp.json` rows. */
-  private async mcpServers(ghost: Ghost): Promise<HarnessMcpServer[]> {
-    const servers: HarnessMcpServer[] = [];
-    // An unreadable file or row is skipped, not thrown; GET …/mcp shows why.
-    for (const server of readEnabledMcp(ghost.dir)) {
-      const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);
-      servers.push({ name: server.name, config });
-    }
-    return servers;
   }
 
   /**
@@ -840,17 +826,17 @@ export class SessionHost {
 
   /**
    * The local model's `delegate`: one headless run of the first cloud harness
-   * that answers, in the conversation's directory, with the ghost's persona
-   * and MCP servers. Its reply returns to the local model, not the owner.
+   * that answers, in the conversation's directory, with the ghost's persona.
+   * Its reply returns to the local model, not the owner.
    */
   private async delegateTask(
     ghost: Ghost, dir: string, env: NodeJS.ProcessEnv, persona: string, task: string, signal: AbortSignal,
   ): Promise<DelegateResult> {
-    const [ordered, mcp] = await Promise.all([this.cloudHarnesses([readHarnessSetting(ghost.dir)]), this.mcpServers(ghost)]);
+    const ordered = await this.cloudHarnesses([readHarnessSetting(ghost.dir)]);
     const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
     let lastError = "No cloud agent is installed to delegate to.";
     for (const harness of ordered) {
-      const pass = await this.cloudPass(harness, { prompt, persona, mcp, dir, env, signal });
+      const pass = await this.cloudPass(harness, { prompt, persona, dir, env, signal });
       if (!pass) return { harness, text: "Stopped.", isError: true };
       const text = pass.text.slice(0, TOOL_RESULT_CHARS);
       if (text && pass.error === null) return { harness, text, isError: false };
@@ -867,10 +853,10 @@ export class SessionHost {
    * pass does; failing before any text starts one.
    */
   private async cloudPass(harness: string, run: {
-    prompt: string; persona: string; mcp: readonly HarnessMcpServer[]; dir: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
+    prompt: string; persona: string; dir: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
   }): Promise<{ text: string; error: string | null } | null> {
     const row = this.rowOf(harness) as HarnessRow;
-    const launch = row.launch({ prompt: run.prompt, resume: false, sessionId: null, persona: run.persona, mcp: run.mcp });
+    const launch = row.launch({ prompt: run.prompt, resume: false, sessionId: null, persona: run.persona });
     await writeLaunchFiles(run.dir, launch.files);
     let text = "";
     let error: string | null = null;
@@ -917,7 +903,7 @@ export class SessionHost {
       try {
         // `GHOST` names the ghost, as in a turn, so a harness stop hook that
         // stands down inside Ghost runs does not review this completion.
-        const pass = await this.cloudPass(harness, { prompt, persona: "", mcp: [], dir, env: { ...this.env, GHOST: ghost.name }, signal });
+        const pass = await this.cloudPass(harness, { prompt, persona: "", dir, env: { ...this.env, GHOST: ghost.name }, signal });
         if (!pass) throw new Error("The completion was cancelled.");
         if (pass.text && pass.error === null) return pass.text;
         failures.push(`${harness}: ${pass.error ?? "no answer"}`);
@@ -948,9 +934,9 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
-    const [{ persona, character }, mcp] = await Promise.all([this.renderPersona(ghost), "run" in row ? [] : this.mcpServers(ghost)]);
+    const { persona, character } = await this.renderPersona(ghost);
     await this.prepareDirectory(ghost.dir, dir, persona);
-    const launch = "run" in row ? null : row.launch({ ...turn, persona, mcp });
+    const launch = "run" in row ? null : row.launch({ ...turn, persona });
     await writeLaunchFiles(dir, launch?.files);
 
     const at = new Date().toISOString();

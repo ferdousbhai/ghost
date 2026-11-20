@@ -1,13 +1,13 @@
 /**
  * Each row's parser against output its CLI really printed (recorded on
  * 2026-10-03 from two-turn probes; personal paths and prompts stripped), and
- * each row's launch line for the flags that carry resume, persona, and MCP.
+ * each row's launch line for the flags that carry resume and persona.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { harnessRow, type HarnessEvent, type HarnessTurnInput } from "../src/harness-table.js";
+import { harnessRow, SUPPORTED_HARNESSES, type HarnessEvent, type HarnessTurnInput } from "../src/harness-table.js";
 import { classifyLimitMessage } from "../src/turn-events.js";
 
 function parse(id: string, fixture: string): HarnessEvent[] {
@@ -32,7 +32,6 @@ const TURN: HarnessTurnInput = {
   resume: false,
   sessionId: null,
   persona: "You are Casper.",
-  mcp: [{ name: "notes", config: { command: "/usr/bin/notes-mcp" } }],
 };
 
 describe("parsers over recorded output", () => {
@@ -327,44 +326,37 @@ describe("launch lines", () => {
     }
   });
 
-  it("claude takes the prompt right after -p, so its list flags cannot swallow it", () => {
+  it("claude takes the prompt right after -p and continues the directory's session", () => {
     const launch = harnessRow("claude")?.launch({ ...TURN, resume: true });
     expect(launch?.argv.slice(0, 3)).toEqual(["claude", "-p", "-hello"]);
     expect(launch?.argv).toContain("--continue");
-    expect(launch?.argv.slice(-2)).toEqual(["--mcp-config", ".ghost-mcp.json"]);
-    expect(JSON.parse(launch?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({
-      mcpServers: { notes: { command: "/usr/bin/notes-mcp", args: [] } },
-    });
   });
 
-  it("codex resumes the directory's last session and takes MCP as config overrides", () => {
+  it("codex resumes the directory's last session", () => {
     const argv = harnessRow("codex")?.launch({ ...TURN, resume: true }).argv ?? [];
     expect(argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "--last"]);
-    expect(argv).toContain('mcp_servers.notes.command="/usr/bin/notes-mcp"');
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
-  });
-
-  it("codex and grok give a stdio MCP server the cwd it resolved to", () => {
-    const turn = { ...TURN, mcp: [{ name: "notes", config: { command: "./serve", cwd: "/home/me/ghosts/casper" } }] };
-    expect(harnessRow("codex")?.launch(turn).argv).toEqual(expect.arrayContaining(["-c", 'mcp_servers.notes.cwd="/home/me/ghosts/casper"']));
-    expect(harnessRow("grok")?.launch(turn).files?.[".grok/config.toml"]).toContain('cwd = "/home/me/ghosts/casper"');
   });
 
   it("grok gets the persona as --rules, since it reads no AGENTS.md", () => {
     const launch = harnessRow("grok")?.launch(TURN);
     expect(launch?.argv).toEqual(expect.arrayContaining(["--rules", "You are Casper."]));
-    expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.notes]\ncommand = "/usr/bin/notes-mcp"');
   });
 
-  it("ori takes the persona ahead of the prompt in a file, resumes by session id, and MCP as a config file", () => {
+  it("no row hands a harness MCP servers: only ori writes a file, its prompt", () => {
+    for (const id of SUPPORTED_HARNESSES) {
+      const launch = harnessRow(id)?.launch(TURN);
+      expect(Object.keys(launch?.files ?? {}), id).toEqual(id === "ori" ? [".ghost-prompt.md"] : []);
+      expect(launch?.argv.join(" "), id).not.toMatch(/mcp/iu);
+    }
+  });
+
+  it("ori takes the persona ahead of the prompt in a file and resumes by session id", () => {
     const fresh = harnessRow("ori")?.launch(TURN);
     expect(fresh?.argv).toEqual(["ori", "code", "--output", "jsonl", "--approvals", "self-drive", "--reasoning-effort", "low", "--prompt-file", ".ghost-prompt.md"]);
     expect(fresh?.files?.[".ghost-prompt.md"]).toBe("<ghost-persona>\nYou are Casper.\n</ghost-persona>\n\n-hello\n");
-    expect(fresh?.env).toEqual({ ORI_MCP_CONFIG: ".ghost-mcp.json" });
-    expect(JSON.parse(fresh?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({ mcpServers: { notes: { command: "/usr/bin/notes-mcp", args: [] } } });
-    const resumed = harnessRow("ori")?.launch({ ...TURN, resume: true, sessionId: "s1", mcp: [] });
+    const resumed = harnessRow("ori")?.launch({ ...TURN, resume: true, sessionId: "s1" });
     expect(resumed?.argv).toEqual(expect.arrayContaining(["--resume", "s1"]));
-    expect(resumed?.env).toBeUndefined();
   });
 
   it("opencode resumes by the session id it reported, not by directory", () => {
@@ -372,8 +364,5 @@ describe("launch lines", () => {
     expect(fresh).not.toContain("--session");
     const resumed = harnessRow("opencode")?.launch({ ...TURN, resume: true, sessionId: "ses_1" });
     expect(resumed?.argv).toEqual(expect.arrayContaining(["--session", "ses_1"]));
-    expect(JSON.parse(resumed?.env?.OPENCODE_CONFIG_CONTENT ?? "{}")).toEqual({
-      mcp: { notes: { type: "local", command: ["/usr/bin/notes-mcp"], enabled: true } },
-    });
   });
 });

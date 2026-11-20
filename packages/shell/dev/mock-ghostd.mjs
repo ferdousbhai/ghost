@@ -192,78 +192,6 @@ function publishConversationUpdated(name, id, updatedAt = new Date().toISOString
   }
 }
 
-// The mock stores each server's mcp.json row; like ghostd, `enabled` lives in
-// that config and the listing derives it (absent means enabled).
-const mcpStore = new Map();
-
-function ghostMcp(name) {
-  if (!mcpStore.has(name)) {
-    mcpStore.set(name, new Map([
-      ["local-files", {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@example/files-mcp", "/tmp/demo"],
-        cwd: "/tmp/demo",
-        envPolicy: "literal",
-        env: { MCP_DEMO_TOKEN: "demo-token" },
-      }],
-      ["project-api", {
-        type: "http",
-        url: "https://example.com/mcp?token=demo",
-        headerPolicy: "origin-locked",
-        headers: { Authorization: "Bearer demo" },
-      }],
-      ["legacy-events", { type: "sse", url: "https://example.com/events", enabled: false }],
-    ]));
-  }
-  return mcpStore.get(name);
-}
-
-function mcpSnapshot(name) {
-  return {
-    servers: [...ghostMcp(name)].map(([serverName, config]) => ({
-      name: serverName,
-      enabled: config.enabled !== false,
-      path: "mcp.json",
-      config,
-    })).sort((a, b) => a.name.localeCompare(b.name)),
-    skipped: [],
-  };
-}
-
-/** mcp-config-policy.ts mcpServerValidationErrors, worded as mcp-catalog.ts validateMutation sends it. */
-function mcpServerProblem(name, config) {
-  const stringRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value)
-    && Object.values(value).every((entry) => typeof entry === "string");
-  const problem = (() => {
-    if (!name) return "Server name cannot be empty";
-    if (name.length > 100) return "Server name is too long (max 100 characters)";
-    if (!/^[a-zA-Z0-9_.:-]+$/u.test(name)) return "Server name can only contain letters, numbers, dash, underscore, dot, and colon";
-    if (config === null || typeof config !== "object" || Array.isArray(config)) return "MCP server configuration must be a JSON object.";
-    const type = config.type === undefined ? "stdio" : config.type;
-    if (type !== "stdio" && type !== "http" && type !== "sse") return 'MCP server "type" must be "stdio", "http", or "sse".';
-    const allowed = type === "stdio" ? ["enabled", "type", "command", "args", "env", "envPolicy", "cwd"]
-      : ["enabled", "type", "url", "headers", "headerPolicy"];
-    if (!Object.keys(config).every((key) => allowed.includes(key))) return "MCP server configuration contains unsupported fields.";
-    if (config.enabled !== undefined && typeof config.enabled !== "boolean") return 'MCP server "enabled" must be a boolean.';
-    if (type === "stdio") {
-      if (typeof config.command !== "string" || config.command.length === 0) return 'MCP stdio "command" must be a non-empty string.';
-      if (config.args !== undefined && (!Array.isArray(config.args) || !config.args.every((entry) => typeof entry === "string"))) {
-        return 'MCP stdio "args" must be an array of strings.';
-      }
-      if (config.env !== undefined && !stringRecord(config.env)) return 'MCP stdio "env" must contain only string values.';
-      if (config.envPolicy !== undefined && config.envPolicy !== "literal") return 'MCP stdio "envPolicy" must be "literal".';
-      if (config.cwd !== undefined && (typeof config.cwd !== "string" || config.cwd.length === 0)) return 'MCP stdio "cwd" must be a non-empty string.';
-    } else {
-      if (typeof config.url !== "string" || config.url.length === 0) return 'MCP remote "url" must be a non-empty string.';
-      if (config.headers !== undefined && !stringRecord(config.headers)) return 'MCP remote "headers" must contain only string values.';
-      if (config.headerPolicy !== undefined && config.headerPolicy !== "origin-locked") return 'MCP remote "headerPolicy" must be "origin-locked".';
-    }
-    return null;
-  })();
-  return problem && `Invalid MCP server ${JSON.stringify(name)}: ${problem}`;
-}
-
 /** The daemon's character cap (MAX_CHARACTER_BODY_LENGTH); shells must read
     it from responses, never pin it. */
 const CHARACTER_LIMIT = 20000;
@@ -299,7 +227,7 @@ if (OWNS_GHOSTS_ROOT) {
 const sessionStore = new Map();
 
 /** Every per-ghost store: re-keyed when a ghost is renamed, dropped when it is banished. */
-const perGhostStores = [sessionStore, writtenCharacter, mcpStore, ghostDefaultHarness];
+const perGhostStores = [sessionStore, writtenCharacter, ghostDefaultHarness];
 
 // Persisted messages carry an `entryId`, `e<n>` for log entry n as
 // CONTRACTS.md's transcript row says: entries count from 0, the conversation
@@ -949,49 +877,6 @@ const mockServer = createServer(async (req, res) => {
     }
     if (/^(?!!\[)!!?\s*$/u.test(body.prompt.trim())) return refuse(res, 400, "invalid_request", "Write a command after ! or !!.");
     return streamTurn(res, name, { ...body, sessionId });
-  }
-  if (parts[3] === "mcp" && parts.length === 4 && req.method === "GET") {
-    return json(res, 200, mcpSnapshot(name));
-  }
-  if (parts[3] === "mcp" && parts.length === 4 && req.method === "POST") {
-    const body = await readBody(req).catch(() => ({}));
-    const serverName = body?.name;
-    if (typeof serverName !== "string") return notString(res, "name");
-    const problem = mcpServerProblem(serverName, body.config);
-    if (problem) return refuse(res, 400, "invalid_mcp_server", problem);
-    if (ghostMcp(name).has(serverName)) {
-      return refuse(res, 409, "mcp_server_exists", `MCP server ${JSON.stringify(serverName)} already exists.`);
-    }
-    // Like ghostd: a newly added server starts disabled unless the row says otherwise.
-    ghostMcp(name).set(serverName, "enabled" in body.config ? body.config : { ...body.config, enabled: false });
-    return json(res, 201, mcpSnapshot(name));
-  }
-  if (parts[3] === "mcp" && parts.length >= 5) {
-    const serverName = decodeURIComponent(parts[4]);
-    const servers = ghostMcp(name);
-    const missing = () => refuse(res, 404, "mcp_server_not_found", `No MCP server named ${JSON.stringify(serverName)}.`);
-    if (parts.length === 5 && req.method === "PUT") {
-      const body = await readBody(req).catch(() => ({}));
-      // mcp-catalog.ts updateLeased validates before it looks the row up.
-      const problem = mcpServerProblem(serverName, body?.config);
-      if (problem) return refuse(res, 400, "invalid_mcp_server", problem);
-      if (!servers.has(serverName)) return missing();
-      // Like ghostd: the written config replaces the row, `enabled` included.
-      servers.set(serverName, body.config);
-      return json(res, 200, mcpSnapshot(name));
-    }
-    if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {
-      const body = await readBody(req).catch(() => ({}));
-      if (typeof body?.enabled !== "boolean") return notBoolean(res, "enabled");
-      if (!servers.has(serverName)) return missing();
-      servers.set(serverName, { ...servers.get(serverName), enabled: body.enabled });
-      return json(res, 200, mcpSnapshot(name));
-    }
-    if (parts.length === 5 && req.method === "DELETE") {
-      if (!servers.has(serverName)) return missing();
-      servers.delete(serverName);
-      return json(res, 200, mcpSnapshot(name));
-    }
   }
   if (parts[3] === "harness" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, harnessSnapshot(name));

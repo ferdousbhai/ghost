@@ -34,7 +34,6 @@ checkdepends=(
 )
 _runtime_optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
-  'npm: npx-launched MCP servers'
 )
 options=('!debug' '!lto' '!strip')
 source=("ghost::git+${GHOST_SOURCE_REPO:-https://github.com/ferdousbhai/ghost.git}#${GHOST_SOURCE_REF:-branch=master}")

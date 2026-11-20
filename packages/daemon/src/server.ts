@@ -9,9 +9,6 @@ import { MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import type { RemoteServe } from "./remote-serve.js";
 import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import { requireConversationId } from "./conversation-log.js";
-import type {
-  McpCatalog,
-} from "./mcp-catalog.js";
 import { readCharacter, writeCharacter } from "./home.js";
 import { MAX_CHARACTER_BODY_LENGTH } from "./persona.js";
 import { errorMessage, GhostError } from "./errors.js";
@@ -40,7 +37,6 @@ export interface ServerOptions {
   host: SessionHost;
   /** What runs this daemon, as `GET /api/status` reports it. */
   runningSource: RunningSource;
-  mcp: McpCatalog;
   /** The owner's `hooks.json`, as `GhostHookRunner.fromConfig` admitted it. */
   hooks: Pick<ConfiguredHookRunner, "config" | "replaceConfig">;
   logger?: Logger;
@@ -344,7 +340,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const liveStreams = new Set<ServerResponse>();
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
-  const { mcp, remoteServe } = options;
+  const { remoteServe } = options;
   const remoteApps = new Set(options.remoteApps ?? []);
   const streamCutBytes = options.streamCutBytes ?? DEFAULT_STREAM_CUT_BYTES;
   const turnLogs = new Map<string, TurnLog>();
@@ -685,7 +681,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   const isGuest = (context: RequestContext): boolean => context.admission.identity?.role === "guest";
-  /** A read a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. Every guest write is already refused `read_only` in `authenticate`. */
+  /** A read a tailnet guest is refused: it shows file paths, hook commands, or the owner's own data. Every guest write is already refused `read_only` in `authenticate`. */
   const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
     if (isGuest(context)) {
       throw new GhostError("owner_only", "Only the owner may see this.", 403);
@@ -897,25 +893,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         throw new GhostError("invalid_request", '"text" must be a non-empty string.', 400);
       }
       jsonResponse(response, 200, await options.host.queueMessage(ghost, id, text.trim()));
-    }),
-    route("GET", "api/ghosts/:ghost/mcp", ownerOnly(async ({ ghost, response }) => {
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.listLeased(ghost)));
-    })),
-    route("POST", "api/ghosts/:ghost/mcp", async ({ ghost, response, body }) => {
-      const document = await body();
-      const name = stringField(document, "name");
-      jsonResponse(response, 201, await options.host.withGhost(ghost, () => mcp.addLeased(ghost, name, document.config)));
-    }),
-    route("PUT", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response, body }) => {
-      const { config } = await body();
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.updateLeased(ghost, params.server ?? "", config)));
-    }),
-    route("DELETE", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response }) => {
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.removeLeased(ghost, params.server ?? "")));
-    }),
-    route("PUT", "api/ghosts/:ghost/mcp/:server/enabled", async ({ ghost, params, response, body }) => {
-      const enabled = booleanField(await body(), "enabled");
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.setEnabledLeased(ghost, params.server ?? "", enabled)));
     }),
   ];
 

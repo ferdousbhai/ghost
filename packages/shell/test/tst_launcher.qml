@@ -38,7 +38,7 @@ TestCase {
         compare(rows[4].kind, "header");
         compare(rows[4].label, "casper");
         compare(rows.filter(row => row.kind === "place").map(row => row.id),
-            ["character", "ghosts", "hooks", "mcp", "remote"]);
+            ["character", "ghosts", "hooks", "remote"]);
         verify(!rows.some(row => row.kind === "ask" || row.kind === "new"));
     }
 

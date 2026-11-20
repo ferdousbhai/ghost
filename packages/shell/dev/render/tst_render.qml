@@ -26,11 +26,7 @@ TestCase {
         for (const xhr of tc.sent) {
             if (xhr.readyState === 4) continue;
             const url = xhr.url;
-            if (/\/mcp$/.test(url)) xhr.complete(200, { servers: [
-                { name: "github", enabled: true, path: "mcp.json", config: { command: "github-mcp", args: ["--read-only"] } },
-                { name: "linear", enabled: false, path: "mcp.json", config: { type: "http", url: "https://mcp.linear.app/sse" } }
-            ], skipped: [] });
-            else if (/\/api\/hooks\/config$/.test(url)) xhr.complete(200, { path: "/home/owner/.config/ghost/hooks.json", document: { hooks: {
+            if (/\/api\/hooks\/config$/.test(url)) xhr.complete(200, { path: "/home/owner/.config/ghost/hooks.json", document: { hooks: {
                 session_stop: [{ hooks: [{ type: "command", command: "/home/owner/bin/review", name: "Review", timeout: 5 }] }],
                 turn_end: [{ hooks: [{ type: "command", command: "/home/owner/bin/ntfy", name: "Phone alert", timeout: 15 }] }]
             } } });
@@ -174,13 +170,11 @@ TestCase {
     }
 
     Component { id: hooksC; HooksBrowser { width: 900; height: 520 } }
-    Component { id: mcpC; McpBrowser { width: 900; height: 520 } }
     // Tall enough to show the app card under the access card.
     Component { id: remoteC; RemoteAccess { width: 900; height: 1040 } }
     Component { id: characterC; CharacterPane { width: 900; height: 520 } }
     function test_panes(): void {
         snap(hooksC, { x: 20, y: 20 }, "pane-hooks");
-        snap(mcpC, { x: 20, y: 20 }, "pane-mcp");
         Ghostd.refreshRemote();
         snap(remoteC, { x: 20, y: 20 }, "pane-remote");
         // The pane fetches when it becomes visible; here it is visible from birth.
@@ -229,13 +223,6 @@ TestCase {
         snap(toolC, { expanded: true, activity: { id: "4", name: "bash", status: "complete",
             arguments: { command: "cloud-tasks lists --json" }, summary: "[{\"id\":\"icloud:C1B4\",\"name\":\"Reminders\"}]" } }, "tool-expanded");
         snap(queueC, { followUps: ["also check the issue tracker"] }, "queue-line");
-
-        const mcp = mcpC.createObject(stage, { x: 20, y: 20 });
-        tc.answer();
-        mcp.beginAdd();
-        tc.shot(mcp, "pane-mcp-adding");
-        mcp.destroy();
-        wait(30);
 
         const hooks = hooksC.createObject(stage, { x: 20, y: 20 });
         tc.answer();

@@ -94,7 +94,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ~/ghosts/<name>/
   character.md
   settings.yml         (`harness: <id>` prefers one harness)
-  mcp.json
   sessions/<id>/       (one directory per conversation)
 ```
 
@@ -149,9 +148,9 @@ and task-tab locking recipe to agent-browser's own skills), and skills are
 whatever each harness discovers itself, the owner's included. A conversation
 directory's `.claude/skills` and `.agents/skills` lose, on its next turn, the
 links earlier versions put there (those pointing into `/usr/lib/ghost/skills`,
-a checkout's `skills/`, or the ghost home's `skills/`); any other link stays. `mcp.json`
-rows that are enabled and valid are handed to the harness each turn (see
-"Harnesses"). A ghost home carries no executable extension code; the only
+a checkout's `skills/`, or the ghost home's `skills/`); any other link stays. Ghost hands a harness no MCP
+servers: a harness connects the ones in its own configuration, and a `mcp.json`
+an earlier version left in a ghost home is not read. A ghost home carries no executable extension code; the only
 hooks are the owner's `hooks.json` commands. Nothing is discovered from any
 other tree: a delegated harness run with a project directory as its own cwd
 respects that project's settings.
@@ -196,8 +195,7 @@ directory to recoverable Trash in one rename; there is no fork.
   chooses the owner's requested destination or XDG Downloads directory.
 - Harness credentials are the harness's own, signed in by the owner with that
   harness; a turn, and a hook's completion, spends the account Omarchy marks
-  active for claude, codex, and grok (`omarchy-agent-account-home`). An MCP server's headers or env are
-  literal values in the ghost's private `mcp.json`. Ghost keeps no keyring, no
+  active for claude, codex, and grok (`omarchy-agent-account-home`). Ghost keeps no keyring, no
   account allow-list, and no secret references.
 - Finished artifacts go to the destination the owner requested, defaulting to
   the owner's Documents directory when none was named. Ghost keeps no index of
@@ -213,7 +211,7 @@ ghost home directory, which moves as one unit.
 | `character.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
 | Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | not removed | unchanged | unchanged | preserved |
-| `settings.yml`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
+| `settings.yml` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved or renamed | not removed | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
@@ -255,8 +253,7 @@ ghost rewrote is who it is on the next one.
 
 A turn is one headless run of an agent CLI, a row of
 [`harness-table.ts`](packages/daemon/src/harness-table.ts): how to launch it
-non-interactively with permissions pre-approved, how to resume, how it takes
-MCP servers, and a parser from its JSON output to text, reasoning, tool
+non-interactively with permissions pre-approved, how to resume, and a parser from its JSON output to text, reasoning, tool
 start/end, session, model, and error events. Rows follow the agents Omarchy
 offers (`omarchy default agent`), and Ghost offers only those Omarchy reports
 installed: claude, codex, grok, copilot, opencode, pi, omp, agy, ori, and
@@ -277,8 +274,7 @@ the reply has already streamed). Nothing from that inspection enters handoff
 context. The owner should always be able to see what answered: each reply
 records the model, provider, and effort its harness named, and the session row
 carries them. Ghost keeps no inventory of a run's skills, plugins, tools, or
-connected MCP servers; those are the harness's own. The HUD's MCP servers pane
-manages only the ghost's additional configured servers.
+connected MCP servers; those are the harness's own.
 Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
@@ -292,16 +288,7 @@ grok, which reads none of them, gets it as `--rules`, and ori, which reads
 none and takes no system prompt, gets it ahead of every prompt. Because the directory is
 the conversation's own, a harness's "continue the most recent session here" is
 the conversation's resume; opencode, whose continue is not
-cwd-scoped, and ori, which has none, are resumed by the session id they reported. Each turn also
-receives the ghost's enabled `mcp.json` rows,
-`${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
-home, in that harness's own dialect: a `--mcp-config` file, copilot's
-`--additional-mcp-config` file, `-c mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, `ORI_MCP_CONFIG` (ori ignores a stdio `cwd`), or a
-project config file in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
-or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
-expansion switches; any other field makes it invalid, since no harness dialect
-carries it. The pi and omp rows forward none of these; Pi 1.2 itself
-supports MCP configured by the owner. Ghost has no screen control: desktop
+cwd-scoped, and ori, which has none, are resumed by the session id they reported. Ghost has no screen control: desktop
 work goes through Omarchy's commands, app CLIs, and config files, on the bet
 that Omarchy's command line keeps growing toward full coverage.
 
@@ -428,7 +415,7 @@ boundary. The configured owner has full access; any other login is refused
 unless `remote.guests` in the config is `"read-only"` (the default is
 `"none"`). Admitted guests are read-only,
 are refused the reads marked owner-only, which show file paths, hook
-commands, MCP credentials, or the owner's own data, and see no path in the ghost list;
+commands, or the owner's own data, and see no path in the ghost list;
 conversations, tool calls included, are shown to them as recorded. Every
 guest write is `403 read_only`.
 Remote access never broadens a ghost's local tool authority.
@@ -464,7 +451,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; while `mcp.json` is unreadable or malformed every mutation is refused (409) and the file left as it is. The next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, usage, effort, resting}], ghostDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which the HUD's and `ghost harness`'s "automatic" name. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the harness a new conversation would start on, in a scratch directory with no persona, conversation, or Ghost tools, a failing harness handing it to the next (resting ones last); on the local model when a turn would run there, never then a cloud one (`409 harness_not_installed` for a ghost set to `local` with none configured). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. `502 completion_failed` names each harness's failure. |
@@ -526,7 +512,7 @@ HUD reaches, except attaching a photo and reading the follow-up queue, is a
 named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
-and a conversation runs on (`ghost switch`), MCP, hooks, remote, and status), so a
+and a conversation runs on (`ghost switch`), hooks, remote, and status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
 a verb's primary output: what a read prints (a transcript without its paging
 note, a character, ids or names, `ok` for status), and nothing for a change.
@@ -576,8 +562,7 @@ Apart from the [local model](#local-model), Ghost has no model, provider, or
 credential of its own: each harness reads its
 sign-in from its own configuration exactly as when the owner runs it by hand,
 and its environment is the daemon's own, unscrubbed. Credential values never
-enter logs; the only API response that carries them is the owner's own MCP
-configuration.
+enter logs or API responses.
 
 Ghosts run unthrottled. Harness limits surface as typed errors, and the
 harness's own retry and fallback behavior applies; Ghost's contribution is
@@ -602,7 +587,7 @@ removing the UI neither stops the runtime nor changes ghost homes; removing the
 runtime preserves owner data.
 
 - [`packages/daemon`](packages/daemon/src/main.ts) owns ghost homes and the
-  persona prompt, configuration, authentication, conversations, the harness table, MCP, hooks, lifecycle,
+  persona prompt, configuration, authentication, conversations, the harness table, hooks, lifecycle,
   HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/window`](packages/window/src/main.rs) is Ghost's window
   (`ghost-window`, app id `io.github.ferdousbhai.Ghost`): a Rust and GTK 4
@@ -822,7 +807,7 @@ rounds, then makes one more call without them:
   named; `due` is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`, so the line means the
   same day whenever it is read). A name becomes one file name, never a path.
 - `delegate(task)`: one headless run of a harness, in the conversation's
-  directory with the ghost's persona and MCP servers, tried in the order
+  directory with the ghost's persona, tried in the order
   above minus `local`; its reply, not its tool calls, returns to the model.
   The task leaves the machine; the section tells the model to send only
   what it needs.
@@ -840,7 +825,7 @@ Recall's coverage is its own configuration.
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
-- Home rename/delete, MCP mutation, and conversation deletion use explicit
+- Home rename/delete and conversation deletion use explicit
   leases and publish only durable state.
 - Control files are bounded (1 MiB), validated, and replaced atomically by
   rename; malformed bytes are refused, and a symlinked file is followed like

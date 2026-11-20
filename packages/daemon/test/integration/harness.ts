@@ -19,7 +19,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GhostRegistry } from "../../src/ghosts.js";
-import { McpCatalog } from "../../src/mcp-catalog.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
 import type { TurnEvent } from "../../src/turn-events.js";
@@ -289,12 +288,10 @@ export async function startRealDaemonHarness(
       env: { ...process.env },
       ...onlyHarnesses(fake),
     });
-    const mcp = new McpCatalog({ registry });
     listening = await startDaemonServer({
       registry,
       host,
       ...serverServices(registry),
-      mcp,
       port: 0,
       apiToken: API_TOKEN,
     });

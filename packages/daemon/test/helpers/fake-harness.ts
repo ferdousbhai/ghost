@@ -31,7 +31,6 @@ export interface FakeCall {
   readonly ghost: string | null;
   readonly session: string | null;
   readonly agents: string | null;
-  readonly mcp: readonly string[];
 }
 
 export interface FakeHarness {
@@ -48,14 +47,13 @@ export interface FakeHarness {
 const SCRIPT = `
 import { once } from "node:events";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-const [turnsPath, counterPath, logPath, prompt, resume, sessionId, mcp] = process.argv.slice(2);
+const [turnsPath, counterPath, logPath, prompt, resume, sessionId] = process.argv.slice(2);
 const n = existsSync(counterPath) ? Number(readFileSync(counterPath, "utf8")) : 0;
 writeFileSync(counterPath, String(n + 1));
 appendFileSync(logPath, JSON.stringify({
   n, prompt, resume: resume === "resume", sessionId: sessionId || null, cwd: process.cwd(),
   ghost: process.env.GHOST ?? null, session: process.env.GHOST_SESSION ?? null,
   agents: existsSync("AGENTS.md") ? readFileSync("AGENTS.md", "utf8") : null,
-  mcp: mcp ? mcp.split(",") : [],
 }) + "\\n");
 const turns = JSON.parse(readFileSync(turnsPath, "utf8"));
 const turn = turns[Math.min(n, turns.length - 1)] ?? {};
@@ -89,7 +87,6 @@ export function fakeHarness(turns: readonly FakeTurn[], id = "fake"): FakeHarnes
       argv: [
         process.execPath, script, turnsPath, counterPath, logPath,
         turn.prompt, turn.resume ? "resume" : "new", turn.sessionId ?? "",
-        turn.mcp.map((server) => server.name).join(","),
       ],
     }),
     parser: () => (line) => {

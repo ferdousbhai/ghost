@@ -1,6 +1,6 @@
 /**
  * The session host over a scripted harness: what a turn hands the harness
- * (persona, cwd, env, resume, MCP), what it streams back, what the
+ * (persona, cwd, env, resume), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
 import { fileURLToPath } from "node:url";
@@ -77,18 +77,10 @@ describe("a turn", () => {
       cwd: conversationDir(sessionDir(), "c1"),
       ghost: "casper",
       session: "c1",
-      mcp: [],
     });
     expect(call?.agents).toContain("You are Casper, a letterpress printer.");
     expect(call?.agents).toContain("## Character file");
     expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(true);
-  });
-
-  it("loads no MCP server of its own", async () => {
-    const fake = harness(replies("one"));
-    const sessions = host({ harnesses: [fake] });
-    await turn(sessions, "first");
-    expect(fake.calls()[0]?.mcp).toEqual([]);
   });
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {

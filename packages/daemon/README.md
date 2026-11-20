@@ -1,7 +1,7 @@
 # `@ghost/daemon`
 
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
-conversations, the choice of harness for each turn, MCP configuration, hooks,
+conversations, the choice of harness for each turn, hooks,
 authenticated HTTP/SSE, and the `ghost` terminal client. Each turn is a
 headless run of an agent CLI the owner already has; the harness brings its own
 model, credentials, and tool loop.

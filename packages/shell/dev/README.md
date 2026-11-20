@@ -114,7 +114,7 @@ that has already exited and the preview keeps running.
   nested monitor's size from its corner, the desktop under the theme's menu
   scrim, and the launcher card a fifth of the way down: a
   filter (`Search, or ask casper…`), the mock's conversations with ages and
-  unread dots, then casper's places (Character, Ghosts, Hooks, MCP servers, Remote access). Typing
+  unread dots, then casper's places (Character, Ghosts, Hooks, Remote access). Typing
   filters; Enter grows the card into the chosen view with a `‹` back to the
   list; Enter on a filter nothing matches asks casper. Ghosts keeps the card's
   size: casper (current, amber) above moaning-myrtle, and a typed free name
@@ -126,9 +126,7 @@ that has already exited and the preview keeps running.
   `omarchy-shell shell toggle ferdousbhai.ghost` under the exported variables.
   Character edits `character.md`. Hooks shows the
   owner's `hooks.json` handlers with their lifecycle triggers and the loaded
-  count, and opening it does not create a conversation. MCP lists stdio, HTTP,
-  and SSE fixtures as stored and exercises add, full replacement,
-  enable/disable, and confirmed deletion. Remote exercises the Tailscale Serve lifecycle and app link, including the
+  count, and opening it does not create a conversation. Remote exercises the Tailscale Serve lifecycle and app link, including the
   off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.

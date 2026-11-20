@@ -248,7 +248,7 @@ filter on top and the ghost's conversations and places under it.
 | `Esc` | close |
 
 A row grows the card into its view: a conversation,
-**Character**, **Hooks**, **MCP servers**, or **Remote access**; `‹` or `Esc`
+**Character**, **Hooks**, or **Remote access**; `‹` or `Esc`
 goes back to the list. **Ghosts** stays a list of the same size. An empty conversation shows the ghost's
 glyph, its name, and the static line `What's on your mind?`.
 
@@ -310,7 +310,7 @@ codes.
 
 | Path | What |
 |---|---|
-| `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
+| `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, and `sessions/<id>/`, one directory per conversation |
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login; `ghost rename` and `ghost rm` keep it true, `ghost use --none` clears it |

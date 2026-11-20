@@ -71,7 +71,7 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
     };
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...options.env, ...options.launch.env },
+      env: options.env,
       stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: true,
     }) as ChildProcessByStdio<Writable | null, Readable, Readable>;

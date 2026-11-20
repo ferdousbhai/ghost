@@ -78,10 +78,9 @@ file tools; the package installs nothing there and gates nothing on it.
 
 ## Optional integrations
 
-MCP servers, CLI integrations, and product skills are yours to install from
+CLI integrations and product skills are yours to install from
 upstream as the desktop user; the upstream installer then owns its files and
-updates. Many MCP servers are launched through `npx`, which the optional `npm`
-package provides.
+updates.
 
 The package ships no skills: the `ghost` CLI is a ghost's documentation
 (`ghost help products` indexes the recommended products, `ghost help browser`

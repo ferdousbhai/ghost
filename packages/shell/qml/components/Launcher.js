@@ -12,8 +12,6 @@ var PLACES = [
         icon: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01" },
     { id: "hooks", label: "Hooks", hint: "lifecycle commands",
         icon: "M8 12h8M12 8v8M7 3v4M17 3v4M7 17v4M17 17v4M3 7h4M17 7h4M3 17h4M17 17h4M7 7h10v10H7z" },
-    { id: "mcp", label: "MCP servers", hint: "tools",
-        icon: "M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 7v5M7.5 17.5l3-5M16.5 17.5l-3-5" },
     { id: "remote", label: "Remote access", hint: "phone",
         icon: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10 5h4M11 18h2" }
 ];

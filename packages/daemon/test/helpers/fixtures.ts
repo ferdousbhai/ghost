@@ -7,7 +7,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
-import { McpCatalog } from "../../src/mcp-catalog.js";
 import { RemoteServe } from "../../src/remote-serve.js";
 import type { TurnEvent } from "../../src/turn-events.js";
 import { startDaemonServer, type ListeningServer, type ServerOptions } from "../../src/server.js";
@@ -167,9 +166,8 @@ export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): voi
  * `tailscale` so no test reaches the real one, and a `hooks.json` in the
  * ghosts root that the registry skips as a dotfile.
  */
-export function serverServices(registry: GhostRegistry): Pick<ServerOptions, "mcp" | "remoteServe" | "hooks" | "runningSource"> {
+export function serverServices(registry: GhostRegistry): Pick<ServerOptions, "remoteServe" | "hooks" | "runningSource"> {
   return {
-    mcp: new McpCatalog({ registry }),
     remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
     hooks: GhostHookRunner.fromConfig(join(registry.root, ".hooks.json")),
     runningSource: { version: "0.0.0-test", commit: null, root: null, entry: fileURLToPath(import.meta.url), startedAt: Date.now() },

@@ -252,16 +252,6 @@ Singleton {
     readonly property bool hookConfigBusy: root.hookConfigMutation !== null
     property string hookConfigError: ""
 
-    // The active ghost's `<ghost-home>/mcp.json` servers, as stored.
-    property var mcpServers: []
-    property var mcpSkipped: []
-    readonly property bool mcpLoading: root.mcpRequest !== null
-    readonly property bool mcpMutating: root.mcpMutationRequest !== null
-    property string mcpError: ""
-    property string mcpNotice: ""
-    /** The active ghost's MCP catalog has been read (cleared on every switch). */
-    property bool mcpLoaded: false
-
     // A ghost owns many conversations. The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
@@ -351,7 +341,6 @@ Singleton {
     signal turnFailed(string ghost, string message, string sessionId, string title)
     /** Text for the composer: a queued message the daemon refused. */
     signal composerDraft(string text)
-    signal mcpMutationFinished(string action, string server, bool ok)
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
 
@@ -371,8 +360,6 @@ Singleton {
     property var remoteAppQrRequest: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
-    property var mcpRequest: null
-    property var mcpMutationRequest: null
     /** Test seam: when set, every request is `requestFactory()` instead of a native XHR. */
     property var requestFactory: null
     readonly property int transcriptPageLimit: 1000
@@ -758,7 +745,6 @@ Singleton {
         root.sessions = [];
         root.sessionsError = "";
         root.clearCharacter();
-        root.clearMcp();
         root.clearHarnessChoice();
     }
 
@@ -1222,109 +1208,6 @@ Singleton {
                 // The file on disk is the truth; re-read what the daemon stored.
                 if (ok) root.fetchCharacter(true);
             });
-    }
-
-
-    function clearMcp(): void {
-        root.retire(root, "mcpRequest");
-        root.retire(root, "mcpMutationRequest");
-        root.mcpServers = [];
-        root.mcpSkipped = [];
-        root.mcpError = "";
-        root.mcpNotice = "";
-        root.mcpLoaded = false;
-    }
-
-    /** Adopt a `{ servers, skipped }` catalog for the active ghost; false when the body is not one. */
-    function applyMcpSnapshot(body: var): bool {
-        if (!body || !Array.isArray(body.servers) || !Array.isArray(body.skipped))
-            return false;
-        root.mcpServers = body.servers.filter(function (server) {
-            return server && typeof server === "object"
-                && typeof server.name === "string" && server.name.trim() !== ""
-                && server.config && typeof server.config === "object";
-        });
-        root.mcpSkipped = body.skipped.filter(function (entry) {
-            return entry && typeof entry === "object";
-        });
-        root.mcpLoaded = true;
-        root.mcpError = "";
-        root.reachable = true;
-        return true;
-    }
-
-    function fetchMcp(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearMcp();
-            return;
-        }
-        if (!force && root.mcpLoaded) return;
-        if (root.mcpRequest) {
-            if (!force) return;
-            root.retire(root, "mcpRequest");
-        }
-        root.mcpError = "";
-        root.mcpNotice = "";
-        root.request(root, "mcpRequest", "GET", root.ghostPath(ghost) + "/mcp",
-            null, function (xhr, body) {
-                if (ghost !== root.activeGhost) return;
-                if (xhr.status !== 200) {
-                    root.mcpError = root.describeError(xhr, "GET MCP servers");
-                } else if (!root.applyMcpSnapshot(body)) {
-                    root.mcpServers = [];
-                    root.mcpSkipped = [];
-                    root.mcpError = "ghostd sent a malformed MCP catalog";
-                }
-            });
-    }
-
-    function mutateMcp(method: string, suffix: string, body: var,
-            action: string, server: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || root.mcpMutating) return;
-        root.retire(root, "mcpRequest");
-        root.mcpError = "";
-        root.mcpNotice = "";
-        root.request(root, "mcpMutationRequest", method, root.ghostPath(ghost)
-            + "/mcp" + suffix, body, function (xhr, catalog) {
-                if (ghost !== root.activeGhost) return;
-                const answered = xhr.status === 200 || xhr.status === 201;
-                const ok = answered && root.applyMcpSnapshot(catalog);
-                if (ok)
-                    root.mcpNotice = action === "delete" ? "Server deleted."
-                        : (action === "toggle" ? "Server state updated."
-                            : (action === "add" ? "Server added." : "Server updated."));
-                else
-                    root.mcpError = answered ? "ghostd sent a malformed MCP catalog"
-                        : root.describeError(xhr, method + " MCP server");
-                root.mcpMutationFinished(action, server, ok);
-            });
-    }
-
-    function addMcpServer(name: string, config: var): void {
-        const trimmed = name.trim();
-        if (trimmed === "") return;
-        root.mutateMcp("POST", "", { name: trimmed, config: config },
-            "add", trimmed);
-    }
-
-    function updateMcpServer(name: string, config: var): void {
-        if (name === "") return;
-        root.mutateMcp("PUT", "/" + encodeURIComponent(name), { config: config },
-            "update", name);
-    }
-
-    function setMcpEnabled(name: string, enabled: bool): void {
-        if (name === "") return;
-        root.mutateMcp("PUT", "/" + encodeURIComponent(name) + "/enabled",
-            { enabled: enabled }, "toggle", name);
-    }
-
-    function deleteMcpServer(name: string): void {
-        if (name === "") return;
-        root.mutateMcp("DELETE", "/" + encodeURIComponent(name), null,
-            "delete", name);
     }
 
 

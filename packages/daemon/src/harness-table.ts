@@ -15,14 +15,8 @@ import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import type { NativeTurnInput } from "./local-turn.js";
-import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord } from "./record.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
-
-export interface HarnessMcpServer {
-  readonly name: string;
-  readonly config: MCPServerConfig;
-}
 
 export interface HarnessTurnInput {
   readonly prompt: string;
@@ -32,12 +26,10 @@ export interface HarnessTurnInput {
   readonly sessionId: string | null;
   /** The rendered ghost system prompt; most rows read it from `AGENTS.md`. */
   readonly persona: string;
-  readonly mcp: readonly HarnessMcpServer[];
 }
 
 export interface HarnessLaunch {
   readonly argv: readonly string[];
-  readonly env?: Readonly<Record<string, string>>;
   /** Files written into the conversation directory before launch. */
   readonly files?: Readonly<Record<string, string>>;
 }
@@ -114,53 +106,6 @@ function json(line: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-/** `{"mcpServers": {...}}`, the Claude Code dialect several harnesses share. */
-function mcpServersJson(servers: readonly HarnessMcpServer[], stdioType?: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const { name, config } of servers) {
-    if (config.type === "http" || config.type === "sse") {
-      out[name] = { type: config.type, url: config.url, ...(config.headers ? { headers: config.headers } : {}) };
-    } else {
-      out[name] = {
-        ...(stdioType ? { type: stdioType } : {}),
-        command: config.command,
-        args: config.args ?? [],
-        ...(config.env ? { env: config.env } : {}),
-        ...(config.cwd ? { cwd: config.cwd } : {}),
-      };
-    }
-  }
-  return { mcpServers: out };
-}
-
-/** A TOML-safe table key; MCP names allow `.` and `:`, which TOML paths do not. */
-function tomlKey(name: string): string {
-  return name.replace(/[^A-Za-z0-9_-]/gu, "_");
-}
-
-/** TOML inline values: JSON strings and string arrays are valid TOML as written. */
-function tomlInlineTable(values: Readonly<Record<string, string>>): string {
-  return `{${Object.entries(values).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")}}`;
-}
-
-/** A server's `[mcp_servers.<name>]` fields as TOML keys and values, the Codex dialect Grok also reads. */
-function mcpTomlFields(config: MCPServerConfig): [string, string][] {
-  if (config.type === "http" || config.type === "sse") {
-    return [["url", JSON.stringify(config.url)], ...(config.headers ? [["http_headers", tomlInlineTable(config.headers)] as [string, string]] : [])];
-  }
-  return [
-    ["command", JSON.stringify(config.command)],
-    ["args", JSON.stringify(config.args ?? [])],
-    ...(config.env ? [["env", tomlInlineTable(config.env)] as [string, string]] : []),
-    ...(config.cwd ? [["cwd", JSON.stringify(config.cwd)] as [string, string]] : []),
-  ];
-}
-
-function mcpServersToml(servers: readonly HarnessMcpServer[]): string {
-  return servers.map(({ name, config }) => [`[mcp_servers.${tomlKey(name)}]`,
-    ...mcpTomlFields(config).map(([key, value]) => `${key} = ${value}`), "enabled = true"].join("\n")).join("\n\n");
 }
 
 /**
@@ -641,10 +586,6 @@ function textParser(): (line: string) => HarnessEvent[] {
   };
 }
 
-function writeJson(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
 // Rows that can set reasoning effort per run ask for low: a ghost is a
 // conversation, and the owner's own setting is tuned for coding. Copilot's
 // `auto` model refuses an effort and opencode's variants are provider-specific,
@@ -655,16 +596,13 @@ const ROWS: readonly HarnessRow[] = [
   {
     id: "claude",
     effort: EFFORT,
-    // The prompt goes right after -p: --mcp-config takes a list.
     launch: (turn) => ({
       argv: [
         "claude", "-p", turn.prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         "--permission-mode", "bypassPermissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
-        ...(turn.mcp.length > 0 ? ["--mcp-config", ".ghost-mcp.json"] : []),
       ],
-      files: turn.mcp.length > 0 ? { ".ghost-mcp.json": writeJson(mcpServersJson(turn.mcp)) } : {},
     }),
     parser: anthropicStreamParser,
   },
@@ -676,8 +614,6 @@ const ROWS: readonly HarnessRow[] = [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
         "-c", `model_reasoning_effort="${EFFORT}"`,
-        ...turn.mcp.flatMap(({ name, config }) =>
-          mcpTomlFields(config).flatMap(([key, value]) => ["-c", `mcp_servers.${tomlKey(name)}.${key}=${value}`])),
         "--", turn.prompt,
       ],
     }),
@@ -695,7 +631,6 @@ const ROWS: readonly HarnessRow[] = [
         "--always-approve", "--rules", turn.persona, "--reasoning-effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
       ],
-      files: turn.mcp.length > 0 ? { ".grok/config.toml": `${mcpServersToml(turn.mcp)}\n` } : {},
     }),
     parser: anthropicStreamParser,
   },
@@ -705,9 +640,7 @@ const ROWS: readonly HarnessRow[] = [
       argv: [
         "copilot", "-p", turn.prompt, "--output-format", "json", "--allow-all",
         ...(turn.resume ? ["--continue"] : []),
-        ...(turn.mcp.length > 0 ? ["--additional-mcp-config", "@.ghost-mcp.json"] : []),
       ],
-      files: turn.mcp.length > 0 ? { ".ghost-mcp.json": writeJson(mcpServersJson(turn.mcp, "local")) } : {},
     }),
     parser: copilotParser,
   },
@@ -715,29 +648,19 @@ const ROWS: readonly HarnessRow[] = [
     id: "opencode",
     // OpenCode's --continue is not cwd-scoped outside a git repository, so a
     // later turn names the session the first one reported.
-    launch: (turn) => {
-      const mcp: Record<string, unknown> = {};
-      for (const { name, config } of turn.mcp) {
-        mcp[name] = config.type === "http" || config.type === "sse"
-          ? { type: "remote", url: config.url, ...(config.headers ? { headers: config.headers } : {}), enabled: true }
-          : { type: "local", command: [config.command, ...(config.args ?? [])], ...(config.env ? { environment: config.env } : {}), enabled: true };
-      }
-      return {
-          argv: [
-          "opencode", "run", "--format", "json", "--auto",
-          ...(turn.resume && turn.sessionId ? ["--session", turn.sessionId] : []),
-          "--", turn.prompt,
-        ],
-        env: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp }) },
-      };
-    },
+    launch: (turn) => ({
+      argv: [
+        "opencode", "run", "--format", "json", "--auto",
+        ...(turn.resume && turn.sessionId ? ["--session", turn.sessionId] : []),
+        "--", turn.prompt,
+      ],
+    }),
     parser: opencodeParser,
     inspectSession: opencodeSessionFacts,
   },
   {
     id: "pi",
     effort: EFFORT,
-    // This row leaves MCP to Pi's own settings; Ghost's servers are not forwarded.
     launch: (turn) => ({
       argv: ["pi", "-p", "--mode", "json", "--thinking", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),
@@ -745,7 +668,6 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "omp",
-    // Like pi, Ghost's MCP servers are not forwarded.
     launch: (turn) => ({
       argv: ["omp", "-p", "--mode", "json", ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),
@@ -759,7 +681,6 @@ const ROWS: readonly HarnessRow[] = [
         "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
       ],
-      files: turn.mcp.length > 0 ? { ".gemini/settings.json": writeJson(mcpServersJson(turn.mcp)) } : {},
     }),
     parser: agyParser,
   },
@@ -768,19 +689,14 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // `ori code` reads no AGENTS.md and takes no system prompt, so the persona
     // leads every prompt; the prompt goes in a file, where no argv parsing or
-    // length limit can reach it. It resumes by the session id it reported, and
-    // takes Ghost's MCP servers as an extra config file (ori ignores a stdio `cwd`).
+    // length limit can reach it. It resumes by the session id it reported.
     launch: (turn) => ({
       argv: [
         "ori", "code", "--output", "jsonl", "--approvals", "self-drive", "--reasoning-effort", EFFORT,
         ...(turn.resume && turn.sessionId ? ["--resume", turn.sessionId] : []),
         "--prompt-file", ".ghost-prompt.md",
       ],
-      files: {
-        ".ghost-prompt.md": `<ghost-persona>\n${turn.persona}\n</ghost-persona>\n\n${turn.prompt}\n`,
-        ...(turn.mcp.length > 0 ? { ".ghost-mcp.json": writeJson(mcpServersJson(turn.mcp)) } : {}),
-      },
-      ...(turn.mcp.length > 0 ? { env: { ORI_MCP_CONFIG: ".ghost-mcp.json" } } : {}),
+      files: { ".ghost-prompt.md": `<ghost-persona>\n${turn.persona}\n</ghost-persona>\n\n${turn.prompt}\n` },
     }),
     parser: oriParser,
   },
@@ -790,12 +706,6 @@ const ROWS: readonly HarnessRow[] = [
     // Crush keeps its sessions in the directory it runs in.
     launch: (turn) => ({
       argv: ["crush", "run", "-q", "--reasoning-effort", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
-      files: turn.mcp.length > 0
-        ? { "crush.json": writeJson({ mcp: Object.fromEntries(turn.mcp.map(({ name, config }) => [name,
-            config.type === "http" || config.type === "sse"
-              ? { type: config.type, url: config.url, ...(config.headers ? { headers: config.headers } : {}) }
-              : { type: "stdio", command: config.command, args: config.args ?? [], ...(config.env ? { env: config.env } : {}) }])) }) }
-        : {},
     }),
     parser: textParser,
   },

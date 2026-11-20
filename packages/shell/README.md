@@ -40,7 +40,7 @@ the keyboard) the ring flows and breathes, the HUD's a softer one on its own
 screen; behind another app it goes out. Reduced motion keeps the colour and
 drops the sweep and the breathing.
 
-**The HUD** (history, character, ghosts, hooks, MCP, remote
+**The HUD** (history, character, ghosts, hooks, remote
 access) opens from the bar mark, a notification, the card's `open`, or any
 summon naming a section, drawn the way the desktop draws its own menu, with
 the theme's `[menu]` tokens (`Theme.menu*`). It and the prompt are windows,

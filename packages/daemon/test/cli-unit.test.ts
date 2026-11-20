@@ -311,11 +311,6 @@ describe("ghost help", () => {
       ["character", "edit"],
       ["character", "set"],
       ["harness", "claude", "--none"],
-      ["mcp", "bogus"],
-      ["mcp", "rm"],
-      ["mcp", "add", "github"],
-      ["mcp", "list", "github"],
-      ["mcp", "enable", "github", "slack"],
       ["hooks", "show", "extra"],
       ["character", "show", "extra"],
       ["say", "hello", "-m", "world"],
@@ -331,7 +326,7 @@ describe("ghost help", () => {
       throw new Error(`unexpected request to ${String(input)}`);
     };
     for (const argv of [
-      ...["harness", "sessions", "mcp", "character", "rename x"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["harness", "sessions", "character", "rename x"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
       ...["list", "new x", "use", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
@@ -350,8 +345,6 @@ describe("ghost help", () => {
       const malformed = join(dir, "malformed.json");
       writeFileSync(malformed, "{ not json");
       for (const [argv, message] of [
-        [["mcp", "add", "github", malformed], `${malformed} is not valid JSON`],
-        [["mcp", "set", "github", missing], "ENOENT"],
         [["hooks", "set", malformed], `${malformed} is not valid JSON`],
         [["character", "set", missing], "ENOENT"],
       ] as const) {

@@ -88,7 +88,7 @@ describe("SessionHost.complete", () => {
 
     await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
     const [call] = fake.calls();
-    expect(call).toMatchObject({ prompt: "Review this.", resume: false, mcp: [], ghost: "casper", session: null });
+    expect(call).toMatchObject({ prompt: "Review this.", resume: false, ghost: "casper", session: null });
     expect(call?.cwd.startsWith(join(tmpdir(), "ghost-hook-"))).toBe(true);
     expect(existsSync(call!.cwd)).toBe(false);
   });
