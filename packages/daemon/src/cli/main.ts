@@ -18,7 +18,6 @@ import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { hooksCommand } from "./hooks.js";
 import { sayCommand } from "./say.js";
 import { askCommand, removeCommand, sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
-import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
 import {
@@ -158,15 +157,6 @@ export const COMMANDS: readonly Command[] = [
     run: statusCommand,
   },
   {
-    verb: "smoke",
-    usage: "smoke [--keep] [--no-turn] [--json] [-q]",
-    summary: "Exercise a throwaway daemon and ghost home.",
-    example: "ghost smoke --no-turn --json",
-    positionals: [0, 0],
-    flags: { boolean: ["keep", "no-turn"] },
-    run: smokeCommand,
-  },
-  {
     verb: "help",
     usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}]`,
     summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
@@ -230,8 +220,8 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
 
 async function dispatch(argv: readonly string[], runtime: CliRuntime): Promise<number> {
   // Two passes: the first knows every verb's flags and is trusted only for the
-  // verb, the second holds that verb to its own, so `--keep` on any verb but
-  // smoke is the unknown option it is.
+  // verb, the second holds that verb to its own, so another verb's flag is
+  // the unknown option it is.
   const scouted = parseArgs(argv, EVERY_ARG);
   if (flagBoolean(scouted, "version")) {
     runtime.stdout.write(`${version(runtime)}\n`);

@@ -23,13 +23,6 @@ Never point a development daemon at `~/ghosts`, never contact the live port
 7717, and never restart the owner's `ghostd.service` from a test. Deployment follows
 [the maintenance runbook](../../docs/self-maintenance.md).
 
-For a terminal-facing smoke test, use `ghost smoke`; it creates disposable
-state and can run without a provider turn:
-
-```sh
-ghost smoke --no-turn --json
-```
-
 ## Runtime notes
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls

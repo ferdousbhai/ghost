@@ -151,8 +151,7 @@ Run that command from the built checkout. Point the client at the canary
 with `GHOSTD_PORT=7799` and
 `GHOSTD_API_TOKEN_FILE="$task_canary_dir/state/ghost/api-token"`. Stop its captured process
 before deleting the scratch directory. Functional window verification
-uses `packages/window/dev/preview.sh`, never the owner's session. `ghost smoke --no-turn`
-also creates an isolated throwaway daemon and reports each stage.
+uses `packages/window/dev/preview.sh`, never the owner's session.
 
 Never port 7717 or `~/ghosts`; scratch configuration also prevents live
 owner hooks from running. Every canary must use its own ghost root.
