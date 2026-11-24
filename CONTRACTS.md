@@ -239,7 +239,7 @@ Documents directory as where finished work and notes live, and
 the Ghost section has a ghost ask the owner with `ghost ask`, says its
 harness's background jobs end with the turn, and indexes the `ghost help`
 recipes by when to read one, so the CLI is the documentation: a task goes to
-an agent run in its project (`ghost delegate`) only when it needs that
+an agent run in its project only when it needs that
 project's instructions, settings, or MCP servers, as the `harnesses` recipe
 says. Owner documents are read only when
 relevant, with the harness's own file and search tools, never injected
@@ -346,40 +346,12 @@ the Ghost section (`GHOST_POLICY` in
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. A ghost that wants a specialist runs the owner's installed `pi`,
-`codex`, `omp`, or `claude -p` from its own Bash as `cd <dir> && ghost delegate
-<harness> -- <args>` (the `ghost help harnesses` recipe, indexed by
+`codex`, `omp`, or `claude -p` from its own Bash, in the project's directory
+(the `ghost help harnesses` recipe, indexed by
 `GHOST_POLICY` in [`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that harness runs
 with the owner's own settings for it — its full tool set, project discovery,
-auth, and session semantics.
-`ghost delegate` refuses an uninstalled harness (exit 5); otherwise it runs
-in the foreground in the caller's cwd and process group, with the caller's
-environment and stdin, its stdout and stderr streamed through unchanged; SIGINT
-and SIGTERM are forwarded to it, and once it exits the verb stops reading when
-its pipes have been idle for 100ms, so a descendant holding them cannot hang
-the call. The verb exits with the harness's status (128 plus the signal number
-when a signal ended it, 127 when it could not start).
-
-A delegated harness runs with its own arguments only, in the ghost's
-environment.
-
-Every attempt, refused or run, appends one JSON line to
-`$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
-file is 0600, and past 1 MiB it moves to `handoffs.jsonl.1`, replacing the
-previous one): `{v: 1, at, ghost, session, harness, pick, cwd, eligible, windows,
-status, outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
-(or `null`), `pick` is `"owner"` when `--owner-named` says the owner named the
-harness or no `$GHOST` is set (the owner ran the verb), else `"ghost"`, `eligible` lists the harnesses eligible at the check, `windows` is
-this harness's last reported windows then, `status` is Omarchy's note when it could not
-measure this harness (an unmeasured harness is eligible, and this shows the
-usage was unmeasured) or `null`, and `outcome` is `{refused}` with the reason,
-or `{exit, signal, durationMs, limit}`, `durationMs` the harness's own run
-time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
-of a run that did not exit 0, else `null`. No prompt text or arguments are
-kept. A receipt that cannot be written is a warning on stderr, never a changed
-exit status. The log is the evidence for judging routing; nothing in Ghost
-reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
-from a checkout, outside the shipped package: attempts, refusals by kind, exit
-outcomes, unmeasured checks, and limits hit, per harness.
+auth, and session semantics. Ghost adds no command of its own around it and
+keeps no record of the run.
 
 Ghost hooks are `session_stop` and `turn_end`, run by ghostd
 above whatever hooks the harness has of its own.

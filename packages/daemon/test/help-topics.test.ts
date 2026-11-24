@@ -48,18 +48,16 @@ describe("ghost help topics", () => {
     expect(text).toContain("end when this turn's headless run does");
   });
 
-  it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {
+  it("harnesses: the launch path and the handoff note", () => {
     const text = renderHelpTopic("harnesses");
     expect(text).toContain("Your turns run in this conversation's own directory");
     expect(text).toContain("only when it needs those; otherwise do it yourself");
     expect(text).not.toContain("orchestrator");
-    expect(text).toContain("cd <project-dir> && ghost delegate <harness> -- <args>");
+    expect(text).toContain("cd <project-dir> && <harness> <args>");
+    expect(text).not.toContain("ghost delegate");
     expect(text).toContain("respects that project's settings");
-    expect(text).toContain("refuses an uninstalled harness (exit 5)");
-    expect(text).toContain("exits with its status");
     expect(text).toContain("`ghost harnesses` lists installed agents and informational usage");
     expect(text).toContain("Browser automation uses agent-browser through Bash.");
-    expect(text).toContain("--owner-named");
     expect(text).toContain("--permission-mode acceptEdits");
     expect(text).toContain("--allowedTools Bash");
     expect(text).not.toContain("~/.local/state/omarchy");

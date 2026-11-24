@@ -206,7 +206,7 @@ there, so your notes, chats, mail and files stay on the computer; it hands
 other work to the agents above. What to install for it, and the alternatives,
 are in `ghost help products`, under "Running locally".
 For the hard questions, a ghost
-also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
+also hands work from Bash to a specialist (`claude -p …`).
 
 ## 6. First conversation
 

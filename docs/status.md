@@ -19,7 +19,8 @@ Done since:
   unsandboxed, unconfirmed), no cap on rounds, no forced answer, no trimming.
   Its former tools (`search`, `read`, `save_note`, `add_reminder`, `delegate`)
   are gone; a coding agent is run from the shell by its own one-shot command
-  (`claude -p`), as the owner chose, so `ghost delegate` can go.
+  (`claude -p`), as the owner chose; `ghost delegate` and its receipts log
+  are gone too.
 
 Not done:
 
@@ -30,7 +31,7 @@ Not done:
 - Ghost still starts its own `llama-server`. Omarchy's model engine does not
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
-- The shrink under "Unfinished" below, `ghost delegate` included.
+- The shrink under "Unfinished" below.
 - A running command's output now streams into the turn, so a coding agent's
   steps show in the HUD's tool card and as the window's status line. Claude
   prints its steps only as streamed JSON, so its command pipes that through
@@ -85,7 +86,6 @@ Approved by the owner but not started when the freeze came:
   split).
 - Replacing the local model's own tool loop (`local-turn.ts`) with pi as the
   local runtime, with Ghost's `search` and `read` as a pi extension.
-- Deleting `ghost delegate` and the local model's `delegate` tool.
 - The window's move to omui 0.5.2, and two window bugs: the composer is not
   focused at startup, and Escape does not clear a source page's search.
 

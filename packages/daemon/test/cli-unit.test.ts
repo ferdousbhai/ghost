@@ -327,7 +327,7 @@ describe("ghost help", () => {
     };
     for (const argv of [
       ...["harness", "sessions", "character", "status"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
-      ...["say hi", "sessions", "show", "harness", "hooks", "remote", "status", "harnesses", "smoke", "delegate claude", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
+      ...["say hi", "sessions", "show", "harness", "hooks", "remote", "status", "harnesses", "smoke", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);

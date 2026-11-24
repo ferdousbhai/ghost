@@ -56,6 +56,7 @@ function localModel(reply: string) {
   closers.push(() => server.stop(true));
   const model = {
     name: "gemma-test",
+    config: { reasoningEffort: "low" },
     acquire: async () => {
       acquired += 1;
       return { url: `http://127.0.0.1:${server.port}`, key: "k" };

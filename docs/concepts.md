@@ -56,8 +56,7 @@ or todo API.
 First consider an installed CLI and its skill, an owner hook, or a harness
 feature. A new Ghost surface needs a demonstrated constraint those cannot
 meet and must say what it replaces. Dependencies cost installed bytes as well
-as code. Delegation receipts record process outcomes, not task quality; they
-are no evidence by themselves that an automatic selector would improve work.
+as code.
 
 See [hooks](hooks.md), [self-maintenance](self-maintenance.md),
 [contributing](../CONTRIBUTING.md), and
