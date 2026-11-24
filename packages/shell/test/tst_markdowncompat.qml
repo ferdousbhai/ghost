@@ -81,7 +81,8 @@ TestCase {
     // Qt paints markdown links in the application palette's blue, whatever
     // linkColor says; an inline anchor keeps its own colour.
     function test_qtIgnoresLinkColorButHonoursAnchorStyle(): void {
-        verify(tc.rendered("[l](https://e.com)").indexOf("#0000ff") >= 0);
+        // The palette's link colour is the desktop theme's: blue (#0000ff) only without one.
+        verify(tc.rendered("[l](https://e.com)").indexOf(String(ed.palette.link)) >= 0);
         verify(tc.rendered(MarkdownCompat.normalize("[l](https://e.com)", "#fbbf24")).indexOf("#fbbf24") >= 0);
     }
 
