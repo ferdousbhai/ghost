@@ -717,15 +717,18 @@ and the API below are this one layer; a source whose product is missing is
 | `reminders` | `Documents/Reminders/*.md`, one item per list; always available | yes | yes | Recall, that folder |
 | `whatsapp` | wacli's chat folders, `~/WhatsApp/<account>/WhatsApp Chat - <name>/_chat.txt`, by last change; a read is the chat's latest 256 KiB | yes | yes | Recall, that folder |
 | `drive` | icloud-drive's `~/iCloud Drive` | | yes | Recall, that folder |
+| `keep` | google-keep's `Documents/Keep/**/*.md`, a note per file, by last change | yes | yes | Recall, that folder |
+| `google-drive` | `~/Google Drive`, which the owner keeps in sync with `rclone bisync` | | yes | Recall, that folder |
 | `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
 | `contacts` | cloud-contacts (iCloud and Google) from its last fetch (`--cached`), by name | yes | yes | yes |
 | `calendar` | cloud-calendar `agenda`, 14 days a page from today (live) | yes | | |
 | `photos` | icloud-photos' catalog: `list`, `info`, and `thumb` for an item's picture | yes | yes | |
+| `google-photos` | google-photos' catalog: `list` and `info`; it keeps originals only, so no pictures | yes | yes | |
 | `lastbook` | Lastbook's library index, read-only | | a page inside its library | yes |
 
 A file hit is labelled with the source whose folder holds it (the Notes
 vault and Reminders under the owner's Documents folder, `~/WhatsApp`,
-`~/iCloud Drive`), so one meaning index, Recall's, serves every file-backed
+`~/iCloud Drive`, `Documents/Keep`, `~/Google Drive`), so one meaning index, Recall's, serves every file-backed
 source and nothing is indexed twice. A search across sources names each one
 that failed rather than failing whole. Reads are cut at 256 KiB.
 
@@ -733,12 +736,15 @@ that failed rather than failing whole. Reads are cut at 256 KiB.
 
 Onboarding is the products' own. [`connections.ts`](packages/daemon/src/connections.ts)
 lists what the owner can connect (`search`: Recall, `icloud`, `mail`,
-`calendar`, `contacts`, `whatsapp`, `lastbook`), each with a `state` and
+`calendar`, `contacts`, `google`: google-session's sign-in for Keep and
+Photos, `google-drive`: an rclone remote of type `drive`, `google-workspace`:
+gws for Docs, Sheets and Tasks, `whatsapp`, `lastbook`), each with a `state` and
 the next steps as `actions`, a label and a shell command line:
 
 - `missing`: the product's command is not installed. The one action is its
   published installer (`curl … install.sh | sudo bash`, which adds the
-  product's signed package repository).
+  product's signed package repository), the package manager's command for
+  rclone and gws, or, for `google`, which has no package yet, its README.
 - `disconnected`: installed, with no sign-in or account (its own status
   command says so; one that does not answer reads as this).
 - `connected`: `detail` names the accounts. Actions that add another

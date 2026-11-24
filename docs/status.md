@@ -1,4 +1,26 @@
-# Status: frozen on 2026-11-20
+# Status: resumed on 2026-11-24 as the hub
+
+The owner reopened Ghost on 2026-11-24 with a narrower aim: the one place
+that shows and answers from the owner's own data, whichever product holds it
+(the iCloud apps, the Cloud apps, WhatsApp, and now Google). What they said
+it must be:
+
+- A local model answers, always. Its tools stay minimal: search, and running
+  shell commands.
+- Coding agents run in the background, with their work visible in Ghost as a
+  sub-agent's is in a coding agent.
+- No release without the owner's go.
+
+Done since: Google in Connect (`google`, `google-drive`, `google-workspace`)
+and in the sources (`keep`, `google-drive`, `google-photos`).
+
+Not done: the local model's tools are still `search`, `read`, `save_note`,
+`add_reminder` and `delegate`, with no shell tool; the shrink under
+"Unfinished" below.
+
+What follows is the freeze of 2026-11-20, kept for what it records.
+
+## Frozen on 2026-11-20
 
 Ghost is frozen. No feature work, no releases. The last release is 0.11.9
 (also the version in Omarchy's package repository); `master` is ahead of it

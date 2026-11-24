@@ -33,7 +33,7 @@ interface Product {
   readonly brings: string;
   /** The command whose presence means installed. */
   readonly command: string;
-  /** The product's published installer, which adds its signed package repository. */
+  /** What installs it: the product's published installer (which adds its signed package repository), or the package manager's command. */
   readonly installer: string;
   /** Whether it is connected, what to say about it, and what the owner can do next. */
   probe(context: SourceContext): Promise<{ connected: boolean; detail: string; actions: ConnectionAction[] }>;
@@ -107,6 +107,46 @@ const PRODUCTS: readonly Product[] = [
         connected: linked.length > 0, detail: linked.join(", "),
         actions: ["iCloud", "Google"].map((name) => ({ label: `Add ${name}`, command: `cloud-contacts account add ${name.toLowerCase()}` })),
       };
+    },
+  },
+  {
+    id: "google", label: "Google Keep and Photos", brings: "Keep notes as files in Documents/Keep, and your Google Photos library.",
+    // No package yet: its README says how to build it.
+    command: "google-session", installer: "xdg-open https://github.com/ferdousbhai/google-for-omarchy#readme",
+    async probe(context) {
+      const session = await status("google-session", ["status", "--quiet"], context);
+      const signedIn = session?.signed_in === true;
+      // `rejected`: Google refused the stored sign-in the last time a tool used it.
+      const ended = signedIn && session.rejected === true;
+      const working = signedIn && !ended;
+      return {
+        connected: working, detail: ended ? `Google ended the sign-in of ${oneLine(session.email, 120)}.` : signedIn ? oneLine(session.email, 120) : "",
+        actions: working ? [] : [{ label: ended ? "Sign in again" : "Sign in", command: "google-session sign-in" }],
+      };
+    },
+  },
+  {
+    id: "google-drive", label: "Google Drive", brings: "Your Drive as the folder ~/Google Drive, kept in sync by rclone.",
+    command: "rclone", installer: "omarchy pkg add rclone",
+    async probe(context) {
+      const listed = json((await runCommand("rclone", ["listremotes", "--type", "drive", "--json"], context)).out);
+      const remotes = (Array.isArray(listed) ? listed : []).map((remote) => oneLine((remote as { name?: unknown })?.name, 60)).filter(Boolean);
+      // rclone asks nothing at the terminal here but opens Google's sign-in in the browser.
+      return { connected: remotes.length > 0, detail: remotes.join(", "), actions: remotes.length > 0 ? [] : [{ label: "Connect", command: "rclone config create gdrive drive scope=drive" }] };
+    },
+  },
+  {
+    id: "google-workspace", label: "Google Docs, Sheets and Tasks", brings: "Documents, spreadsheets and tasks, through Google's own command line.",
+    command: "gws", installer: "npm install -g @googleworkspace/cli",
+    async probe(context) {
+      const auth = await status("gws", ["auth", "status"], context);
+      const working = auth?.token_valid === true;
+      const expired = !working && auth?.has_refresh_token === true;
+      // `gws auth setup` makes the owner's own Google Cloud client, once; `login` is the sign-in.
+      const actions = working ? [] : auth?.client_config_exists === true
+        ? [{ label: expired ? "Sign in again" : "Sign in", command: "gws auth login -s tasks,drive,docs,sheets,slides" }]
+        : [{ label: "Set up", command: "gws auth setup" }];
+      return { connected: working, detail: expired ? "The sign-in expired." : "", actions };
     },
   },
   {

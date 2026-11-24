@@ -207,12 +207,69 @@ describe("sources", () => {
       wacli: "exit 1",
     });
     const rows = Object.fromEntries((await listConnections(context)).map((row) => [row.id, row]));
-    expect(Object.keys(rows)).toEqual(["search", "icloud", "mail", "calendar", "contacts", "whatsapp", "lastbook"]);
+    expect(Object.keys(rows)).toEqual(["search", "icloud", "mail", "calendar", "contacts", "google", "google-drive", "google-workspace", "whatsapp", "lastbook"]);
     expect(rows.mail).toMatchObject({ state: "missing", actions: [{ label: "Install", command: "curl -fsSL https://ferdousbhai.com/cloudmail/install.sh | sudo bash" }] });
     expect(rows.icloud).toMatchObject({ state: "disconnected", detail: "", actions: [{ label: "Sign in", command: "icloud-session sign-in" }] });
     expect(rows.calendar).toMatchObject({ state: "connected", detail: "Home, Work (needs sign-in)" });
     expect(rows.calendar?.actions.map((action) => action.command)).toContain("cloud-calendar account add google");
     expect(rows.whatsapp).toMatchObject({ state: "disconnected", actions: [{ label: "Link WhatsApp", command: "wacli auth" }] });
+  });
+
+  it("connects Google through its own tools: the phone sign-in, rclone's remote, and gws", async () => {
+    const signedOut = owner({
+      "google-session": `printf '{"signed_in":false}'; exit 1`,
+      rclone: `[ "$*" = "listremotes --type drive --json" ] && printf '[]'`,
+      gws: `echo 'Using keyring backend: keyring' >&2; printf '{"client_config_exists":true,"has_refresh_token":true,"token_valid":false}'`,
+    });
+    const before = Object.fromEntries((await listConnections(signedOut)).map((row) => [row.id, row]));
+    expect(before.google).toMatchObject({ state: "disconnected", actions: [{ label: "Sign in", command: "google-session sign-in" }] });
+    expect(before["google-drive"]).toMatchObject({ state: "disconnected", actions: [{ label: "Connect", command: "rclone config create gdrive drive scope=drive" }] });
+    expect(before["google-workspace"]).toMatchObject({ state: "disconnected", detail: "The sign-in expired.", actions: [{ label: "Sign in again", command: "gws auth login -s tasks,drive,docs,sheets,slides" }] });
+
+    const signedIn = owner({
+      "google-session": `printf '{"signed_in":true,"email":"me@example.com"}'`,
+      rclone: `printf '[{"name":"gdrive","type":"drive"}]'`,
+      gws: `printf '{"client_config_exists":true,"has_refresh_token":true,"token_valid":true}'`,
+    });
+    const after = Object.fromEntries((await listConnections(signedIn)).map((row) => [row.id, row]));
+    expect(after.google).toMatchObject({ state: "connected", detail: "me@example.com", actions: [] });
+    expect(after["google-drive"]).toMatchObject({ state: "connected", detail: "gdrive", actions: [] });
+    expect(after["google-workspace"]).toMatchObject({ state: "connected", detail: "", actions: [] });
+
+    const ended = Object.fromEntries((await listConnections(owner({ "google-session": `printf '{"signed_in":true,"email":"me@example.com","rejected":true}'; exit 1` }))).map((row) => [row.id, row]));
+    expect(ended.google).toMatchObject({ state: "disconnected", detail: "Google ended the sign-in of me@example.com.", actions: [{ label: "Sign in again", command: "google-session sign-in" }] });
+
+    const bare = Object.fromEntries((await listConnections(owner({ gws: `printf '{"client_config_exists":false}'` }))).map((row) => [row.id, row]));
+    expect(bare["google-workspace"]?.actions).toEqual([{ label: "Set up", command: "gws auth setup" }]);
+    expect(bare["google-drive"]).toMatchObject({ state: "missing", actions: [{ label: "Install", command: "omarchy pkg add rclone" }] });
+  });
+
+  it("lists Keep notes and Google Photos, and reads a Drive file, from what the Google tools keep here", async () => {
+    const context = owner({
+      "google-photos": [
+        `case "$*" in`,
+        `  "list --limit 5000 --quiet") printf '[{"id":"g1","filename":"IMG_1.HEIC","created":"2026-11-13T06:40:22Z","kind":"photo","width":4032,"height":3024,"local_path":null}]' ;;`,
+        `  "info --quiet -- g1") printf '{"filename":"IMG_1.HEIC","created":"2026-11-13T06:40:22Z","kind":"photo","width":4032,"height":3024,"size":2100000,"place":"Helsinki","local_path":null}' ;;`,
+        `  *) exit 2 ;;`,
+        `esac`,
+      ].join("\n"),
+    });
+    const note = join(context.home, "Documents", "Keep", "Archive", "Packing.md");
+    const sheet = join(context.home, "Google Drive", "plan.txt");
+    for (const [path, text] of [[note, "Passport\nCharger\n"], [sheet, "the plan\n"]] as const) {
+      mkdirSync(join(path, ".."), { recursive: true });
+      writeFileSync(path, text);
+    }
+    expect((await listSource("keep", context, 10, null)).items).toEqual([expect.objectContaining({ source: "keep", id: note, title: "Packing", snippet: "Passport" })]);
+    expect((await readSource({ source: "keep", id: note }, context)).text).toBe("Passport\nCharger\n");
+    await expect(readSource({ source: "keep", id: sheet }, context)).rejects.toMatchObject({ code: "not_found" });
+    expect((await readSource({ source: "google-drive", id: sheet }, context)).text).toBe("the plan\n");
+    expect((await listSource("google-photos", context, 10, null)).items).toEqual([
+      { source: "google-photos", id: "g1", title: "IMG_1.HEIC", snippet: "photo · 4032×3024", at: at("2026-11-13T06:40:22Z") },
+    ]);
+    expect((await readSource({ source: "google-photos", id: "g1" }, context)).text)
+      .toBe("Taken: 2026-11-13T06:40:22Z\nKind: photo, 4032×3024, 2.1 MB\nPlace: Helsinki\nNot downloaded to this computer.");
+    await expect(pictureOf("google-photos", "g1", context)).rejects.toMatchObject({ code: "no_pictures" });
   });
 
   it("names a failing source and still returns the others", async () => {

@@ -48,14 +48,14 @@ pub struct SourceInfo {
 
 fn icon_of(source: &str) -> &'static str {
     match source {
-        "notes" => icon::DOCUMENT,
+        "notes" | "keep" => icon::DOCUMENT,
         "reminders" => icon::CHECKED,
         "whatsapp" => icon::CHAT,
         "mail" => icon::MAIL,
         "contacts" => icon::USER,
         "calendar" => icon::CALENDAR,
-        "photos" => icon::IMAGE,
-        "drive" => icon::CLOUD,
+        "photos" | "google-photos" => icon::IMAGE,
+        "drive" | "google-drive" => icon::CLOUD,
         "lastbook" => icon::BOOK,
         _ => icon::FOLDER,
     }

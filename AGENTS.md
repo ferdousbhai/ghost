@@ -1,6 +1,6 @@
 # ghost
 
-**Frozen on 2026-11-20: no feature work, no releases. Read `docs/status.md` before starting anything.**
+**Work resumed on 2026-11-24, with a narrower aim: Ghost is the hub over the owner's own data. No release without the owner's go. Read `docs/status.md` before starting anything.**
 
 Local Omarchy-native AI persona with file-backed state, a daemon API, desktop shell, and Bash browser automation.
 

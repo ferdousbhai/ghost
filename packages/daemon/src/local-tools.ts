@@ -26,7 +26,7 @@ export interface ToolResult {
 }
 
 /** Sources whose hits are files, read straight from disk. */
-const FILE_SOURCES = new Set(["files", "notes", "reminders", "whatsapp", "drive", "lastbook"]);
+const FILE_SOURCES = new Set(["files", "notes", "reminders", "keep", "whatsapp", "drive", "google-drive", "lastbook"]);
 
 /** One pass's search hits, keyed `S1`, `S2`, …; a pass's ids mean nothing in the next. */
 export class Hits {

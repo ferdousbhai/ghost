@@ -14,7 +14,7 @@ import { GhostError } from "./errors.js";
 import { which } from "./harnesses.js";
 import { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
 
-export const SOURCE_IDS = ["files", "notes", "reminders", "whatsapp", "drive", "mail", "contacts", "calendar", "photos", "lastbook"] as const;
+export const SOURCE_IDS = ["files", "notes", "reminders", "keep", "whatsapp", "drive", "google-drive", "mail", "contacts", "calendar", "photos", "google-photos", "lastbook"] as const;
 export type SourceId = (typeof SOURCE_IDS)[number];
 
 /** What a source returns for one thing: enough to show it in a list and to read it. */
@@ -188,6 +188,8 @@ function folders(context: SourceContext): Array<{ source: SourceId; root: string
     { source: "reminders", root: join(documents, "Reminders") },
     { source: "whatsapp", root: join(context.home, "WhatsApp") },
     { source: "drive", root: join(context.home, "iCloud Drive") },
+    { source: "keep", root: join(documents, "Keep") },
+    { source: "google-drive", root: join(context.home, "Google Drive") },
   ];
 }
 
@@ -387,16 +389,18 @@ async function fileStart(path: string): Promise<string> {
   }
 }
 
+/** A folder of Markdown notes as a list: one item per file, named by the file, newest change first. */
+const markdownList = (id: SourceId): NonNullable<Source["list"]> => async (context, limit, cursor) => {
+  const items = await Promise.all((await markdownFiles(folderOf(id, context))).map(async (path): Promise<SourceItem> => {
+    const lines = noteBody(await fileStart(path).catch(() => "")).split("\n").map((line) => line.replace(/^#+\s*/u, "").trim()).filter(Boolean);
+    const title = basename(path).replace(/\.md$/u, "");
+    return { source: id, id: path, path, title, snippet: oneLine(lines.find((line) => line !== title) ?? "", 300), at: (await stat(path)).mtimeMs };
+  }));
+  return timePage(items, limit, cursor);
+};
+
 const notes: Source = {
-  ...folderSource("notes", "Notes", async (context, limit, cursor) => {
-    const root = folderOf("notes", context);
-    const items = await Promise.all((await markdownFiles(root)).map(async (path): Promise<SourceItem> => {
-      const lines = noteBody(await fileStart(path).catch(() => "")).split("\n").map((line) => line.replace(/^#+\s*/u, "").trim()).filter(Boolean);
-      const title = basename(path).replace(/\.md$/u, "");
-      return { source: "notes", id: path, path, title, snippet: oneLine(lines.find((line) => line !== title) ?? "", 300), at: (await stat(path)).mtimeMs };
-    }));
-    return timePage(items, limit, cursor);
-  }, async (context, ref) => {
+  ...folderSource("notes", "Notes", markdownList("notes"), async (context, ref) => {
     if (!inside(folderOf("notes", context), ref.id)) throw new GhostError("not_found", "That is not in Notes.", 404);
     const document = await readFileRef(ref, context);
     return document.part === "whole" || document.part === "start" ? { ...document, text: noteBody(document.text) } : document;
@@ -493,6 +497,12 @@ const whatsapp = folderSource("whatsapp", "WhatsApp", async (context, limit, cur
   });
 
 const drive = folderSource("drive", "iCloud Drive", undefined);
+
+// Google's, as folders: google-keep keeps `Documents/Keep` in sync (a note per
+// Markdown file, archived ones under `Archive/`), and `rclone bisync` keeps
+// `~/Google Drive`. Ghost only reads both; a Keep note is edited as a file.
+const keep = folderSource("keep", "Google Keep", markdownList("keep"));
+const googleDrive = folderSource("google-drive", "Google Drive", undefined);
 
 // ── Mail: cloudmail ────────────────────────────────────────────────────
 
@@ -597,42 +607,56 @@ const calendar: Source = {
 
 // ── Photos: icloud-photos' catalog ─────────────────────────────────────
 
-/** icloud-photos lists newest first with no offset, so a page is cut from one long listing. */
+/** Both list newest first with no offset, so a page is cut from one long listing. */
 const PHOTOS_LISTED = 5_000;
 
-const photos: Source = {
-  id: "photos",
-  label: "Photos",
-  available: (context) => which("icloud-photos", context.env) !== null,
-  async list(context, limit, cursor) {
-    const rows = records(await cliData("icloud-photos", ["list", "--limit", String(PHOTOS_LISTED), "--quiet"], context));
-    return timePage(rows.map((row): SourceItem => ({
-      source: "photos", id: String(row.id), title: oneLine(row.filename, 200),
-      snippet: `${String(row.kind ?? "photo")} · ${Number(row.width ?? 0)}×${Number(row.height ?? 0)}`,
-      at: ms(row.created) ?? (typeof row.created_unix === "number" ? row.created_unix * 1000 : null),
-      ...(typeof row.local_path === "string" ? { path: row.local_path } : {}),
-    })), limit, cursor);
-  },
-  async read(context, ref) {
-    const info = (await cliData("icloud-photos", ["info", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
-    if (!info || typeof info !== "object") throw new GhostError("not_found", "No such photo.", 404);
-    const albums = (Array.isArray(info.albums) ? info.albums : []).map((album) => oneLine((album as { name?: unknown })?.name ?? album, 80)).filter(Boolean);
-    const size = typeof info.size === "number" && info.size > 0 ? `, ${(info.size / 1e6).toFixed(1)} MB` : "";
-    const text = [
-      `Taken: ${oneLine(info.created, 40)}`,
-      `Kind: ${oneLine(info.kind ?? "photo", 20)}, ${Number(info.width ?? 0)}×${Number(info.height ?? 0)}${size}`,
-      ...(albums.length > 0 ? [`Albums: ${albums.join(", ")}`] : []),
-      typeof info.local_path === "string" ? `File: ${info.local_path}` : "Not downloaded to this computer.",
-    ].join("\n");
-    return { title: oneLine(info.filename, 200), text, part: "whole", ...(typeof info.local_path === "string" ? { path: info.local_path } : {}) };
-  },
-  /** iCloud's thumbnail, which icloud-photos fetches into its cache on first use. */
-  async picture(context, id) {
-    const thumb = (await cliData("icloud-photos", ["thumb", "--quiet", "--", id], context)) as { path?: unknown } | null;
-    if (typeof thumb?.path !== "string") throw new GhostError("not_found", "No such photo.", 404);
-    return thumb.path;
-  },
-};
+/**
+ * A photo library behind a catalog CLI: icloud-photos, and google-photos,
+ * which prints the same `list` and `info`. `thumb` is the command that
+ * fetches an item's small picture, for the product that has one.
+ */
+function photoLibrary(id: SourceId, label: string, command: string, thumb: boolean): Source {
+  return {
+    id,
+    label,
+    available: (context) => which(command, context.env) !== null,
+    async list(context, limit, cursor) {
+      const rows = records(await cliData(command, ["list", "--limit", String(PHOTOS_LISTED), "--quiet"], context));
+      return timePage(rows.map((row): SourceItem => ({
+        source: id, id: String(row.id), title: oneLine(row.filename, 200),
+        snippet: `${String(row.kind ?? "photo")} · ${Number(row.width ?? 0)}×${Number(row.height ?? 0)}`,
+        at: ms(row.created) ?? (typeof row.created_unix === "number" ? row.created_unix * 1000 : null),
+        ...(typeof row.local_path === "string" ? { path: row.local_path } : {}),
+      })), limit, cursor);
+    },
+    async read(context, ref) {
+      const info = (await cliData(command, ["info", "--quiet", "--", ref.id], context)) as Record<string, unknown> | null;
+      if (!info || typeof info !== "object") throw new GhostError("not_found", "No such photo.", 404);
+      const albums = (Array.isArray(info.albums) ? info.albums : []).map((album) => oneLine((album as { name?: unknown })?.name ?? album, 80)).filter(Boolean);
+      const size = typeof info.size === "number" && info.size > 0 ? `, ${(info.size / 1e6).toFixed(1)} MB` : "";
+      const text = [
+        `Taken: ${oneLine(info.created, 40)}`,
+        `Kind: ${oneLine(info.kind ?? "photo", 20)}, ${Number(info.width ?? 0)}×${Number(info.height ?? 0)}${size}`,
+        ...(albums.length > 0 ? [`Albums: ${albums.join(", ")}`] : []),
+        ...(typeof info.place === "string" && info.place ? [`Place: ${oneLine(info.place, 120)}`] : []),
+        typeof info.local_path === "string" ? `File: ${info.local_path}` : "Not downloaded to this computer.",
+      ].join("\n");
+      return { title: oneLine(info.filename, 200), text, part: "whole", ...(typeof info.local_path === "string" ? { path: info.local_path } : {}) };
+    },
+    ...(thumb ? {
+      /** The product's thumbnail, which it fetches into its cache on first use. */
+      async picture(context: SourceContext, item: string) {
+        const found = (await cliData(command, ["thumb", "--quiet", "--", item], context)) as { path?: unknown } | null;
+        if (typeof found?.path !== "string") throw new GhostError("not_found", "No such photo.", 404);
+        return found.path;
+      },
+    } : {}),
+  };
+}
+
+const photos = photoLibrary("photos", "Photos", "icloud-photos", true);
+/** google-photos keeps originals only: no thumbnails, so its items are a list, not a grid. */
+const googlePhotos = photoLibrary("google-photos", "Google Photos", "google-photos", false);
 
 // ── Lastbook: its library's search index, read-only ────────────────────
 
@@ -679,7 +703,7 @@ const lastbook: Source = {
 
 // ── The registry ───────────────────────────────────────────────────────
 
-const SOURCES: Record<SourceId, Source> = { files, notes, reminders, whatsapp, drive, mail, contacts, calendar, photos, lastbook };
+const SOURCES: Record<SourceId, Source> = { files, notes, reminders, keep, whatsapp, drive, "google-drive": googleDrive, mail, contacts, calendar, photos, "google-photos": googlePhotos, lastbook };
 
 export interface SourceSummary {
   readonly id: SourceId;
