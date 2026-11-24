@@ -1,12 +1,11 @@
 import type { Transcript } from "../session-host.js";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
-import { listSessions, resolveGhost, resolveTarget } from "./common.js";
+import { listSessions, resolveTarget } from "./common.js";
 import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
 
 export async function sessionsCommand(ctx: CliContext): Promise<number> {
-  const name = await resolveGhost(ctx);
-  const sessions = await listSessions(ctx.client, name);
+  const sessions = await listSessions(ctx.client);
   emit(ctx, { sessions }, () => {
     const rows = sessions.map((session) => [
       session.id,
@@ -23,11 +22,11 @@ export async function sessionsCommand(ctx: CliContext): Promise<number> {
   return 0;
 }
 
-function transcriptMarkdown(body: Transcript, ghost: string): string {
+function transcriptMarkdown(body: Transcript): string {
   return body.messages.map((message) => {
     const heading = message.role === "user" ? "you"
       : message.role === "hook" ? "Stop hook"
-      : ghost;
+      : "ghost";
     const lines = message.content.map((part) => part.type === "toolCall"
       ? `> ⚙ ${part.name}(${truncate(JSON.stringify(part.arguments ?? {}), 120)})`
       : part.text).filter(Boolean);
@@ -41,7 +40,7 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
  */
 export async function showCommand(ctx: CliContext): Promise<number> {
   const { parsed } = ctx;
-  const { name, path } = await resolveTarget(ctx);
+  const { path } = await resolveTarget(ctx);
   const limit = flagString(parsed, "limit");
   const offset = flagString(parsed, "offset");
   const page = (from: string | undefined) => {
@@ -57,7 +56,7 @@ export async function showCommand(ctx: CliContext): Promise<number> {
     response = await page(String(first));
   }
   emit(ctx, response, (body) => {
-    const markdown = transcriptMarkdown(body, name);
+    const markdown = transcriptMarkdown(body);
     if (body.total === 0) return { human: "No messages.\n", quiet: "" };
     if (body.messages.length === 0) return { human: `(no messages from ${first + 1}; ${body.total} in all)\n`, quiet: "" };
     const trailer = body.truncated

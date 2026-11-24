@@ -1,23 +1,18 @@
 /**
  * `ghostd hook-complete`: one completion for a trusted command hook (a
  * stop-hook reviewer, a classifier), asked of the daemon that owns the ghost
- * (`POST /api/ghosts/:name/complete`), so it completes on the daemon's own
+ * (`POST /api/complete`), so it completes on the daemon's own
  * loaded copy of the local model rather than a second one started here.
  */
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
-import { realpathSync } from "node:fs";
 import { CliError, DaemonClient, EXIT_CODE } from "./cli/client.js";
 import type { CliRuntime } from "./cli/types.js";
-import { loadConfig } from "./config.js";
 import { errorMessage } from "./errors.js";
-import { isGhostHome } from "./ghosts.js";
 import { isRecord } from "./record.js";
 
 const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
 
 interface HookCompleteInput {
-  readonly ghost_home: string;
   readonly prompt: string;
 }
 
@@ -42,25 +37,8 @@ export function parseHookCompleteInput(raw: string): HookCompleteInput {
   }
   const input = value as Partial<HookCompleteInput> | null;
   if (!isRecord(input)) throw new Error("stdin must contain a JSON object.");
-  if (typeof input.ghost_home !== "string" || typeof input.prompt !== "string") {
-    throw new Error("stdin must contain string ghost_home and prompt fields.");
-  }
-  return { ghost_home: input.ghost_home, prompt: input.prompt };
-}
-
-/** The ghost `ghost_home` names among the daemon's ghosts. */
-function ghostName(ghostHome: string, ghostsRoot: string): string {
-  if (!isAbsolute(ghostHome)) throw new Error("ghost_home must be an absolute path.");
-  let home: string;
-  let root: string;
-  try {
-    home = realpathSync(resolve(ghostHome));
-    root = realpathSync(ghostsRoot);
-  } catch {
-    throw new Error(`${ghostHome} is not a Ghost home under ${ghostsRoot}.`);
-  }
-  if (dirname(home) !== root || !isGhostHome(home)) throw new Error(`${ghostHome} is not a Ghost home under ${ghostsRoot}.`);
-  return basename(home);
+  if (typeof input.prompt !== "string") throw new Error("stdin must contain a string prompt field.");
+  return { prompt: input.prompt };
 }
 
 export async function hookCompleteCommand(argv: string[], options: Partial<CliRuntime> = {}): Promise<number> {
@@ -79,10 +57,9 @@ export async function hookCompleteCommand(argv: string[], options: Partial<CliRu
   try {
     const input = parseHookCompleteInput(typeof runtime.stdin === "string" ? runtime.stdin : await readStdin(runtime.stdin));
     if (!input.prompt.trim()) throw new Error("prompt must be a non-empty string.");
-    const name = ghostName(input.ghost_home, loadConfig({ env: runtime.env, home: runtime.home }).ghostsRoot);
     const client = new DaemonClient(runtime);
     const { text } = await client.request<{ text: string }>(
-      "POST", `/api/ghosts/${encodeURIComponent(name)}/complete`, { prompt: input.prompt },
+      "POST", "/api/complete", { prompt: input.prompt },
       // No deadline of its own: the hook's `timeout` kills this process group,
       // which closes the request and stops the completion.
       null,

@@ -218,7 +218,7 @@ export const BROWSER_LINES: readonly string[] = [
   "export -f ab",
   "# Choose once per task, then reuse the same value in subsequent invocations.",
   // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion in the recipe's text.
-  "export BROWSER_TAB=\"task-${GHOST:-agent}-${GHOST_SESSION:-$(cat /proc/sys/kernel/random/uuid)}\"",
+  "export BROWSER_TAB=\"task-${GHOST_SESSION:-$(cat /proc/sys/kernel/random/uuid)}\"",
   "```",
   "",
   "Create your task tab once with `locked ab tab new --label \"$BROWSER_TAB\" about:blank`.",

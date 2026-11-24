@@ -1,6 +1,6 @@
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
-import { listGhosts } from "./common.js";
+import { ghostName } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -13,12 +13,11 @@ interface DaemonStatus {
 }
 
 export async function statusCommand(ctx: CliContext): Promise<number> {
-  const [ghosts, remote, daemon] = await Promise.all([
-    listGhosts(ctx.client),
+  const [ghost, remote, daemon] = await Promise.all([
+    ghostName(ctx.client),
     ctx.client.request<RemoteStatus>("GET", "/api/remote"),
     ctx.client.request<DaemonStatus>("GET", "/api/status"),
   ]);
-  const ghost = ghosts[0]?.name ?? null;
   const result = {
     daemon: ctx.client.baseUrl,
     tokenFile: ctx.client.tokenPath,

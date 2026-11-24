@@ -11,7 +11,7 @@ import {
 } from "./config.js";
 import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
-import { FIRST_GHOST_NAME, GhostRegistry } from "./ghosts.js";
+import { theGhost, type Ghost } from "./ghosts.js";
 import { type ConfiguredHookRunner, GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
@@ -194,18 +194,22 @@ async function serveDaemon(
   logger: ReturnType<typeof createLogger>,
   hooks: ConfiguredHookRunner,
 ): Promise<number> {
-  const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
   // What is running: the source checkout behind this process, if it has one.
   const runningSource = resolveRunningSource(DAEMON_VERSION, fileURLToPath(import.meta.url));
-  registry.ensureRoot();
-  if (registry.list().length === 0) logger.info("made the ghost home", { ghost: registry.create(FIRST_GHOST_NAME).name });
+  let ghost: Ghost;
+  try {
+    ghost = theGhost(config.ghostsRoot);
+  } catch (error) {
+    logger.error("no ghost home", { error: errorMessage(error) });
+    return 1;
+  }
 
   const remoteServe = new RemoteServe(config.port, config.remote);
   const host = new SessionHost({
-    registry,
+    ghost,
     ownerHome,
-    conversationUrl: (ghost, id) => remoteServe.conversationUrl(ghost, id),
+    conversationUrl: (id) => remoteServe.conversationUrl(id),
     logger,
     hooks,
     localModel: config.local ? new LocalModel(config.local, logger.child({ part: "local-model" })) : null,
@@ -214,7 +218,7 @@ async function serveDaemon(
   let listening: ListeningServer;
   try {
     listening = await startDaemonServer({
-      registry,
+      ghost,
       host,
       hooks,
       runningSource,
@@ -237,7 +241,7 @@ async function serveDaemon(
   logger.info("listening", {
     url: `http://${DAEMON_HOST}:${listening.port}`,
     ghostsRoot: config.ghostsRoot,
-    ghosts: registry.list().length,
+    ghost: ghost.name,
     version: runningSource.version,
     commit: runningSource.commit,
     source: runningSource.root,

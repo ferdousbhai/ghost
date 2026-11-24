@@ -17,7 +17,6 @@ afterEach(async () => {
 describe("SSE turn lifecycle", () => {
   it("flushes accepted stream headers before a silent turn produces an event", async () => {
     temp = makeTempGhosts();
-    temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
     let finishTurn = () => {};
     const turnFinished = new Promise<void>((resolve) => {
@@ -34,9 +33,9 @@ describe("SSE turn lifecycle", () => {
       },
     } as unknown as SessionHost;
     listening = await startDaemonServer({
-      registry: temp.registry,
+      ghost: temp.ghost,
       host,
-      ...serverServices(temp.registry),
+      ...serverServices(temp.root),
       port: 0,
       apiToken: null,
     });
@@ -46,7 +45,7 @@ describe("SSE turn lifecycle", () => {
     let response: Response;
     try {
       response = await globalThis.fetch(
-        `http://127.0.0.1:${listening.port}/api/ghosts/casper/messages`,
+        `http://127.0.0.1:${listening.port}/api/messages`,
         {
           method: "POST",
           headers: { "content-type": "application/json", accept: "text/event-stream" },
@@ -71,7 +70,6 @@ describe("SSE turn lifecycle", () => {
 
   it("adds an error terminal when a runtime ends without done or error", async () => {
     temp = makeTempGhosts();
-    temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
     const host = {
       async admitTurn() {
@@ -84,15 +82,15 @@ describe("SSE turn lifecycle", () => {
       },
     } as unknown as SessionHost;
     listening = await startDaemonServer({
-      registry: temp.registry,
+      ghost: temp.ghost,
       host,
-      ...serverServices(temp.registry),
+      ...serverServices(temp.root),
       port: 0,
       apiToken: null,
     });
 
     const response = await fetch(
-      `http://127.0.0.1:${listening.port}/api/ghosts/casper/messages`,
+      `http://127.0.0.1:${listening.port}/api/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream" },

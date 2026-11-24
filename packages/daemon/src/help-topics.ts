@@ -44,7 +44,7 @@ function background(): string[] {
     "systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20 \\",
     "  setsid -f bash -c 'cmd > \"$XDG_RUNTIME_DIR/<name>.log\" 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log $XDG_RUNTIME_DIR/<name>.log\" >/dev/null 2>&1'",
     "```",
-    "`$GHOST` and `$GHOST_SESSION` are set in your shell, so `ghost` verbs address this conversation without `-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
+    "`$GHOST_SESSION` is set in your shell, so `ghost` verbs address this conversation without `-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
     "The job is its own low-priority unit: it yields the CPU to the owner's apps, survives a daemon restart (so its log is outside your private /tmp), and `systemctl --user stop <unit>` ends it. Nothing else watches it: read its log.",
   ];
 }

@@ -34,11 +34,14 @@ pub struct AskPage {
     composer: gtk::TextView,
     send: gtk::Button,
     status: gtk::Label,
-    ghost: RefCell<String>,
     session: RefCell<String>,
     sessions: RefCell<Vec<Value>>,
     live: RefCell<Option<(Rc<Answer>, Cancel)>>,
     syncing: Cell<bool>,
+}
+
+fn api_path(rest: &str) -> String {
+    format!("/api{rest}")
 }
 
 impl AskPage {
@@ -105,7 +108,6 @@ impl AskPage {
             composer,
             send,
             status,
-            ghost: RefCell::new(String::new()),
             session: RefCell::new(String::new()),
             sessions: RefCell::new(Vec::new()),
             live: RefCell::new(None),
@@ -145,18 +147,8 @@ impl AskPage {
         });
         page.composer.add_controller(keys);
 
-        // The ghost to talk to: the machine's one, the first ghostd lists.
         let this = page.clone();
-        glib::spawn_future_local(async move {
-            let name = this.app.api.get("/api/ghosts".into()).await.ok().and_then(|ghosts| ghosts[0]["name"].as_str().map(String::from));
-            match name {
-                Some(name) => {
-                    *this.ghost.borrow_mut() = name;
-                    this.refresh_chats().await;
-                }
-                None => this.note("No ghost yet: ghostd makes one when it starts."),
-            }
-        });
+        glib::spawn_future_local(async move { this.refresh_chats().await });
         page
     }
 
@@ -167,10 +159,6 @@ impl AskPage {
 
     pub fn note(&self, text: &str) {
         self.status.set_text(text);
-    }
-
-    fn ghost_path(&self, rest: &str) -> String {
-        format!("/api/ghosts/{}{rest}", segment(&self.ghost.borrow()))
     }
 
     fn new_chat(&self) {
@@ -190,7 +178,7 @@ impl AskPage {
     }
 
     async fn refresh_chats(self: &Rc<Self>) {
-        let Ok(body) = self.app.api.get(self.ghost_path("/sessions")).await else { return };
+        let Ok(body) = self.app.api.get(api_path("/sessions")).await else { return };
         let sessions = body["sessions"].as_array().cloned().unwrap_or_default();
         self.syncing.set(true);
         omui::clear(&self.chats);
@@ -214,7 +202,7 @@ impl AskPage {
         omui::clear(&self.convo);
         let this = self.clone();
         glib::spawn_future_local(async move {
-            let reply = this.app.api.get(this.ghost_path(&format!("/sessions/{}/transcript", segment(&id)))).await;
+            let reply = this.app.api.get(api_path(&format!("/sessions/{}/transcript", segment(&id)))).await;
             if *this.session.borrow() != id {
                 return;
             }
@@ -289,7 +277,7 @@ impl AskPage {
     fn ask(self: &Rc<Self>) {
         let buffer = self.composer.buffer();
         let prompt = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).trim().to_string();
-        if prompt.is_empty() || self.ghost.borrow().is_empty() {
+        if prompt.is_empty() {
             return;
         }
         buffer.set_text("");
@@ -305,7 +293,7 @@ impl AskPage {
         self.note("");
 
         let session = self.session.borrow().clone();
-        let first = self.app.api.stream(self.ghost_path("/messages"), Some(json!({ "prompt": prompt, "sessionId": session })));
+        let first = self.app.api.stream(api_path("/messages"), Some(json!({ "prompt": prompt, "sessionId": session })));
         *self.live.borrow_mut() = Some((answer.clone(), first.1.clone()));
 
         // Tokens arrive faster than a redraw is worth: the Markdown is redrawn at most every 60 ms.
@@ -332,7 +320,7 @@ impl AskPage {
                         Frame::Event(event) => {
                             // A long turn's stream is cut; its last frame says where the rest is.
                             if event["type"] == "resume" {
-                                let path = this.ghost_path(&format!(
+                                let path = api_path(&format!(
                                     "/sessions/{}/stream?turn={}&from={}",
                                     segment(&session),
                                     segment(event["turn"].as_str().unwrap_or_default()),
@@ -409,7 +397,7 @@ impl AskPage {
     }
 
     fn stop(self: &Rc<Self>) {
-        let path = self.ghost_path(&format!("/sessions/{}/stop", segment(&self.session.borrow())));
+        let path = api_path(&format!("/sessions/{}/stop", segment(&self.session.borrow())));
         let this = self.clone();
         glib::spawn_future_local(async move {
             if let Err(error) = this.app.api.call("POST", path, Some(json!({}))).await {

@@ -3,7 +3,7 @@
  * (persona, cwd, env), what it streams back, and what the conversation log
  * keeps.
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
@@ -34,11 +34,10 @@ function harness(...args: Parameters<typeof fakeAnswerer>): FakeAnswerer {
 
 function host(options: Partial<SessionHostOptions> & { fake: FakeAnswerer }): SessionHost {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper", character: "# Casper\n\nYou are Casper, a letterpress printer.\n" });
   const { fake, ...rest } = options;
   return new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     ...answeredBy(fake),
     ...rest,
@@ -47,7 +46,7 @@ function host(options: Partial<SessionHostOptions> & { fake: FakeAnswerer }): Se
 
 async function turn(sessions: SessionHost, prompt: string, sessionId = "c1"): Promise<TurnEvent[]> {
   const events: TurnEvent[] = [];
-  await sessions.runTurn("casper", { sessionId, prompt, emit: (event) => events.push(event) });
+  await sessions.runTurn({ sessionId, prompt, emit: (event) => events.push(event) });
   return events;
 }
 
@@ -72,7 +71,6 @@ describe("a turn", () => {
     expect(call).toMatchObject({
       prompt: "What do you do?",
       cwd: conversationDir(sessionDir(), "c1"),
-      ghost: "casper",
       session: "c1",
     });
     expect(call?.persona).toContain("You are Casper, a letterpress printer.");
@@ -97,7 +95,7 @@ describe("a turn", () => {
     await turn(sessions, "again");
 
     expect(fake.calls().map((call) => call.prompt)).toEqual(["ping", "<conversation-so-far>\nOwner: ping\n\nYou: pong\n</conversation-so-far>\n\nagain"]);
-    const transcript = await sessions.readTranscript("casper", "c1");
+    const transcript = await sessions.readTranscript("c1");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
       ["assistant", [{ type: "text", text: "pong" }]],
@@ -119,7 +117,7 @@ describe("a turn", () => {
 
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_start", id: "t1", toolName: "Bash" }));
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", id: "t1", isError: true, summary: "exit 1" }));
-    const assistant = (await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant");
+    const assistant = (await sessions.readTranscript("c1")).messages.find((message) => message.role === "assistant");
     expect(assistant?.content).toEqual([
       { type: "toolCall", id: "t1", name: "Bash", arguments: { command: "false" }, failed: true },
       { type: "text", text: "It failed." },
@@ -133,7 +131,7 @@ describe("a turn", () => {
     const events = await turn(sessions, "hello");
 
     expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "connection reset" });
-    expect((await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant"))
+    expect((await sessions.readTranscript("c1")).messages.find((message) => message.role === "assistant"))
       .toMatchObject({ errorMessage: "connection reset", content: [{ type: "text", text: "partial" }] });
   });
 
@@ -146,27 +144,14 @@ describe("a turn", () => {
 });
 
 describe("where a turn runs", () => {
-  it("runs in the home's new place after the owner moved it under another name", async () => {
-    const fake = harness(replies("I am Casper.", "Still here."));
-    const sessions = host({ fake: fake });
-    await turn(sessions, "Who are you?");
-    renameSync(join(temp.root, "casper"), join(temp.root, "wisp"));
-    const events: TurnEvent[] = [];
-    await sessions.runTurn("wisp", { sessionId: "c1", prompt: "And now?", emit: (event) => events.push(event) });
-
-    const second = fake.calls()[1];
-    expect(second?.cwd).toBe(conversationDir(ghostPaths(join(temp.root, "wisp")).sessionDir, "c1"));
-    expect(second?.prompt).toContain("Owner: Who are you?");
-  });
 
   it("fails plainly when no local model is configured", async () => {
     temp = makeTempGhosts();
-    temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
-    const sessions = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome });
+    const sessions = new SessionHost({ ghost: temp.ghost, ownerHome: temp.ownerHome });
     const events = await turn(sessions, "hi");
     expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: expect.stringContaining("local.model") });
-    await expect(sessions.complete("casper", "Review this.", new AbortController().signal)).rejects.toMatchObject({ code: "no_local_model" });
+    await expect(sessions.complete("Review this.", new AbortController().signal)).rejects.toMatchObject({ code: "no_local_model" });
   });
 });
 
@@ -177,10 +162,10 @@ describe("queued follow-ups and aborts", () => {
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second")]);
     const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    expect(sessions.queuedMessages("casper", "c1").streaming).toBe(true);
-    await sessions.queueMessage("casper", "c1", "two");
+    expect(sessions.queuedMessages("c1").streaming).toBe(true);
+    await sessions.queueMessage("c1", "two");
     gate.release();
     await running;
 
@@ -201,10 +186,10 @@ describe("queued follow-ups and aborts", () => {
     fake.setTurns([{ gate: gate.path, events: [{ type: "text", block: "a", delta: "ok" }] }]);
     const sessions = host({ fake: fake });
     const seen: string[][] = [];
-    sessions.subscribeConversationEvents("casper", () => {
+    sessions.subscribeConversationEvents(() => {
       seen.push([]);
       const slot = seen.length - 1;
-      void sessions.readTranscript("casper", "c1", {}).then((transcript) => {
+      void sessions.readTranscript("c1", {}).then((transcript) => {
         seen[slot] = transcript.messages.filter((message) => message.role === "user")
           .map((message) => message.content.map((part) => part.type === "text" ? part.text : "").join(""));
       });
@@ -226,7 +211,7 @@ describe("queued follow-ups and aborts", () => {
     ] }]);
     const sessions = host({ fake: fake });
     await turn(sessions, "check it");
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    const { messages } = await sessions.readTranscript("c1", {});
     expect(messages.at(-1)?.content.map((part) => part.type === "text" ? part.text : part.type))
       .toEqual(["Let me check.", "toolCall", "Done: X"]);
   });
@@ -237,14 +222,14 @@ describe("queued follow-ups and aborts", () => {
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "half" }], fail: "crashed", gate: gate.path }, ...replies("second")]);
     const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    await sessions.queueMessage("casper", "c1", "two");
+    await sessions.queueMessage("c1", "two");
     gate.release();
     await running;
     expect(fake.calls().map((call) => call.message)).toEqual(["one", "two"]);
     expect(events.at(-1)).toEqual({ type: "done" });
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    const { messages } = await sessions.readTranscript("c1", {});
     expect(messages.map((message) => [message.role, message.errorMessage ?? null])).toEqual([
       ["user", null], ["assistant", "crashed"], ["user", null], ["assistant", null],
     ]);
@@ -252,12 +237,12 @@ describe("queued follow-ups and aborts", () => {
 
   it("refuses a stop when nothing is running", () => {
     const sessions = host({ fake: harness(replies("x")) });
-    expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));
+    expect(() => sessions.stopTurn("c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));
   });
 
   it("refuses a queued message when nothing is streaming", async () => {
     const sessions = host({ fake: harness(replies("x")) });
-    await expect(sessions.queueMessage("casper", "c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
+    await expect(sessions.queueMessage("c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
   });
 
   it("stops the pass on stop and ends the turn aborted", async () => {
@@ -265,13 +250,13 @@ describe("queued follow-ups and aborts", () => {
     fake.setTurns([{ gate: fake.gate("never").path }]);
     const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "wait", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c1", running: true });
-    sessions.stopTurn("casper", "c1");
+    expect((await sessions.listSessions())[0]).toMatchObject({ id: "c1", running: true });
+    sessions.stopTurn("c1");
     await running;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c1", running: false });
+    expect((await sessions.listSessions())[0]).toMatchObject({ id: "c1", running: false });
   });
 });
 
@@ -320,7 +305,7 @@ describe("owner commands and hooks", () => {
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: false }));
     expect(fake.calls()).toEqual([]);
     // Read back as the live turn showed it: the owner's `!command`, then its output.
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    const { messages } = await sessions.readTranscript("c1", {});
     expect(messages.map((message) => [message.role, message.entryId])).toEqual([["user", "e1"], ["assistant", "e1o"]]);
     expect(messages[0]?.content).toEqual([{ type: "text", text: "!echo printed-$GHOST_SESSION" }]);
 
@@ -343,11 +328,11 @@ describe("owner commands and hooks", () => {
   it("stops a running `!command`", async () => {
     const sessions = host({ fake: harness([]) });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "!sleep 30", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
     // A command has no passes to queue after; it is busy, not idle.
-    await expect(sessions.queueMessage("casper", "c1", "after")).rejects.toMatchObject({ code: "session_busy" });
-    sessions.stopTurn("casper", "c1");
+    await expect(sessions.queueMessage("c1", "after")).rejects.toMatchObject({ code: "session_busy" });
+    sessions.stopTurn("c1");
     await running;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted", errorMessage: "Command aborted." });
   });
@@ -355,28 +340,28 @@ describe("owner commands and hooks", () => {
   it("lists a conversation of owner commands while one runs and after", async () => {
     const sessions = host({ fake: harness(replies("on it")) });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c9", prompt: "!sleep 30", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c9", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
-    expect(await sessions.listSessions("casper")).toEqual([expect.objectContaining({ id: "c9", running: true, messageCount: 0 })]);
-    sessions.stopTurn("casper", "c9");
+    expect(await sessions.listSessions()).toEqual([expect.objectContaining({ id: "c9", running: true, messageCount: 0 })]);
+    sessions.stopTurn("c9");
     await running;
-    expect(await sessions.listSessions("casper")).toEqual([
+    expect(await sessions.listSessions()).toEqual([
       expect.objectContaining({ id: "c9", running: false, messageCount: 2, preview: "!sleep 30" }),
     ]);
 
     // The first owner message still titles it; the command keeps the preview.
     await turn(sessions, "fix the failing build please", "c9");
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c9", title: "Fix the failing build please", preview: "!sleep 30" });
+    expect((await sessions.listSessions())[0]).toMatchObject({ id: "c9", title: "Fix the failing build please", preview: "!sleep 30" });
 
     // `!!` output is kept from the transcript too, so it alone is no conversation.
     await turn(sessions, "!!echo hidden", "c8");
-    expect((await sessions.listSessions("casper")).map((row) => row.id)).not.toContain("c8");
+    expect((await sessions.listSessions()).map((row) => row.id)).not.toContain("c8");
   });
 
   it("fences a command's output so a ``` line inside stays code", async () => {
     const sessions = host({ fake: harness([]) });
     await turn(sessions, "!printf '# Readme\\n```sh\\nls\\n```\\n'");
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    const { messages } = await sessions.readTranscript("c1", {});
     expect(messages.at(-1)?.content).toEqual([{ type: "text", text: "````\n# Readme\n```sh\nls\n```\n````" }]);
   });
 
@@ -390,7 +375,7 @@ describe("owner commands and hooks", () => {
     // `!!` keeps a command whose text opens with `[` out of the ghost's context.
     const kept = await turn(sessions, "!![ -d / ] && echo kept", "c2");
     expect(kept).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: false }));
-    const { messages } = await sessions.readTranscript("casper", "c2", {});
+    const { messages } = await sessions.readTranscript("c2", {});
     expect(messages).toEqual([]);
   });
 
@@ -423,7 +408,7 @@ describe("owner commands and hooks", () => {
       expect.objectContaining({ type: "done" }),
     ]);
     expect(fake.calls()[1]?.message).toBe("Stop hook feedback:\nverify it");
-    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
+    expect((await sessions.readTranscript("c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
     const [first, continued] = stop.inputs();
     expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: expect.any(String), stop_hook_active: false });
     expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: first?.turn_id, stop_hook_active: true });
@@ -438,10 +423,10 @@ describe("owner commands and hooks", () => {
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "Write this as my character file?" }], gate: gate.path }, ...replies("written")]);
     const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "draft your character", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "draft your character", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
     // The ghost runs `ghost ask` during its pass.
-    await sessions.setQuestion("casper", "c1", "Write this as my character file?", ["Write it", "Change something first"]);
+    await sessions.setQuestion("c1", "Write this as my character file?", ["Write it", "Change something first"]);
     gate.release();
     await running;
     expect(fake.calls()).toHaveLength(1);
@@ -468,9 +453,9 @@ describe("owner commands and hooks", () => {
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second", "verified")]);
     const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    await sessions.queueMessage("casper", "c1", "two");
+    await sessions.queueMessage("c1", "two");
     gate.release();
     await running;
 
@@ -488,9 +473,9 @@ describe("owner commands and hooks", () => {
     const fake = harness(replies("first", "second"));
     const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => existsSync(stop.started));
-    await sessions.queueMessage("casper", "c1", "two");
+    await sessions.queueMessage("c1", "two");
     writeFileSync(stop.go, "");
     await running;
 
@@ -511,14 +496,14 @@ describe("conversation metadata", () => {
     await turn(sessions, "second", "c2");
 
     await Promise.all([
-      sessions.setPinned("casper", "c1", true),
-      sessions.setPinned("casper", "c2", true),
+      sessions.setPinned("c1", true),
+      sessions.setPinned("c2", true),
     ]);
     expect((await readPins(sessionDir())).sort()).toEqual(["c1", "c2"]);
 
     await Promise.all([
-      sessions.markRead("casper", "c1"),
-      sessions.markRead("casper", "c2"),
+      sessions.markRead("c1"),
+      sessions.markRead("c2"),
     ]);
     expect(Object.keys((await readReads(sessionDir()))).sort()).toEqual(["c1", "c2"]);
   });
@@ -526,19 +511,19 @@ describe("conversation metadata", () => {
   it("lists, titles, pins, reads, and trashes a conversation", async () => {
     const sessions = host({ fake: harness(replies("hi")) });
     await turn(sessions, "Plan the zine\nwith details");
-    let [row] = await sessions.listSessions("casper");
+    let [row] = await sessions.listSessions();
     expect(row).toMatchObject({ id: "c1", title: "Plan the zine", preview: "Plan the zine", messageCount: 2, pinned: false, unread: true });
 
-    await sessions.renameConversation("casper", "c1", "Zine");
-    await sessions.setPinned("casper", "c1", true);
-    await sessions.markRead("casper", "c1", new Date(Date.now() + 60_000));
-    [row] = await sessions.listSessions("casper");
+    await sessions.renameConversation("c1", "Zine");
+    await sessions.setPinned("c1", true);
+    await sessions.markRead("c1", new Date(Date.now() + 60_000));
+    [row] = await sessions.listSessions();
     expect(row).toMatchObject({ title: "Zine", pinned: true, unread: false });
 
-    await sessions.deleteSession("casper", "c1");
+    await sessions.deleteSession("c1");
     expect(existsSync(join(temp.trashDir, "files", basename(conversationDir(sessionDir(), "c1"))))).toBe(true);
     expect(existsSync(conversationDir(sessionDir(), "c1"))).toBe(false);
-    expect(await sessions.listSessions("casper")).toEqual([]);
+    expect(await sessions.listSessions()).toEqual([]);
   });
 
   it("skips a torn last log line", async () => {
@@ -573,11 +558,11 @@ describe("completion delivery", () => {
   it("delivers a final bounded excerpt and exact conversation link once after done", async () => {
     const notifications: GhostHookEvent[] = [];
     const fake = harness(replies(`Finished.\n${"a".repeat(400)}`));
-    const sessions = host({ fake: fake, hooks: delivery(notifications), conversationUrl: async (ghost, id) => `https://summonghost.com/#/ghost.example.ts.net/${ghost}/${id}` });
+    const sessions = host({ fake: fake, hooks: delivery(notifications), conversationUrl: async (id) => `https://summonghost.com/#/ghost.example.ts.net/${id}` });
     const events = await turn(sessions, "Make the report");
     await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
-    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://summonghost.com/#/ghost.example.ts.net/casper/c1" });
+    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://summonghost.com/#/ghost.example.ts.net/c1" });
     expect(notifications[0]?.type === "turn_end" && notifications[0].excerpt.length).toBe(280);
     expect(events.filter(event => event.type === "done")).toHaveLength(1);
     expect(events.filter(event => event.type === "hook_start")).toEqual([]);
@@ -599,9 +584,9 @@ describe("completion delivery", () => {
     const fake = harness([]), gate = fake.gate("first");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second")]);
     const sessions = host({ fake: fake, hooks });
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: () => {} });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "one", emit: () => {} });
     await waitFor(() => fake.calls().length === 1);
-    await sessions.queueMessage("casper", "c1", "two");
+    await sessions.queueMessage("c1", "two");
     gate.release(); await running;
     await waitFor(() => seen.some(event => event.type === "turn_end"));
     const followUp = seen.find(event => event.type === "session_stop" && event.owner_prompt === "two");
@@ -638,9 +623,9 @@ describe("completion delivery", () => {
     fake.setTurns([{ gate: fake.gate("never").path }]);
     const sessions = host({ fake: fake, hooks: delivery(notifications) });
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: event => events.push(event) });
+    const running = sessions.runTurn({ sessionId: "c1", prompt: "wait", emit: event => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    sessions.stopTurn("casper", "c1"); await running;
+    sessions.stopTurn("c1"); await running;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
     expect(notifications).toEqual([]);
   });
@@ -653,8 +638,8 @@ describe("completion delivery", () => {
   it("does not let a late read receipt move the read watermark backwards", async () => {
     const sessions = host({ fake: harness(replies("done")) });
     await turn(sessions, "Do it");
-    const latest = new Date(); await sessions.markRead("casper", "c1", latest);
-    await sessions.markRead("casper", "c1", new Date(0));
+    const latest = new Date(); await sessions.markRead("c1", latest);
+    await sessions.markRead("c1", new Date(0));
     expect((await readReads(sessionDir())).c1).toBe(latest.toISOString());
   });
 });

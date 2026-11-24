@@ -42,7 +42,7 @@ function sseResponse(events: unknown[]): Response {
 }
 
 describe("a ghost's own shell addresses its conversation", () => {
-  const env = { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "conv-mine" };
+  const env = { GHOSTD_PORT: "7718", GHOST_SESSION: "conv-mine" };
   const sessions = [session("conv-other"), session("conv-mine")];
 
   it("reads $GHOST_SESSION in place of -s", async () => {
@@ -50,7 +50,7 @@ describe("a ghost's own shell addresses its conversation", () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
       paths.push(path);
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/transcript")) {
         return jsonResponse({ id: "conv-mine", title: null, messages: [], total: 0, truncated: false });
       }
@@ -58,7 +58,7 @@ describe("a ghost's own shell addresses its conversation", () => {
     };
     const result = await runCli(["show", "--json"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result.code).toBe(0);
-    expect(paths).toContain("/api/ghosts/casper/sessions/conv-mine/transcript");
+    expect(paths).toContain("/api/sessions/conv-mine/transcript");
   });
 
   it("`ghost ask` asks in its own conversation, and --clear withdraws", async () => {
@@ -66,25 +66,25 @@ describe("a ghost's own shell addresses its conversation", () => {
     const fetch: CliFetch = async (input, init) => {
       const path = new URL(input).pathname;
       calls.push({ request: `${init?.method ?? "GET"} ${path}`, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/question")) return jsonResponse({ ok: true });
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
     const asked = await runCli(["ask", "Ship it tonight?", "yes", "wait for review"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(asked.code).toBe(0);
     expect(calls).toContainEqual({
-      request: "PUT /api/ghosts/casper/sessions/conv-mine/question",
+      request: "PUT /api/sessions/conv-mine/question",
       body: { text: "Ship it tonight?", options: ["yes", "wait for review"] },
     });
     expect((await runCli(["ask", "--clear"], { env, home: "/tmp/ghost-cli-unit", fetch })).code).toBe(0);
-    expect(calls.map((call) => call.request)).toContain("DELETE /api/ghosts/casper/sessions/conv-mine/question");
+    expect(calls.map((call) => call.request)).toContain("DELETE /api/sessions/conv-mine/question");
     expect((await runCli(["ask"], { env, home: "/tmp/ghost-cli-unit", fetch })).code).not.toBe(0);
   });
 
   it("a change verb acknowledges in a sentence, and -q prints nothing", async () => {
     const fetch: CliFetch = async (input, init) => {
       const path = new URL(input).pathname;
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/title")) return jsonResponse({ ok: true, title: JSON.parse(String(init?.body)).title });
       if (path.endsWith("/pin") || path.endsWith("/stop")) return jsonResponse({ ok: true });
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
@@ -106,13 +106,13 @@ describe("a ghost's own shell addresses its conversation", () => {
     const fetch: CliFetch = async (input, init) => {
       const path = new URL(input).pathname;
       requests.push(`${init?.method ?? "GET"} ${path}`);
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions: running });
+      if (path === "/api/sessions") return jsonResponse({ sessions: running });
       if (path.endsWith("/stop")) return jsonResponse({ stopped: true });
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
     const result = await runCli(["stop"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result.code).toBe(0);
-    expect(requests).toContain("POST /api/ghosts/casper/sessions/conv-mine/stop");
+    expect(requests).toContain("POST /api/sessions/conv-mine/stop");
   });
 
   it("turns a follow-up to an idle conversation into its next turn", async () => {
@@ -120,25 +120,25 @@ describe("a ghost's own shell addresses its conversation", () => {
     const fetch: CliFetch = async (input, init) => {
       const path = new URL(input).pathname;
       calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/queue")) {
         return jsonResponse({ error: { code: "session_not_streaming", message: "idle" } }, 409);
       }
-      if (path === "/api/ghosts/casper/messages") {
+      if (path === "/api/messages") {
         return sseResponse([{ type: "text_delta", delta: "Noted." }, { type: "done" }]);
       }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
     const result = await runCli(["say", "--follow-up", "-q", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result).toMatchObject({ code: 0, stdout: "Noted.\n" });
-    const turn = calls.find((call) => call.path === "/api/ghosts/casper/messages");
+    const turn = calls.find((call) => call.path === "/api/messages");
     expect(turn?.body).toMatchObject({ sessionId: "conv-mine" });
   });
 
   it("acknowledges a follow-up queued into a live turn in words, and -q prints nothing", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/queue")) return jsonResponse({ streaming: true, followUp: ["job finished"] });
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
@@ -153,7 +153,7 @@ describe("a ghost's own shell addresses its conversation", () => {
     const queries: string[] = [];
     const fetch: CliFetch = async (input) => {
       const url = new URL(input);
-      if (url.pathname === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (url.pathname === "/api/sessions") return jsonResponse({ sessions });
       queries.push(url.search);
       const limit = Number(url.searchParams.get("limit") ?? 1000);
       const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -188,8 +188,8 @@ describe("a ghost's own shell addresses its conversation", () => {
   it("-q keeps a read verb's primary output: the transcript without its paging note, the character body", async () => {
     const fetch: CliFetch = async (input) => {
       const url = new URL(input);
-      if (url.pathname === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
-      if (url.pathname === "/api/ghosts/casper/character") return jsonResponse({ body: "# Casper\nFriendly.\n" });
+      if (url.pathname === "/api/sessions") return jsonResponse({ sessions });
+      if (url.pathname === "/api/character") return jsonResponse({ body: "# Casper\nFriendly.\n" });
       const offset = Number(url.searchParams.get("offset") ?? 0);
       return jsonResponse({
         id: "conv-mine",
@@ -210,7 +210,7 @@ describe("a ghost's own shell addresses its conversation", () => {
   it("still fails a follow-up on any other conflict", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
-      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path === "/api/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/queue")) return jsonResponse({ error: { code: "session_busy", message: "busy" } }, 409);
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
@@ -231,7 +231,7 @@ describe("ghost help <topic>", () => {
 
   it("restarts without sending a model prompt", async () => {
     const result = await runCli(["help", "self"], {
-      env: { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "conv-mine", PATH: "/nonexistent" },
+      env: { GHOSTD_PORT: "7718", GHOST_SESSION: "conv-mine", PATH: "/nonexistent" },
       home: "/tmp/ghost-cli-unit",
     });
     expect(result.stdout).not.toContain("ghost say");
@@ -310,7 +310,7 @@ describe("ghost help", () => {
       ["character", "show", "extra"],
       ["say", "hello", "-m", "world"],
     ]) {
-      const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
+      const result = await runCli(argv, { env: { GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);
       expect(result.stderr, argv.join(" ")).not.toContain("cannot reach ghostd");
     }
@@ -324,7 +324,7 @@ describe("ghost help", () => {
       ...["sessions", "character", "status"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
       ...["say hi", "sessions", "show", "hooks", "remote", "status", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
-      const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
+      const result = await runCli(argv, { env: { GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);
       expect(result.stderr, argv.join(" ")).toContain("Unknown option");
     }
@@ -343,7 +343,7 @@ describe("ghost help", () => {
         [["hooks", "set", malformed], `${malformed} is not valid JSON`],
         [["character", "set", missing], "ENOENT"],
       ] as const) {
-        const result = await runCli([...argv], { env: { GHOST: "casper" }, home: dir, fetch });
+        const result = await runCli([...argv], { env: {  }, home: dir, fetch });
         expect(result.code, argv.join(" ")).toBe(2);
         expect(result.stderr, argv.join(" ")).toContain(message);
       }
@@ -429,16 +429,9 @@ describe("CLI API adaptation", () => {
       if (path.endsWith("/sessions")) return jsonResponse({ sessions: [] });
       throw new Error(`unexpected request to ${path}`);
     };
-    const run = (...flags: string[]) => runCli(["sessions", ...flags], { env: { GHOSTD_PORT: "7718", GHOST: "casper" }, home: "/tmp/ghost-cli-unit", fetch });
+    const run = (...flags: string[]) => runCli(["sessions", ...flags], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
     expect(await run()).toMatchObject({ code: 0, stdout: "No conversations.\n" });
     expect(await run("-q")).toMatchObject({ code: 0, stdout: "" });
-  });
-
-  it("says how a ghost home comes to be when ghostd lists none", async () => {
-    const fetch: CliFetch = async () => jsonResponse([]);
-    const result = await runCli(["sessions"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
-    expect(result).toMatchObject({ code: 5, stdout: "" });
-    expect(result.stderr).toContain("ghostd makes one when it starts");
   });
 
   it("ghost hooks status prints each hook's event, name, and description", async () => {
@@ -483,7 +476,7 @@ describe("CLI API adaptation", () => {
   /** A daemon answering `ghost status`'s three reads, `/api/status` with `daemon`. */
   const statusDaemon = (daemon: Record<string, unknown>): CliFetch => async (input) => {
     const path = new URL(input).pathname;
-    if (path === "/api/ghosts") return jsonResponse([]);
+    if (path === "/api/ghost") return jsonResponse([]);
     if (path === "/api/status") return jsonResponse(daemon);
     if (path === "/api/remote") {
       return jsonResponse({

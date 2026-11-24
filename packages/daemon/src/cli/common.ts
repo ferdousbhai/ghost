@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString } from "./args.js";
 import { notFound, type DaemonClient } from "./client.js";
@@ -33,24 +32,13 @@ export function stdinIsTty(stdin: CliStdin): boolean {
   return typeof stdin !== "string" && stdin.isTTY === true;
 }
 
-export function listGhosts(client: DaemonClient): Promise<Ghost[]> {
-  return client.request<Ghost[]>("GET", "/api/ghosts");
+/** The name of the machine's one ghost. */
+export async function ghostName(client: DaemonClient): Promise<string> {
+  return (await client.request<{ name: string }>("GET", "/api/ghost")).name;
 }
 
-/**
- * The ghost a verb addresses: `$GHOST`, which a ghost's own shell carries,
- * else the machine's one ghost, the first home ghostd lists.
- */
-export async function resolveGhost(ctx: Pick<CliContext, "client" | "runtime">): Promise<string> {
-  const named = ctx.runtime.env.GHOST?.trim();
-  if (named) return named;
-  const [ghost] = await listGhosts(ctx.client);
-  if (!ghost) throw notFound("a ghost home (ghostd makes one when it starts; restart ghostd.service)");
-  return ghost.name;
-}
-
-export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {
-  return (await client.request<{ sessions: SessionSummary[] }>("GET", ghostPath(ghost, "/sessions"))).sessions;
+export async function listSessions(client: DaemonClient): Promise<SessionSummary[]> {
+  return (await client.request<{ sessions: SessionSummary[] }>("GET", "/api/sessions")).sessions;
 }
 
 export function resolveSessionPrefix(rows: readonly SessionSummary[], requested: string): SessionSummary {
@@ -69,8 +57,8 @@ export function resolveSessionPrefix(rows: readonly SessionSummary[], requested:
  * given: one no message has landed in yet is not listed, and a turn
  * may still address it.
  */
-export async function conversationId(client: DaemonClient, name: string, requested: string): Promise<string> {
-  const sessions = await listSessions(client, name);
+export async function conversationId(client: DaemonClient, requested: string): Promise<string> {
+  const sessions = await listSessions(client);
   return sessions.some((row) => row.id.startsWith(requested)) ? resolveSessionPrefix(sessions, requested).id : requested;
 }
 
@@ -86,24 +74,19 @@ export function preferredSessionId(ctx: Pick<CliContext, "runtime" | "parsed">):
 
 export async function resolveTarget(
   ctx: Pick<CliContext, "client" | "runtime" | "parsed">,
-): Promise<{ name: string; session: SessionSummary; path: string }> {
-  const name = await resolveGhost(ctx);
-  const session = await resolveSession(ctx.client, name, preferredSessionId(ctx));
-  return { name, session, path: sessionPath(name, session.id) };
+): Promise<{ session: SessionSummary; path: string }> {
+  const session = await resolveSession(ctx.client, preferredSessionId(ctx));
+  return { session, path: sessionPath(session.id) };
 }
 
 /** `requested` (an id or unique prefix) among the ghost's sessions, else its latest. */
-export async function resolveSession(client: DaemonClient, name: string, requested: string | undefined): Promise<SessionSummary> {
-  const sessions = await listSessions(client, name);
+export async function resolveSession(client: DaemonClient, requested: string | undefined): Promise<SessionSummary> {
+  const sessions = await listSessions(client);
   const session = requested ? resolveSessionPrefix(sessions, requested) : latestSession(sessions);
-  if (!session) throw notFound(`a session for ghost ${JSON.stringify(name)}`);
+  if (!session) throw notFound("a conversation");
   return session;
 }
 
-export function ghostPath(ghost: string, suffix: string): string {
-  return `/api/ghosts/${encodeURIComponent(ghost)}${suffix}`;
-}
-
-export function sessionPath(ghost: string, publicId: string, suffix = ""): string {
-  return ghostPath(ghost, `/sessions/${encodeURIComponent(publicId)}${suffix}`);
+export function sessionPath(publicId: string, suffix = ""): string {
+  return `/api/sessions/${encodeURIComponent(publicId)}${suffix}`;
 }

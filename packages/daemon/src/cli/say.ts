@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
-import { conversationId, ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, sessionPath, stdinIsTty, stdinText } from "./common.js";
+import { conversationId, latestSession, listSessions, preferredSessionId, resolveSession, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -39,13 +39,12 @@ function toolDescription(event: StreamEvent): string {
 /** Which conversation a fresh turn joins: `--new`, then `-s`/`$GHOST_SESSION`, then the latest. */
 async function turnConversationId(
   ctx: CliContext,
-  name: string,
   startNew: boolean,
   requestedSession: string | undefined,
 ): Promise<string> {
   if (startNew) return newConversationId();
-  if (requestedSession) return conversationId(ctx.client, name, requestedSession);
-  return latestSession(await listSessions(ctx.client, name))?.id ?? newConversationId();
+  if (requestedSession) return conversationId(ctx.client, requestedSession);
+  return latestSession(await listSessions(ctx.client))?.id ?? newConversationId();
 }
 
 export async function sayCommand(ctx: CliContext): Promise<number> {
@@ -55,15 +54,14 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
   const text = await messageText(parsed.positionals, ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
-  const name = await resolveGhost(ctx);
   const requestedSession = preferredSessionId(ctx);
 
   // The conversation an idle --follow-up turns into a fresh turn of.
   let idleFollowUp: string | undefined;
   if (followUp) {
-    const id = requestedSession ? await conversationId(ctx.client, name, requestedSession)
-      : (await resolveSession(ctx.client, name, undefined)).id;
-    const path = sessionPath(name, id);
+    const id = requestedSession ? await conversationId(ctx.client, requestedSession)
+      : (await resolveSession(ctx.client, undefined)).id;
+    const path = sessionPath(id);
     try {
       const response = await ctx.client.request("POST", `${path}/queue`, { text });
       emit(ctx, response, () => `Queued for ${id}.\n`);
@@ -76,7 +74,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
     }
   }
   const sessionId = idleFollowUp
-    ?? await turnConversationId(ctx, name, startNew, requestedSession);
+    ?? await turnConversationId(ctx, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
   // An owner `!command` streams as one bash card before any pass starts;
@@ -91,7 +89,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   let interrupted = false;
   const stop: NodeJS.SignalsListener = () => {
     interrupted = true;
-    ctx.client.request("POST", sessionPath(name, sessionId, "/stop"), {}).catch(() => undefined);
+    ctx.client.request("POST", sessionPath(sessionId, "/stop"), {}).catch(() => undefined);
   };
   process.once("SIGINT", stop);
   // A long turn's response is cut, its last frame naming where the next resumes.
@@ -145,11 +143,11 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
           break;
       }
     };
-    await ctx.client.stream(ghostPath(name, "/messages"), { prompt: text, sessionId }, onEvent);
+    await ctx.client.stream("/api/messages", { prompt: text, sessionId }, onEvent);
     while (resume) {
       const { turn, from } = resume;
       resume = null;
-      await ctx.client.stream(sessionPath(name, sessionId, `/stream?turn=${encodeURIComponent(turn)}&from=${from}`), undefined, onEvent);
+      await ctx.client.stream(sessionPath(sessionId, `/stream?turn=${encodeURIComponent(turn)}&from=${from}`), undefined, onEvent);
     }
   } finally {
     (process as NodeJS.EventEmitter).off("SIGINT", stop);

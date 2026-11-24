@@ -33,7 +33,7 @@ import {
   type AssistantPart,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
+import { ghostPaths, type Ghost } from "./ghosts.js";
 import { chooseCodingAgent } from "./coding-agent.js";
 import { runProcess } from "./process.js";
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
@@ -66,12 +66,13 @@ const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
 
 export interface SessionHostOptions {
-  registry: GhostRegistry;
+  /** The machine's one ghost. */
+  ghost: Ghost;
   ownerHome?: string;
   logger?: Logger;
   hooks?: GhostHookRunner;
   /** The app's link to a conversation for `turn_end`'s `url`, or null. */
-  conversationUrl?: (ghost: string, id: string) => Promise<string | null>;
+  conversationUrl?: (id: string) => Promise<string | null>;
   /** The model ghostd runs (CONTRACTS.md "Local model"); without one no turn can run. */
   localModel?: LocalModel | null;
   /** What answers in place of the local model; a test supplies a script. */
@@ -185,9 +186,7 @@ function ownerCommand(prompt: string): { command: string; excluded: boolean } | 
   return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
 }
 
-function keyOf(ghostName: string, id: string): string {
-  return JSON.stringify([ghostName, id]);
-}
+
 
 /** The fields every hook event carries (docs/hooks.md). */
 function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: AbortSignal): GhostHookEventBase {
@@ -231,11 +230,11 @@ function validQuestion(text: string, options: readonly string[]): OwnerQuestion 
 }
 
 export class SessionHost {
-  private readonly registry: GhostRegistry;
+  private readonly ghost: Ghost;
   private readonly ownerHome: string;
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
-  private readonly conversationUrl: ((ghost: string, id: string) => Promise<string | null>) | undefined;
+  private readonly conversationUrl: ((id: string) => Promise<string | null>) | undefined;
   private readonly answerer: Answerer | null;
   private readonly codingAgent: () => Promise<string | null>;
   private readonly localModel: LocalModel | null;
@@ -246,11 +245,11 @@ export class SessionHost {
   /** A session being trashed cannot admit a turn or another mutation. */
   private readonly reservedSessions = new Set<string>();
   private readonly metadataWrites = new Map<string, Promise<unknown>>();
-  private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
+  private readonly listeners = new Set<{ listener: ConversationEventListener; close: () => void }>();
   private shuttingDown = false;
 
   constructor(options: SessionHostOptions) {
-    this.registry = options.registry;
+    this.ghost = options.ghost;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     this.logger = options.logger ?? silentLogger;
     this.conversationUrl = options.conversationUrl;
@@ -266,36 +265,31 @@ export class SessionHost {
   // ── Conversation events ────────────────────────────────────────────────
 
   subscribeConversationEvents(
-    ghostName: string,
     listener: ConversationEventListener,
     close: () => void = () => {},
   ): () => void {
-    this.registry.get(ghostName);
-    const set = this.listeners.get(ghostName) ?? new Set();
     const subscription = { listener, close };
-    set.add(subscription);
-    this.listeners.set(ghostName, set);
+    this.listeners.add(subscription);
     return () => {
-      set.delete(subscription);
-      if (set.size === 0 && this.listeners.get(ghostName) === set) this.listeners.delete(ghostName);
+      this.listeners.delete(subscription);
     };
   }
 
-  private announce(ghostName: string, id: string): void {
+  private announce(id: string): void {
     const event: ConversationUpdatedEvent = { type: "conversation-updated", id, updatedAt: new Date().toISOString() };
-    for (const { listener } of [...(this.listeners.get(ghostName) ?? [])]) {
+    for (const { listener } of [...this.listeners]) {
       try {
         listener(event);
       } catch (error) {
-        this.logger.warn("conversation event listener failed", { ghost: ghostName, error: errorMessage(error) });
+        this.logger.warn("conversation event listener failed", { error: errorMessage(error) });
       }
     }
   }
 
-  private closeConversationEventStreams(ghostName: string): void {
-    const set = this.listeners.get(ghostName);
-    this.listeners.delete(ghostName);
-    for (const { close } of [...(set ?? [])]) {
+  private closeConversationEventStreams(): void {
+    const set = [...this.listeners];
+    this.listeners.clear();
+    for (const { close } of set) {
       try {
         close();
       } catch {
@@ -337,12 +331,11 @@ export class SessionHost {
   // ── Turns ─────────────────────────────────────────────────────────────
 
   async admitTurn(
-    ghostName: string,
     options: Pick<RunTurnOptions, "sessionId" | "prompt">,
   ): Promise<TurnAdmission> {
-    const ghost = this.registry.get(ghostName);
+    const ghost = this.ghost;
     const id = requireConversationId(options.sessionId ?? "default");
-    const key = keyOf(ghost.name, id);
+    const key = id;
     if (this.shuttingDown) throw new GhostError("shutting_down", "ghostd is shutting down.", 503);
     if (this.admissions.has(key) || this.reservedSessions.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
@@ -371,7 +364,7 @@ export class SessionHost {
           settled = terminal;
         } finally {
           this.admissions.delete(key);
-          this.announce(ghost.name, id);
+          this.announce(id);
           // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
           const ended = settled;
           if (ended) void this.turnEnd(ghost, id, ended, controller.signal, turnId);
@@ -381,8 +374,8 @@ export class SessionHost {
   }
 
   /** admitTurn then run, in one call, for tests. */
-  async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
-    await (await this.admitTurn(ghostName, options)).run(options);
+  async runTurn(options: RunTurnOptions): Promise<void> {
+    await (await this.admitTurn(options)).run(options);
   }
 
   private async runAdmitted(
@@ -398,11 +391,11 @@ export class SessionHost {
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
     if (command) {
-      this.announce(ghost.name, id);
+      this.announce(id);
       await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream, signal);
       return initialTurnId;
     }
-    const key = keyOf(ghost.name, id);
+    const key = id;
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
     const blocks = { next: 0 };
@@ -424,7 +417,7 @@ export class SessionHost {
         // The owner's message answers what the ghost was waiting on.
         if (origin !== "hook") await this.dropQuestion(ghost, id);
         // Other clients learn the turn is running with its prompt already readable.
-        this.announce(ghost.name, id);
+        this.announce(id);
         const passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         const failure = await this.runTurnOnModel(ghost, id, passPrompt, stream, blocks, signal);
         // A failed pass ends the turn only when nothing is queued behind it:
@@ -497,9 +490,8 @@ export class SessionHost {
    * admission or conversation lock: the turn awaiting the `session_stop` hook
    * that asks holds its own, and waiting for it would deadlock.
    */
-  async complete(ghostName: string, prompt: string, signal: AbortSignal): Promise<string> {
+  async complete(prompt: string, signal: AbortSignal): Promise<string> {
     if (!prompt.trim()) throw new GhostError("invalid_request", "prompt must be a non-empty string.", 400);
-    this.registry.get(ghostName);
     if (!this.answerer) throw new GhostError("no_local_model", NO_LOCAL_MODEL, 409);
     const text = (await this.answerer.complete(prompt, signal)).trim();
     if (!text) throw new GhostError("completion_failed", "The local model returned no text for the prompt.", 502);
@@ -582,7 +574,7 @@ export class SessionHost {
 
     await answerer.turn({
       prompt, persona, cwd: dir, signal, onEvent,
-      env: { ...this.env, ...conversationEnvironment(ghost.name, id) },
+      env: { ...this.env, ...conversationEnvironment(id) },
       codingAgent: await this.codingAgent(),
     }).catch((failure: unknown) => {
       if (!signal.aborted) error = errorMessage(failure);
@@ -602,7 +594,7 @@ export class SessionHost {
       const text = terminal.type === "error" ? terminal.errorMessage
         : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
         : last?.type === "command" ? last.output : "";
-      const url = await this.conversationUrl?.(ghost.name, id).catch(() => null) ?? null;
+      const url = await this.conversationUrl?.(id).catch(() => null) ?? null;
       await this.hooks.emitTurnEnd({
         type: "turn_end", turn_id: turnId, outcome: terminal.type, title: (logState(entries).title ?? ghost.name).slice(0, 160),
         excerpt: (text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url,
@@ -657,7 +649,7 @@ export class SessionHost {
     const exit = await runProcess({
       argv: ["bash", "-c", command],
       cwd: this.ownerHome,
-      env: { ...this.env, ...conversationEnvironment(ghost.name, id) },
+      env: { ...this.env, ...conversationEnvironment(id) },
       onStdout: (chunk) => {
         output += chunk;
         if (output.length > 200_000) output = output.slice(-100_000);
@@ -676,16 +668,14 @@ export class SessionHost {
       : { type: "done" });
   }
 
-  queuedMessages(ghostName: string, sessionId: string): QueuedMessages {
-    this.registry.get(ghostName);
-    const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId)));
+  queuedMessages(sessionId: string): QueuedMessages {
+    const turn = this.live.get(requireConversationId(sessionId));
     return { streaming: turn !== undefined, followUp: turn ? [...turn.followUps] : [] };
   }
 
   /** Abort the conversation's running turn or owner command; its stream ends `aborted`. */
-  stopTurn(ghostName: string, sessionId: string): void {
-    this.registry.get(ghostName);
-    const controller = this.admissions.get(keyOf(ghostName, requireConversationId(sessionId)));
+  stopTurn(sessionId: string): void {
+    const controller = this.admissions.get(requireConversationId(sessionId));
     if (!controller) {
       throw new GhostError("session_not_streaming", "This conversation is not currently streaming.", 409);
     }
@@ -693,9 +683,8 @@ export class SessionHost {
   }
 
   /** Queue text for after the current pass, which takes no input mid-run. */
-  async queueMessage(ghostName: string, sessionId: string, text: string): Promise<QueuedMessages> {
-    this.registry.get(ghostName);
-    const key = keyOf(ghostName, requireConversationId(sessionId));
+  async queueMessage(sessionId: string, text: string): Promise<QueuedMessages> {
+    const key = requireConversationId(sessionId);
     const turn = this.live.get(key);
     if (!turn) {
       // A running `!command` has no passes to queue after.
@@ -704,7 +693,7 @@ export class SessionHost {
     }
     turn.followUps.push(text);
     turn.emit({ type: "queue", followUp: [...turn.followUps] });
-    return this.queuedMessages(ghostName, sessionId);
+    return this.queuedMessages(sessionId);
   }
 
   // ── Listing and metadata ──────────────────────────────────────────────
@@ -719,8 +708,8 @@ export class SessionHost {
     return names.filter((name) => isValidConversationId(name) && existsSync(logPath(sessionDir, name)));
   }
 
-  async listSessions(ghostName: string): Promise<SessionSummary[]> {
-    const ghost = this.registry.get(ghostName);
+  async listSessions(): Promise<SessionSummary[]> {
+    const ghost = this.ghost;
     const { sessionDir } = ghostPaths(ghost.dir);
     const [ids, pins, reads, questions] = await Promise.all([
       this.conversationIds(sessionDir),
@@ -734,7 +723,7 @@ export class SessionHost {
       if (!log) continue;
       const { state, updatedAt } = log;
       // An owner command logs when it ends, so a running one is listed before anything is.
-      const running = this.admissions.has(keyOf(ghost.name, id));
+      const running = this.admissions.has(id);
       if (state.messageCount === 0 && state.title === null && !running) continue;
       const readAt = reads[id];
       rows.push({
@@ -760,8 +749,8 @@ export class SessionHost {
     return id;
   }
 
-  async setPinned(ghostName: string, sessionId: string, pinned: boolean): Promise<void> {
-    const ghost = this.registry.get(ghostName);
+  async setPinned(sessionId: string, pinned: boolean): Promise<void> {
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
     const { sessionDir } = ghostPaths(ghost.dir);
     await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
@@ -769,7 +758,7 @@ export class SessionHost {
       const kept = (await readPins(sessionDir)).filter((pin) => pin !== id && existing.has(pin));
       await writePins(sessionDir, pinned ? [...kept, id] : kept);
     });
-    this.announce(ghost.name, id);
+    this.announce(id);
   }
 
   /**
@@ -777,20 +766,20 @@ export class SessionHost {
    * earlier open question there. It stays until the owner's next message to
    * that conversation (`dropQuestion`) or until dismissed.
    */
-  async setQuestion(ghostName: string, sessionId: string, text: string, options: readonly string[]): Promise<OwnerQuestion> {
+  async setQuestion(sessionId: string, text: string, options: readonly string[]): Promise<OwnerQuestion> {
     const question = validQuestion(text, options);
-    const ghost = this.registry.get(ghostName);
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
     await this.updateQuestions(ghost, (questions) => ({ ...questions, [id]: question }));
-    this.announce(ghost.name, id);
+    this.announce(id);
     return question;
   }
 
   /** Withdraw a conversation's open question without answering it. */
-  async dismissQuestion(ghostName: string, sessionId: string): Promise<void> {
-    const ghost = this.registry.get(ghostName);
+  async dismissQuestion(sessionId: string): Promise<void> {
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
-    if (await this.dropQuestion(ghost, id)) this.announce(ghost.name, id);
+    if (await this.dropQuestion(ghost, id)) this.announce(id);
   }
 
   /** The ghost has asked the owner something in this conversation that is still open. */
@@ -829,8 +818,8 @@ export class SessionHost {
     });
   }
 
-  async markRead(ghostName: string, sessionId: string, openedAt = new Date()): Promise<string> {
-    const ghost = this.registry.get(ghostName);
+  async markRead(sessionId: string, openedAt = new Date()): Promise<string> {
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
     const { sessionDir } = ghostPaths(ghost.dir);
     let readAt = openedAt.toISOString();
@@ -840,11 +829,11 @@ export class SessionHost {
       readAt = kept[id] && kept[id] > readAt ? kept[id] : readAt;
       await writeReads(sessionDir, { ...kept, [id]: readAt });
     });
-    this.announce(ghost.name, id);
+    this.announce(id);
     return readAt;
   }
 
-  async renameConversation(ghostName: string, sessionId: string, title: string): Promise<string> {
+  async renameConversation(sessionId: string, title: string): Promise<string> {
     const trimmed = title.trim();
     if (trimmed.length === 0) throw new GhostError("invalid_request", "\"title\" must not be empty.", 400);
     if (trimmed.length > MAX_CONVERSATION_TITLE_LENGTH) {
@@ -853,32 +842,31 @@ export class SessionHost {
     if (!/\P{C}/u.test(trimmed)) {
       throw new GhostError("invalid_request", "A conversation title needs at least one printable character.", 400);
     }
-    const ghost = this.registry.get(ghostName);
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
     await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
-    this.announce(ghost.name, id);
+    this.announce(id);
     return trimmed;
   }
 
   /** Store an image in the conversation directory, which need not hold a turn yet. */
-  async saveAttachment(ghostName: string, sessionId: string, bytes: Uint8Array): Promise<string> {
-    return saveAttachment(this.attachmentDir(ghostName, sessionId), bytes);
+  async saveAttachment(sessionId: string, bytes: Uint8Array): Promise<string> {
+    return saveAttachment(this.attachmentDir(sessionId), bytes);
   }
 
-  async readAttachment(ghostName: string, sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
-    return readAttachment(this.attachmentDir(ghostName, sessionId), name);
+  async readAttachment(sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
+    return readAttachment(this.attachmentDir(sessionId), name);
   }
 
-  private attachmentDir(ghostName: string, sessionId: string): string {
-    return conversationDir(ghostPaths(this.registry.get(ghostName).dir).sessionDir, requireConversationId(sessionId));
+  private attachmentDir(sessionId: string): string {
+    return conversationDir(ghostPaths(this.ghost.dir).sessionDir, requireConversationId(sessionId));
   }
 
   async readTranscript(
-    ghostName: string,
     sessionId: string,
     options: { limit?: number; offset?: number } = {},
   ): Promise<Transcript> {
-    const ghost = this.registry.get(ghostName);
+    const ghost = this.ghost;
     const id = requireConversationId(sessionId);
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
     const requestedOffset = clamp(options.offset, 0, Number.MAX_SAFE_INTEGER);
@@ -893,10 +881,10 @@ export class SessionHost {
   }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
-  async deleteSession(ghostName: string, sessionId: string): Promise<void> {
-    const ghost = this.registry.get(ghostName);
+  async deleteSession(sessionId: string): Promise<void> {
+    const ghost = this.ghost;
     const id = await this.requireConversation(ghost, sessionId);
-    const key = keyOf(ghost.name, id);
+    const key = id;
     if (this.admissions.has(key) || this.reservedSessions.has(key)) {
       throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
     }
@@ -910,7 +898,7 @@ export class SessionHost {
       });
       await this.dropQuestion(ghost, id);
       this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
-      this.announce(ghost.name, id);
+      this.announce(id);
     } finally {
       this.reservedSessions.delete(key);
     }
@@ -926,7 +914,7 @@ export class SessionHost {
   async disposeAll(): Promise<void> {
     this.shuttingDown = true;
     for (const controller of this.admissions.values()) controller.abort();
-    for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
+    this.closeConversationEventStreams();
     await this.localModel?.stop("daemon stopping");
   }
 }

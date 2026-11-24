@@ -470,6 +470,6 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
  * `ghost` CLI reads to address this conversation. Every harness turn and owner
  * `!` command runs with them.
  */
-export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string } {
-  return { GHOST: ghostName, GHOST_SESSION: id };
+export function conversationEnvironment(id: string): { GHOST_SESSION: string } {
+  return { GHOST_SESSION: id };
 }

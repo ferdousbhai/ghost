@@ -11,7 +11,7 @@ import { readCharacter, writeCharacter } from "./home.js";
 import { MAX_CHARACTER_BODY_LENGTH } from "./persona.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { isRecord } from "./record.js";
-import type { GhostRegistry } from "./ghosts.js";
+import type { Ghost } from "./ghosts.js";
 import type { ConfiguredHookRunner } from "./hooks.js";
 import type { GhostHookCommandConfig } from "./hook-policy.js";
 import { DAEMON_HOST } from "./loopback.js";
@@ -31,7 +31,8 @@ import { listConnections } from "./connections.js";
 import { listSource, listSources, pictureOf, readSource, searchSources, SOURCE_IDS, type SourceId } from "./sources.js";
 
 export interface ServerOptions {
-  registry: GhostRegistry;
+  /** The machine's one ghost. */
+  ghost: Ghost;
   host: SessionHost;
   /** What runs this daemon, as `GET /api/status` reports it. */
   runningSource: RunningSource;
@@ -82,7 +83,6 @@ const RESUME_GRACE_MS = 60_000;
 /** One turn's events, kept while it runs (and briefly after) so a cut response can resume. */
 interface TurnLog {
   readonly id: string;
-  readonly ghost: string;
   readonly conversation: string;
   /** Each event SSE-encoded; once `ended`, the last is the terminal. */
   readonly frames: TurnBuffer;
@@ -189,7 +189,7 @@ interface Route<C> {
   readonly handle: (context: C) => unknown;
 }
 
-/** `"GET PUT"`, `"api/ghosts/:ghost/character"`: a `:name` segment is a parameter. */
+/** `"GET PUT"`, `"api/sessions/:id/pin"`: a `:name` segment is a parameter. */
 function route<C>(methods: string, pattern: string, handle: (context: C) => unknown): Route<C> {
   return { methods: methods.split(" "), path: pattern === "" ? [] : pattern.split("/"), handle };
 }
@@ -400,8 +400,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     url: URL;
     admission: { identity: TailscaleIdentity | undefined };
     params: Record<string, string>;
-    /** The route's `:ghost`, decoded; empty where it has none. */
-    ghost: string;
     /** The route's `:id`, validated; empty where it has none. */
     id: string;
     /** The request's JSON object body, read within the size bound. */
@@ -436,7 +434,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
    * Passive conversation-list invalidations. This subscription never opens a
    * hosted session; disconnect cleanup drops both its listener and keepalive.
    */
-  const handleConversationEvents = ({ ghost: ghostName, request, response }: RequestContext): void => {
+  const handleConversationEvents = ({ request, response }: RequestContext): void => {
     let closed = false;
     let keepalive: ReturnType<typeof setInterval> | undefined;
     let unsubscribe = () => {};
@@ -461,7 +459,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       if (!accepted || written >= streamCutBytes) finish();
     };
     unsubscribe = options.host.subscribeConversationEvents(
-      ghostName,
       (event) => write(encodeSseEvent(event)),
       finish,
     );
@@ -473,13 +470,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   /** An image body, from any owner. */
-  const handleSaveAttachment = async ({ ghost, id, request, response }: RequestContext): Promise<void> => {
+  const handleSaveAttachment = async ({ id, request, response }: RequestContext): Promise<void> => {
     const bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
-    jsonResponse(response, 201, { path: await options.host.saveAttachment(ghost, id, bytes) });
+    jsonResponse(response, 201, { path: await options.host.saveAttachment(id, bytes) });
   };
 
-  const handleReadAttachment = async ({ ghost, id, params, response }: RequestContext): Promise<void> => {
-    const { bytes, type } = await options.host.readAttachment(ghost, id, params.file ?? "");
+  const handleReadAttachment = async ({ id, params, response }: RequestContext): Promise<void> => {
+    const { bytes, type } = await options.host.readAttachment(id, params.file ?? "");
     response.writeHead(200, {
       "content-type": type,
       "content-length": bytes.length,
@@ -491,11 +488,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
 
   /** Run an admitted turn into a new log, which ends in exactly one terminal event. */
   const startTurnLog = (
-    ghost: string,
     conversation: string,
     run: (emit: (event: TurnEvent) => void) => Promise<void>,
   ): TurnLog => {
-    const log: TurnLog = { id: randomUUID(), ghost, conversation, frames: new TurnBuffer(), ended: false, followers: new Set() };
+    const log: TurnLog = { id: randomUUID(), conversation, frames: new TurnBuffer(), ended: false, followers: new Set() };
     turnLogs.set(log.id, log);
     const append = (event: TurnEvent): void => {
       if (log.ended) return;
@@ -506,7 +502,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         log.ended = true;
         log.failure = encodeSseEvent({ type: "error", reason: "error", errorMessage: "Could not retain the turn stream; read the transcript." });
         logger.error("turn replay storage failed", { error: errorMessage(error) });
-        try { options.host.stopTurn(ghost, conversation); } catch { /* The turn may already have settled. */ }
+        try { options.host.stopTurn(conversation); } catch { /* The turn may already have settled. */ }
       }
       for (const follower of [...log.followers]) follower();
     };
@@ -603,24 +599,22 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       pump();
     });
 
-  const handleMessages = async ({ ghost: ghostName, request, response, body }: RequestContext): Promise<void> => {
+  const handleMessages = async ({ request, response, body }: RequestContext): Promise<void> => {
     // Fail before any byte of the stream, so the client sees a real status
     // code rather than an SSE error event it has to unwrap.
-    const ghost = options.registry.get(ghostName);
     const parsed = parseTurnRequest(await body());
-    const admission = await options.host.admitTurn(ghost.name, {
+    const admission = await options.host.admitTurn({
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
     });
-    const log = startTurnLog(ghost.name, admission.sessionId, (emit) => admission.run({ emit }));
+    const log = startTurnLog(admission.sessionId, (emit) => admission.run({ emit }));
     await followTurn(request, response, log, 0);
   };
 
   /** The rest of a cut turn response; see CONTRACTS.md, "Turn wire". */
-  const handleTurnStream = async ({ ghost: ghostName, id, url, request, response }: RequestContext): Promise<void> => {
-    const ghost = options.registry.get(ghostName);
+  const handleTurnStream = async ({ id, url, request, response }: RequestContext): Promise<void> => {
     const log = turnLogs.get(url.searchParams.get("turn") ?? "");
-    if (!log || log.ghost !== ghost.name || log.conversation !== id) {
+    if (!log || log.conversation !== id) {
       throw new GhostError("turn_not_found", "That turn is no longer resumable; read the transcript.", 404);
     }
     const from = numberParam(url, "from");
@@ -728,85 +722,84 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         release();
       }
     })),
-    route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,
-      isGuest(context) ? options.registry.list().map(({ name }) => ({ name })) : options.registry.list())),
-    route("GET", "api/ghosts/:ghost/character", async ({ ghost, response }) => {
-      const character = await readCharacter(options.registry.get(ghost).dir, { enforceLimit: false });
+    route("GET", "api/ghost", ({ response }) => jsonResponse(response, 200, { name: options.ghost.name })),
+    route("GET", "api/character", async ({ response }) => {
+      const character = await readCharacter(options.ghost.dir, { enforceLimit: false });
       jsonResponse(response, 200, { body: character?.body ?? "", limit: MAX_CHARACTER_BODY_LENGTH });
     }),
-    route("PUT", "api/ghosts/:ghost/character", async ({ ghost, response, body }) => {
+    route("PUT", "api/character", async ({ response, body }) => {
       const text = stringField(await body(), "body");
-      await writeCharacter(options.registry.get(ghost).dir, text);
+      await writeCharacter(options.ghost.dir, text);
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
-    route("POST", "api/ghosts/:ghost/complete", async ({ ghost, request, response, body }) => {
+    route("POST", "api/complete", async ({ request, response, body }) => {
       const prompt = stringField(await body(), "prompt");
       const { signal, release } = abortOnClose(request, response);
       try {
-        jsonResponse(response, 200, { text: await options.host.complete(ghost, prompt, signal) });
+        jsonResponse(response, 200, { text: await options.host.complete(prompt, signal) });
       } finally {
         release();
       }
     }),
-    route("POST", "api/ghosts/:ghost/messages", handleMessages),
-    route("GET", "api/ghosts/:ghost/events", handleConversationEvents),
-    route("GET", "api/ghosts/:ghost/sessions", async ({ ghost, response }) => {
-      jsonResponse(response, 200, { sessions: await options.host.listSessions(ghost) });
+    route("POST", "api/messages", handleMessages),
+    route("GET", "api/events", handleConversationEvents),
+    route("GET", "api/sessions", async ({ response }) => {
+      jsonResponse(response, 200, { sessions: await options.host.listSessions() });
     }),
-    route("DELETE", "api/ghosts/:ghost/sessions/:id", async ({ ghost, id, response }) => {
-      await options.host.deleteSession(ghost, id);
+    route("DELETE", "api/sessions/:id", async ({ id, response }) => {
+      await options.host.deleteSession(id);
       jsonResponse(response, 200, { ok: true });
     }),
     // Idempotent, so a client sends the state it wants rather than a toggle.
-    route("PUT", "api/ghosts/:ghost/sessions/:id/pin", async ({ ghost, id, response, body }) => {
+    route("PUT", "api/sessions/:id/pin", async ({ id, response, body }) => {
       const pinned = booleanField(await body(), "pinned");
-      await options.host.setPinned(ghost, id, pinned);
+      await options.host.setPinned(id, pinned);
       jsonResponse(response, 200, { ok: true, pinned });
     }),
     // A ghost asking the owner something (`ghost ask`); the owner's next
     // message to the conversation answers it, DELETE withdraws it unanswered.
-    route("PUT", "api/ghosts/:ghost/sessions/:id/question", async ({ ghost, id, response, body }) => {
+    route("PUT", "api/sessions/:id/question", async ({ id, response, body }) => {
       const input = await body();
       const answers = input.options === undefined ? [] : input.options;
       if (!Array.isArray(answers) || answers.some((answer) => typeof answer !== "string")) {
         throw new GhostError("invalid_request", '"options" must be an array of strings.', 400);
       }
-      jsonResponse(response, 200, { ok: true, question: await options.host.setQuestion(ghost, id, stringField(input, "text"), answers) });
+      jsonResponse(response, 200, { ok: true, question: await options.host.setQuestion(id, stringField(input, "text"), answers) });
     }),
-    route("DELETE", "api/ghosts/:ghost/sessions/:id/question", async ({ ghost, id, response }) => {
-      await options.host.dismissQuestion(ghost, id);
+    route("DELETE", "api/sessions/:id/question", async ({ id, response }) => {
+      await options.host.dismissQuestion(id);
       jsonResponse(response, 200, { ok: true });
     }),
-    route("PUT", "api/ghosts/:ghost/sessions/:id/read", async ({ ghost, id, response, body }) => {
+    route("PUT", "api/sessions/:id/read", async ({ id, response, body }) => {
       const input = await body();
       const readAt = input.readThrough === undefined ? new Date() : new Date(stringField(input, "readThrough"));
       if (!Number.isFinite(readAt.getTime()) || readAt.getTime() > Date.now()) throw new GhostError("invalid_request", "readThrough must be a valid timestamp no later than now.", 400);
-      jsonResponse(response, 200, { ok: true, readAt: await options.host.markRead(ghost, id, readAt) });
+      jsonResponse(response, 200, { ok: true, readAt: await options.host.markRead(id, readAt) });
     }),
-    route("PUT", "api/ghosts/:ghost/sessions/:id/title", async ({ ghost, id, response, body }) => {
-      const title = await options.host.renameConversation(ghost, id, stringField(await body(), "title"));
+    route("PUT", "api/sessions/:id/title", async ({ id, response, body }) => {
+      const title = await options.host.renameConversation(id, stringField(await body(), "title"));
       jsonResponse(response, 200, { ok: true, title });
     }),
-    route("POST", "api/ghosts/:ghost/sessions/:id/attachments", handleSaveAttachment),
-    route("GET", "api/ghosts/:ghost/sessions/:id/attachments/:file", handleReadAttachment),
-    route("GET", "api/ghosts/:ghost/sessions/:id/stream", handleTurnStream),
-    route("GET", "api/ghosts/:ghost/sessions/:id/transcript", async ({ ghost, id, url, response }) => {
+    route("POST", "api/sessions/:id/attachments", handleSaveAttachment),
+    route("GET", "api/sessions/:id/attachments/:file", handleReadAttachment),
+    route("GET", "api/sessions/:id/stream", handleTurnStream),
+    route("GET", "api/sessions/:id/transcript", async ({ id, url, response }) => {
       const readThrough = new Date().toISOString();
-      jsonResponse(response, 200, { ...await options.host.readTranscript(ghost, id, { limit: numberParam(url, "limit"), offset: numberParam(url, "offset") }), readThrough });
+      jsonResponse(response, 200, { ...await options.host.readTranscript(id, { limit: numberParam(url, "limit"), offset: numberParam(url, "offset") }), readThrough });
     }),
-    route("POST", "api/ghosts/:ghost/sessions/:id/stop", ({ ghost, id, response }) => {
-      options.host.stopTurn(ghost, id);
+    route("POST", "api/sessions/:id/stop", ({ id, response }) => {
+      options.host.stopTurn(id);
       jsonResponse(response, 200, { stopped: true });
     }),
-    route("GET", "api/ghosts/:ghost/sessions/:id/queue", ({ ghost, id, response }) => {
-      jsonResponse(response, 200, options.host.queuedMessages(ghost, id));
+    route("GET", "api/sessions/:id/queue", ({ id, response }) => {
+      jsonResponse(response, 200, options.host.queuedMessages(id));
     }),
-    route("POST", "api/ghosts/:ghost/sessions/:id/queue", async ({ ghost, id, response, body }) => {
+    route("POST", "api/sessions/:id/queue", async ({ id, response, body }) => {
       const { text } = await body();
       if (typeof text !== "string" || text.trim() === "") {
         throw new GhostError("invalid_request", '"text" must be a non-empty string.', 400);
       }
-      jsonResponse(response, 200, await options.host.queueMessage(ghost, id, text.trim()));
+      jsonResponse(response, 200, await options.host.queueMessage(id, text.trim()));
     }),
   ];
 
@@ -849,7 +842,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
           .map(([name, segment]) => [name, decodePathSegment(segment)]));
         await matched.route.handle({
           method, request, response, url, admission, params,
-          ghost: params.ghost ?? "",
           id: params.id === undefined ? "" : requireConversationId(params.id),
           body: () => readJsonObjectBody(request, maxBodyBytes),
         });

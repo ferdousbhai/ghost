@@ -1,5 +1,5 @@
 import { ArgsError, flagBoolean } from "./args.js";
-import { readArgumentFile, ghostPath, resolveGhost, resolveTarget } from "./common.js";
+import { readArgumentFile, resolveTarget } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
@@ -11,15 +11,14 @@ export async function characterCommand(ctx: CliContext): Promise<number> {
   const [action = "show", file] = parsed.positionals;
   if (action === "show") {
     if (file) throw new ArgsError("ghost character show takes no further arguments");
-    const body = await ctx.client.request<{ body: string }>("GET", ghostPath(await resolveGhost(ctx), "/character"));
+    const body = await ctx.client.request<{ body: string }>("GET", "/api/character");
     emit(ctx, body, (result) => primary(result.body));
     return 0;
   }
   if (action !== "set" || !file) throw new ArgsError("ghost character takes `show` or `set <file>`");
   const text = readArgumentFile(file);
-  const name = await resolveGhost(ctx);
-  const body = await ctx.client.request("PUT", ghostPath(name, "/character"), { body: text });
-  emit(ctx, body, () => `Character replaced for ${name}.\n`);
+  const body = await ctx.client.request("PUT", "/api/character", { body: text });
+  emit(ctx, body, () => "Character replaced.\n");
   return 0;
 }
 

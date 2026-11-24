@@ -4,7 +4,7 @@
  * The hole this closes (issue #485) is not exotic: binding to `127.0.0.1` keeps
  * the *network* out and does nothing about the browser already running as the
  * same user. A page the owner visits can POST `text/plain` to
- * `http://127.0.0.1:7717/api/ghosts/casper/messages` with no preflight, because
+ * `http://127.0.0.1:7717/api/messages` with no preflight, because
  * a simple request never asks permission — CORS only decides whether the page
  * may *read* the answer, and the attacker does not care about the answer. These
  * tests pin the three checks that make that request fail.
@@ -33,13 +33,12 @@ afterEach(async () => {
 
 async function serve(apiToken: string | null = TOKEN): Promise<string> {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  host = new SessionHost({ registry: temp.registry });
+  host = new SessionHost({ ghost: temp.ghost });
   listening = await startDaemonServer({
-    registry: temp.registry,
+    ghost: temp.ghost,
     host,
-    ...serverServices(temp.registry),
+    ...serverServices(temp.root),
     port: 0,
     apiToken,
   });
@@ -51,7 +50,7 @@ const auth = { authorization: `Bearer ${TOKEN}` };
 describe("the bearer token", () => {
   it("refuses a request that presents none", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`);
+    const response = await fetch(`${base}/api/ghost`);
     expect(response.status).toBe(401);
     // Without this a client cannot tell "wrong token" from "wrong route".
     expect(response.headers.get("www-authenticate")).toBe("Bearer");
@@ -62,7 +61,7 @@ describe("the bearer token", () => {
 
   it("refuses a request that presents the wrong one", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
+    const response = await fetch(`${base}/api/ghost`, {
       headers: { authorization: `Bearer ${OTHER_TOKEN}` },
     });
     expect(response.status).toBe(401);
@@ -72,22 +71,22 @@ describe("the bearer token", () => {
     const base = await serve();
     // A query parameter would land in logs and in `Referer`; only the header
     // counts.
-    expect((await fetch(`${base}/api/ghosts?token=${TOKEN}`)).status).toBe(401);
-    expect((await fetch(`${base}/api/ghosts`, {
+    expect((await fetch(`${base}/api/ghost?token=${TOKEN}`)).status).toBe(401);
+    expect((await fetch(`${base}/api/ghost`, {
       headers: { "x-ghost-api-token": TOKEN },
     })).status).toBe(401);
   });
 
   it("lets the real one through", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, { headers: auth });
+    const response = await fetch(`${base}/api/ghost`, { headers: auth });
     expect(response.status).toBe(200);
-    expect(await response.json()).toHaveLength(1);
+    expect(await response.json()).toEqual({ name: "casper" });
   });
 
   it("accepts the scheme case-insensitively, as RFC 7235 requires", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts`, {
+    expect((await fetch(`${base}/api/ghost`, {
       headers: { authorization: `bearer ${TOKEN}` },
     })).status).toBe(200);
   });
@@ -95,8 +94,8 @@ describe("the bearer token", () => {
   it("guards every route, not just the mutating ones", async () => {
     const base = await serve();
     for (const path of [
-      "/api/ghosts",
-      "/api/ghosts/casper/sessions",
+      "/api/ghost",
+      "/api/sessions",
       "/api/hooks/config",
       "/api/nonsense",
     ]) {
@@ -106,14 +105,14 @@ describe("the bearer token", () => {
 
   it("can be switched off, but only deliberately", async () => {
     const base = await serve(null);
-    expect((await fetch(`${base}/api/ghosts`)).status).toBe(200);
+    expect((await fetch(`${base}/api/ghost`)).status).toBe(200);
   });
 });
 
 describe("the Origin check", () => {
   it("refuses a foreign origin even when the token is right", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
+    const response = await fetch(`${base}/api/ghost`, {
       headers: { ...auth, origin: "https://evil.example" },
     });
     expect(response.status).toBe(403);
@@ -123,7 +122,7 @@ describe("the Origin check", () => {
 
   it("refuses a foreign origin before it even looks at the token", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
+    const response = await fetch(`${base}/api/ghost`, {
       headers: { origin: "https://evil.example" },
     });
     expect(response.status).toBe(403);
@@ -131,14 +130,14 @@ describe("the Origin check", () => {
 
   it("allows a request with no Origin at all — that is what a file-reading client sends", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts`, { headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/api/ghost`, { headers: auth })).status).toBe(200);
   });
 });
 
 describe("the content type of a mutating request", () => {
   it("refuses the text/plain POST that is the whole CSRF vector", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+    const response = await fetch(`${base}/api/messages`, {
       method: "POST",
       // Even holding the token, this shape must not be reachable: it is the
       // one a cross-site form post can produce without a preflight.
@@ -153,7 +152,7 @@ describe("the content type of a mutating request", () => {
   it("refuses the other two simple-request types as well", async () => {
     const base = await serve();
     for (const type of ["application/x-www-form-urlencoded", "multipart/form-data"]) {
-      const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+      const response = await fetch(`${base}/api/messages`, {
         method: "POST",
         headers: { ...auth, "content-type": type },
         body: "prompt=hello",
@@ -164,7 +163,7 @@ describe("the content type of a mutating request", () => {
 
   it("refuses a POST with no content type at all", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+    const response = await fetch(`${base}/api/messages`, {
       method: "POST",
       headers: { ...auth, "content-type": "" },
       body: "{}",
@@ -174,7 +173,7 @@ describe("the content type of a mutating request", () => {
 
   it("accepts application/json with parameters", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/character`, {
+    const response = await fetch(`${base}/api/character`, {
       method: "PUT",
       headers: { ...auth, "content-type": "application/json; charset=utf-8" },
       body: JSON.stringify({ body: "# Casper\n" }),
@@ -184,7 +183,7 @@ describe("the content type of a mutating request", () => {
 
   it("leaves GET alone — a body-less read has nothing to smuggle", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts`, {
+    expect((await fetch(`${base}/api/ghost`, {
       headers: { ...auth, "content-type": "text/plain" },
     })).status).toBe(200);
   });
@@ -193,10 +192,10 @@ describe("the content type of a mutating request", () => {
 describe("a replaced token file", () => {
   it("is not honored until the daemon restarts", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts`, { headers: auth })).status).toBe(200);
+    expect((await fetch(`${base}/api/ghost`, { headers: auth })).status).toBe(200);
     // The server holds the token it was built with; a client that read a
     // replaced file is presenting the wrong secret until then.
-    expect((await fetch(`${base}/api/ghosts`, {
+    expect((await fetch(`${base}/api/ghost`, {
       headers: { authorization: `Bearer ${OTHER_TOKEN}` },
     })).status).toBe(401);
   });

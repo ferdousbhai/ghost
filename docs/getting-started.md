@@ -110,7 +110,7 @@ To replace it, delete the file and `systemctl --user restart ghostd`.
 
 ## 4. Your ghost
 
-You have one ghost. The first time ghostd starts and finds no ghost home, it
+Each machine has one ghost. The first time ghostd starts and finds no ghost home, it
 makes `~/ghosts/ghost/` with a seeded `character.md`; `ghost status` prints the
 name. The directory name *is* the ghost's name. To use another (1–64
 characters of letters, digits, `.`, `_`, or `-`, starting with a letter or
@@ -179,9 +179,9 @@ answer. It continues the most recently updated conversation unless you pass
 conversation becomes its next turn, which is how a ghost's own background
 command reports back.
 
-The CLI talks to your one ghost (`$GHOST` names it in the ghost's own shell); the session is `-s`,
+The CLI talks to this machine's ghost; the session is `-s`,
 then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
-carries both variables. It never edits a ghost home directly: every change to
+carries that variable. It never edits a ghost home directly: every change to
 a ghost goes through the daemon, so the window shows the same conversations,
 and the reverse.
 

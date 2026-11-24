@@ -23,12 +23,12 @@ async function fakeDaemon(events: unknown[], resumed: unknown[] = []): Promise<{
       response.end(resumed.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
       return;
     }
-    if (request.method === "GET" && request.url === "/api/ghosts") {
+    if (request.method === "GET" && request.url === "/api/ghost") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
       return;
     }
-    if (request.method === "GET" && request.url === "/api/ghosts/casper/sessions") {
+    if (request.method === "GET" && request.url === "/api/sessions") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ sessions: [] }));
       return;
@@ -86,7 +86,7 @@ describe("ghost say", () => {
     const result = await runCli(["say", "hi", "--new"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("hello\n");
-    expect(fake.resumedFrom()).toMatch(/^\/api\/ghosts\/casper\/sessions\/cli-[^/]+\/stream\?turn=turn-1&from=2$/);
+    expect(fake.resumedFrom()).toMatch(/^\/api\/sessions\/cli-[^/]+\/stream\?turn=turn-1&from=2$/);
   });
 
   it("prints an owner !command's output, the turn's whole answer", async () => {
@@ -125,10 +125,10 @@ describe("ghost say", () => {
     let turn: import("node:http").ServerResponse | undefined;
     let stopped = "";
     server = createServer((request, response) => {
-      if (request.url === "/api/ghosts") {
+      if (request.url === "/api/ghost") {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
-      } else if (request.url === "/api/ghosts/casper/messages") {
+      } else if (request.url === "/api/messages") {
         turn = response;
         response.writeHead(200, { "content-type": "text/event-stream" });
         response.write(`data: ${JSON.stringify({ type: "start" })}\n\n`);
@@ -149,7 +149,7 @@ describe("ghost say", () => {
     while (!turn) await new Promise((resolve) => setTimeout(resolve, 5));
     process.emit("SIGINT", "SIGINT");
     const result = await running;
-    expect(stopped).toMatch(/^POST \/api\/ghosts\/casper\/sessions\/cli-[^/]+\/stop$/);
+    expect(stopped).toMatch(/^POST \/api\/sessions\/cli-[^/]+\/stop$/);
     expect(result.code).toBe(130);
   });
 
@@ -158,9 +158,9 @@ describe("ghost say", () => {
     server = createServer((request, response) => {
       requests.push(`${request.method} ${request.url}`);
       response.writeHead(200, { "content-type": "application/json" });
-      if (request.url === "/api/ghosts") {
+      if (request.url === "/api/ghost") {
         response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
-      } else if (request.url === "/api/ghosts/casper/sessions") {
+      } else if (request.url === "/api/sessions") {
         response.end(JSON.stringify({ sessions: [{ id: "remote-1", title: "Photo", updatedAt: new Date().toISOString(), messageCount: 2, pinned: false, unread: false, running: true }] }));
       } else {
         response.end(JSON.stringify({ stopped: true }));
@@ -172,7 +172,7 @@ describe("ghost say", () => {
     const result = await runCli(["stop", "-s", "remote-1"], { env: { GHOSTD_PORT: String(port) }, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
     expect(result.stdout).toBe("Stopped remote-1.\n");
-    expect(requests).toContain("POST /api/ghosts/casper/sessions/remote-1/stop");
+    expect(requests).toContain("POST /api/sessions/remote-1/stop");
   });
 
   it("emits every event as one JSON line", async () => {

@@ -67,7 +67,7 @@ describe("golden: session", () => {
     writeFileSync(join(stubBin, "recall"), "#!/bin/sh\nexit 0\n");
     chmodSync(join(stubBin, "recall"), 0o755);
     host = new SessionHost({
-      registry: temp.registry,
+      ghost: temp.ghost,
       ownerHome: temp.ownerHome,
       env: { PATH: `${stubBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: temp.ownerHome },
       ...answeredBy(harness),
@@ -82,7 +82,7 @@ describe("golden: session", () => {
     const prompts = ["Remember that I want short answers.", "What do you remember about me?"];
     for (const [index, prompt] of prompts.entries()) {
       const events: TurnEvent[] = [];
-      await host.runTurn("casper", {
+      await host.runTurn({
         sessionId: "conv-golden",
         prompt,
         emit: (event) => events.push(event),
@@ -101,7 +101,6 @@ describe("golden: session", () => {
         body: normalizer.json({
           prompt: call!.prompt,
           cwd: call!.cwd,
-          ghost: call!.ghost,
           session: call!.session,
         }),
       });
@@ -111,10 +110,10 @@ describe("golden: session", () => {
       });
     }
 
-    const listing = await host.listSessions("casper");
+    const listing = await host.listSessions();
     sections.push({ title: "conversation listing", body: normalizer.json(listing) });
 
-    const transcript = await host.readTranscript("casper", "conv-golden");
+    const transcript = await host.readTranscript("conv-golden");
     sections.push({ title: "rendered transcript", body: normalizer.json(transcript) });
 
     const conversation = conversationDir(ghostPaths(dir).sessionDir, "conv-golden");

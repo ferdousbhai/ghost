@@ -6,7 +6,6 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "./persona.js";
-import { GhostError } from "./errors.js";
 
 export interface Ghost {
   name: string;
@@ -14,30 +13,11 @@ export interface Ghost {
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
-/** The home a first start makes: the owner has one ghost, and a root without one gets this. */
-export const FIRST_GHOST_NAME = "ghost";
+/** The home a first start makes. */
+const FIRST_GHOST_NAME = "ghost";
 
-/**
- * Ghost names are both URL path segments and directory names, so the
- * character set is deliberately narrow: no separators, no leading dot, no
- * whitespace, no percent-encoding games.
- */
+/** A ghost home's directory name: no separators, no leading dot, no whitespace. */
 const GHOST_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
-export function isValidGhostName(name: string): boolean {
-  return GHOST_NAME_PATTERN.test(name);
-}
-
-export function assertValidGhostName(name: string): void {
-  if (!isValidGhostName(name)) {
-    throw new GhostError(
-      "invalid_name",
-      `Ghost names must be 1-64 characters of letters, digits, ".", "_", or "-", `
-        + `and may not start with a dot (got ${JSON.stringify(name)}).`,
-      400,
-    );
-  }
-}
 
 function isFile(path: string): boolean {
   try {
@@ -67,66 +47,25 @@ export function ghostPaths(dir: string): {
   };
 }
 
-export class GhostRegistry {
-  readonly root: string;
-
-  constructor(root: string) {
-    this.root = resolve(root);
+/**
+ * The machine's one ghost: the ghost home under `root`, made as `ghost` when
+ * there is none. Non-directories, dot-directories, and directories without a
+ * `character.md` are not homes: the root is a user directory and may hold
+ * anything. More than one home is refused rather than one being picked.
+ */
+export function theGhost(root: string): Ghost {
+  const base = resolve(root);
+  mkdirSync(base, { recursive: true });
+  const homes = readdirSync(base).filter((name) => GHOST_NAME_PATTERN.test(name) && isGhostHome(join(base, name))).sort();
+  if (homes.length > 1) {
+    throw new Error(`A machine has one ghost, and ${base} holds ${homes.length} (${homes.join(", ")}): move all but one away.`);
   }
-
-  ensureRoot(): void {
-    mkdirSync(this.root, { recursive: true });
-  }
-
-  /**
-   * Every ghost under the root, name-sorted. Non-directories, dot-directories
-   * (the daemon's own state), and directories without a `character.md` are
-   * skipped rather than reported as errors — the root is a user directory and
-   * may hold anything.
-   */
-  list(): Ghost[] {
-    let entries: string[];
-    try {
-      entries = readdirSync(this.root);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-    const ghosts: Ghost[] = [];
-    for (const name of entries) {
-      if (!isValidGhostName(name)) continue;
-      const dir = join(this.root, name);
-      if (!isGhostHome(dir)) continue;
-      ghosts.push({ name, dir });
-    }
-    return ghosts.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  get(name: string): Ghost {
-    assertValidGhostName(name);
-    const dir = join(this.root, name);
-    if (!isGhostHome(dir)) {
-      throw new GhostError("not_found", `No ghost named ${JSON.stringify(name)}.`, 404);
-    }
-    return { name, dir };
-  }
-
-  /**
-   * Create `<root>/<name>/` with a seeded `character.md`. Refuses to overwrite an existing ghost.
-   */
-  create(name: string): Ghost {
-    assertValidGhostName(name);
-    const dir = join(this.root, name);
-    if (isGhostHome(dir)) {
-      throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
-    }
+  const [name = FIRST_GHOST_NAME] = homes;
+  const dir = join(base, name);
+  if (homes.length === 0) {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
-      encoding: "utf8",
-      // Fail rather than clobber a character.md that appeared between the
-      // isGhostHome() check and here.
-      flag: "wx",
-    });
-    return { name, dir };
+    // Fail rather than clobber a character.md that appeared since the listing.
+    writeFileSync(join(dir, CHARACTER_FILENAME), SEEDED_CHARACTER(name), { encoding: "utf8", flag: "wx" });
   }
+  return { name, dir };
 }

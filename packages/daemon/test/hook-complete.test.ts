@@ -1,9 +1,9 @@
 /**
  * One completion for an owner command hook: `SessionHost.complete` behind
- * `POST /api/ghosts/:name/complete`, and `ghostd hook-complete`, which asks
+ * `POST /api/complete`, and `ghostd hook-complete`, which asks
  * its own daemon for it.
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -69,10 +69,9 @@ function localModel(reply: string) {
 
 function host(fakes: [FakeAnswerer] | [], options: Partial<SessionHostOptions> = {}): { sessions: SessionHost; home: string } {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   const home = seedGhost(temp.root, { name: "casper" });
   const sessions = new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     ...(fakes[0] ? answeredBy(fakes[0]) : {}),
     ...options,
@@ -87,17 +86,17 @@ describe("SessionHost.complete", () => {
     const fake = harness([{ events: [{ type: "text", block: "a", delta: "  APPROVE\n" }] }, { events: [] }]);
     const { sessions } = host([fake]);
 
-    await expect(sessions.complete("casper", "   ", signal())).rejects.toThrow(/non-empty/u);
-    await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
+    await expect(sessions.complete("   ", signal())).rejects.toThrow(/non-empty/u);
+    await expect(sessions.complete("Review this.", signal())).resolves.toBe("APPROVE");
     expect(fake.calls().map((call) => call.prompt)).toEqual(["Review this."]);
-    await expect(sessions.complete("casper", "Classify.", signal())).rejects.toMatchObject({ code: "completion_failed" });
+    await expect(sessions.complete("Classify.", signal())).rejects.toMatchObject({ code: "completion_failed" });
   });
 
   it("completes on the daemon's own local model, with no persona or tools", async () => {
     const local = localModel(" APPROVE ");
     const { sessions } = host([], { localModel: local.model });
 
-    await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
+    await expect(sessions.complete("Review this.", signal())).resolves.toBe("APPROVE");
     expect(local.prompts).toEqual([[{ role: "user", content: "Review this." }]]);
     expect(local.acquired()).toBe(1);
   });
@@ -108,14 +107,14 @@ describe("SessionHost.complete", () => {
     const hooks = new GhostHookRunner({
       commands: parseHooksDocument({ hooks: { session_stop: [{ hooks: [{ type: "command", command: "review" }] }] } }, "test"),
       commandRunner: async () => {
-        reviews.push(await sessions!.complete("casper", "Is the turn done?", signal()));
+        reviews.push(await sessions!.complete("Is the turn done?", signal()));
         return { exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };
       },
     });
     const fake = harness(replies("the answer", "APPROVE"));
     ({ sessions } = host([fake], { hooks }));
 
-    await sessions.runTurn("casper", { sessionId: "c1", prompt: "work", emit: () => {} });
+    await sessions.runTurn({ sessionId: "c1", prompt: "work", emit: () => {} });
     expect(reviews).toEqual(["APPROVE"]);
   });
 });
@@ -165,7 +164,7 @@ describe("ghostd hook-complete", () => {
     const host = daemon.host;
     const complete = host.complete.bind(host);
     let outcome: Promise<string> | null = null;
-    host.complete = (ghost, prompt, signal) => (outcome = complete(ghost, prompt, signal));
+    host.complete = (prompt, signal) => (outcome = complete(prompt, signal));
     const hang = new AbortController();
     const through = ((input: string | URL | Request, init?: RequestInit) => fetch(input, { ...init, signal: hang.signal })) as typeof fetch;
 
@@ -179,15 +178,9 @@ describe("ghostd hook-complete", () => {
     expect(existsSync(daemon.harness.calls()[0]!.cwd)).toBe(false);
   });
 
-  it("rejects a non-ghost home, a relative path, and an empty prompt before asking", async () => {
+  it("rejects an empty prompt before asking", async () => {
     daemon = await startTestDaemon();
-    const notHome = mkdtempSync(join(tmpdir(), "ghost-not-home-"));
-    dirs.push(notHome);
-    const home = join(daemon.temp.root, "casper");
-
-    expect((await run(JSON.stringify({ ghost_home: notHome, prompt: "x" }), daemon.env)).stderr).toMatch(/not a Ghost home/u);
-    expect((await run(JSON.stringify({ ghost_home: "ghosts/casper", prompt: "x" }), daemon.env)).stderr).toMatch(/absolute path/u);
-    expect((await run(JSON.stringify({ ghost_home: home, prompt: "   " }), daemon.env)).stderr).toMatch(/non-empty/u);
+    expect((await run(JSON.stringify({ prompt: "   " }), daemon.env)).stderr).toMatch(/non-empty/u);
     expect(daemon.harness.calls()).toEqual([]);
   });
 
@@ -204,11 +197,11 @@ describe("ghostd hook-complete", () => {
 });
 
 describe("parseHookCompleteInput", () => {
-  it("takes string ghost_home and prompt from a JSON object and refuses anything else", () => {
+  it("takes a string prompt from a JSON object and refuses anything else", () => {
     expect(parseHookCompleteInput('{"ghost_home":"/g/casper","prompt":"hi","extra":1}'))
-      .toEqual({ ghost_home: "/g/casper", prompt: "hi" });
+      .toEqual({ prompt: "hi" });
     expect(() => parseHookCompleteInput("not json")).toThrow(/not valid JSON/u);
     expect(() => parseHookCompleteInput("[]")).toThrow(/JSON object/u);
-    expect(() => parseHookCompleteInput('{"ghost_home":"/g","prompt":7}')).toThrow(/string ghost_home and prompt/u);
+    expect(() => parseHookCompleteInput('{"ghost_home":"/g","prompt":7}')).toThrow(/string prompt/u);
   });
 });

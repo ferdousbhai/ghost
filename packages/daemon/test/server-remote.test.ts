@@ -31,13 +31,12 @@ async function serve(
   remoteApps?: readonly string[],
 ): Promise<string> {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome });
+  host = new SessionHost({ ghost: temp.ghost, ownerHome: temp.ownerHome });
   listening = await startDaemonServer({
-    registry: temp.registry,
+    ghost: temp.ghost,
     host,
-    ...serverServices(temp.registry),
+    ...serverServices(temp.root),
     port: 0,
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", guests: "read-only", ...remote }),
@@ -103,24 +102,22 @@ async function serveFake(enabled: boolean): Promise<{ fake: FakeRemoteServe; bas
 describe("tailnet identity", () => {
   it("admits the owner fully and guests read-only", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts`)).status).toBe(401);
+    expect((await fetch(`${base}/api/ghost`)).status).toBe(401);
 
     const guest = await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("guest@example.com") });
     expect(await guest.json()).toEqual({ role: "guest" });
-    const guestGhosts = await fetch(`${base}/api/ghosts`, { headers: asTailnet("guest@example.com") });
+    const guestGhosts = await fetch(`${base}/api/ghost`, { headers: asTailnet("guest@example.com") });
     expect(guestGhosts.status).toBe(200);
-    // A guest sees names, never a ghost home's path; the owner sees both.
-    expect(await guestGhosts.json()).toEqual([{ name: "casper" }]);
-    const ownerGhosts = await (await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).json() as unknown[];
-    expect(ownerGhosts[0]).toHaveProperty("dir");
-    const write = await fetch(`${base}/api/ghosts/casper/character`, {
+    // The name, never the ghost home's path.
+    expect(await guestGhosts.json()).toEqual({ name: "casper" });
+    const write = await fetch(`${base}/api/character`, {
       method: "PUT",
       headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
       body: JSON.stringify({ body: "# Intruder\n" }),
     });
     expect(write.status).toBe(403);
     expect(await write.json()).toMatchObject({ error: { code: "read_only" } });
-    const attach = await fetch(`${base}/api/ghosts/casper/sessions/remote-1/attachments`, {
+    const attach = await fetch(`${base}/api/sessions/remote-1/attachments`, {
       method: "POST",
       headers: { ...asTailnet("guest@example.com"), "content-type": "image/png" },
       body: Buffer.from("89504e47", "hex"),
@@ -129,13 +126,13 @@ describe("tailnet identity", () => {
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
       .toEqual({ role: "owner" });
-    const ownerWrite = await fetch(`${base}/api/ghosts/casper/character`, {
+    const ownerWrite = await fetch(`${base}/api/character`, {
       method: "PUT",
       headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json" },
       body: JSON.stringify({ body: "# Casper\n" }),
     });
     expect(ownerWrite.status).toBe(200);
-    expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com", { origin: "https://evil.example" }) })).status).toBe(403);
+    expect((await fetch(`${base}/api/ghost`, { headers: asTailnet("owner@example.com", { origin: "https://evil.example" }) })).status).toBe(403);
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: { authorization: `Bearer ${TOKEN}` } })).json())
       .toEqual({ role: "owner" });
@@ -173,7 +170,7 @@ describe("tailnet identity", () => {
       expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
     }
     // Owner-only writes need no route guard: every guest write is refused first.
-    for (const path of ["/api/ghosts/casper/complete", "/api/ghosts/casper/messages"]) {
+    for (const path of ["/api/complete", "/api/messages"]) {
       const guest = await fetch(`${base}${path}`, {
         method: "POST",
         headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },
@@ -186,14 +183,14 @@ describe("tailnet identity", () => {
 
   it("honours guests: none and a configured owner login", async () => {
     const base = await serve({ guests: "none", owner: "guest@example.com" });
-    expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).status).toBe(401);
+    expect((await fetch(`${base}/api/ghost`, { headers: asTailnet("owner@example.com") })).status).toBe(401);
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("guest@example.com") })).json())
       .toMatchObject({ role: "owner" });
   });
 
   it("admits no identity when the server has no RemoteAccess", async () => {
     const base = await serve(null);
-    expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).status).toBe(401);
+    expect((await fetch(`${base}/api/ghost`, { headers: asTailnet("owner@example.com") })).status).toBe(401);
   });
 
   it("serves no page: everything outside /api is a 404", async () => {
@@ -207,7 +204,7 @@ describe("tailnet identity", () => {
 
   it("refuses a page on the tailnet host itself: only remote.apps are origins", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`, {
+    const response = await fetch(`${base}/api/ghost`, {
       headers: asTailnet("owner@example.com", { origin: "https://ghostbox.example.ts.net", host: "ghostbox.example.ts.net" }),
     });
     expect(response.status).toBe(403);
@@ -263,13 +260,13 @@ describe("a web app in remote.apps", () => {
 
   it("is admitted by tailnet identity, with CORS for its origin", async () => {
     const base = await serve({}, undefined, undefined, [APP]);
-    const owner = await fetch(`${base}/api/ghosts`, { headers: fromApp("owner@example.com") });
+    const owner = await fetch(`${base}/api/ghost`, { headers: fromApp("owner@example.com") });
     expect(owner.status).toBe(200);
     expect(owner.headers.get("access-control-allow-origin")).toBe(APP);
     expect(owner.headers.get("vary")).toBe("origin");
     expect(owner.headers.get("access-control-allow-credentials")).toBeNull();
 
-    const anonymous = await fetch(`${base}/api/ghosts`, { headers: fromApp(null) });
+    const anonymous = await fetch(`${base}/api/ghost`, { headers: fromApp(null) });
     expect(anonymous.status).toBe(401);
     expect(anonymous.headers.get("access-control-allow-origin")).toBe(APP);
   });
@@ -277,7 +274,7 @@ describe("a web app in remote.apps", () => {
   it("refuses the bearer token from an app origin, even the right one", async () => {
     const base = await serve({}, undefined, undefined, [APP]);
     for (const headers of [fromApp(null, { authorization: `Bearer ${TOKEN}` }), fromApp("owner@example.com", { authorization: `Bearer ${TOKEN}` })]) {
-      const response = await fetch(`${base}/api/ghosts`, { headers });
+      const response = await fetch(`${base}/api/ghost`, { headers });
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({ error: { code: "app_token_refused" } });
     }
@@ -285,7 +282,7 @@ describe("a web app in remote.apps", () => {
 
   it("answers the preflight with the app's methods and headers, and private network when asked", async () => {
     const base = await serve({}, undefined, undefined, [APP]);
-    const preflight = await fetch(`${base}/api/ghosts/casper/messages`, {
+    const preflight = await fetch(`${base}/api/messages`, {
       method: "OPTIONS",
       headers: { origin: APP, "access-control-request-method": "POST", "access-control-request-private-network": "true" },
     });
@@ -295,14 +292,14 @@ describe("a web app in remote.apps", () => {
     expect(preflight.headers.get("access-control-allow-headers")).toBe("content-type");
     expect(preflight.headers.get("access-control-allow-private-network")).toBe("true");
 
-    const plain = await fetch(`${base}/api/ghosts`, { method: "OPTIONS", headers: { origin: APP } });
+    const plain = await fetch(`${base}/api/ghost`, { method: "OPTIONS", headers: { origin: APP } });
     expect(plain.headers.get("access-control-allow-private-network")).toBeNull();
   });
 
   it("keeps a guest calling through the app read-only", async () => {
     const base = await serve({}, undefined, undefined, [APP]);
-    expect((await fetch(`${base}/api/ghosts`, { headers: fromApp("guest@example.com") })).status).toBe(200);
-    const write = await fetch(`${base}/api/ghosts`, {
+    expect((await fetch(`${base}/api/ghost`, { headers: fromApp("guest@example.com") })).status).toBe(200);
+    const write = await fetch(`${base}/api/ghost`, {
       method: "POST",
       headers: fromApp("guest@example.com", { "content-type": "application/json" }),
       body: JSON.stringify({ name: "wraith" }),
@@ -313,7 +310,7 @@ describe("a web app in remote.apps", () => {
   it("is an ordinary foreign origin when not listed, or when remote.apps is empty", async () => {
     for (const apps of [["https://lab.summonghost.com"], []]) {
       const base = await serve({}, undefined, undefined, apps);
-      const response = await fetch(`${base}/api/ghosts`, { headers: fromApp("owner@example.com") });
+      const response = await fetch(`${base}/api/ghost`, { headers: fromApp("owner@example.com") });
       expect(response.status, JSON.stringify(apps)).toBe(403);
       expect(await response.json()).toMatchObject({ error: { code: "forbidden_origin" } });
       expect(response.headers.get("access-control-allow-origin")).toBeNull();
@@ -325,11 +322,10 @@ describe("a web app in remote.apps", () => {
 describe("the summonghost.com app's routes", () => {
   it("answers each one the app calls, admitted by tailnet identity alone", async () => {
     temp = makeTempGhosts();
-    temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
-    host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...answeredBy(fakeAnswerer(replies("hello"))) });
+    host = new SessionHost({ ghost: temp.ghost, ownerHome: temp.ownerHome, ...answeredBy(fakeAnswerer(replies("hello"))) });
     listening = await startDaemonServer({
-      registry: temp.registry, host, ...serverServices(temp.registry), port: 0, apiToken: TOKEN,
+      ghost: temp.ghost, host, ...serverServices(temp.root), port: 0, apiToken: TOKEN,
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }),
       remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
       remoteApps: [APP],
@@ -338,24 +334,24 @@ describe("the summonghost.com app's routes", () => {
     const owner = { origin: APP, ...asTailnet("owner@example.com") };
     const json = { ...owner, "content-type": "application/json" };
     const call = (path: string, init: RequestInit = {}) => fetch(`${base}${path}`, { headers: owner, ...init });
-    const conversation = "/ghosts/casper/sessions/app-1";
+    const conversation = "/sessions/app-1";
 
     expect(await (await call("/remote/whoami")).json()).toEqual({ role: "owner" });
     expect((await call("/remote/machines")).status).toBe(200);
-    expect((await call("/ghosts")).status).toBe(200);
+    expect((await call("/ghost")).status).toBe(200);
     const events = new AbortController();
     // An EventSource stays open, so this one is read with the streaming fetch.
-    const stream = await globalThis.fetch(`${base}/ghosts/casper/events`, { headers: owner, signal: events.signal });
+    const stream = await globalThis.fetch(`${base}/events`, { headers: owner, signal: events.signal });
     expect(stream.status).toBe(200);
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     expect(stream.headers.get("access-control-allow-origin")).toBe(APP);
     events.abort();
     await stream.body?.cancel().catch(() => {});
 
-    const turn = await call("/ghosts/casper/messages", { method: "POST", headers: json, body: JSON.stringify({ prompt: "hi", sessionId: "app-1" }) });
+    const turn = await call("/messages", { method: "POST", headers: json, body: JSON.stringify({ prompt: "hi", sessionId: "app-1" }) });
     expect(turn.status).toBe(200);
     expect(await turn.text()).toContain("hello");
-    expect(await (await call("/ghosts/casper/sessions")).json()).toMatchObject({ sessions: [{ id: "app-1" }] });
+    expect(await (await call("/sessions")).json()).toMatchObject({ sessions: [{ id: "app-1" }] });
     const transcript = await (await call(`${conversation}/transcript`)).json() as { readThrough: string };
     expect((await call(`${conversation}/transcript?offset=0`)).status).toBe(200);
     expect((await call(`${conversation}/read`, { method: "PUT", headers: json, body: JSON.stringify({ readThrough: transcript.readThrough }) })).status).toBe(200);

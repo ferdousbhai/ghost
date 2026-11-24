@@ -32,13 +32,13 @@ describe("RemoteServe status", () => {
 
   it("links a conversation in the first app only while there is an app link", async () => {
     const linked = new RemoteServe(7717, { run: fakeTailscale({ https: true }).run, apps: ["https://summonghost.com"] });
-    expect(await linked.conversationUrl("casper", "c 1"))
-      .toBe("https://summonghost.com/#/ghostbox.example.ts.net/casper/c%201");
+    expect(await linked.conversationUrl("c 1"))
+      .toBe("https://summonghost.com/#/ghostbox.example.ts.net/c%201");
     for (const serve of [
       new RemoteServe(7717, { run: fakeTailscale({ https: true }).run, apps: [] }),
       new RemoteServe(7717, { run: fakeTailscale({ certs: false, http: true }).run, apps: ["https://summonghost.com"] }),
       new RemoteServe(7717, { run: fakeTailscale().run, apps: ["https://summonghost.com"] }),
-    ]) expect(await serve.conversationUrl("casper", "c1")).toBeNull();
+    ]) expect(await serve.conversationUrl("c1")).toBeNull();
   });
 
   it("reports a plain-HTTP entry an earlier version wrote as off, since no app can use it", async () => {

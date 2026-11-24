@@ -18,7 +18,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GhostRegistry } from "../../src/ghosts.js";
+import { theGhost } from "../../src/ghosts.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
 import type { TurnEvent } from "../../src/turn-events.js";
@@ -276,22 +276,21 @@ export async function startRealDaemonHarness(
   let listening: ListeningServer | null = null;
   const clients = new Set<RealSseClient>();
   try {
-    const registry = new GhostRegistry(ghostsRoot);
-    registry.ensureRoot();
     const fake = fakeAnswerer(options.turns);
     harness = fake;
     const ghostName = options.ghostName ?? "casper";
     const ghostHome = seedGhost(ghostsRoot, { name: ghostName });
+    const ghost = theGhost(ghostsRoot);
     host = new SessionHost({
-      registry,
+      ghost,
       ownerHome: disposableHome,
       env: { ...process.env },
       ...answeredBy(fake),
     });
     listening = await startDaemonServer({
-      registry,
+      ghost,
       host,
-      ...serverServices(registry),
+      ...serverServices(ghostsRoot),
       port: 0,
       apiToken: API_TOKEN,
     });
@@ -350,7 +349,7 @@ export async function startRealDaemonHarness(
     };
 
     const startTurn = async (sessionId: string, prompt: string): Promise<RealSseClient> => {
-      const path = `/api/ghosts/${encodeURIComponent(ghostName)}/messages`;
+      const path = "/api/messages";
       const payload = JSON.stringify({
         model: `ghost/${ghostName}`,
         prompt,

@@ -55,7 +55,6 @@ function makeScratch(): string {
 function host(script: Reply[], codingAgent: string | null = null) {
   temp?.cleanup();
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper", character: "# Casper\n" });
   const notes = join(temp.ownerHome, "Documents", "Notes");
   mkdirSync(notes, { recursive: true });
@@ -63,7 +62,7 @@ function host(script: Reply[], codingAgent: string | null = null) {
   const server = fakeServer(script);
   closers.push(server.close);
   const sessions = new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     codingAgent: async () => codingAgent,
     env: { ...process.env, HOME: temp.ownerHome, PATH: `${dirname(process.execPath)}:/usr/bin` },
@@ -74,7 +73,7 @@ function host(script: Reply[], codingAgent: string | null = null) {
 
 async function turn(sessions: SessionHost, prompt: string): Promise<TurnEvent[]> {
   const events: TurnEvent[] = [];
-  await sessions.runTurn("casper", { sessionId: "c1", prompt, emit: (event) => events.push(event) });
+  await sessions.runTurn({ sessionId: "c1", prompt, emit: (event) => events.push(event) });
   return events;
 }
 

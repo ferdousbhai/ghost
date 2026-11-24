@@ -16,7 +16,7 @@ stand_in_home() {
   export HOME=$root/home
   export XDG_CONFIG_HOME=$root/config XDG_STATE_HOME=$root/state XDG_DATA_HOME=$root/data XDG_CACHE_HOME=$root/cache
   export GHOSTS_ROOT=$root/ghosts
-  unset GHOSTD_CONFIG GHOSTD_HOOKS GHOSTD_API_TOKEN_FILE GHOSTD_PORT GHOST GHOST_SESSION XDG_DOCUMENTS_DIR
+  unset GHOSTD_CONFIG GHOSTD_HOOKS GHOSTD_API_TOKEN_FILE GHOSTD_PORT GHOST_SESSION XDG_DOCUMENTS_DIR
 
   # Sample data in the products' documented folders.
   mkdir -p "$HOME/Documents/Notes" "$HOME/Documents/Reminders" "$HOME/Downloads" \
@@ -80,7 +80,7 @@ stand_in_ghostd() {
   daemon_pid=$!
   local token_file=$XDG_STATE_HOME/ghost/api-token
   for _ in {1..100}; do
-    [[ -s $token_file ]] && curl -fsS -o /dev/null -H "Authorization: Bearer $(cat "$token_file")" "http://127.0.0.1:$port/api/ghosts" 2>/dev/null && break
+    [[ -s $token_file ]] && curl -fsS -o /dev/null -H "Authorization: Bearer $(cat "$token_file")" "http://127.0.0.1:$port/api/ghost" 2>/dev/null && break
     kill -0 "$daemon_pid" 2>/dev/null || { echo "stand-in: ghostd exited" >&2; sed -n '1,40p' "$root/ghostd.log" >&2; exit 1; }
     sleep 0.1
   done

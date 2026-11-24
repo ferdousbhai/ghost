@@ -22,18 +22,17 @@ afterEach(async () => {
 
 async function setup(streamCutBytes?: number): Promise<string> {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   harness = fakeAnswerer(replies("hello"));
   seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     ...answeredBy(harness),
   });
   listening = await startDaemonServer({
-    registry: temp.registry,
+    ghost: temp.ghost,
     host,
-    ...serverServices(temp.registry),
+    ...serverServices(temp.root),
     port: 0,
     apiToken: null,
     streamCutBytes,
@@ -48,7 +47,7 @@ const TURN_BODY = {
 };
 
 async function postTurn(base: string): Promise<void> {
-  const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+  const response = await fetch(`${base}/api/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream" },
     body: JSON.stringify(TURN_BODY),
@@ -96,40 +95,39 @@ async function nextEvent(
 describe("conversation unread state", () => {
   it("starts unread, marks read, then becomes unread after a newer turn", async () => {
     await setup();
-    await host!.runTurn("casper", {
+    await host!.runTurn({
       sessionId: "conv-1",
       prompt: "first",
       emit: () => {},
     });
-    let row = (await host!.listSessions("casper"))[0]!;
+    let row = (await host!.listSessions())[0]!;
     expect(row.unread).toBe(true);
 
     await host!.markRead(
-      "casper",
       row.id,
       new Date(Date.parse(row.updatedAt) + 1),
     );
-    row = (await host!.listSessions("casper"))[0]!;
+    row = (await host!.listSessions())[0]!;
     expect(row.unread).toBe(false);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await host!.runTurn("casper", {
+    await host!.runTurn({
       sessionId: "conv-1",
       prompt: "second",
       emit: () => {},
     });
-    expect((await host!.listSessions("casper"))[0]).toMatchObject({
+    expect((await host!.listSessions())[0]).toMatchObject({
       id: "conv-1",
       unread: true,
     });
   });
 });
 
-describe("GET /api/ghosts/:name/events", () => {
+describe("GET /api/events", () => {
   it("pushes small invalidations for turns and read changes", async () => {
     const base = await setup();
     const controller = new AbortController();
-    const response = await fetch(`${base}/api/ghosts/casper/events`, {
+    const response = await fetch(`${base}/api/events`, {
       headers: { accept: "text/event-stream" },
       signal: controller.signal,
     });
@@ -142,12 +140,12 @@ describe("GET /api/ghosts/:name/events", () => {
       type: "conversation-updated",
       id: "conv-1",
     });
-    let listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    let listing = await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(true);
 
-    const marked = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/read`, {
+    const marked = await fetch(`${base}/api/sessions/conv-1/read`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -157,7 +155,7 @@ describe("GET /api/ghosts/:name/events", () => {
       type: "conversation-updated",
       id: "conv-1",
     });
-    listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    listing = await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(false);
@@ -168,16 +166,16 @@ describe("GET /api/ghosts/:name/events", () => {
 
   it("rotates bounded responses and lets a reconnect fetch current state", async () => {
     const base = await setup(150);
-    const response = await fetch(`${base}/api/ghosts/casper/events`);
+    const response = await fetch(`${base}/api/events`);
     await postTurn(base);
     const body = await response.text();
     expect(body).toContain("conversation-updated");
     const internals = host as unknown as { listeners: Map<string, Set<unknown>> };
-    expect(internals.listeners.has("casper")).toBe(false);
+    expect(internals.listeners.size > 0).toBe(false);
     const controller = new AbortController();
-    const reconnected = await fetch(`${base}/api/ghosts/casper/events`, { signal: controller.signal });
+    const reconnected = await fetch(`${base}/api/events`, { signal: controller.signal });
     expect(reconnected.status).toBe(200);
-    expect((await host!.listSessions("casper"))[0]).toMatchObject({ id: "conv-1", running: false });
+    expect((await host!.listSessions())[0]).toMatchObject({ id: "conv-1", running: false });
     controller.abort();
     await expect(reconnected.body!.getReader().closed).rejects.toBeDefined();
   });
@@ -185,7 +183,7 @@ describe("GET /api/ghosts/:name/events", () => {
   it("starts no turn and unregisters a dropped client", async () => {
     const base = await setup();
     const controller = new AbortController();
-    const response = await fetch(`${base}/api/ghosts/casper/events`, {
+    const response = await fetch(`${base}/api/events`, {
       signal: controller.signal,
     });
     const internals = host as unknown as {
@@ -193,16 +191,16 @@ describe("GET /api/ghosts/:name/events", () => {
       listeners: Map<string, Set<unknown>>;
     };
     expect(internals.live.size).toBe(0);
-    expect(internals.listeners.get("casper")?.size).toBe(1);
+    expect(internals.listeners.size).toBe(1);
 
     controller.abort();
     await expect(response.body!.getReader().closed).rejects.toBeDefined();
     // The server sees the dropped socket on its own schedule.
     const deadline = Date.now() + 2_000;
-    while (internals.listeners.has("casper") && Date.now() < deadline) {
+    while (internals.listeners.size > 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    expect(internals.listeners.has("casper")).toBe(false);
+    expect(internals.listeners.size > 0).toBe(false);
     expect(internals.live.size).toBe(0);
   });
 });

@@ -25,7 +25,6 @@ export interface FakeCall {
   /** The prompt without the conversation so far that every pass is handed. */
   readonly message: string;
   readonly cwd: string;
-  readonly ghost: string | null;
   readonly session: string | null;
   readonly persona: string;
   readonly codingAgent: string | null;
@@ -62,7 +61,7 @@ export function fakeAnswerer(turns: readonly FakeTurn[]): FakeAnswerer {
       async turn(input) {
         calls.push({
           n: calls.length, prompt: input.prompt, message: input.prompt.replace(/^<conversation-so-far>\n[\s\S]*\n<\/conversation-so-far>\n\n/u, ""), cwd: input.cwd, persona: input.persona, codingAgent: input.codingAgent,
-          ghost: input.env.GHOST ?? null, session: input.env.GHOST_SESSION ?? null,
+          session: input.env.GHOST_SESSION ?? null,
         });
         const turn = next();
         await held(turn, input.signal);
@@ -70,7 +69,7 @@ export function fakeAnswerer(turns: readonly FakeTurn[]): FakeAnswerer {
         if (turn.fail !== undefined) throw new Error(turn.fail);
       },
       async complete(prompt, signal) {
-        calls.push({ n: calls.length, prompt, message: prompt, cwd: "", persona: "", codingAgent: null, ghost: null, session: null });
+        calls.push({ n: calls.length, prompt, message: prompt, cwd: "", persona: "", codingAgent: null, session: null });
         const turn = next();
         await held(turn, signal);
         if (turn.fail !== undefined) throw new Error(turn.fail);

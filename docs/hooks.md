@@ -150,8 +150,8 @@ informational notification alone is not.
 
 Trusted command hooks that need a classifier can invoke
 `ghostd hook-complete`. It reads
-`{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin, asks the
-daemon that owns that home (`POST /api/ghosts/:name/complete`, at the port and
+`{ "prompt": "..." }` from stdin (other fields are ignored), asks the
+daemon (`POST /api/complete`, at the port and
 token a hook's environment names), and returns `{ "text": "..." }`: one
 completion on the daemon's own loaded [local model](../CONTRACTS.md#local-model), with no persona,
 conversation, or tools, so a hook's prompt stays on the machine. It is
@@ -191,7 +191,7 @@ An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
 
 `outcome` is `done` or `error`; `title` is at most 160 characters and the
 whitespace-normalized `excerpt` at most 280. `url` opens the conversation in the first
-`remote.apps` app (`<origin>/#/<hostname>/<ghost>/<id>`, each segment
+`remote.apps` app (`<origin>/#/<hostname>/<id>`, each segment
 URI-encoded), never a bearer token; it is null while remote access is off, or
 when `remote.apps` is `[]`, and with no `turn_end` handler Ghost never looks
 it up. Failed turns use the failure message. Handlers run in order,

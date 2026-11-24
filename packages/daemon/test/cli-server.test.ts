@@ -40,14 +40,13 @@ async function cli(argv: string[], overrides: { env?: NodeJS.ProcessEnv } = {}) 
 }
 
 describe("ghost CLI against a real daemon server", () => {
-  it("addresses the machine's one ghost with no flag, and $GHOST names it from a ghost's shell", async () => {
+  it("addresses the machine's one ghost with no flag", async () => {
     const sessions = await cli(["sessions", "--json"]);
     expect(sessions).toMatchObject({ code: 0 });
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
       expect.objectContaining({ id: "conv-1" }),
     ]);
-    expect(await cli(["sessions", "-q"], { env: { ...env, GHOST: "casper" } })).toMatchObject({ code: 0, stdout: "conv-1\n" });
-    expect(await cli(["sessions"], { env: { ...env, GHOST: "nobody" } })).toMatchObject({ code: 5 });
+    expect(await cli(["sessions", "-q"], { env: { ...env } })).toMatchObject({ code: 0, stdout: "conv-1\n" });
     for (const verb of [["list"], ["new", "probe"], ["use", "casper"], ["rename", "wisp"]]) {
       expect(await cli(verb), verb.join(" ")).toMatchObject({ code: 2, stderr: expect.stringContaining("Unknown command") });
     }
@@ -91,17 +90,17 @@ describe("ghost CLI against a real daemon server", () => {
   it("says into a conversation no message has landed in yet, addressed as given", async () => {
     const said = await cli(["say", "-s", "fresh-1", "-q", "hi"]);
     expect(said.code, said.stderr).toBe(0);
-    expect((await host.listSessions("casper")).map((row) => row.id)).toContain("fresh-1");
+    expect((await host.listSessions()).map((row) => row.id)).toContain("fresh-1");
   });
 
   it("trashes a conversation only when named with -s, behind --yes", async () => {
     expect(await cli(["rm", "-s", "conv-1"])).toMatchObject({ code: 2, stderr: expect.stringContaining("requires --yes") });
     expect(await cli(["rm", "--yes"])).toMatchObject({ code: 2, stderr: expect.stringContaining("needs -s <id>") });
     expect(await cli(["rm", "casper", "--yes"])).toMatchObject({ code: 2 });
-    expect((await host.listSessions("casper")).map((row) => row.id)).toEqual(["conv-1"]);
+    expect((await host.listSessions()).map((row) => row.id)).toEqual(["conv-1"]);
     expect(await cli(["rm", "-s", "conv-1", "--yes"])).toMatchObject({ code: 0, stdout: "Trashed conv-1.\n" });
-    expect(await host.listSessions("casper")).toEqual([]);
-    expect(temp.registry.get("casper").name).toBe("casper");
+    expect(await host.listSessions()).toEqual([]);
+    expect(temp.ghost.name).toBe("casper");
   });
 
   it("refuses a flag on a verb that does not take it", async () => {
@@ -128,7 +127,7 @@ describe("ghost CLI against a real daemon server", () => {
       return response;
     };
     const result = await runCli(["sessions", "-q"], {
-      env: { ...env, GHOST: "casper" },
+      env: { ...env },
       home: temp.ownerHome,
       fetch: retryingFetch,
     });

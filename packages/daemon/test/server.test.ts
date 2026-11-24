@@ -58,18 +58,17 @@ async function serve(
   } = {},
 ) {
   temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   harness = fakeAnswerer(turns);
   seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     ...answeredBy(harness),
   });
   listening = await startDaemonServer({
-    registry: temp.registry,
+    ghost: temp.ghost,
     host,
-    ...serverServices(temp.registry),
+    ...serverServices(temp.root),
     port: 0,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
@@ -108,7 +107,7 @@ async function postTurn(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<{ status: number; headers: Headers; events: TurnEvent[]; raw: string }> {
-  const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+  const response = await fetch(`${base}/api/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream", ...headers },
     body: JSON.stringify(body),
@@ -134,14 +133,12 @@ const turnBody = (sessionId: string, prompt = "Who are you?") => ({
   sessionId,
 });
 
-describe("GET /api/ghosts", () => {
-  it("lists ghosts with name and dir", async () => {
+describe("GET /api/ghost", () => {
+  it("names the machine's one ghost", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts`);
+    const response = await fetch(`${base}/api/ghost`);
     expect(response.status).toBe(200);
-    const ghosts = await response.json() as Array<Record<string, string>>;
-    expect(ghosts).toHaveLength(1);
-    expect(ghosts[0]).toEqual({ name: "casper", dir: join(temp!.root, "casper") });
+    expect(await response.json()).toEqual({ name: "casper" });
   });
 });
 
@@ -203,11 +200,11 @@ describe("/api/hooks/config", () => {
   });
 });
 
-describe("/api/ghosts/:name/character", () => {
+describe("/api/character", () => {
   it("round-trips the persona file and refuses an oversize write", async () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
-    const route = `${base}/api/ghosts/casper/character`;
+    const route = `${base}/api/character`;
     const put = (body: unknown) => fetch(route, {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -244,7 +241,7 @@ describe("/api/ghosts/:name/character", () => {
     const ghostDir = join(temp!.root, "casper");
     writeFileSync(join(ghostDir, "character.md"), "y".repeat(20_400), "utf8");
 
-    const read = await fetch(`${base}/api/ghosts/casper/character`);
+    const read = await fetch(`${base}/api/character`);
     expect(read.status).toBe(200);
     const body = await read.json() as { body: string; limit: number };
     expect(body.body.length).toBe(20_400);
@@ -252,7 +249,7 @@ describe("/api/ghosts/:name/character", () => {
   });
 });
 
-describe("POST /api/ghosts/:name/messages admission", () => {
+describe("POST /api/messages admission", () => {
   it("refuses a second turn in an answering conversation before SSE, and admits it after", async () => {
     const { base, release } = await serveHeld();
     const first = postTurn(base, turnBody("conv-busy", "hold this turn"));
@@ -283,7 +280,7 @@ describe("session Connect routes", () => {
     const base = await serve();
     const segment = "conv-connect";
     for (const route of ["live", "collab"]) {
-      const url = `${base}/api/ghosts/casper/sessions/${segment}/${route}`;
+      const url = `${base}/api/sessions/${segment}/${route}`;
       expect((await fetch(url)).status).toBe(404);
       const posted = await fetch(url, {
         method: "POST",
@@ -295,7 +292,7 @@ describe("session Connect routes", () => {
   });
 });
 
-describe("POST /api/ghosts/:name/messages", () => {
+describe("POST /api/messages", () => {
   it("streams one well-formed turn", async () => {
     const base = await serve([{
       events: [
@@ -342,7 +339,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const responses: Array<Array<TurnEvent | TurnResumeEvent>> = [first.events];
     for (let last = responses.at(-1)?.at(-1); last?.type === "resume"; last = responses.at(-1)?.at(-1)) {
       const { turn, from } = last;
-      const response = await fetch(`${base}/api/ghosts/casper/sessions/${TURN_BODY.sessionId}/stream?turn=${turn}&from=${from}`);
+      const response = await fetch(`${base}/api/sessions/${TURN_BODY.sessionId}/stream?turn=${turn}&from=${from}`);
       expect(response.status).toBe(200);
       responses.push(parseSseStream(await response.text()));
     }
@@ -366,7 +363,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     try {
       const { events } = await postTurn(base, TURN_BODY);
       expect(events).toEqual([{ type: "error", reason: "error", errorMessage: "Could not retain the turn stream; read the transcript." }]);
-      await vi.waitFor(() => expect(host!.queuedMessages("casper", TURN_BODY.sessionId).streaming).toBe(false));
+      await vi.waitFor(() => expect(host!.queuedMessages(TURN_BODY.sessionId).streaming).toBe(false));
     } finally { failure.mockRestore(); }
   });
 
@@ -390,7 +387,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const pending = postTurn(base, TURN_BODY);
     await vi.waitFor(() => {
       expect(dataWrites).toBe(1);
-      expect(host!.queuedMessages("casper", TURN_BODY.sessionId).streaming).toBe(false);
+      expect(host!.queuedMessages(TURN_BODY.sessionId).streaming).toBe(false);
     });
     blocked = false;
     response!.emit("drain");
@@ -404,7 +401,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const { events } = await postTurn(base, TURN_BODY);
     const { turn } = events.at(-1) as unknown as TurnResumeEvent;
     const stream = (query: string, session = TURN_BODY.sessionId) =>
-      fetch(`${base}/api/ghosts/casper/sessions/${session}/stream?${query}`);
+      fetch(`${base}/api/sessions/${session}/stream?${query}`);
     const unknown = await stream("turn=nope&from=0");
     expect(unknown.status).toBe(404);
     expect(((await unknown.json()) as { error: { code: string } }).error.code).toBe("turn_not_found");
@@ -421,7 +418,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     }]);
     const { events } = await postTurn(base, TURN_BODY);
     expect(events.some((event) => event.type === "thinking")).toBe(true);
-    const transcript = await (await fetch(`${base}/api/ghosts/casper/sessions/${TURN_BODY.sessionId}/transcript`)).text();
+    const transcript = await (await fetch(`${base}/api/sessions/${TURN_BODY.sessionId}/transcript`)).text();
     expect(transcript).toContain("Answer.");
     expect(transcript).not.toContain("private reasoning");
   });
@@ -437,7 +434,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const base = await serve(replies("one", "two"));
     await postTurn(base, TURN_BODY);
     await postTurn(base, { ...TURN_BODY, sessionId: "conv-2" });
-    const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    const { sessions } = await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: unknown[];
     };
     expect(sessions).toHaveLength(2);
@@ -463,7 +460,7 @@ describe("POST /api/ghosts/:name/messages", () => {
 
   it("rejects a malformed turn body with a client error", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
+    const response = await fetch(`${base}/api/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ prompt: "" }),
@@ -486,8 +483,8 @@ function terminalCount(events: readonly TurnEvent[]): number {
   return events.filter((event) => event.type === "done" || event.type === "error").length;
 }
 
-describe("/api/ghosts/:name/sessions/:id/queue", () => {
-  const queueUrl = (base: string, id: string) => `${base}/api/ghosts/casper/sessions/${id}/queue`;
+describe("/api/sessions/:id/queue", () => {
+  const queueUrl = (base: string, id: string) => `${base}/api/sessions/${id}/queue`;
   const enqueue = (base: string, id: string, body: unknown) => fetch(queueUrl(base, id), {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -533,13 +530,13 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/sessions", () => {
+describe("GET /api/sessions", () => {
   it("is empty before the first turn and lists it after", async () => {
     const base = await serve();
-    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
+    expect(await (await fetch(`${base}/api/sessions`)).json())
       .toEqual({ sessions: [] });
     await postTurn(base, TURN_BODY);
-    const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    const { sessions } = await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<Record<string, unknown>>;
     };
     expect(sessions).toHaveLength(1);
@@ -569,14 +566,14 @@ describe("GET /api/ghosts/:name/sessions", () => {
     const base = await serve(replies("boundary"));
     const boundary = "a".repeat(128);
     expect((await postTurn(base, turnBody(boundary))).status).toBe(200);
-    const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    const listing = await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ id: string }>;
     };
     expect(listing.sessions.map((row) => row.id)).toEqual([boundary]);
-    expect((await fetch(`${base}/api/ghosts/casper/sessions/${boundary}/transcript`)).status).toBe(200);
+    expect((await fetch(`${base}/api/sessions/${boundary}/transcript`)).status).toBe(200);
 
     // A pin writes pins.json beside the conversations; an id naming a sidecar is refused, not a 500.
-    expect((await fetch(`${base}/api/ghosts/casper/sessions/${boundary}/pin`, {
+    expect((await fetch(`${base}/api/sessions/${boundary}/pin`, {
       method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned: true }),
     })).status).toBe(200);
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
@@ -594,7 +591,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
         ["/title", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "x" }) }],
         ["", { method: "DELETE" }],
       ] as const) {
-        const response = await fetch(`${base}/api/ghosts/casper/sessions/${segment}${suffix}`, init);
+        const response = await fetch(`${base}/api/sessions/${segment}${suffix}`, init);
         expect(response.status, `${invalid}${suffix}`).toBe(400);
         expect(await response.json()).toMatchObject({ error: { code: "invalid_conversation_id" } });
       }
@@ -605,9 +602,9 @@ describe("GET /api/ghosts/:name/sessions", () => {
   });
 });
 
-describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
+describe("PUT /api/sessions/:id/pin", () => {
   const setPin = (base: string, id: string, body: unknown) => fetch(
-    `${base}/api/ghosts/casper/sessions/${id}/pin`,
+    `${base}/api/sessions/${id}/pin`,
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -616,7 +613,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
   );
 
   const listSessions = async (base: string) => (
-    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ id: string; pinned: boolean }>;
     }
   ).sessions;
@@ -662,7 +659,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
 
     const wrongMethod = await fetch(
-      `${base}/api/ghosts/casper/sessions/conv-1/pin`,
+      `${base}/api/sessions/conv-1/pin`,
     );
     expect(wrongMethod.status).toBe(405);
   });
@@ -672,7 +669,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     await postTurn(base, TURN_BODY);
     expect((await setPin(base, "conv-1", { pinned: true })).status).toBe(200);
 
-    await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
+    await fetch(`${base}/api/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(JSON.parse(readFileSync(join(temp!.root, "casper", "sessions", "pins.json"), "utf8")))
@@ -680,13 +677,13 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
   });
 });
 
-describe("PUT|DELETE /api/ghosts/:name/sessions/:id/question", () => {
+describe("PUT|DELETE /api/sessions/:id/question", () => {
   const ask = (base: string, id: string, body: unknown) => fetch(
-    `${base}/api/ghosts/casper/sessions/${id}/question`,
+    `${base}/api/sessions/${id}/question`,
     { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
   );
   const questionOf = async (base: string, id: string) => (
-    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ id: string; question: { text: string; options: string[]; askedAt: string } | null }>;
     }
   ).sessions.find((session) => session.id === id)?.question;
@@ -712,12 +709,12 @@ describe("PUT|DELETE /api/ghosts/:name/sessions/:id/question", () => {
     const base = await serve(replies("one", "two"));
     await postTurn(base, TURN_BODY);
     await ask(base, "conv-1", { text: "Which one?" });
-    const dismissed = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/question`, { method: "DELETE" });
+    const dismissed = await fetch(`${base}/api/sessions/conv-1/question`, { method: "DELETE" });
     expect(dismissed.status).toBe(200);
     expect(await questionOf(base, "conv-1")).toBeNull();
 
     await ask(base, "conv-1", { text: "Still there?" });
-    await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, { method: "DELETE" });
+    await fetch(`${base}/api/sessions/conv-1`, { method: "DELETE" });
     expect(JSON.parse(readFileSync(questionsFile(), "utf8"))).toEqual({ version: 2, questions: {} });
   });
 
@@ -736,9 +733,9 @@ describe("PUT|DELETE /api/ghosts/:name/sessions/:id/question", () => {
   });
 });
 
-describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
+describe("PUT /api/sessions/:id/title", () => {
   const rename = (base: string, id: string, body: unknown) => fetch(
-    `${base}/api/ghosts/casper/sessions/${id}/title`,
+    `${base}/api/sessions/${id}/title`,
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -747,7 +744,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
   );
 
   const titleOf = async (base: string, id: string) => (
-    await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
+    await (await fetch(`${base}/api/sessions`)).json() as {
       sessions: Array<{ id: string; title: string | null }>;
     }
   ).sessions.find((session) => session.id === id)?.title ?? null;
@@ -791,17 +788,17 @@ describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
     expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/conv-1/title`,
+      `${base}/api/sessions/conv-1/title`,
     )).status).toBe(405);
   });
 });
 
-describe("DELETE /api/ghosts/:name/sessions/:id", () => {
+describe("DELETE /api/sessions/:id", () => {
   it("moves a stored conversation to recoverable Trash", async () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
 
-    const deleted = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
+    const deleted = await fetch(`${base}/api/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
@@ -811,10 +808,10 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
     const trashed = join(temp!.trashDir, "files", basename(conversationDir(sessionDir, "conv-1")));
     expect(existsSync(conversationDir(sessionDir, "conv-1"))).toBe(false);
     expect(existsSync(join(trashed, LOG_FILENAME))).toBe(true);
-    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
+    expect(await (await fetch(`${base}/api/sessions`)).json())
       .toEqual({ sessions: [] });
 
-    const missing = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
+    const missing = await fetch(`${base}/api/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(missing.status).toBe(404);
@@ -822,11 +819,11 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
   });
 });
 
-describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
+describe("GET /api/sessions/:id/transcript", () => {
   it("returns the conversation's renderable messages", async () => {
     const base = await serve(replies("I set type for a living."));
     await postTurn(base, TURN_BODY);
-    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`);
+    const response = await fetch(`${base}/api/sessions/conv-1/transcript`);
     expect(response.status).toBe(200);
     const transcript = await response.json() as {
       id: string;
@@ -845,7 +842,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     const base = await serve(replies("one", "two"));
     await postTurn(base, turnBody("conv-1", "first"));
     await postTurn(base, turnBody("conv-1", "second"));
-    const page = await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?limit=1&offset=2`)).json() as {
+    const page = await (await fetch(`${base}/api/sessions/conv-1/transcript?limit=1&offset=2`)).json() as {
       messages: Array<{ role: string; content: unknown }>;
       total: number;
       truncated: boolean;
@@ -853,7 +850,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     expect(page).toMatchObject({ total: 4, truncated: true });
     expect(page.messages).toEqual([expect.objectContaining({ role: "user", content: [{ type: "text", text: "second" }] })]);
     for (const query of ["limit=many", "offset=later"]) {
-      const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?${query}`);
+      const response = await fetch(`${base}/api/sessions/conv-1/transcript?${query}`);
       expect(response.status, query).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
     }
@@ -861,7 +858,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
 
   it("reads a conversation with no log yet as empty, and 404s an unknown ghost", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
+    const response = await fetch(`${base}/api/sessions/nope/transcript`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ id: "nope", messages: [], total: 0, truncated: false, readThrough: expect.any(String) });
     expect((await fetch(`${base}/api/ghosts/nobody/sessions/nope/transcript`)).status).toBe(404);
@@ -880,10 +877,10 @@ describe("routing and transport", () => {
     expect((await fetch(`${base}/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/other`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(404);
-    expect((await fetch(`${base}/api/ghosts/casper/nothing`)).status).toBe(404);
-    expect((await fetch(`${base}/api/ghosts/casper/sessions`, { method: "POST" })).status)
+    expect((await fetch(`${base}/api/nothing`)).status).toBe(404);
+    expect((await fetch(`${base}/api/sessions`, { method: "POST" })).status)
       .toBe(405);
-    expect((await fetch(`${base}/api/ghosts/casper/messages`)).status).toBe(405);
+    expect((await fetch(`${base}/api/messages`)).status).toBe(405);
   });
 
   it("has no route that makes, renames, or removes a ghost", async () => {
@@ -891,17 +888,16 @@ describe("routing and transport", () => {
     const send = (method: string, path: string, body?: unknown) => fetch(`${base}${path}`, {
       method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    expect((await send("POST", "/api/ghosts", { name: "wisp" })).status).toBe(405);
-    expect((await send("PUT", "/api/ghosts/casper/name", { name: "wisp" })).status).toBe(404);
+    expect((await send("POST", "/api/ghost", { name: "wisp" })).status).toBe(405);
+    expect((await send("PUT", "/api/name", { name: "wisp" })).status).toBe(404);
     expect((await send("DELETE", "/api/ghosts/casper?confirm=casper")).status).toBe(404);
-    expect(temp!.registry.list().map((ghost) => ghost.name)).toEqual(["casper"]);
+    expect(temp!.ghost.name).toBe("casper");
   });
 
   it("returns a typed 400 for malformed percent-encoding in dynamic path segments", async () => {
     const base = await serve();
     for (const path of [
-      "/api/ghosts/%/sessions",
-      "/api/ghosts/casper/sessions/%/transcript",
+      "/api/sessions/%/transcript",
     ]) {
       const response = await fetch(`${base}${path}`);
       expect(response.status, path).toBe(400);
@@ -914,12 +910,10 @@ describe("routing and transport", () => {
     }
   });
 
-  it("decodes valid ghost names and conversation ids", async () => {
+  it("decodes valid conversation ids", async () => {
     const base = await serve();
-    expect((await fetch(`${base}/api/ghosts/casp%65r/sessions`)).status).toBe(200);
-
     await postTurn(base, TURN_BODY);
-    const transcript = await fetch(`${base}/api/ghosts/casp%65r/sessions/conv%2D1/transcript`);
+    const transcript = await fetch(`${base}/api/sessions/conv%2D1/transcript`);
     expect(transcript.status).toBe(200);
     expect(await transcript.json()).toMatchObject({ id: "conv-1" });
   });
@@ -927,14 +921,14 @@ describe("routing and transport", () => {
   it("offers CORS to no origin that is not an app", async () => {
     const base = await serve();
     for (const origin of ["http://localhost:5173", "https://evil.example"]) {
-      const response = await fetch(`${base}/api/ghosts`, { headers: { origin } });
+      const response = await fetch(`${base}/api/ghost`, { headers: { origin } });
       expect(response.headers.get("access-control-allow-origin"), origin).toBeNull();
     }
   });
 
   it("refuses an oversized body", async () => {
     const base = await serve(undefined, { maxBodyBytes: 256 });
-    const response = await fetch(`${base}/api/ghosts/casper/character`, {
+    const response = await fetch(`${base}/api/character`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ body: "x".repeat(1_000) }),
@@ -955,7 +949,7 @@ describe("GET /api/status", () => {
 
 describe("attachments", () => {
   const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
-  const url = (base: string, id: string) => `${base}/api/ghosts/casper/sessions/${id}/attachments`;
+  const url = (base: string, id: string) => `${base}/api/sessions/${id}/attachments`;
 
   it("stores an image in the conversation directory before its first turn and serves it back", async () => {
     const base = await serve();
@@ -966,7 +960,7 @@ describe("attachments", () => {
     const dir = conversationDir(ghostPaths(join(temp!.root, "casper")).sessionDir, "hud-new");
     expect(readFileSync(join(dir, path))).toEqual(PNG);
     // A directory holding only attachments is not a conversation yet.
-    expect((await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as { sessions: unknown[] }).sessions).toEqual([]);
+    expect((await (await fetch(`${base}/api/sessions`)).json() as { sessions: unknown[] }).sessions).toEqual([]);
 
     const served = await fetch(`${url(base, "hud-new")}/${path.slice("attachments/".length)}`);
     expect(served.status).toBe(200);

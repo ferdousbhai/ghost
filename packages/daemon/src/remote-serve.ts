@@ -180,12 +180,12 @@ export class RemoteServe {
 
   /**
    * The app's deep link to one conversation on this machine,
-   * `<origin>/#/<hostname>/<ghost>/<id>`, null while there is no app link.
+   * `<origin>/#/<hostname>/<id>`, null while there is no app link.
    */
-  async conversationUrl(ghost: string, id: string): Promise<string | null> {
+  async conversationUrl(id: string): Promise<string | null> {
     const { app, hostname } = await this.status();
     if (!app?.url || !hostname) return null;
-    return `${app.origin}/#/${[hostname, ghost, id].map(encodeURIComponent).join("/")}`;
+    return `${app.origin}/#/${[hostname, id].map(encodeURIComponent).join("/")}`;
   }
 
   private async inspect(): Promise<Inspection> {

@@ -92,7 +92,7 @@ describe("real ghostd streaming lifecycle", () => {
     const followUpText = "Keep the remaining tool work concise.";
     const queued = await daemon!.request<{ streaming: boolean; followUp: string[] }>(
       "POST",
-      "/api/ghosts/casper/sessions/conv-follow-up/queue",
+      "/api/sessions/conv-follow-up/queue",
       { text: followUpText },
     );
     expect(queued.status).toBe(200);
@@ -115,8 +115,8 @@ describe("real ghostd streaming lifecycle", () => {
   it("turns a completion with its terminal event suppressed into an SSE error", async () => {
     daemon = await startRealDaemonHarness({ turns: [{ events: [text("The harness completed.")] }] });
     const originalAdmitTurn = daemon.host.admitTurn.bind(daemon.host);
-    daemon.host.admitTurn = async (ghostName, options) => {
-      const admission = await originalAdmitTurn(ghostName, options);
+    daemon.host.admitTurn = async (options) => {
+      const admission = await originalAdmitTurn(options);
       return {
         sessionId: admission.sessionId,
         async run(streamOptions) {
@@ -150,7 +150,7 @@ describe("real ghostd streaming lifecycle", () => {
       gate({ events: [text("This response will be disconnected.")] }),
       { events: [text("The same conversation accepted another turn.")] },
     ]);
-    const session = `/api/ghosts/${daemon!.ghostName}/sessions/conv-disconnect`;
+    const session = "/api/sessions/conv-disconnect";
 
     const interrupted = await daemon!.startTurn("conv-disconnect", "Hold this turn open.");
     await interrupted.waitForEvent("start");

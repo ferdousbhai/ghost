@@ -43,7 +43,7 @@ describe("ghost help topics", () => {
     expect(text).not.toContain("/tmp/job.log");
     expect(text).toContain("`systemctl --user stop <unit>` ends it");
     expect(text).toContain("ghost say --follow-up");
-    expect(text).toContain("`$GHOST` and `$GHOST_SESSION`");
+    expect(text).toContain("`$GHOST_SESSION` is set");
     expect(text).toContain("A command you start ends when this turn does.");
   });
 

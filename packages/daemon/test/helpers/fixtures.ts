@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
+import { ghostPaths, theGhost, type Ghost } from "../../src/ghosts.js";
 import { RemoteServe } from "../../src/remote-serve.js";
 import type { TurnEvent } from "../../src/turn-events.js";
 import { startDaemonServer, type ListeningServer, type ServerOptions } from "../../src/server.js";
@@ -21,7 +21,8 @@ export interface TempGhosts {
   /** The freedesktop home trash under it — where a deleted ghost lands. */
   trashDir: string;
   ownerHome: string;
-  registry: GhostRegistry;
+  /** The root's one ghost, made as `ghost` when no home was seeded. */
+  readonly ghost: Ghost;
   cleanup(): void;
 }
 
@@ -46,7 +47,7 @@ export function makeTempGhosts(): TempGhosts {
     xdgDataHome,
     trashDir: join(xdgDataHome, "Trash"),
     ownerHome,
-    registry: new GhostRegistry(root),
+    get ghost() { return theGhost(root); },
     cleanup: () => {
       // Idempotent: a test may clean up early and the afterEach hook again.
       if (!restored) {
@@ -101,18 +102,17 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const apiToken = "a".repeat(64);
   const ghost = options.ghost ?? "casper";
   const temp = makeTempGhosts();
-  temp.registry.ensureRoot();
   const harness = fakeAnswerer(options.turns ?? replies("hello"));
   seedGhost(temp.root, { name: ghost });
   const host = new SessionHost({
-    registry: temp.registry,
+    ghost: temp.ghost,
     ownerHome: temp.ownerHome,
     ...answeredBy(harness),
   });
   const listening = await startDaemonServer({
-    registry: temp.registry,
+    ghost: temp.ghost,
     host,
-    ...serverServices(temp.registry),
+    ...serverServices(temp.root),
     apiToken,
     port: 0,
   });
@@ -126,7 +126,7 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     XDG_CONFIG_HOME: join(temp.root, ".config"),
   };
   if (options.openSession) {
-    await host.runTurn(ghost, {
+    await host.runTurn({
       sessionId: options.openSession,
       prompt: "hi",
       emit: () => {},
@@ -166,10 +166,10 @@ export function tempDir(prefix = "ghostd-test-"): { path: string; cleanup(): voi
  * `tailscale` so no test reaches the real one, and a `hooks.json` in the
  * ghosts root that the registry skips as a dotfile.
  */
-export function serverServices(registry: GhostRegistry): Pick<ServerOptions, "remoteServe" | "hooks" | "runningSource"> {
+export function serverServices(root: string): Pick<ServerOptions, "remoteServe" | "hooks" | "runningSource"> {
   return {
     remoteServe: new RemoteServe(7717, { run: fakeTailscale().run }),
-    hooks: GhostHookRunner.fromConfig(join(registry.root, ".hooks.json")),
+    hooks: GhostHookRunner.fromConfig(join(root, ".hooks.json")),
     runningSource: { version: "0.0.0-test", commit: null, root: null, entry: fileURLToPath(import.meta.url), startedAt: Date.now() },
   };
 }

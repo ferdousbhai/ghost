@@ -29,7 +29,7 @@ phone destination, or credentials are preconfigured. The selected service
 receives the conversation title and completion/failure excerpt.
 
 Alerts link to the exact conversation in the app,
-`https://summonghost.com/#/<hostname>/<ghost>/<conversation>`, while remote
+`https://summonghost.com/#/<hostname>/<conversation>`, while remote
 access is on; the link opens on a device that has added this
 machine. Removing the hook disables delivery; cancellations stay quiet.
 Delivery failures are logged and do not change the work's outcome. There is no
