@@ -1,4 +1,4 @@
-// Sample pictures for the window preview: `<dir>/p1.png` … `p<count>.png`, each a different two-colour gradient,
+// Sample pictures for the window's scripted QA: `<dir>/p1.png` … `p<count>.png`, each a different two-colour gradient,
 // alternately wide and tall so the grid's cropping shows.
 import { writeFileSync } from "node:fs";
 import { deflateSync } from "node:zlib";

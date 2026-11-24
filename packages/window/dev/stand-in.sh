@@ -1,4 +1,4 @@
-# Sourced by preview.sh and qa.sh: a scratch owner home seeded with sample data, under the caller's private `$root`,
+# Sourced by qa.sh: a scratch owner home seeded with sample data, under the caller's private `$root`,
 # and a scratch ghostd against it. Private HOME and XDG directories, stand-in product CLIs and a stand-in model
 # server: never the owner's ghosts, data, accounts, session bus, or port 7717.
 #

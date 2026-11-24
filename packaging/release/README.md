@@ -5,7 +5,7 @@ from which Omarchy builds the stable `ghost` package, and publishes it as a
 GitHub release on `ferdousbhai/ghost`. Omarchy's package repository carries
 `ghost`: its recipe (`pkgbuilds/ghost` in
 [omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs)) downloads the
-release's `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot,
+release's `ghost-<version>.tar.gz`, a deterministic source snapshot,
 and its `sync-upstream` workflow follows the tags.
 
 The recipe builds everything from that snapshot: `prepare()` downloads what
@@ -14,8 +14,8 @@ CLI with Bun (minified, with function and class names kept for diagnostics)
 and compiles the window with cargo. One archive, one commit: a package cannot
 mix an old window with a new daemon or client.
 
-Installed launchers use `/usr/bin/bun`, so the stable `ghost` package and the
-checkout-only `ghost-dev` recipe require system Bun 1.3.14 or newer. The current
+Installed launchers use `/usr/bin/bun`, so the package requires system Bun
+1.3.14 or newer. The current
 build/check toolchain requires Bun 1.4.0 or newer.
 
 ## Cutting a release
@@ -32,7 +32,7 @@ packaging/release/publish.sh 0.1.1             # bump, push, tag, publish
 it does not say the version yet and commits `release: <version>` (a dry run
 does this too); a real run then pushes, and the `pre-push` hook runs the
 whole gate. It builds the source archive with
-`SOURCE_DATE_EPOCH` pinned to the commit, verifies it, writes `SHA256SUMS`, renders the stable `PKGBUILD`
+`git archive`, writes `SHA256SUMS`, renders the stable `PKGBUILD`
 through `render-arch-package.sh` and builds the package from it with
 `makepkg`, using the archive beside it rather than the release URL (which
 does not exist yet), creates the annotated tag, and publishes the GitHub
@@ -86,7 +86,10 @@ is Omarchy's, not the release's. Meanwhile the release's `install.sh`
   [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md). Ghost
   does not poll for releases.
 
-`ghost-dev` remains the checkout-only rolling recipe under
-[`../arch/`](../arch/). It provides and conflicts with `ghost` so the two
-cannot be installed together. Generated archives and work trees live under
+The `Native packages` workflow runs the workspace's tests and builds this
+recipe from the commit's own source archive, in clean Arch Linux x86_64 and
+Arch Linux ARM aarch64 roots, on every pull request and master push
+(`sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh`; on ARM it
+expects the checksum-verified upstream Bun binary at `.ci/bun/bun`).
+Generated archives and work trees live under
 `out/` and `work/`, which are ignored.

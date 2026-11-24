@@ -86,7 +86,7 @@ for script in "${scripts[@]}"; do
   # in a process group of its own, which Ctrl-C does not reach. Killing `timeout` stops the app with it. TZ fixes the
   # times the window shows, which the scripts name widgets by.
   status=0
-  (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME -u GHOST_WINDOW_OPEN \
+  (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent TZ=UTC \
     GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" OMUI_QA=1 OMUI_QA_INPUT="127.0.0.1:$input_port" OMUI_QA_FD=3 \
     timeout "${OMUI_QA_TIMEOUT:-120}" "$binary" < "$script" 3> "$root/answers") &

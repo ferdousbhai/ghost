@@ -28,15 +28,13 @@ for doc in "$source_root"/docs/*.md; do
   cmp "$doc" "$work/payload/usr/share/doc/ghost/docs/${doc##*/}"
 done
 
-# Evaluate each recipe's dependencies and assembly command; nothing is built
+# Evaluate the recipe's dependencies and assembly command; nothing is built
 # or installed, and no daemon runs.
 verify_recipe() (
   local recipe="$1" replaced="$2"
   source "$recipe"
   srcdir="$work/recipe-source-$pkgname"
   mkdir -p "$srcdir"
-  # The checkout recipe builds in ghost/, the stable one in ghost-<version>/.
-  ln -s "$source_root" "$srcdir/ghost"
   ln -s "$source_root" "$srcdir/ghost-$pkgver"
   pkgdir="$work/recipe"
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
@@ -46,7 +44,6 @@ verify_recipe() (
   [[ " ${replaces[*]} " == *" $replaced "* && " ${conflicts[*]} " == *" $replaced "* ]]
   [[ "$(cat "$work/assembly")" == *'packages/window/target/release/ghost-window' ]]
 )
-verify_recipe "$source_root/packaging/arch/PKGBUILD" ghost-runtime-dev
 bash "$source_root/packaging/release/render-arch-package.sh" "$work/recipe-stable" 0.3.0 \
   "$(printf '%064d' 0)"
 verify_recipe "$work/recipe-stable/PKGBUILD" ghost-runtime

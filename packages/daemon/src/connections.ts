@@ -6,6 +6,7 @@
  * every one of them asks the owner something (a password, a sign-in, a code).
  */
 import { which } from "./coding-agent.js";
+import { PRODUCTS as CATALOG } from "./help-guides.js";
 import { json, oneLine, runCommand, type SourceContext } from "./sources.js";
 
 export interface ConnectionAction {
@@ -39,7 +40,12 @@ interface Product {
   probe(context: SourceContext): Promise<{ connected: boolean; detail: string; actions: ConnectionAction[] }>;
 }
 
-const installer = (path: string) => `curl -fsSL https://ferdousbhai.com/${path}/install.sh | sudo bash`;
+/** A product's install command, from the one catalog `ghost help products` also prints. */
+function installer(command: string): string {
+  const install = CATALOG.find((product) => product.cli === command)?.install;
+  if (!install) throw new Error(`no catalog install for ${command}`);
+  return install;
+}
 
 async function status(command: string, args: string[], context: SourceContext): Promise<Record<string, unknown> | null> {
   const data = json((await runCommand(command, args, context)).out);
@@ -67,7 +73,7 @@ const PRODUCTS: readonly Product[] = [
   },
   {
     id: "icloud", label: "iCloud", brings: "Notes, Reminders, Photos and iCloud Drive, synced with your Apple devices.",
-    command: "icloud-session", installer: installer("icloud"),
+    command: "icloud-session", installer: installer("icloud-session"),
     async probe(context) {
       const session = await status("icloud-session", ["status", "--quiet"], context);
       const signedIn = session?.signed_in === true;
@@ -88,7 +94,7 @@ const PRODUCTS: readonly Product[] = [
   },
   {
     id: "calendar", label: "Calendar", brings: "iCloud, Google and HEY calendars as one agenda.",
-    command: "cloud-calendar", installer: "curl -fsSL https://github.com/ferdousbhai/cloud-calendar/releases/latest/download/install.sh | sudo bash",
+    command: "cloud-calendar", installer: installer("cloud-calendar"),
     async probe(context) {
       const linked = accounts((await status("cloud-calendar", ["status", "--quiet"], context))?.accounts);
       return {
@@ -137,7 +143,7 @@ const PRODUCTS: readonly Product[] = [
   },
   {
     id: "google-workspace", label: "Google Docs, Sheets and Tasks", brings: "Documents, spreadsheets and tasks, through Google's own command line.",
-    command: "gws", installer: "npm install -g @googleworkspace/cli",
+    command: "gws", installer: installer("gws"),
     async probe(context) {
       const auth = await status("gws", ["auth", "status"], context);
       const working = auth?.token_valid === true;

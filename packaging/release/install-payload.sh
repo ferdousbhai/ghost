@@ -21,8 +21,6 @@ install -Dm644 "$runtime_root/lib/ghost.js" \
 
 install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
   "$pkgdir/usr/lib/systemd/user/ghostd.service"
-install -Dm644 "$source_root/packaging/arch/README.md" \
-  "$pkgdir/usr/share/doc/ghost/ARCH.md"
 install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
 install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
 # The installed README and CONTRACTS.md link into docs/. Ship those

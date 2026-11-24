@@ -27,9 +27,6 @@ command -v omarchy-pkg-add >/dev/null || die "Ghost is an Omarchy app, and this 
 for tool in curl jq makepkg vercmp; do
   command -v "$tool" >/dev/null || die "$tool is missing."
 done
-if pacman -Q ghost-dev >/dev/null 2>&1; then
-  die "this machine runs Ghost's checkout packages (ghost-dev); update those from the checkout instead."
-fi
 
 tag="$(curl -fsSL "https://api.github.com/repos/$repository/releases/latest" | jq -r '.tag_name // empty')"
 [[ $tag == v* ]] || die "could not find Ghost's latest release."

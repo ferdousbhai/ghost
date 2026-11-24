@@ -25,14 +25,12 @@ makedepends=(
 )
 checkdepends=(
   'jq'
-  'nodejs'
-  'ripgrep'
 )
 optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
 )
 # 0.11.9 and earlier split the daemon out as ghost-runtime.
-conflicts=(ghost-dev ghost-runtime)
+conflicts=(ghost-runtime)
 replaces=(ghost-runtime)
 install=ghost.install
 options=('!debug' '!lto' '!strip')

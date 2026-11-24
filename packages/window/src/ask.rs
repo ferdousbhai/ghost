@@ -153,11 +153,6 @@ impl AskPage {
                 Some(name) => {
                     *this.ghost.borrow_mut() = name;
                     this.refresh_chats().await;
-                    // For scripted checks: `GHOST_WINDOW_OPEN=ask:<prompt>` asks it at start.
-                    if let Some(prompt) = std::env::var("GHOST_WINDOW_OPEN").ok().as_deref().and_then(|open| open.strip_prefix("ask:")) {
-                        this.composer.buffer().set_text(prompt);
-                        this.ask();
-                    }
                 }
                 None => this.note("No ghost yet: ghostd makes one when it starts."),
             }

@@ -430,7 +430,7 @@ spend cap.
 ## Package boundaries
 
 The seam between the packages is the authenticated HTTP/SSE API. The Arch
-install is one package, `ghost` (checkout variant `ghost-dev`): the daemon,
+install is one package, `ghost`: the daemon,
 CLI, user unit, docs and licenses, and the window with its launcher entry and
 icons. It replaces the `ghost-runtime` package that 0.11.9 and earlier split
 the daemon into. Removing it preserves owner data.
@@ -453,10 +453,7 @@ the daemon into. Removing it preserves owner data.
   (the first `GET /api/ghosts` lists). It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
-  `GHOST_WINDOW_OPEN` starts it on `connect`, a source id, or
-  `<source id>/<item id>`, or asks `ask:<prompt>`, for
-  [`dev/preview.sh`](packages/window/dev/preview.sh), which runs it in a
-  nested Hyprland against a scratch ghostd and sample data. It is a workspace
+  It is a workspace
   package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
   `test`), and `test` also walks its main flows with omui's scripted QA
   ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
@@ -609,8 +606,8 @@ is answered with what was wrong, and nothing runs.
 
 - Never start a test daemon against `~/ghosts` or the live port 7717.
   Canary daemons isolate Ghost config and owner hooks.
-  Tests use scratch homes and the window preview's private
-  HOME/XDG/dbus/Hyprland.
+  Tests use scratch homes, and the window's scripted QA a private
+  HOME, XDG directories and display.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
 - Conversation deletion reserves its conversation and publishes only durable

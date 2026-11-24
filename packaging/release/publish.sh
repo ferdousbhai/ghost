@@ -65,18 +65,12 @@ if (( ! dry_run )); then
   fi
 fi
 commit="$(git rev-parse 'HEAD^{commit}')"
-epoch="$(git show -s --format=%ct "$commit")"
 work="$script_root/work"
 rm -rf -- "$out" "$work"
-mkdir -p -- "$out" "$work"
+mkdir -p -- "$out"
 
-SOURCE_DATE_EPOCH="$epoch" \
-  bash "$script_root/make-source-archive.sh" \
-    "$source_root" "$out/ghost-$version.tar.gz" "$version" HEAD
-# The verifier reads the sanitized archive, not this tree.
-tar -xf "$out/ghost-$version.tar.gz" -C "$work"
-bash "$script_root/verify-release-source.sh" "$work/ghost-$version" "$version" "$commit" "$epoch"
-rm -rf -- "$work"
+bash "$script_root/make-source-archive.sh" \
+  "$source_root" "$out/ghost-$version.tar.gz" "$version" HEAD
 (cd -- "$out" && sha256sum -- "ghost-$version.tar.gz" > SHA256SUMS)
 
 source_sha="$(sed -n 1p "$out/SHA256SUMS" | cut -d' ' -f1)"

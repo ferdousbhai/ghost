@@ -94,8 +94,8 @@ reach the running daemon only after `pnpm build` and a restart.
 The window is one binary, `ghost-window`, and a client of the daemon's API.
 `pnpm build` compiles a clone's to `packages/window/target/release/ghost-window`
 (it needs `cargo`); run that file to use it, and close the window to go back
-to the packaged one. `packages/window/dev/preview.sh` shows a change in a
-nested Hyprland against a scratch ghostd and sample data.
+to the packaged one. `packages/window/dev/qa.sh` walks a change's flows, with
+screenshots, against a scratch ghostd and sample data.
 
 The ghost's prompt carries only what runs it and which clone is its checkout;
 the loop, the restart unit, and the undo list are `ghost help self`, read on
@@ -151,7 +151,7 @@ Run that command from the built checkout. Point the client at the canary
 with `GHOSTD_PORT=7799` and
 `GHOSTD_API_TOKEN_FILE="$task_canary_dir/state/ghost/api-token"`. Stop its captured process
 before deleting the scratch directory. Functional window verification
-uses `packages/window/dev/preview.sh`, never the owner's session.
+uses `packages/window/dev/qa.sh`, never the owner's session.
 
 Never port 7717 or `~/ghosts`; scratch configuration also prevents live
 owner hooks from running. Every canary must use its own ghost root.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Keep commands used by package checks, PKGBUILD metadata, the generated
-# .SRCINFO, and the stable recipe's dependencies in agreement.
+# The packaging checks: the install hooks, the staged payload, the release
+# version, the installer, the Omarchy contribution, and the rendered recipe.
 
 set -euo pipefail
 
@@ -45,23 +45,11 @@ require_install_hook_activation() {
   fi
 }
 
-command -v rg >/dev/null || {
-  printf 'ripgrep is required by package checks but is not installed\n' >&2
-  exit 1
-}
-command -v node >/dev/null || {
-  printf 'nodejs is required by package checks but is not installed\n' >&2
-  exit 1
-}
 command -v jq >/dev/null || {
   printf 'jq is required by the Omarchy contribution regression but is not installed\n' >&2
   exit 1
 }
-# The checkout recipe's hook is a link to the Omarchy recipe's; cmp proves
-# the link still resolves to it.
-cmp "$script_dir/ghost-dev.install" \
-  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"
-install_script="$script_dir/ghost-dev.install"
+install_script="$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"
 require_install_hook_activation "$install_script" post_install \
   'systemctl --user enable --now ghostd.service'
 require_install_hook_activation "$install_script" post_upgrade \
@@ -72,13 +60,13 @@ bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-install-script.sh"
 bash "$source_root/packaging/omarchy/test-contribution.sh"
 
-# Every packaging test suite must be invoked by some other packaging or CI
-# file; an unreferenced test-* file is a suite that silently never runs.
+# Every packaging test suite must be invoked by some other packaging, gate or
+# CI file; an unreferenced test-* file is a suite that silently never runs.
 while IFS= read -r suite; do
   name="$(basename -- "$suite")"
   if ! grep -rFq --exclude="$name" \
     --exclude='README.md' "$name" \
-    "$source_root/packaging" "$source_root/.github"; then
+    "$source_root/packaging" "$source_root/.github" "$source_root/.githooks"; then
     printf 'orphaned packaging test suite: %s is referenced nowhere\n' \
       "$suite" >&2
     exit 1
@@ -86,31 +74,14 @@ while IFS= read -r suite; do
 done < <(find "$source_root/packaging" \
   -name 'test-*' -type f -print | sort)
 
-(
-  CDPATH= cd -- "$script_dir"
-  env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo
-) > "$work/ghost-dev.SRCINFO"
-cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
-# The commands these checks call (see the command -v guards) are declared.
-require_srcinfo_entry checkdepends jq "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry checkdepends ripgrep "$work/ghost-dev.SRCINFO"
-# The local model's Claude command pipes through jq (local-turn.ts).
-require_srcinfo_entry depends jq "$work/ghost-dev.SRCINFO"
-
 bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost" \
   0.0.1 \
   0000000000000000000000000000000000000000000000000000000000000000
 [[ "$(stat -c '%a' "$work/ghost/.SRCINFO")" == 644 ]]
-# The stable recipe needs what the development one does at run and check
-# time; only the development build itself needs git and pnpm.
-dependencies() {
-  sed -En 's/^\t(depends|checkdepends|optdepends) = /\1 /p' "$1" | LC_ALL=C sort
-}
-if ! cmp <(dependencies "$work/ghost-dev.SRCINFO") <(dependencies "$work/ghost/.SRCINFO"); then
-  printf 'stable and development dependencies differ\n' >&2
-  exit 1
-fi
+# The commands the checks and the turn prompt call are declared: jq here, and
+# in the local model's Claude command (coding-agent.ts).
+require_srcinfo_entry checkdepends jq "$work/ghost/.SRCINFO"
+require_srcinfo_entry depends jq "$work/ghost/.SRCINFO"
 
-printf 'Arch package check dependency coverage passed\n'
+printf 'Packaging checks passed\n'

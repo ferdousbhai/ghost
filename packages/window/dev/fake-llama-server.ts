@@ -1,4 +1,4 @@
-// A stand-in for llama-server in the window preview: ghostd spawns it as `local.server`, and it answers every
+// A stand-in for llama-server in the window's scripted QA: ghostd spawns it as `local.server`, and it answers every
 // chat with one short reply that names its file, so Ask can be checked without loading a model.
 const args = process.argv.slice(2);
 const port = Number(args[args.indexOf("--port") + 1]);

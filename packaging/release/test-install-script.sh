@@ -39,7 +39,6 @@ case "$1" in
     shift
     for pkg in "$@"; do
       [[ $pkg == ghost && -n $TEST_INSTALLED ]] && { echo "ghost $TEST_INSTALLED"; exit 0; }
-      [[ $pkg == ghost-dev && $TEST_DEV == yes ]] && { echo "ghost-dev 0.10.0.r1-1"; exit 0; }
     done
     exit 1 ;;
   -Si) [[ -n $TEST_REPO ]] || exit 1; printf 'Name            : ghost\nVersion         : %s\n' "$TEST_REPO" ;;
@@ -57,7 +56,7 @@ done
 run() {
   : > "$work/actions"
   result=0
-  PATH="$work/bin" TEST_STATE="$work" TEST_INSTALLED="$1" TEST_REPO="$2" TEST_DEV="${3:-no}" \
+  PATH="$work/bin" TEST_STATE="$work" TEST_INSTALLED="$1" TEST_REPO="$2" \
     bash "$installer" > "$work/output" 2>&1 || result=$?
 }
 
@@ -81,11 +80,5 @@ run "0.10.0-1" "0.8.1-1"
 [[ $result == 0 ]]
 ! grep -qE '^(pacman|makepkg)' "$work/actions" || exit 1
 grep -Fxq menu "$work/actions"
-
-# Checkout packages are the checkout's to update.
-run "" "0.10.0-1" yes
-[[ $result != 0 ]]
-grep -Fq 'ghost-dev' "$work/output"
-[[ ! -s "$work/actions" ]]
 
 echo "install.sh test passed"

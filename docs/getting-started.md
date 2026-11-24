@@ -38,9 +38,8 @@ release, and otherwise builds Omarchy's own recipe for it; either way the
 package is the same, and `omarchy update` keeps it current afterwards.
 It also starts Ghost for your login (section 3).
 
-For checkout development, use the
-[rolling package recipe](../packaging/arch/README.md); a workspace build alone
-does not update the app.
+To run from a checkout instead, follow
+[the maintenance runbook](self-maintenance.md).
 
 The package only puts files in place; section 3 starts Ghost for this login.
 

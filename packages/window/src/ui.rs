@@ -160,7 +160,7 @@ impl App {
         app.window.connect_is_active_notify(move |window| {
             if window.is_active() && this.history.borrow().get(this.pos.get()) == Some(&Route::Connect) {
                 this.connect().refresh();
-                this.load_sources(None);
+                this.load_sources();
             }
         });
 
@@ -200,29 +200,25 @@ impl App {
         app.navigate(Route::Ask);
         app.window.present();
 
-        let open = std::env::var("GHOST_WINDOW_OPEN").ok();
-        if open.is_none() {
-            // A first run, with nothing connected yet, starts where connecting is.
-            let this = app.clone();
-            glib::spawn_future_local(async move {
-                if let Ok(body) = this.api.get("/api/connections".into()).await
-                    && body["connections"].as_array().is_some_and(|rows| rows.iter().all(|row| row["state"] != "connected"))
-                    && this.history.borrow().len() == 1
-                {
-                    this.navigate(Route::Connect);
-                }
-            });
-        }
-        app.load_sources(open);
+        // A first run, with nothing connected yet, starts where connecting is.
+        let this = app.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(body) = this.api.get("/api/connections".into()).await
+                && body["connections"].as_array().is_some_and(|rows| rows.iter().all(|row| row["state"] != "connected"))
+                && this.history.borrow().len() == 1
+            {
+                this.navigate(Route::Connect);
+            }
+        });
+        app.load_sources();
     }
 
     fn add_row(&self, id: &str, label: &str, icon: &str) {
         self.sidebar.append(&omui::sidebar_row(id, Some(icon), label, None));
     }
 
-    /// The sources that are set up here become the sidebar's rows, after Ask. `open` is `GHOST_WINDOW_OPEN`, for
-    /// scripted checks: `connect`, a source id, or `<source id>/<item id>` (`ask:<prompt>` is the Ask page's).
-    fn load_sources(self: &Rc<Self>, open: Option<String>) {
+    /// The sources that are set up here become the sidebar's rows, after Ask.
+    fn load_sources(self: &Rc<Self>) {
         let this = self.clone();
         glib::spawn_future_local(async move {
             let body = match this.api.get("/api/sources".into()).await {
@@ -252,17 +248,6 @@ impl App {
                     this.add_row(&info.id, &info.label, icon_of(&info.id));
                 }
                 *this.sources.borrow_mut() = sources;
-            }
-            let Some(open) = open else { return };
-            let (source, item) = open.split_once('/').unwrap_or((&open, ""));
-            if open == "connect" {
-                this.navigate(Route::Connect);
-            } else if this.sources.borrow().iter().any(|info| info.id == source) {
-                this.navigate(if item.is_empty() {
-                    Route::Source(source.into())
-                } else {
-                    Route::Item { source: source.into(), id: item.into(), title: item.into(), page: None, line: None }
-                });
             }
         });
     }

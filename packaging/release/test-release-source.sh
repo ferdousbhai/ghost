@@ -1,51 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The packaging checks, run where the stable package runs them: inside an
+# extracted source archive, with no Git metadata. A file the archive loses or
+# a link it breaks fails here.
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
-test_parent="${TMPDIR:-/tmp}"
-mkdir -p "$test_parent"
-work="$(mktemp -d "$test_parent/ghost-release-source.XXXXXX")"
-cleanup() {
-  find -P "$work" -depth -delete
-}
-trap cleanup EXIT
+work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-release-source.XXXXXX")"
+trap 'find -P "$work" -depth -delete' EXIT
 
-version="$(bun -e 'process.stdout.write((await Bun.file(process.argv[1]).json()).version)' "$source_root/package.json")"
-commit="$(git -C "$source_root" rev-parse 'HEAD^{commit}')"
-epoch="$(git -C "$source_root" show -s --format=%ct "$commit")"
-archive="$work/ghost-$version.tar.gz"
-SOURCE_DATE_EPOCH="$epoch" \
-  bash "$script_dir/make-source-archive.sh" \
-    "$source_root" "$archive" "$version" --worktree
-tar -xf "$archive" -C "$work"
+version="$(bash "$script_dir/verify-release-version.sh" "$source_root")"
+bash "$script_dir/make-source-archive.sh" "$source_root" "$work/ghost-$version.tar.gz" "$version" --worktree
+tar -xf "$work/ghost-$version.tar.gz" -C "$work"
 extracted="$work/ghost-$version"
+[[ ! -e "$extracted/.git" && -f "$extracted/CONTRACTS.md" ]]
 
-[[ ! -e "$extracted/.git" && ! -L "$extracted/.git" && -f "$extracted/CONTRACTS.md" ]]
-bash "$script_dir/verify-release-source.sh" \
-  "$extracted" "$version" "$commit" "$epoch"
-
-mkdir -p "$extracted/nested"
-printf 'private fixture\n' > "$extracted/nested/AGENTS.md"
-if bash "$script_dir/verify-release-source.sh" \
-  "$extracted" "$version" "$commit" "$epoch" > "$work/rejected.out" 2>&1; then
-  printf 'release verifier accepted AGENTS.md\n' >&2
-  exit 1
-fi
-grep -Fq 'private AGENTS.md instructions' "$work/rejected.out"
-rm "$extracted/nested/AGENTS.md"
-ln -s ../CONTRACTS.md "$extracted/nested/AGENTS.md"
-if bash "$script_dir/verify-release-source.sh" \
-  "$extracted" "$version" "$commit" "$epoch" > "$work/rejected-link.out" 2>&1; then
-  printf 'release verifier accepted an AGENTS.md alias\n' >&2
-  exit 1
-fi
-grep -Fq 'private AGENTS.md instructions' "$work/rejected-link.out"
-rm "$extracted/nested/AGENTS.md"
-
-# The stable package invokes this shared check from an extracted source archive,
-# where Git metadata is deliberately absent.
 mkdir "$work/stable-check-work"
 TMPDIR="$work/stable-check-work" \
   bash "$extracted/packaging/arch/test-check-dependencies.sh"
-printf 'Release source privacy regression passed\n'
+printf 'Release source check passed\n'
