@@ -357,6 +357,9 @@ impl App {
             self.sidebar.unselect_all();
         }
         self.syncing.set(false);
+        if matches!(route, Route::Ask) {
+            self.ask().focus();
+        }
     }
 }
 

@@ -25,6 +25,8 @@ Done since:
   surface. With it went the `desktop` field of a message, the QR route
   (`/api/remote/qr.svg`) and the `qrencode` dependency, and the
   `ghost`/`ghost-runtime` package split: one package, `ghost`, replaces both.
+- The window is on omui 0.5.7, its composer has the keyboard when Ask shows,
+  and Escape empties a source page's search.
 
 Not done:
 
@@ -66,7 +68,7 @@ Omarchy's own agent plumbing.
 ## What master holds beyond 0.11.9
 
 - The GTK window (`packages/window`): one view over the owner's own data, on
-  omui 0.5.1, with scripted QA in `pnpm verify`. Never released.
+  omui 0.5.7, with scripted QA in `pnpm verify`. Never released.
 - Lastbook in the product catalog (`ghost help products`).
 - The first stage of a shrink the owner approved the same day, which deleted:
   routines (per-ghost systemd timers), external events (`ghost event`),
@@ -90,8 +92,6 @@ Approved by the owner but not started when the freeze came:
 - Replacing the local model's own tool loop (`local-turn.ts`) with pi as the
   local runtime, with Ghost's `search` and `read` as a pi extension.
   Superseded on 2026-11-24 by the minimal loop above.
-- The window's move to omui 0.5.2, and two window bugs: the composer is not
-  focused at startup, and Escape does not clear a source page's search.
 
 Undecided: owner hooks stay, because the owner's keep-going product runs on
 the `session_stop` hook through `ghostd hook-complete`.

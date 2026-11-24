@@ -23,6 +23,12 @@
 {"do":"key","keys":"BackSpace"}
 {"do":"wait","role":"search-box","name":"Search Notes","text":""}
 {"do":"wait","role":"list-item","name":"Packing","visible":true}
+# Escape empties it too.
+{"do":"type","role":"search-box","name":"Search Notes","text":"boat"}
+{"do":"wait","role":"list-item","name":"Packing","visible":false,"timeout_ms":30000}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"search-box","name":"Search Notes","text":""}
+{"do":"wait","role":"list-item","name":"Packing","visible":true}
 
 # An item in the reader, then back and forward by button and by key.
 {"do":"click","role":"list-item","name":"Ferry trip"}

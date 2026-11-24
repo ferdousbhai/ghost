@@ -165,6 +165,11 @@ impl AskPage {
         page
     }
 
+    /// The keyboard goes to the composer when the page shows.
+    pub fn focus(&self) {
+        self.composer.grab_focus();
+    }
+
     pub fn note(&self, text: &str) {
         self.status.set_text(text);
     }

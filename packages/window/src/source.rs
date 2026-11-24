@@ -165,6 +165,8 @@ impl SourcePage {
             let query = entry.text().trim().to_string();
             if query.is_empty() { this.load(true) } else { this.search(query) }
         });
+        // Escape empties the search, which brings the list back.
+        entry.connect_stop_search(|entry| entry.set_text(""));
         page.load(true);
         page
     }
