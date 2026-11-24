@@ -37,7 +37,7 @@ names this file alone.
 ```
 
 Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
-replaces it; the shell's Hooks pane edits it through that route, and no
+replaces it; `ghost hooks set` edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
 needs a restart. Groups and handlers run in file order. An event earlier
 versions ran (`before_prompt`) and any top-level key other than `hooks` are
@@ -48,7 +48,7 @@ the daemon. The daemon admits the document without them: `GET
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
-event, and are what the Hooks pane shows. While a `session_stop` handler runs, the turn
+event, and are what `ghost hooks` shows. While a `session_stop` handler runs, the turn
 stream carries `hook_start`/`hook_end` with its `name` and `event`. It runs
 out of sight: the reply already reads as finished, and only a continuation
 shows. The first `session_stop` handler that requests a continuation wins.
@@ -178,8 +178,7 @@ completion.
 
 The hooks that run are exactly the handlers in the `hooks.json` the daemon
 admitted. The owner-only `GET /api/hooks/config` returns `{ path, document }`:
-that file as one object and its absolute path; `ghost hooks` and the HUD's
-Hooks pane read it there, showing a handler without a `name` or
+that file as one object and its absolute path; `ghost hooks` reads it there, showing a handler without a `name` or
 `description` with the defaults above. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,
 which refuses a top-level key other than `hooks` (so a pasted `{ path,
@@ -214,7 +213,7 @@ under the existing timeout/output bounds, after the terminal stream frame and
 outside the conversation's busy state, so they never delay the next prompt.
 Their output cannot change the result; failures fail open and are logged. Ghost
 stores no delivery credentials, retries, or push subscription. Removing the
-handler through `ghost hooks set` or the Hooks pane disables delivery at the
+handler through `ghost hooks set` disables delivery at the
 next boundary. `ghost help notifications` gives a curl/ntfy recipe that works
 with the app closed. It sends conversation text to the selected
 service, so configure it only when the owner wants that delivery.

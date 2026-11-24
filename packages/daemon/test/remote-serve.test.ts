@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RemoteServe } from "../src/remote-serve.js";
 import type { CommandRunner } from "../src/command-runner.js";
-import { FAKE_TARGET, fakeTailscale, missingBinary, ok } from "./helpers/fake-tailscale.js";
+import { FAKE_TARGET, fakeTailscale, missingBinary } from "./helpers/fake-tailscale.js";
 
 describe("RemoteServe status", () => {
   it("derives an HTTPS URL, owner, and guest policy from Tailscale JSON", async () => {
@@ -143,17 +143,4 @@ describe("RemoteServe mutations", () => {
     expect(await remote.enable()).toMatchObject({ state: "on", problem: null });
   });
 
-});
-
-describe("RemoteServe QR", () => {
-  it("returns qrencode SVG output with the exact URL command line", async () => {
-    const calls: string[][] = [];
-    const qrRun: CommandRunner = async (args) => {
-      calls.push([...args]);
-      return ok("<svg>qr</svg>");
-    };
-    const remote = new RemoteServe(7717, { run: fakeTailscale().run, qrRun });
-    await expect(remote.qrSvg("https://ghostbox.example.ts.net/")).resolves.toBe("<svg>qr</svg>");
-    expect(calls).toEqual([["-t", "SVG", "-o", "-", "https://ghostbox.example.ts.net/"]]);
-  });
 });

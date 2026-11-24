@@ -9,7 +9,7 @@ Copilot, OpenCode, pi, and other installed agent CLIs. Each harness keeps
 its own sign-in, tools, and limits. If one cannot take a turn, Ghost tries
 the next. Your ghost keeps one character and conversation history across them.
 
-Talk to it in the desktop HUD or the terminal; both share one conversation
+Talk to it in its window or the terminal; both share one conversation
 history, and `ghost say` joins the most recent conversation:
 
 ```sh
@@ -36,9 +36,5 @@ Install from Omarchy's package repository with `omarchy pkg add ghost`, then
 start it for this login ([getting started](docs/getting-started.md#3-confirm-setup)).
 The Install → AI menu entry, which does both, is tracked in
 [#54](https://github.com/ferdousbhai/ghost/issues/54).
-
-An app can bring its own UI: `ghost-runtime` installs the daemon/API and CLI
-without the HUD (`packaging/arch/README.md`,
-`/usr/share/doc/ghost/ARCH.md` once installed).
 
 License: Apache-2.0

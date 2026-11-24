@@ -15,21 +15,19 @@ The inputs:
    and exact bundled-package license closure; and
 3. `SHA256SUMS`.
 
-The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
-`ghost` contains only the Omarchy UI (the HUD, and the window, which the
-recipe compiles from the source snapshot with cargo, fetching its locked
-crates in `prepare()`) and depends on the exact runtime version;
-`ghost-runtime` is independently installable for apps with their own UI (see
-[the install choices](../arch/README.md#runtime-with-your-own-ui)).
+The stable recipe builds one package, `ghost`, from these inputs: the daemon
+and CLI from the runtime archive, and the window, which the recipe compiles
+from the source snapshot with cargo, fetching its locked crates in
+`prepare()`.
 
 The v3 runtime archive is a package *source*, not an installed pacman package;
 its bundles are minified with function and class names preserved for
-diagnostics. The UI, unit, and docs come from the source snapshot, and
+diagnostics. The window, unit, and docs come from the source snapshot, and
 the runtime archive is verified against the same commit, so a stable package
-cannot mix an old UI with a new daemon or client.
+cannot mix an old window with a new daemon or client.
 
-Installed launchers use `/usr/bin/bun`, so the stable `ghost-runtime` package and the
-checkout-only `ghost-runtime-dev` recipe require system Bun 1.3.14 or newer. The current
+Installed launchers use `/usr/bin/bun`, so the stable `ghost` package and the
+checkout-only `ghost-dev` recipe require system Bun 1.3.14 or newer. The current
 build/check toolchain requires Bun 1.4.0 or newer.
 
 ## Reproducibility boundary
@@ -58,7 +56,7 @@ does this too); a real run then pushes, and the `pre-push` hook runs the
 whole gate. It builds the runtime and source archives with
 `SOURCE_DATE_EPOCH` pinned to the commit, verifies the sanitized source and
 the runtime smoke, writes `SHA256SUMS`, renders the stable `PKGBUILD`
-through `render-arch-package.sh` and builds both packages from it with
+through `render-arch-package.sh` and builds the package from it with
 `makepkg`, using the archives beside it rather than the release URLs (which
 do not exist yet), creates the annotated tag, and publishes the GitHub
 release carrying:
@@ -76,8 +74,7 @@ release carrying:
 
 Users install the `ghost` package from Omarchy's repository. The
 Install → AI → Ghost entry contributed to Omarchy is
-[`omarchy-install-ai-ghost`](../omarchy/bin/omarchy-install-ai-ghost);
-[`test-installer.sh`](test-installer.sh), which the gate runs, checks it.
+[`omarchy-install-ai-ghost`](../omarchy/bin/omarchy-install-ai-ghost).
 
 ## Omarchy's recipe
 

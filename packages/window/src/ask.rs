@@ -1,5 +1,5 @@
 //! Ask: a conversation with the ghost, which answers from the owner's own data. The conversations are the
-//! ghost's own (the HUD and `ghost say` show the same ones).
+//! ghost's own (`ghost say` shows the same ones).
 
 use std::{
     cell::{Cell, RefCell},

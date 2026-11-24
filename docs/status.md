@@ -21,6 +21,10 @@ Done since:
   are gone; a coding agent is run from the shell by its own one-shot command
   (`claude -p`), as the owner chose; `ghost delegate` and its receipts log
   are gone too.
+- The HUD (`packages/shell`) is deleted: the window is the only chat
+  surface. With it went the `desktop` field of a message, the QR route
+  (`/api/remote/qr.svg`) and the `qrencode` dependency, and the
+  `ghost`/`ghost-runtime` package split: one package, `ghost`, replaces both.
 
 Not done:
 
@@ -31,9 +35,9 @@ Not done:
 - Ghost still starts its own `llama-server`. Omarchy's model engine does not
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
-- The shrink under "Unfinished" below.
+- The rest of "Unfinished" below.
 - A running command's output now streams into the turn, so a coding agent's
-  steps show in the HUD's tool card and as the window's status line. Claude
+  steps show as the window's status line. Claude
   prints its steps only as streamed JSON, so its command pipes that through
   `jq`; the model ran it so on the owner's machine.
 
@@ -52,7 +56,7 @@ subscription's limits, several accounts per agent with automatic switching,
 `omarchy agent` for the default agent, `omarchy agent --local` for local
 models (`omarchy-local-ai`), and Install > AI entries for OpenClaw and Hermes
 in the persona, phone and messaging role. What only Ghost does (a persona,
-one history across agents, the HUD, hooks, phone reach through
+one history across agents, the HUD (deleted since), hooks, phone reach through
 summonghost.com) no longer justifies continued work.
 
 The owner will reassess after their machine moves from the Omarchy Mac fork
@@ -62,7 +66,7 @@ Omarchy's own agent plumbing.
 ## What master holds beyond 0.11.9
 
 - The GTK window (`packages/window`): one view over the owner's own data, on
-  omui 0.5.1, with scripted QA in `pnpm verify`. Never packaged for release.
+  omui 0.5.1, with scripted QA in `pnpm verify`. Never released.
 - Lastbook in the product catalog (`ghost help products`).
 - The first stage of a shrink the owner approved the same day, which deleted:
   routines (per-ghost systemd timers), external events (`ghost event`),
@@ -74,18 +78,18 @@ Omarchy's own agent plumbing.
 A machine upgraded from 0.11.9 to a build of master has leftovers to remove by
 hand: `ghost-timer-*` units in `~/.config/systemd/user/`, the watch scripts in
 `~/.config/ghost/`, `~/.config/ghost/cli.json`, and any Omarchy hook that
-calls `ghost event` (for example `hooks/battery-low.d/ghost-event.sh`).
+calls `ghost event` (for example `hooks/battery-low.d/ghost-event.sh`),
+and the HUD's plugin link, `~/.config/omarchy/plugins/ferdousbhai.ghost`
+(`omarchy plugin remove ferdousbhai.ghost --yes`), with any Hyprland line
+that sources its `ghost.conf` or `ghost.lua`.
 
 ## Unfinished
 
 Approved by the owner but not started when the freeze came:
 
-- Deleting the HUD (`packages/shell`), leaving the window as the only chat
-  surface, and with it the HUD-only parts of the daemon (the `desktop` field
-  of a message, the summon and IPC contract, the ghost/ghost-runtime package
-  split).
 - Replacing the local model's own tool loop (`local-turn.ts`) with pi as the
   local runtime, with Ghost's `search` and `read` as a pi extension.
+  Superseded on 2026-11-24 by the minimal loop above.
 - The window's move to omui 0.5.2, and two window bugs: the composer is not
   focused at startup, and Escape does not clear a source page's search.
 

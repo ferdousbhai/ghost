@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname> <runtime|ui> [window-binary]'
+usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname> <window-binary>'
 source_root="${1:?usage: $usage}"
 runtime_root="${2:?usage: $usage}"
 pkgdir="${3:?usage: $usage}"
 pkgname="${4:?usage: $usage}"
-component="${5:?usage: $usage}"
-[[ "$component" == runtime || "$component" == ui ]] || {
-  printf 'unknown package component: %s\n' "$component" >&2
-  exit 2
-}
-
-# The UI package carries the built window (packages/window).
-window=""
-[[ "$component" != ui ]] || window="$(realpath -e -- "${6:?usage: $usage}")"
+# The built window (packages/window).
+window="$(realpath -e -- "${5:?usage: $usage}")"
 
 source_root="$(realpath "$source_root")"
 runtime_root="$(realpath "$runtime_root")"
@@ -37,53 +30,42 @@ install_tree() {
   done < <(find "$source_dir" -type f -print0)
 }
 
-sharedir="$pkgdir/usr/share/ghost"
+install -Dm755 "$runtime_root/bin/ghostd" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$runtime_root/bin/ghost" "$pkgdir/usr/bin/ghost"
+install -Dm644 "$runtime_root/lib/ghostd.js" \
+  "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
+install -Dm644 "$runtime_root/lib/ghost.js" \
+  "$pkgdir/usr/lib/ghost/runtime/ghost.js"
 
-if [[ "$component" == runtime ]]; then
-  install -Dm755 "$runtime_root/bin/ghostd" "$pkgdir/usr/bin/ghostd"
-  install -Dm755 "$runtime_root/bin/ghost" "$pkgdir/usr/bin/ghost"
-  install -Dm644 "$runtime_root/lib/ghostd.js" \
-    "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
-  install -Dm644 "$runtime_root/lib/ghost.js" \
-    "$pkgdir/usr/lib/ghost/runtime/ghost.js"
+install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
+  "$pkgdir/usr/lib/systemd/user/ghostd.service"
+install -Dm755 "$source_root/packaging/arch/service-smoke.sh" \
+  "$pkgdir/usr/lib/ghost/package-smoke/service-smoke.sh"
+install -Dm644 "$source_root/packaging/arch/README.md" \
+  "$pkgdir/usr/share/doc/ghost/ARCH.md"
+install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
+install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
+# The installed README and CONTRACTS.md link into docs/. Ship those
+# link targets so the relative references resolve inside the package.
+for doc in "$source_root"/docs/*.md; do
+  install -Dm644 "$doc" "$pkgdir/usr/share/doc/ghost/docs/${doc##*/}"
+done
+install -Dm644 "$runtime_root/BUNDLED-LICENSES" \
+  "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"
+install_tree "$runtime_root/licenses" \
+  "$pkgdir/usr/share/licenses/$pkgname/runtime/licenses"
 
-  install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
-    "$pkgdir/usr/lib/systemd/user/ghostd.service"
-  install -Dm755 "$source_root/packaging/arch/service-smoke.sh" \
-    "$pkgdir/usr/lib/ghost/package-smoke/service-smoke.sh"
-  install -Dm644 "$source_root/packaging/arch/README.md" \
-    "$pkgdir/usr/share/doc/ghost/ARCH.md"
-  install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
-  install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
-  # The installed README and CONTRACTS.md link into docs/. Ship those
-  # link targets so the relative references resolve inside the package.
-  for doc in "$source_root"/docs/*.md; do
-    install -Dm644 "$doc" "$pkgdir/usr/share/doc/ghost/docs/${doc##*/}"
-  done
-  install -Dm644 "$runtime_root/BUNDLED-LICENSES" \
-    "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"
-  install_tree "$runtime_root/licenses" \
-    "$pkgdir/usr/share/licenses/$pkgname/runtime/licenses"
-else
-  # The HUD is an omarchy-shell plugin. The package owns the files; the per-user
-  # symlink into ~/.config/omarchy/plugins belongs to the install script, because
-  # a package may not write into a home.
-  install_tree "$source_root/packages/shell/qml" "$sharedir/plugin"
-
-  # The window is the app the launcher entry opens, named by its app id so
-  # the compositor finds the entry's icon for it.
-  install -Dm755 "$window" "$pkgdir/usr/bin/ghost-window"
-  install -Dm644 "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" \
-    "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
-  install -Dm644 "$source_root/packages/shell/contrib/icons/ghost.svg" \
-    "$pkgdir/usr/share/icons/hicolor/scalable/apps/ghost.svg"
-  for size in 48 128 256; do
-    install -Dm644 "$source_root/packages/shell/contrib/icons/ghost-$size.png" \
-      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/ghost.png"
-  done
-  install_tree "$source_root/packages/shell/contrib" \
-    "$pkgdir/usr/share/doc/ghost/shell-contrib"
-fi
+# The window is the app the launcher entry opens, named by its app id so
+# the compositor finds the entry's icon for it.
+install -Dm755 "$window" "$pkgdir/usr/bin/ghost-window"
+install -Dm644 "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" \
+  "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
+install -Dm644 "$source_root/packages/window/contrib/icons/ghost.svg" \
+  "$pkgdir/usr/share/icons/hicolor/scalable/apps/ghost.svg"
+for size in 48 128 256; do
+  install -Dm644 "$source_root/packages/window/contrib/icons/ghost-$size.png" \
+    "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/ghost.png"
+done
 
 install -Dm644 "$source_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 install -Dm644 "$source_root/THIRD_PARTY_NOTICES.md" \
@@ -91,4 +73,4 @@ install -Dm644 "$source_root/THIRD_PARTY_NOTICES.md" \
 chown -hR 0:0 "$pkgdir"
 find "$pkgdir" \( -type f -o -type d \) -exec chmod go-w {} +
 
-bash "$source_root/packaging/arch/smoke.sh" "$pkgdir" "$component"
+bash "$source_root/packaging/arch/smoke.sh" "$pkgdir"

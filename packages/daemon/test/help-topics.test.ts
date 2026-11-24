@@ -30,7 +30,6 @@ describe("ghost help topics", () => {
     expect(text).toContain("preserve other sessions' edits");
     expect(text).toContain('systemctl --user restart ghostd.service');
     expect(text).toContain('journalctl --user -t ghostd');
-    expect(text).toContain('omarchy-restart-shell');
     expect(text).not.toContain('ghost say');
     expect(text).not.toContain('git restore');
     expect(text).not.toContain('branch from upstream master');

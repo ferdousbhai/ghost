@@ -52,7 +52,6 @@ expected=(
   .omarchy
   .omarchy/package.json
   PKGBUILD
-  ghost-runtime.install
   ghost.install
 )
 [[ "${inventory[*]}" == "${expected[*]}" ]]
@@ -60,7 +59,6 @@ expected=(
 [[ "$(stat -c '%a' "$contribution/.omarchy")" == 755 ]]
 [[ "$(stat -c '%a' "$contribution/PKGBUILD")" == 644 ]]
 [[ "$(stat -c '%a' "$contribution/ghost.install")" == 644 ]]
-[[ "$(stat -c '%a' "$contribution/ghost-runtime.install")" == 644 ]]
 [[ "$(stat -c '%a' "$contribution/.omarchy/package.json")" == 644 ]]
 # The declarative upstream block is what omarchy-pkgs' sync-upstream reads;
 # a hook alongside it would be an error there. Release files are `assets`,
@@ -85,11 +83,10 @@ srcinfo="$work/ghost.SRCINFO"
 ) > "$srcinfo"
 grep -Fxq 'pkgbase = ghost' "$srcinfo"
 grep -Fxq 'pkgname = ghost' "$srcinfo"
-grep -Fxq 'pkgname = ghost-runtime' "$srcinfo"
 grep -Fxq $'\tconflicts = ghost-dev' "$srcinfo"
+grep -Fxq $'\treplaces = ghost-runtime' "$srcinfo"
 grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
 grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-any.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-any.tar.zst' "$srcinfo"
-grep -Fxq $'\tarch = any' "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$source_sha" "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$runtime_sha" "$srcinfo"
 
@@ -252,14 +249,6 @@ for script in "$script_root"/bin/omarchy-install-ai-ghost "$script_root"/bin/oma
 done
 grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-install-ai-ghost"
 grep -Fq 'systemctl --user enable --now ghostd.service' "$script_root/bin/omarchy-install-ai-ghost"
-grep -Fq 'omarchy-plugin-enable ferdousbhai.ghost' "$script_root/bin/omarchy-install-ai-ghost"
-# -T or the link lands *inside* an existing directory and the HUD never loads.
-grep -Fq 'ln -sfnT /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
-if grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost" \
-    "$script_root/pkgbuilds/ghost/ghost.install"; then
-  printf 'plain ln -sfn onto the plugin link would nest it inside an existing directory\n' >&2
-  exit 1
-fi
 grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"

@@ -2,7 +2,7 @@
 
 **Work resumed on 2026-11-24, with a narrower aim: Ghost is the hub over the owner's own data. No release without the owner's go. Read `docs/status.md` before starting anything.**
 
-Local Omarchy-native AI persona with file-backed state, a daemon API, desktop shell, and Bash browser automation.
+Local Omarchy-native AI persona with file-backed state, a daemon API, a window, and Bash browser automation.
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
 
@@ -15,7 +15,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
 - **ghost** — the owner's one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
-- **daemon** (`ghostd`) — the HTTP API that owns conversations; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
+- **daemon** (`ghostd`) — the HTTP API that owns conversations; **window** (`ghost-window`) — the GTK app that talks to it.
 
 ## Taste
 
@@ -26,18 +26,17 @@ superseded machinery rather than preserving parallel implementations.
 
 If a rule here fights the task in front of you, say so loudly and get sign-off before breaking it.
 
-## The four ways to hurt yourself
+## The three ways to hurt yourself
 
-1. **Testing against the live install.** Tests use scratch ghost homes, never `~/ghosts`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; HUD checks use nested Hyprland with a private runtime directory and D-Bus. The live install need not use this checkout: discover `systemctl --user cat ghostd.service`, `command -v ghostd`, and `readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost` before deploying. A packaged daemon and HUD must be installed together; a checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes and omarchy-shell for QML changes. Rescans and plugin disable/enable can reuse loaded Components, so they are not proof a change is live. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version), installed artifacts, and the running shell's `debugBarGeometry`.
-2. **Driving the HUD on the owner's desktop.** Enabling the plugin in the live `omarchy-shell`, or a plain `quickshell -p`, puts a mock ghost in the owner's real desktop. Verify shell changes only through `packages/shell/dev/preview.sh`, which runs a nested Hyprland and a nested omarchy-shell with private HOME, XDG dirs, and dbus, seeds the plugin there, and refuses the live port and `~/ghosts`. No headless QML platform either — window and bar behavior is what is being verified.
-3. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
-4. **Touching a peer's git state.** The same shared checkout means `git stash` pops someone else's stash, so never stash here; commit or branch instead. A worktree and branch outlive their PR only while it is open: after the merge, `git worktree remove`, delete the branch locally and on origin, `git worktree prune`.
+1. **Testing against the live install.** Tests use scratch ghost homes, never `~/ghosts`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; window checks use `packages/window/dev/qa.sh` (a private broadway display) or `dev/preview.sh` (a nested Hyprland with a private runtime directory and D-Bus), each against a scratch ghostd. The live install need not use this checkout: discover `systemctl --user cat ghostd.service` and `command -v ghostd ghost-window` before deploying. A checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version) and the installed artifacts.
+2. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
+3. **Touching a peer's git state.** The same shared checkout means `git stash` pops someone else's stash, so never stash here; commit or branch instead. A worktree and branch outlive their PR only while it is open: after the merge, `git worktree remove`, delete the branch locally and on origin, `git worktree prune`.
 
 ## Hit every surface
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, `ghost` CLI, HUD (QML), the local model's tools. A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, `ghost` CLI, the window, the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help-topics.ts`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
@@ -52,6 +51,6 @@ pnpm test
 pnpm build
 ```
 
-Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test <file>`; the shell suite always runs whole) plus `typecheck` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (installed by `pnpm install`) refuses a master push until `pnpm verify` — the whole gate, which the `Native packages` workflow also runs through the PKGBUILD on x86_64 and aarch64 — (workspace build, typecheck, lint, tests, `bun test scripts`, and the packaging checks that diff `packaging/arch/.SRCINFO` against `PKGBUILD`) has passed on that tree; run `pnpm verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Never run biome's `--write --unsafe`: its fix for an unused function is to rename it with a leading underscore, which silences the lint forever, so a `function _name` in a `src/` tree is dead code to delete, not a convention. A `PKGBUILD` edit regenerates `.SRCINFO` in the same commit (`makepkg --printsrcinfo > .SRCINFO` in `packaging/arch/`). Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by `packages/daemon/test/prompt-budget.test.ts`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
+Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test <file>`; the window suite always runs whole) plus `typecheck` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (installed by `pnpm install`) refuses a master push until `pnpm verify` — the whole gate, which the `Native packages` workflow also runs through the PKGBUILD on x86_64 and aarch64 — (workspace build, typecheck, lint, tests, `bun test scripts`, and the packaging checks that diff `packaging/arch/.SRCINFO` against `PKGBUILD`) has passed on that tree; run `pnpm verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Never run biome's `--write --unsafe`: its fix for an unused function is to rename it with a leading underscore, which silences the lint forever, so a `function _name` in a `src/` tree is dead code to delete, not a convention. A `PKGBUILD` edit regenerates `.SRCINFO` in the same commit (`makepkg --printsrcinfo > .SRCINFO` in `packaging/arch/`). Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by `packages/daemon/test/prompt-budget.test.ts`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
 
 The daemon runs on Bun (`engines.bun`), not Node. Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.

@@ -5,8 +5,6 @@ set -euo pipefail
 manifests=(
   package.json
   packages/daemon/package.json
-  packages/shell/package.json
-  packages/shell/qml/manifest.json
 )
 usage='verify-release-version.sh <source-root> | --manifests | --valid <version>'
 if [[ "${1:-}" == --manifests ]]; then

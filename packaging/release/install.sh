@@ -7,10 +7,10 @@
 # install, ahead of it. When the repository already has the latest release,
 # it installs from there. Otherwise it builds Omarchy's own recipe for that
 # release (pkgbuilds/ghost, attached to the release as ghost-recipe.tar.gz)
-# with makepkg: the same `ghost` and `ghost-runtime` packages, so
+# with makepkg: the same `ghost` package, so
 # `omarchy update` takes over from there once the repository catches up.
 # Then it runs the Install menu's own steps (omarchy-install-ai-ghost, from
-# the same release): start ghostd for this login and enable the HUD.
+# the same release): start ghostd for this login.
 #
 # Run it as yourself; it asks for your password where pacman needs it.
 set -euo pipefail
@@ -27,7 +27,7 @@ command -v omarchy-pkg-add >/dev/null || die "Ghost is an Omarchy app, and this 
 for tool in curl jq makepkg vercmp; do
   command -v "$tool" >/dev/null || die "$tool is missing."
 done
-if pacman -Q ghost-dev ghost-runtime-dev >/dev/null 2>&1; then
+if pacman -Q ghost-dev >/dev/null 2>&1; then
   die "this machine runs Ghost's checkout packages (ghost-dev); update those from the checkout instead."
 fi
 
@@ -43,7 +43,7 @@ if [[ -n $installed ]] && (( $(vercmp "${installed%-*}" "$version") >= 0 )); the
   echo "Ghost $installed is already the latest release."
 elif [[ -n $available ]] && (( $(vercmp "${available%-*}" "$version") >= 0 )); then
   echo "Installing Ghost $available from Omarchy's package repository..."
-  sudo pacman -S --needed --noconfirm ghost ghost-runtime
+  sudo pacman -S --needed --noconfirm ghost
 else
   echo "Omarchy's package repository has ${available:-no} Ghost; building $version from its release..."
   work="$(mktemp -d)"

@@ -25,7 +25,7 @@ it. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction. The one
 exception is the [local model](#local-model): a model on this machine that
 ghostd runs, and loops over, itself.
-`ghostd` owns sessions and state transitions; the HUD and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it; a `host` key an earlier config carries is ignored, like any key Ghost does not read) and serves no web page; remote
+`ghostd` owns sessions and state transitions; the window and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it; a `host` key an earlier config carries is ignored, like any key Ghost does not read) and serves no web page; remote
 access is the summonghost.com app over an explicit Tailscale Serve address. The
 app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale
@@ -156,7 +156,7 @@ respects that project's settings.
 
 A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
 `[A-Za-z0-9._-]` not starting with `.` and not a sidecar's name
-(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the HUD `hud-…`,
+(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the window `app-…`,
 the CLI `cli-…`). The directory is
 the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
@@ -375,7 +375,7 @@ and explicit owner command hooks initiate work.
 from Ghost's mode-0600 XDG-state token file or an authenticated tailnet
 request; every path outside `/api` is `404`. A browser origin is admitted only
 when it is loopback or in `remote.apps`. Loopback CORS allows only the exact
-HUD/client methods and headers. Errors are
+client methods and headers. Errors are
 `{ "error": { "code": string, "message": string } }` with a meaningful HTTP
 status. Request bodies and control files are bounded before allocation.
 
@@ -418,10 +418,10 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET /api/ghosts` | `[{ name, dir }]`, the ghost homes by name; a tailnet guest's list carries only names. No route makes, renames, or removes one ([Ghost home](#ghost-home-ghost-homev2)). |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, usage, effort, resting}], ghostDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which the HUD's and `ghost harness`'s "automatic" name. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
+| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, usage, effort, resting}], ghostDefault, automatic }`: the installed agents Ghost has a row for, then `local` when [configured](#local-model), with the effort its launch asks for (null where the owner's setting stands), Omarchy's usage, and whether it is resting (above), the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and `automatic`, the agent a new conversation would start on now by the order above (`local` when it is the default; null when none can run), which `ghost harness`'s "automatic" names. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the harness a new conversation would start on, in a scratch directory with no persona, conversation, or Ghost tools, a failing harness handing it to the next (resting ones last); on the local model when a turn would run there, never then a cloud one (`409 harness_not_installed` for a ghost set to `local` with none configured). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. `502 completion_failed` names each harness's failure. |
-| `POST /api/ghosts/:name/messages` | `{ prompt, sessionId?, desktop? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. `desktop` is the window a HUD summon came from, `{ app?, title?, cwd? }` (text of at most 256, 1024, and 4096 characters; anything else is `400 invalid_request`): the turn's first pass gets it in a `<desktop-context>` block after the prompt, its title with secret-shaped text (a value after `token`, `password`, `Bearer`, …, or a long key-like run) replaced by `[redacted]`; like hook context it is neither logged nor shown. Only the HUD's summon sends it, and no selection, clipboard, or screen content. |
+| `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
@@ -431,10 +431,10 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
-| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
+| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. A running turn refuses it with `409 session_busy`. |
 | `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
-| `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control (`{ state, hostname, guests, owner, app, problem }`; `state` is `unavailable` only while Tailscale is missing, stopped, or logged out, and `problem` is `{ code, message, action? }`), with the app link (`app: { origin, url } \| null`), and that link's QR (`404` while it is null). Serve is HTTPS only (port 443), since the app is an HTTPS page: on a tailnet without HTTPS certificates `POST { enabled: true }` writes nothing and returns `problem.code` `https_required`, saying where to turn them on. Enabling and disabling also clear a plain-HTTP (port 80) entry an earlier version wrote. |
+| `GET\|POST /api/remote` | Tailscale Serve status/control (`{ state, hostname, guests, owner, app, problem }`; `state` is `unavailable` only while Tailscale is missing, stopped, or logged out, and `problem` is `{ code, message, action? }`), with the app link (`app: { origin, url } \| null`). Serve is HTTPS only (port 443), since the app is an HTTPS page: on a tailnet without HTTPS certificates `POST { enabled: true }` writes nothing and returns `problem.code` `https_required`, saying where to turn them on. Enabling and disabling also clear a plain-HTTP (port 80) entry an earlier version wrote. |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
@@ -471,8 +471,7 @@ period (once attached readers finish) or server shutdown, and are not history.
 
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
-[`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
-HUD reaches, except attaching a photo and reading the follow-up queue, is a
+[`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
 named verb there (character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, the agent a ghost prefers (`ghost harness`)
@@ -533,20 +532,11 @@ informational only. Ghost adds no turn, hosted-session, concurrency, or spend ca
 
 ## Package boundaries
 
-**ghost-core** is `packages/daemon`.
-**ghost-omarchy** is `packages/shell` (`@ghost/omarchy`). Core never imports
-the Omarchy side; `scripts/check-core-boundary.sh` proves this during lint.
-Their seam is the authenticated HTTP/SSE API.
-
-The Arch install has two packages built from the same release: `ghost-runtime`
-owns the daemon, CLI, user unit, and runtime docs/licenses;
-`ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
-that exact runtime version. The checkout variants are `ghost-runtime-dev` and
-`ghost-dev`. Installing only the runtime keeps the daemon in the existing
-graphical session without requiring Quickshell or installing Ghost UI.
-An app supplies its own UI over the same authenticated HTTP/SSE API. Adding or
-removing the UI neither stops the runtime nor changes ghost homes; removing the
-runtime preserves owner data.
+The seam between the packages is the authenticated HTTP/SSE API. The Arch
+install is one package, `ghost` (checkout variant `ghost-dev`): the daemon,
+CLI, user unit, docs and licenses, and the window with its launcher entry and
+icons. It replaces the `ghost-runtime` package that 0.11.9 and earlier split
+the daemon into. Removing it preserves owner data.
 
 - [`packages/daemon`](packages/daemon/src/main.ts) owns ghost homes and the
   persona prompt, configuration, authentication, conversations, the harness table, hooks, lifecycle,
@@ -557,7 +547,7 @@ runtime preserves owner data.
   widgets are [omui](https://github.com/ferdousbhai/omui)'s;
   [`style.css`](packages/window/src/style.css) holds only Ghost's own rules,
   on omui's `@om_*` colours. It is a client of the
-  API like the HUD and keeps no data: a sidebar of Ask and each available
+  API and keeps no data: a sidebar of Ask and each available
   [source](#sources), a page per source (its list, or a grid of pictures
   when its items have them, a search of it, and a reader for one item),
   Connect (the [connections](#connections); a first run with none connected
@@ -575,68 +565,10 @@ runtime preserves owner data.
   ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
   feature, against the same scratch ghostd and sample data, on a private
   broadway display), so the gate covers it; the package build's `check()`
-  skips the QA, and no release build has the feature. The `ghost` package
-  carries it, which makes that package per-architecture (`ghost-runtime`
-  stays `any`), with the launcher entry `io.github.ferdousbhai.Ghost.desktop`
-  that opens it; `--version` prints the release version.
-- [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
-  package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring
-  `service` (the daemon connection, the desktop presence, and the
-  notifications a shut window would swallow), `panel` (the summon), and
-  `bar-widget` (the ghost mark) kinds. How it behaves is its
-  [README](packages/shell/README.md); what others rely on:
-  - **The summon payload**, sent by the host's toggle and summon, the `ghost`
-    IPC, and notifications: `{}` opens the presence prompt
-    (the HUD while no ghost is listed); `section` opens the HUD there;
-    `sessionId` with `ghost`, the listed ghost's name, opens that
-    conversation;
-    `restore: true` puts the HUD back after a reload without igniting or
-    listening. With nothing named, a prompt or HUD left open behind another
-    app is refocused rather than closed or reopened.
-  - **The `ghost` IPC target** (`omarchy-shell ghost <verb>`): `open`,
-    `close`, `summon <name>`, `ask <prompt>`, `section <name>`, `refresh`,
-    and `status`, a JSON object of `ghost`, `shown`, `streaming`,
-    `reachable`, `activity`, `error`, and `summonKey`.
-  - **Hyprland**, asked at runtime through `hyprctl eval`
-    ([`DesktopKeys.qml`](packages/shell/qml/DesktopKeys.qml)) so no config
-    file is edited: `SUPER+CTRL+G` unless a default-mode binding holds it (the
-    owner's own, bound to this plugin or described "Summon ghost", stays; the
-    shell's is described "Summon ghost (shell)"), and the named window rule
-    `ghost-windows` for its two keyboard windows, titled `Ghost` and
-    `Ghost prompt`. Both are withdrawn when the plugin unloads, only by the
-    shell that last made them, and re-made after each config reload.
-    `summonKey` is `shell`, `owner`, `taken`, or `none` (free on a `.conf`
-    config, which runs no Lua, so `contrib/hyprland/ghost.conf` carries the
-    key and the rule there), and empty until read.
-  - **Notifications**: completed turns and terminal failures notify unless
-    their conversation is viewed in the focused, visible chat or followed by
-    the presence, and only those two mark replies read; cancellation is
-    quiet. A toast uses the conversation title and a reply or error excerpt,
-    replaces live toasts per ghost and conversation through the notification
-    server's IDs, and opens its conversation with the summon payload
-    `{ "ghost", "sessionId", "section": "chat" }` in Omarchy's
-    `omarchy-exec-argv` hint. Optional mobile delivery is the owner's
-    `turn_end` command hook.
-  - **State** moves only through the authenticated HTTP/SSE API; the shell
-    never edits daemon-validated ghost state (character, control files)
-    directly, and it has no file editor: a tool call that wrote a file
-    shows its path in the transcript and opens nothing.
-  - **Dictation** is Omarchy's Voxtype: the shell reads
-    `$XDG_RUNTIME_DIR/voxtype/state` and runs `voxtype record
-    start|stop|cancel`. Ghost ships no speech stack of its own.
-  - **Hosting**: it runs inside Omarchy's own shell process, so Ghost ships no
-    shell, unit, or tray helper, and its QML imports are relative paths
-    (inside the host, `qs.` resolves to Omarchy's shell root). The bar widget
-    takes the host's injected `bar` facade: `barSize`, `vertical`,
-    `position`, the tooltip API, the
-    `shell` facade, and `triggerPress(button)` for the host's click
-    forwarding. The package installs the plugin to `/usr/share/ghost/plugin`;
-    the per-user link into `~/.config/omarchy/plugins/` belongs to the
-    install script, which waits for shell discovery before enabling it. It
-    is distributed only by the `ghost` package, never as an
-    `omarchy plugin add` checkout: the HUD and the daemon are one product
-    and must be the same version, and a second channel cannot hold that lock.
-    Setup ends with ghostd's first start, which makes the ghost home; harness sign-in is external.
+  skips the QA, and no release build has the feature. It makes the `ghost`
+  package per-architecture; the launcher entry
+  `io.github.ferdousbhai.Ghost.desktop` opens it, and `--version` prints the
+  release version.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   prints the daemon restart that loads the new bundle. A release is cut locally
@@ -645,11 +577,13 @@ runtime preserves owner data.
   archive, runtime archive, and `SHA256SUMS`; Omarchy's sync reads GitHub's
   asset digests. Owners install from Omarchy's package repository. Ahead of
   its sync, `ferdousbhai.com/ghost/install.sh` (the release's `install.sh`)
-  installs the same packages: from that repository when it has the latest
+  installs the same package: from that repository when it has the latest
   release, else built with makepkg from Omarchy's own recipe for it
   (`ghost-recipe.tar.gz`), never from a second package repository, so
   `omarchy update` carries on from there. It ends with the Install menu's
-  own steps (`omarchy-install-ai-ghost`, also attached to the release).
+  own step (`omarchy-install-ai-ghost`, also attached to the release), which
+  starts ghostd; its first start makes the ghost home, and harness sign-in is
+  external.
 
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md).
@@ -733,7 +667,7 @@ the `llama-server` executable (default: `llama-server` on `PATH`; on Asahi, poin
 the context in tokens (32768), the idle minutes before it stops (5), and how
 deeply the model reasons, as its chat template names the depths (`low`).
 Configured, `local` is the default runtime ([Harnesses](#harnesses)), listed
-with the harnesses (`GET …/harness`, the HUD agent menu) and chosen like one
+with the harnesses (`GET …/harness`) and chosen like one
 (`ghost switch local`, `ghost harness local`); `ghost harnesses`, which reads
 Omarchy, does not list it.
 
@@ -782,9 +716,9 @@ is answered with what was wrong, and nothing runs.
 
 ## Harness and lifecycle invariants
 
-- Never start a test daemon against `~/ghosts`, the live port 7717, or the live
-  Quickshell bus. Canary/smoke daemons isolate Ghost config and owner hooks.
-  Tests use scratch homes and the shell preview's private
+- Never start a test daemon against `~/ghosts` or the live port 7717.
+  Canary/smoke daemons isolate Ghost config and owner hooks.
+  Tests use scratch homes and the window preview's private
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
@@ -818,7 +752,7 @@ is answered with what was wrong, and nothing runs.
 - Any part of Ghost's code is a ghost's to change to fit its owner. A
   packaged install's files are pacman's and never edited: a ghost changes itself by running
   from its own clone under the owner's home (an `ExecStart` drop-in for
-  ghostd, a `~/.local/bin/ghost` launcher, the plugin link), each step undone
+  ghostd, a `~/.local/bin/ghost` launcher), each step undone
   by removing it.
 
 Focused tests beside the implementation are part of these contracts. GitHub

@@ -26,7 +26,7 @@ export async function characterCommand(ctx: CliContext): Promise<number> {
 }
 
 
-/** `ghost read -s <id>`: mark a conversation read, as opening it in the HUD does. */
+/** `ghost read -s <id>`: mark a conversation read. */
 export async function readCommand(ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx);
   const body = await ctx.client.request("PUT", `${path}/read`, {});

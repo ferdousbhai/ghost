@@ -70,7 +70,7 @@ describe("parsers over recorded output", () => {
   });
 
   // A start with no end leaves a card running for the rest of the turn, and
-  // the HUD's activity line names the newest running card.
+  // a client's activity line names the newest running card.
   it.each([
     ["claude", "claude.jsonl"],
     ["codex", "codex.jsonl"],

@@ -13,7 +13,7 @@ bash -n "$installer"
 work="$(mktemp -d)"
 trap 'rm -rf -- "$work"' EXIT
 mkdir -p "$work/bin" "$work/recipe/ghost"
-printf 'pkgname=(ghost-runtime ghost)\n' > "$work/recipe/ghost/PKGBUILD"
+printf 'pkgname=ghost\n' > "$work/recipe/ghost/PKGBUILD"
 tar -czf "$work/ghost-recipe.tar.gz" -C "$work/recipe" ghost
 
 # curl serves the release API, the recipe, and the menu script by URL.
@@ -64,7 +64,7 @@ run() {
 # Omarchy's repository has the latest: install from it, build nothing.
 run "" "0.10.0-1"
 [[ $result == 0 ]]
-grep -Fxq 'pacman -S --needed --noconfirm ghost ghost-runtime' "$work/actions"
+grep -Fxq 'pacman -S --needed --noconfirm ghost' "$work/actions"
 ! grep -q '^makepkg' "$work/actions" || exit 1
 grep -Fxq menu "$work/actions"
 

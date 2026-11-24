@@ -62,7 +62,7 @@ export interface ServerOptions {
    * tailnet identity only, never the bearer token; omitted, none.
    */
   remoteApps?: readonly string[];
-  /** Owns the Tailscale Serve exposure and its QR code. */
+  /** Owns the Tailscale Serve exposure. */
   remoteServe: RemoteServe;
   /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
   streamCutBytes?: number;
@@ -76,7 +76,7 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
-/** Qt's XHR rebuilds a response's whole body on every chunk, so the HUD's cost grows with it. */
+/** Where a turn response is cut, so no client holds one ever-growing body. */
 const DEFAULT_STREAM_CUT_BYTES = 1_048_576;
 /** How long an ended turn stays resumable, for a client cut just before the end. */
 const RESUME_GRACE_MS = 60_000;
@@ -95,7 +95,7 @@ interface TurnLog {
 }
 
 /**
- * The HUD is not a web page, and the daemon serves none; a local UI on a
+ * The daemon serves no web page; a local UI on a
  * loopback port is a different origin on the same interface. Allow exactly
  * that and `remote.apps`, and nothing else — a page on another origin must not
  * be able to read a ghost's conversations through the user's own browser.
@@ -118,7 +118,7 @@ function jsonResponse(
 
 /**
  * The `{ error: { message, code } }` envelope is fixed by Ghost's HTTP contract
- * and in-repo consumers, not chosen here: the shell, CLI, and summonghost.com app all
+ * and in-repo consumers, not chosen here: the window, CLI, and summonghost.com app all
  * parse the nested error from a non-2xx response. Flattening it silently breaks
  * those clients.
  */
@@ -490,7 +490,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
 
   /**
    * An image body from any owner, or JSON `{ path }` naming a local image
-   * from the machine-local token: the HUD's pasted or dropped picture.
+   * from the machine-local token.
    */
   const handleSaveAttachment = async ({ ghost, id, request, response, admission }: RequestContext): Promise<void> => {
     let bytes: Uint8Array;
@@ -641,7 +641,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     const admission = await options.host.admitTurn(ghost.name, {
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
-      desktop: parsed.desktop,
     });
     const log = startTurnLog(ghost.name, admission.sessionId, (emit) => admission.run({ emit }));
     await followTurn(request, response, log, 0);
@@ -673,20 +672,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const routes: Route<RequestContext>[] = [
     route("GET", "api/remote/whoami", ({ response, admission }) => {
       jsonResponse(response, 200, { role: admission.identity?.role ?? "owner" });
-    }),
-    // The app link adding this machine.
-    route("GET", "api/remote/qr.svg", async ({ response }) => {
-      const url = (await remoteServe.status()).app?.url;
-      if (!url) {
-        throw new GhostError("not_found", "Remote access is off, or remote.apps names no app.", 404);
-      }
-      const svg = await remoteServe.qrSvg(url);
-      response.writeHead(200, {
-        "content-type": "image/svg+xml; charset=utf-8",
-        "content-length": Buffer.byteLength(svg),
-        "cache-control": "no-store",
-      });
-      response.end(svg);
     }),
     route("GET", "api/remote/machines", ownerOnly(async ({ response }) => {
       jsonResponse(response, 200, { machines: await remoteServe.machines() });

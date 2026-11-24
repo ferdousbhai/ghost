@@ -4,7 +4,6 @@
  * size. Clients ignore event types they do not know.
  */
 import { requireConversationId } from "./conversation-log.js";
-import { type DesktopContext, parseDesktopContext } from "./desktop-context.js";
 import { GhostError } from "./errors.js";
 
 export type TurnEvent =
@@ -70,7 +69,7 @@ export interface TurnResumeEvent {
 
 /**
  * A harness refused on quota. Sent before the terminal `error`, whose
- * message it classifies, so the HUD and CLI can name the limit.
+ * message it classifies, so a client can name the limit.
  */
 export interface LimitReachedEvent {
   type: "limit_reached";
@@ -85,7 +84,7 @@ const LIMIT_WORDS: Record<LimitReachedEvent["kind"], string> = {
   billing: "needs billing attention",
 };
 
-/** "claude usage limit reached"; the HUD's `limitNoticeText` words it the same. */
+/** "claude usage limit reached". */
 export function limitNotice(event: Pick<LimitReachedEvent, "harness" | "kind">): string {
   return `${event.harness} ${LIMIT_WORDS[event.kind]}`;
 }
@@ -148,19 +147,16 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
 interface TurnRequest {
   sessionId: string | null;
   prompt: string;
-  /** The window a summon came from, when the HUD sent one. */
-  desktop: DesktopContext | null;
 }
 
-/** Parse a turn request body, `{ prompt, sessionId?, desktop? }`. */
+/** Parse a turn request body, `{ prompt, sessionId? }`. */
 export function parseTurnRequest(body: Record<string, unknown>): TurnRequest {
-  const { prompt, sessionId, desktop } = body;
+  const { prompt, sessionId } = body;
   if (typeof prompt !== "string" || prompt.trim() === "") {
     throw new GhostError("invalid_request", "\"prompt\" must be non-empty text.", 400);
   }
   return {
     sessionId: typeof sessionId === "string" && sessionId ? requireConversationId(sessionId) : null,
     prompt: prompt.trim(),
-    desktop: parseDesktopContext(desktop),
   };
 }

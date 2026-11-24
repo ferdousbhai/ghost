@@ -1,9 +1,8 @@
 # Checkout package recipe
 
-`PKGBUILD` builds two rolling packages: `ghost-runtime-dev` (daemon, API,
-CLI) and `ghost-dev` (the Omarchy UI). They provide
-and conflict with stable `ghost-runtime` and `ghost`, respectively. The UI
-requires the exact matching runtime version.
+`PKGBUILD` builds one rolling package, `ghost-dev`: the daemon, API and CLI,
+and the window. It provides and conflicts with stable `ghost`, and replaces
+the `ghost-runtime-dev` package earlier checkouts split the daemon into.
 `/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
@@ -28,48 +27,6 @@ sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
 The chroot command expects, on ARM, the checksum-verified upstream Bun
 binary at `.ci/bun/bun`. The workflow prepares these before invoking it.
 
-## Runtime with your own UI
-
-Install `ghost-runtime` from the Omarchy package repository for a remote desktop
-where an app supplies the UI. Install `ghost` to add the version-matched HUD
-and window:
-
-```sh
-sudo pacman -Syu ghost-runtime
-systemctl --user enable --now ghostd.service
-ghost status
-# Optional Ghost UI:
-sudo pacman -S ghost
-```
-
-The runtime package has no Ghost QML, window, desktop entry, icons, or
-Quickshell and GTK requirement, and is the same package on every architecture;
-`ghost` is built per architecture, because the window (`ghost-window`) is
-native code. The commands a ghost runs (Hyprland, clipboard, and browser CLIs)
-still need the supported Hyprland graphical environment. This is an install
-without the Ghost HUD, nothing more.
-The daemon remains bound to the graphical session and loopback. An app uses the
-existing bearer-authenticated HTTP/SSE API; it must render and answer pending
-questions through conversation replies.
-Use an SSH tunnel or the existing Tailscale boundary for access from another
-machine; installing only the runtime does not expose the API publicly.
-
-To remove the UI while retaining an app's backend:
-
-```sh
-sudo pacman -D --asexplicit ghost-runtime
-omarchy plugin remove ferdousbhai.ghost --yes
-sudo pacman -R ghost
-omarchy-restart-shell
-```
-
-The Omarchy **Remove → AI → Ghost** action removes Ghost and keeps every
-ghost home. `ghost-runtime` goes with it when it came in as Ghost's
-dependency, and stays, daemon running, when it was installed on its own
-(the first command above marks it so).
-For checkout builds use the `-dev` package names. Building produces both
-archives; install just the `ghost-runtime-dev` archive when supplying your own UI.
-
 ## Owner-shared state
 
 Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
@@ -89,41 +46,30 @@ the shared Chromium session and task tabs). Each product installs its own skill
 its own.
 
 This remains the rolling, checkout-only development package: `pnpm install`
-may populate its store during `build()`. The stable `ghost-runtime` package uses the
+may populate its store during `build()`. The stable `ghost` package uses the
 [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
 and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
 source and runtime inputs as a GitHub release (`../release/publish.sh`);
 Omarchy's package repository carries `ghost` and owns the stable package
 build and promotion (see [the release README](../release/README.md)).
 
-The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
-The package does not write into a user's config directory, so linking it into
-`~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
 Browser automation uses the optional agent-browser CLI through Bash. Ghost has
 no screen control: desktop work goes through Omarchy's commands and app CLIs.
 
 ## Desktop boundary
 
-The supported release target is Omarchy. Ghost depends on Omarchy's Hyprland
-and Quickshell desktop shape, and carries its keybinding samples under
-`/usr/share/doc/ghost/shell-contrib/` for the owner to enable. There is no generic Arch/Hyprland support promise. Packaging never
-edits `~/.config/hypr` or `~/.config/omarchy`; on a Lua config the HUD asks
-Hyprland for its summon key and its window rule at runtime instead, and a
-`.conf` config sources `shell-contrib/hyprland/ghost.conf` (see CONTRACTS.md).
+The supported release target is Omarchy. There is no generic Arch/Hyprland
+support promise. Packaging never edits `~/.config/hypr` or `~/.config/omarchy`.
 
 ## Upgrades, rollback, and uninstall
 
-The package owns only files under `/usr`; the HUD's per-user link is the
-owner's. It does not create or own `~/ghosts`,
+The package owns only files under `/usr`. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, documents, sessions, provider credentials, and API tokens
 untouched.
 
-A runtime upgrade requires `systemctl --user restart ghostd.service` to load
-the new bundle; an installed HUD also needs `omarchy-restart-shell`.
-A rescan will not do here: the plugin's entry point is unchanged, so the shell
-keeps the widget it already loaded and the owner runs a new daemon behind an
-old HUD.
+An upgrade requires `systemctl --user restart ghostd.service` to load
+the new bundle.
 A package rollback uses the normal pacman cache
 (`pacman -U /var/cache/pacman/pkg/<package>.pkg.tar.zst`) and likewise does not
 roll back or delete user data. Ghost-home format changes must remain
@@ -134,16 +80,15 @@ To remove the complete checkout installation, stop and disable the user unit:
 
 ```sh
 systemctl --user disable --now ghostd.service
-sudo pacman -Rns ghost-dev ghost-runtime-dev
+sudo pacman -Rns ghost-dev
 ```
 
-For the complete stable installation, use `sudo pacman -Rns ghost ghost-runtime`.
-If only the runtime is installed, name only `ghost-runtime`.
+For the stable installation, use `sudo pacman -Rns ghost`.
 
 That removes package-owned files only.
 
-`smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
-the window and its desktop entry, Quickshell assets,
+`smoke.sh <root>` validates the staged package tree, including daemon startup metadata,
+the window and its desktop entry,
 and graphical-session service binding. `package()` runs it before producing the
 archive. `pnpm verify` is the gate: the pre-push hook refuses a master push
 until it has passed on that exact tree, and the `Native packages` workflow

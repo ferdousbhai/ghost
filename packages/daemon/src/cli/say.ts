@@ -87,7 +87,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
   // An owner `!command` streams as one bash card before any harness starts;
-  // its output is the card's summary (the tail the HUD shows), and it is this
+  // its output is the card's summary (its tail), and it is this
   // turn's whole answer. ghostd alone decides what a command is.
   let harnessStarted = false;
   let ownerCommand = false;

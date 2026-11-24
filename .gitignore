@@ -5,10 +5,6 @@ dist/
 .env
 .env.*
 
-# Machine-local Quickshell per-run symlink (points into /run/user VFS)
-packages/shell/qml/.qmlls.ini
-packages/shell/dev/render/out/
-
 # makepkg output from building the checkout package (packaging/arch/README.md)
 packaging/arch/*.pkg.tar.*
 packaging/arch/src/

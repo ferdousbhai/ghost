@@ -6,7 +6,6 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
-import { type DesktopContext, renderDesktopContext } from "./desktop-context.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
@@ -116,8 +115,6 @@ export interface SessionHostOptions {
 interface RunTurnOptions {
   sessionId?: string | null;
   prompt: string;
-  /** The window a summon came from: hidden context for the first pass only. */
-  desktop?: DesktopContext | null;
   emit: (event: TurnEvent) => void;
 }
 
@@ -202,7 +199,7 @@ export interface HarnessChoices {
 }
 
 interface LiveTurn {
-  /** The owner's queued messages, in order, which the HUD shows and hands back on a stop. */
+  /** The owner's queued messages, in order, which a client shows. */
   readonly followUps: string[];
   /** The turn's own stream, which announces each change to `followUps`. */
   readonly emit: (event: TurnEvent) => void;
@@ -600,7 +597,7 @@ export class SessionHost {
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt" | "desktop">,
+    options: Pick<RunTurnOptions, "sessionId" | "prompt">,
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -624,7 +621,7 @@ export class SessionHost {
             if (event.type === "done" || event.type === "error") terminal = event;
             else stream.emit(event);
           };
-          try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, turnId, options.desktop ?? null); }
+          try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, turnId); }
           catch (error) {
             terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
           }
@@ -655,7 +652,6 @@ export class SessionHost {
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
     initialTurnId: string,
-    desktop: DesktopContext | null = null,
   ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -676,7 +672,6 @@ export class SessionHost {
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
-      const first = next;
       let ownerPrompt = prompt;
       while (next && !signal.aborted) {
         const { text, origin }: Pass = next;
@@ -689,8 +684,7 @@ export class SessionHost {
         if (origin !== "hook") await this.dropQuestion(ghost, id);
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
-        let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
-        if (desktop && next === first && origin === undefined) passPrompt = `${passPrompt}\n\n${renderDesktopContext(desktop)}`;
+        const passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
         // A failed pass ends the turn only when nothing is queued behind it:
         // the owner's follow-ups were accepted and still run.

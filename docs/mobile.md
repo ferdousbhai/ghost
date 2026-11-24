@@ -2,8 +2,7 @@
 
 The phone client is the [summonghost.com](https://summonghost.com) app. Turn on
 remote access with `ghost remote on`, then open the `app` link
-`ghost remote status` prints (the HUD's Remote access pane shows it with a QR
-code), `https://summonghost.com/#add=<hostname>`, on a phone signed into the
+`ghost remote status` prints, `https://summonghost.com/#add=<hostname>`, on a phone signed into the
 tailnet: the app adds this machine, then finds your other machines running
 Ghost, all in one page. The host must remain awake, logged in, and connected. A
 missing host cannot run work or deliver alerts.

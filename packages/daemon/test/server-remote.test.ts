@@ -88,10 +88,6 @@ class FakeRemoteServe extends RemoteServe {
     this.current = remoteStatus(false);
     return this.current;
   }
-
-  override async qrSvg(url: string): Promise<string> {
-    return `<svg data-url="${url}"></svg>`;
-  }
 }
 
 /** A server over a fake RemoteServe. */
@@ -262,26 +258,6 @@ describe("remote management", () => {
     expect(fake.mutations).toEqual([]);
   });
 
-  it("serves a no-store QR of the app link only while there is one", async () => {
-    const { fake, base } = await serveFake(true);
-    const headers = { authorization: `Bearer ${TOKEN}` };
-    const none = await fetch(`${base}/api/remote/qr.svg`, { headers });
-    expect(none.status).toBe(404);
-    expect(await none.json()).toMatchObject({ error: { code: "not_found" } });
-    fake.current = { ...remoteStatus(true), app: { origin: APP, url: `${APP}/#add=ghostbox.example.ts.net` } };
-    const qr = await fetch(`${base}/api/remote/qr.svg`, { headers });
-    expect(qr.status).toBe(200);
-    expect(qr.headers.get("content-type")).toContain("image/svg+xml");
-    expect(qr.headers.get("cache-control")).toBe("no-store");
-    expect(await qr.text()).toContain(`${APP}/#add=ghostbox.example.ts.net`);
-  });
-
-  it("has no QR code while Serve is off", async () => {
-    const base = await serve();
-    const headers = { authorization: `Bearer ${TOKEN}` };
-    expect((await fetch(`${base}/api/remote`, { headers })).status).toBe(200);
-    expect((await fetch(`${base}/api/remote/qr.svg`, { headers })).status).toBe(404);
-  });
 });
 
 

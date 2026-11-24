@@ -3,7 +3,7 @@
  * ghost home: what
  * the owner said, what the ghost answered, the tools it ran, the owner's `!`
  * commands, and which harness carried each stretch. Each harness keeps its
- * own transcript for resume; this log is what the HUD, `ghost show`, and a
+ * own transcript for resume; this log is what the window, `ghost show`, and a
  * harness switch read, so it is the one history that outlives any harness.
  */
 import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";

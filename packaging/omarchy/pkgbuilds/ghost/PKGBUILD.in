@@ -1,23 +1,22 @@
 # Maintainer: Ferdous Bhai <https://github.com/ferdousbhai>
 
-pkgbase=ghost
-pkgname=(ghost-runtime ghost)
+pkgname=ghost
 pkgver=@@VERSION@@
 pkgrel=1
 pkgdesc="An orchestration layer for all your agent harnesses"
-# The window is native code; the runtime package says `any` for itself.
+# The window is native code.
 arch=('x86_64' 'aarch64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
 license=('Apache-2.0')
-_runtime_depends=(
+depends=(
   'bun>=1.3.14'
   'glib2'
+  'gtk4>=4.14'
   'hyprland>=0.56'
-  'qrencode'
+  'jq'
   'systemd'
+  'xdg-utils>=1.2'
 )
-_ui_depends=('gtk4>=4.14' 'jq' 'libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'wl-clipboard' 'xdg-utils>=1.2')
-depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
 makedepends=(
   'bun>=1.4.0'
   'cargo'
@@ -28,9 +27,13 @@ checkdepends=(
   'nodejs'
   'ripgrep'
 )
-_runtime_optdepends=(
+optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
 )
+# 0.11.9 and earlier split the daemon out as ghost-runtime.
+conflicts=(ghost-dev ghost-runtime)
+replaces=(ghost-runtime)
+install=ghost.install
 options=('!debug' '!lto' '!strip')
 
 # Omarchy's sync-upstream follows the GitHub release named in
@@ -123,27 +126,10 @@ check() {
     --manifest-path "$source_root/packages/window/Cargo.toml" || return 1
 }
 
-package_ghost-runtime() {
-  pkgdesc="Ghost daemon, API, and CLI without the HUD"
-  depends=("${_runtime_depends[@]}")
-  optdepends=("${_runtime_optdepends[@]}")
-  conflicts=(ghost-runtime-dev)
-  arch=('any')
-  install=ghost-runtime.install
+package() {
   local source_root="$srcdir/ghost-${pkgver}"
   local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-any"
   bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_root" "$pkgdir" "$pkgname" runtime
-}
-
-package_ghost() {
-  pkgdesc="An orchestration layer for all your agent harnesses"
-  depends=("ghost-runtime=$pkgver-$pkgrel" "${_ui_depends[@]}")
-  conflicts=(ghost-dev)
-  install=ghost.install
-  local source_root="$srcdir/ghost-${pkgver}"
-  local runtime_root="$srcdir/runtime/ghost-runtime-${pkgver}-linux-any"
-  bash "$source_root/packaging/release/install-payload.sh" \
-    "$source_root" "$runtime_root" "$pkgdir" "$pkgname" ui \
+    "$source_root" "$runtime_root" "$pkgdir" "$pkgname" \
     "$source_root/packages/window/target/release/ghost-window"
 }

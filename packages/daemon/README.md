@@ -34,4 +34,4 @@ ghost smoke --no-turn --json
 ## Runtime notes
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
-the authenticated HTTP API, and renders the same conversations as the HUD. Run `ghost help` for the current command catalog.
+the authenticated HTTP API, and renders the same conversations as the window. Run `ghost help` for the current command catalog.

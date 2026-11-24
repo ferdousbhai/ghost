@@ -44,9 +44,8 @@ interface RemoteServeOptions {
   guests?: "read-only" | "none";
   /** `remote.apps`; omitted, none. */
   apps?: readonly string[];
-  /** Test seams over `tailscale` and `qrencode`. */
+  /** Test seam over `tailscale`. */
   run?: CommandRunner;
-  qrRun?: CommandRunner;
 }
 
 /** The listeners Ghost writes: HTTPS, and plain HTTP, which earlier versions used without certificates and are now only cleared. */
@@ -113,7 +112,6 @@ interface Inspection {
 export class RemoteServe {
   private readonly target: string;
   private readonly run: CommandRunner;
-  private readonly qrRun: CommandRunner;
   private readonly owner: string | null;
   private readonly guests: "read-only" | "none";
   private readonly app: string | null;
@@ -123,7 +121,6 @@ export class RemoteServe {
   constructor(port: number, options: RemoteServeOptions = {}) {
     this.target = `http://${DAEMON_HOST}:${port}`;
     this.run = options.run ?? commandRunner("tailscale");
-    this.qrRun = options.qrRun ?? commandRunner("qrencode");
     // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
     this.owner = options.owner?.trim().toLowerCase() || null;
     this.guests = options.guests ?? "none";
@@ -189,19 +186,6 @@ export class RemoteServe {
     const { app, hostname } = await this.status();
     if (!app?.url || !hostname) return null;
     return `${app.origin}/#/${[hostname, ghost, id].map(encodeURIComponent).join("/")}`;
-  }
-
-  async qrSvg(url: string): Promise<string> {
-    let result: CommandResult;
-    try {
-      result = await this.qrRun(["-t", "SVG", "-o", "-", url]);
-    } catch (error) {
-      throw new Error(isMissingBinary(error)
-        ? "qrencode is required to create the remote-access QR code."
-        : `qrencode failed: ${firstLine(errorMessage(error))}`);
-    }
-    if (result.code !== 0) throw new Error(`qrencode failed: ${firstLine(result.stderr) || result.code}`);
-    return result.stdout;
   }
 
   private async inspect(): Promise<Inspection> {

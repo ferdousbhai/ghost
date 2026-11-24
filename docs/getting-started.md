@@ -1,14 +1,14 @@
 # Getting started
 
-Install Ghost, create a persona, and talk in the HUD or terminal.
+Install Ghost, create a persona, and talk in its window or the terminal.
 
 For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
 of — this page.
 
 ## 0. What you need
 
-- **Omarchy** (Hyprland + Quickshell). Ghost depends on that desktop shape;
-  there is no generic Arch/Hyprland support promise.
+- **Omarchy**. Ghost depends on that desktop; there is no generic
+  Arch/Hyprland support promise.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
 - **An agent CLI** — Omarchy installs Claude Code, Codex, Grok, Copilot,
@@ -36,12 +36,12 @@ curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash
 
 It installs from Omarchy's repository when that already has the latest
 release, and otherwise builds Omarchy's own recipe for it; either way the
-packages are the same, and `omarchy update` keeps them current afterwards.
+package is the same, and `omarchy update` keeps it current afterwards.
 It also starts Ghost for your login (section 3).
 
 For checkout development, use the
-[rolling package recipe](../packaging/arch/README.md). Install matching runtime
-and UI packages together; a workspace build alone does not update the app.
+[rolling package recipe](../packaging/arch/README.md); a workspace build alone
+does not update the app.
 
 The package only puts files in place; section 3 starts Ghost for this login.
 
@@ -83,38 +83,19 @@ checklist per list). Ghost does not index the directory
 or read any of it until a request calls for it. For search by meaning, a
 ghost can offer to install Recall, which indexes only the folders you choose.
 
-### Bring your own UI
-
-For a remote desktop with an app-provided UI, install `ghost-runtime` instead of
-`ghost`. It includes the daemon/API and CLI,
-without Ghost's HUD, launcher, icons, or Quickshell dependency. Start only
-`ghostd.service`; the graphical-session and authentication requirements below
-still apply. See [runtime install and UI removal](../packaging/arch/README.md#runtime-with-your-own-ui).
-
 ## 3. Confirm setup
 
-The Install → AI → Ghost entry starts the daemon and links and enables the
-HUD. After `omarchy pkg add ghost`, do the same for this login:
+The Install → AI → Ghost entry starts the daemon. After `omarchy pkg add
+ghost`, do the same for this login:
 
 ```sh
 systemctl --user enable --now ghostd.service
-mkdir -p ~/.config/omarchy/plugins
-ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
-omarchy-shell shell rescanPlugins
-omarchy plugin enable ferdousbhai.ghost
 ```
 
-The rescan finishes in the background; if `omarchy plugin enable` doesn't
-find the plugin yet, run it again. Runtime-only installs need just the first
-line.
-
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
-compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
-— it is a plugin inside your own `omarchy-shell`, summoned with
-`omarchy-shell shell toggle ferdousbhai.ghost`; history and settings open with
-`omarchy-shell ghost section home`. Ghost in your app launcher opens the
-window (`ghost-window`): your notes, reminders, mail, and other connected
-data in one place, with the ghost answering from them.
+compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
+launcher opens the window (`ghost-window`): your notes, reminders, mail, and
+other connected data in one place, with the ghost answering from them.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -125,31 +106,9 @@ ghost status
 It prints the daemon URL, the token file path, the ghost count, and
 remote-access state; that it prints at all means the daemon answered and
 accepted the token (otherwise it exits 3 or 4). The bearer token is minted on
-first run at `~/.local/state/ghost/api-token` (mode 0600); the HUD and CLI read
+first run at `~/.local/state/ghost/api-token` (mode 0600); the window and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
 To replace it, delete the file and `systemctl --user restart ghostd`.
-
-**Summon key.** `SUPER+CTRL+G` summons the ghost as soon as the shell loads
-the plugin: Ghost asks Hyprland for the binding at runtime, so nothing in
-`~/.config/hypr` or `~/.config/omarchy` is edited. If one of your own bindings
-already holds that key for something else, Ghost leaves it alone and says so in
-the shell's log; bind another key with a snippet from
-`/usr/share/doc/ghost/shell-contrib/`
-(`hyprland/ghost.lua` for Omarchy 4's Lua config), or summon with
-`omarchy-shell shell toggle ferdousbhai.ghost`. A Hyprland still on a `.conf`
-config cannot run what Ghost asks for at runtime: source `hyprland/ghost.conf`,
-which carries the key and the window rule the prompt and history need.
-
-The summon prompt and history are windows that float over everything, so a
-habitual `SUPER+W` closes Ghost rather than the app behind it, while your other
-shortcuts (screenshots, volume, workspaces) keep working. `Esc` closes the
-prompt; in the history it steps back first, and the `×` closes it.
-
-A summon knows where you were: the prompt you send carries the app and window
-title you summoned it from, and a terminal's directory, so "why did this
-fail?" needs no explaining. Anything in the title that looks like a password or
-token is blanked first, and nothing else on screen is read: no selection,
-clipboard, or screenshot. Prompts from your phone or the CLI carry none of it.
 
 ## 4. Your ghost
 
@@ -182,10 +141,7 @@ picks, per turn, the one already carrying the conversation, then the ghost's
 ghost harnesses          # installed agents and informational usage
 ```
 
-In the HUD, the harness label beside the conversation title opens a picker:
-choose an agent for this conversation, then "use <agent>" makes it the ghost's
-default for new conversations and "automatic" sets that back. From the terminal, or by asking the ghost, which runs the
-same commands:
+From the terminal, or by asking the ghost, which runs the same commands:
 
 ```sh
 ghost harness            # which agent this ghost prefers
@@ -210,68 +166,18 @@ also hands work from Bash to a specialist (`claude -p …`).
 
 ## 6. First conversation
 
-Press `SUPER+CTRL+G` (or run `omarchy-shell shell toggle ferdousbhai.ghost`).
-The screen edges glow and a prompt opens near the bottom of the focused
-monitor, already listening if Voxtype is installed. Speak or type, then press
-`Enter`; with nothing typed, `Enter` stops the recording and sends what was
-heard. `Esc` or a click outside closes the
-prompt.
+Open Ghost from your app launcher. **Ask** is a conversation with the ghost:
+type, and `Enter` sends (`Shift+Enter` is a newline). The answer streams in
+with a line saying what the ghost is doing; `Esc` or **Stop** ends a running
+turn. Your conversations are listed beside it, and **New chat** starts one.
 
-The prompt closes and the ghost works in the background: a thin shimmer stays
-on the edges and a ticker says what it is doing. Its reply replaces the
-ticker as a card. Summon again while the card is up to follow up in the same
-conversation (`new ×` starts a fresh one instead); `×` or `Esc` on the card
-dismisses it, and `open` shows the conversation in history.
+The sidebar's other pages are your own data, one per connected product
+(notes, reminders, mail, and so on), each with its list, a search, and a
+reader. **Connect** lists what you can connect and runs each product's own
+setup step in a terminal.
 
-Clicking the ghost in the bar opens history the same way: the edges light
-from the mark, and it is already listening. Speak to fill the search, then
-press `Enter` to ask the ghost what you said, or type and use the arrows to
-pick a conversation (the arrows stop the listening, so `Enter` opens it).
-
-History and settings open the way your desktop's own menu does (the ghost
-mark in the Omarchy bar, or `omarchy-shell ghost section home`): a card over whatever is open, with a
-filter on top and the ghost's conversations and places under it.
-
-| Key | Effect |
-|---|---|
-| typing | filter conversations and places |
-| `Up` / `Down` (`Ctrl+K` / `Ctrl+J`) | move |
-| `Enter` | open the row; with nothing matching, ask the ghost what you typed |
-| `Ctrl+N` | new conversation |
-| `Ctrl+R` / `Ctrl+P` / `Delete` | rename, pin, or trash the selected conversation |
-| `Esc` | close |
-
-A row grows the card into its view: a conversation,
-**Character**, **Hooks**, or **Remote access**; `‹` or `Esc`
-goes back to the list. An empty conversation shows the ghost's
-glyph, its name, and the static line `What's on your mind?`.
-
-In a conversation, type, and:
-
-| Key | Effect |
-|---|---|
-| `Enter` | send |
-| `Shift+Enter` | newline |
-| `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
-| `Esc` | dismiss a pending confirmation, then back to the list; a running turn keeps going |
-| `Shift+Esc` | stop a running turn |
-| `Ctrl+N` | start a new conversation (the composer's `+`) |
-| `PageUp` / `PageDown` | scroll the transcript a page |
-| `Ctrl+Home` / `Ctrl+End` | jump to the transcript's start / back to its end, following new output again |
-| `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | jump to your previous / next message |
-
-The transcript follows new output only while you are at its end. Scrolled
-up, it stays put and shows **↓ Jump to latest message**; its scrollbar
-appears only while it moves or under the pointer.
-
-Clicking the ghost mark in the Omarchy bar toggles the card. The mark uses
-herdr's colours: a green outline when everything is read, amber while the ghost
-works, blue when a reply is unread, and red when it is waiting on you.
-
-When the ghost needs a decision it asks with `ghost ask` instead of guessing:
-the question shows on the presence card and above the composer with a few
-suggested answers. Pick one (or press its number on the card), type any other
-answer, or `dismiss` it.
+When the ghost needs a decision it asks with `ghost ask` instead of guessing;
+your next message in that conversation is the answer.
 
 ## 7. The same ghost from the terminal
 
@@ -292,8 +198,8 @@ command reports back.
 The CLI talks to your one ghost (`$GHOST` names it in the ghost's own shell); the session is `-s`,
 then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
 carries both variables. It never edits a ghost home directly: every change to
-a ghost goes through the daemon, so the HUD sees everything it does
-immediately, and the reverse.
+a ghost goes through the daemon, so the window shows the same conversations,
+and the reverse.
 
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
@@ -305,14 +211,14 @@ codes.
 |---|---|
 | `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, and `sessions/<id>/`, one directory per conversation |
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
-| `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
+| `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | XDG Pictures | browser screenshots, unless you name another destination |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` the API token file.
 `GHOSTD_PORT` moves the port the daemon binds on `127.0.0.1` and the CLI and
-HUD dial (7717 by default).
+window dial (7717 by default).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
 leaves personas, conversations, tokens, and your documents untouched.
@@ -322,16 +228,11 @@ leaves personas, conversations, tokens, and your documents untouched.
 - **Use websites.** Install agent-browser; `ghost help browser` covers signed-in Chromium
   setup, shared-session tab locking, and cleanup.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
-  Install → AI → Dictation, which sets up Voxtype). With the composer focused,
-  hold `F9` and speak, or click the mic at the right of the composer; the
-  composer says when it is listening, and `Esc` or its `×` discards the
-  recording or transcription. A ghost can also transcribe an audio file with
-  Voxtype (`ghost help dictation`). Ghost adds nothing else: no
-  speech stack, no voice of its own.
-- **Show it a picture.** Paste (`Ctrl+V`) or drop an image on the composer;
-  it waits above the field, `×` to take it off, until you send.
+  Install → AI → Dictation, which sets up Voxtype); it types into the window's
+  composer as into any app. A ghost can also transcribe an audio file with
+  Voxtype (`ghost help dictation`). Ghost adds no speech stack of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
-- **Remote access.** `ghost remote` (or the HUD's Remote access pane)
+- **Remote access.** `ghost remote`
   turns the opt-in Tailscale Serve address on and off, and prints the
   summonghost.com link that adds this machine to the app, the phone client
   ([mobile](mobile.md)).
@@ -346,8 +247,7 @@ leaves personas, conversations, tokens, and your documents untouched.
 | Symptom | Check |
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
-| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, run the link, rescan, and enable lines in [Confirm setup](#3-confirm-setup). |
+| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the window and CLI read `~/.local/state/ghost/api-token` |
 | A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
@@ -355,8 +255,4 @@ After an upgrade, restart the daemon to load the new bundle:
 
 ```sh
 systemctl --user restart ghostd.service
-omarchy-restart-shell
 ```
-
-A rescan discovers a plugin; it does not replace QML the running shell has
-already loaded, so an upgraded HUD needs the shell restart.

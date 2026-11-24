@@ -6,7 +6,7 @@ code history, journald is the lifecycle history, and systemd is the guardian
 that survives the daemon it restarts.
 
 Any part of Ghost's code is a ghost's to change, to fit its owner: its
-persona, its HUD, its daemon, its recipes. On Omarchy, Ghost is a packaged
+persona, its window, its daemon, its recipes. On Omarchy, Ghost is a packaged
 install whose files pacman owns and a ghost cannot write; a ghost changes
 itself by running from its own clone instead, as below, which needs no sudo beyond
 installing `pnpm` and is undone in a few commands. That clone powers every
@@ -21,14 +21,12 @@ Before deploying, inspect the actual paths:
 
 ```sh
 systemctl --user cat ghostd.service
-command -v ghostd
-readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost
+command -v ghostd ghost-window
 ghost status
 ```
 
-The package installs runtime and HUD from one version. Install both packages
-together before restarting the daemon and shell; building another checkout
-does not update them. The sections below describe an explicit development
+The package installs the daemon and the window from one version; building
+another checkout does not update them. The sections below describe an explicit development
 override, not a second package distribution channel.
 
 ## Run ghostd from a clone
@@ -91,31 +89,13 @@ invisible to the daemon's writes even when the file permissions allow them.
 The daemon runs on Bun, not Node, and it runs the *built* bundle. Source edits
 reach the running daemon only after `pnpm build` and a restart.
 
-### The shell
+### The window
 
-This section applies when the optional `ghost` UI package or checkout plugin is installed.
-Runtime-only updates restart `ghostd.service` without restarting the shell.
-
-The HUD is an omarchy-shell plugin, not a unit of Ghost's. The package
-installs it at `/usr/share/ghost/plugin`, and omarchy-shell loads whatever
-`~/.config/omarchy/plugins/ferdousbhai.ghost` points at. Point it at the clone
-instead:
-
-```sh
-mkdir -p ~/.config/omarchy/plugins
-# -T, because plain `ln -sfn` onto an existing directory puts the link INSIDE
-# it (…/ferdousbhai.ghost/qml) and says nothing. If the packaged plugin is
-# already installed there as a real directory this refuses; move it aside first.
-ln -sfnT ~/src/ghost/packages/shell/qml ~/.config/omarchy/plugins/ferdousbhai.ghost
-omarchy-shell shell rescanPlugins
-```
-
-A rescan only discovers the plugin; it does not replace QML the shell has
-already loaded, and neither does saving a file under a symlinked plugin
-directory. An edit lands with `omarchy-restart-shell`, and
-`omarchy-shell shell debugBarGeometry` reports what the running shell actually
-has. A syntax error there lands in the owner's whole desktop shell, which is
-why previews go through `dev/preview.sh`.
+The window is one binary, `ghost-window`, and a client of the daemon's API.
+`pnpm build` compiles a clone's to `packages/window/target/release/ghost-window`
+(it needs `cargo`); run that file to use it, and close the window to go back
+to the packaged one. `packages/window/dev/preview.sh` shows a change in a
+nested Hyprland against a scratch ghostd and sample data.
 
 The ghost's prompt carries only what runs it and which clone is its checkout;
 the loop, the restart unit, and the undo list are `ghost help self`, read on
@@ -170,8 +150,8 @@ XDG_STATE_HOME="$task_canary_dir/state" \
 Run that command from the built checkout. Point the client at the canary
 with `GHOSTD_PORT=7799` and
 `GHOSTD_API_TOKEN_FILE="$task_canary_dir/state/ghost/api-token"`. Stop its captured process
-before deleting the scratch directory. Functional desktop/HUD verification
-uses the nested preview, never the owner's session. `ghost smoke --no-turn`
+before deleting the scratch directory. Functional window verification
+uses `packages/window/dev/preview.sh`, never the owner's session. `ghost smoke --no-turn`
 also creates an isolated throwaway daemon and reports each stage.
 
 Never port 7717 or `~/ghosts`; scratch configuration also prevents live
@@ -203,10 +183,9 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 rm -f ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev \
   ~/.local/bin/ghost
 systemctl --user daemon-reload
-ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
 ```
 
-Then restart ghostd (as above) and the shell (`omarchy-restart-shell`). The
+Then restart ghostd (as above). The
 clone stays where it is, and `git` in it still holds every change.
 
 ## Updates

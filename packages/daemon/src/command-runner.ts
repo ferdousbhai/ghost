@@ -1,4 +1,4 @@
-/** Runs one short-lived binary (systemctl, tailscale, qrencode, …) and collects its output. */
+/** Runs one short-lived binary (systemctl, tailscale, …) and collects its output. */
 import { execFile, type ExecFileException } from "node:child_process";
 import { promisify } from "node:util";
 

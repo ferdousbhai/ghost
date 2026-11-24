@@ -1,7 +1,7 @@
 /**
  * The HTTP API's bearer token: 32 random bytes as hex in a mode-0600 file
  * under XDG state, minted by the daemon when missing and read by the CLI and
- * HUD. The daemon holds the token it started with, so replacing it is
+ * window. The daemon holds the token it started with, so replacing it is
  * delete-and-restart.
  */
 import { closeSync, constants, fstatSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";

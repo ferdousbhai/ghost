@@ -30,7 +30,6 @@ function self(): string[] {
     "  systemctl --user restart ghostd.service",
     "```",
     "The transient unit survives the daemon. Verify afterward with `ghost status` (no `restart needed` line) and `journalctl --user -t ghostd`; a restart sends no model prompt.",
-    "A HUD change needs `omarchy-restart-shell`: the HUD is an omarchy-shell plugin, not a unit of yours, and a rescan leaves QML the shell already loaded in place.",
     "Omarchy owns package updates; update a checkout only when the owner asks.",
     "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
     "Undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper for the system. Never `rm -rf` a checkout.",
@@ -111,7 +110,7 @@ function dictation(): string[] {
     "voxtype -q transcribe /tmp/<name>.wav",
     "```",
     "Read the output before using it: not every line is transcript.",
-    "The summon prompt starts the owner's dictation when it opens; it and the HUD composer start, stop, and cancel it (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
+    "Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
   ];
 }
 

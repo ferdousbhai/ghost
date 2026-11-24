@@ -371,7 +371,7 @@ describe("GhostHookRunner", () => {
     // replaceConfig itself, not only the HTTP route, refuses a pasted reply.
     await expect(runner.replaceConfig(runner.config())).rejects.toThrow(/no top-level "path", "document"/u);
 
-    // A client editing what the daemon serves (the HUD clones it) writes it clean.
+    // A client editing what the daemon serves writes it clean.
     const served = structuredClone(runner.config().document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };
     served.hooks.session_stop[0]!.hooks[0]!.name = "Reviewer";
     await expect(runner.replaceConfig(served)).resolves.toMatchObject({ document: served });

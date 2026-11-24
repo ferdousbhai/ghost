@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="${1:?usage: smoke.sh <package-root> <runtime|ui>}"
-component="${2:?usage: smoke.sh <package-root> <runtime|ui>}"
-[[ "$component" == runtime || "$component" == ui ]] || exit 2
+root="${1:?usage: smoke.sh <package-root>}"
 
 require_file() {
   local path="$root$1"
@@ -45,37 +43,17 @@ require_unit_directive() {
   fi
 }
 
-data_files=()
-executables=()
-if [[ "$component" == runtime ]]; then
-  data_files=(
-    /usr/lib/systemd/user/ghostd.service
-    /usr/lib/ghost/runtime/ghostd.js
-    /usr/lib/ghost/runtime/ghost.js
-    /usr/share/doc/ghost/docs/hooks.md
-  )
-  executables=(/usr/bin/ghostd /usr/bin/ghost
-    /usr/lib/ghost/package-smoke/service-smoke.sh)
-  absent=(/usr/share/ghost/plugin /usr/share/applications /usr/bin/ghost-window
-    /usr/share/icons /usr/share/doc/ghost/shell-contrib)
-else
-  data_files=(
-    /usr/share/ghost/plugin/manifest.json
-    /usr/share/ghost/plugin/Panel.qml
-    /usr/share/ghost/plugin/Service.qml
-    /usr/share/applications/io.github.ferdousbhai.Ghost.desktop
-    /usr/share/icons/hicolor/scalable/apps/ghost.svg
-    /usr/share/icons/hicolor/128x128/apps/ghost.png
-  )
-  executables=(/usr/bin/ghost-window)
-  absent=(/usr/bin/ghost /usr/bin/ghostd /usr/lib/ghost /usr/lib/systemd /usr/share/doc/ghost/README.md)
-fi
-for path in "${absent[@]}"; do
-  if [[ -e "$root$path" || -L "$root$path" ]]; then
-    printf '%s package contains another component: %s\n' "$component" "$path" >&2
-    exit 1
-  fi
-done
+data_files=(
+  /usr/lib/systemd/user/ghostd.service
+  /usr/lib/ghost/runtime/ghostd.js
+  /usr/lib/ghost/runtime/ghost.js
+  /usr/share/doc/ghost/docs/hooks.md
+  /usr/share/applications/io.github.ferdousbhai.Ghost.desktop
+  /usr/share/icons/hicolor/scalable/apps/ghost.svg
+  /usr/share/icons/hicolor/128x128/apps/ghost.png
+)
+executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-window
+  /usr/lib/ghost/package-smoke/service-smoke.sh)
 for path in "${data_files[@]}"; do
   require_file "$path"
   [[ "$(stat -c '%a' "$root$path")" == 644 ]] || exit 1
@@ -92,50 +70,44 @@ if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q
   exit 1
 fi
 
-if [[ "$component" == ui ]]; then
-  desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
-  [[ "$(find "$root/usr/bin" -mindepth 1 | wc -l)" == 1 ]]
-  # Runs without a display: the version is the release's, and printing it proves the binary loads its libraries.
-  "$root/usr/bin/ghost-window" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-  bun -e 'await Bun.file(process.argv[1]).json()' "$root/usr/share/ghost/plugin/manifest.json"
-else
-  GHOST_BUN_EXECUTABLE="$(command -v bun)" \
-    "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
+# Runs without a display: the version is the release's, and printing it proves the binary loads its libraries.
+"$root/usr/bin/ghost-window" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+GHOST_BUN_EXECUTABLE="$(command -v bun)" \
+  "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
-  mapfile -t runtime_license_manifests < <(
-    find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print
-  )
-  if (( ${#runtime_license_manifests[@]} != 1 )); then
-    printf 'package payload has %s bundled-license manifests, expected one\n' \
-      "${#runtime_license_manifests[@]}" >&2
+mapfile -t runtime_license_manifests < <(
+  find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print
+)
+if (( ${#runtime_license_manifests[@]} != 1 )); then
+  printf 'package payload has %s bundled-license manifests, expected one\n' \
+    "${#runtime_license_manifests[@]}" >&2
+  exit 1
+fi
+runtime_license_root="$(dirname "${runtime_license_manifests[0]}")"
+require_runtime_license() {
+  local path="$runtime_license_root/$1"
+  [[ -f "$path" && "$(stat -c '%a' "$path")" == 644 ]] || {
+    printf 'packaged runtime license is missing or unsafe: %s\n' "$1" >&2
     exit 1
-  fi
-  runtime_license_root="$(dirname "${runtime_license_manifests[0]}")"
-  require_runtime_license() {
-    local path="$runtime_license_root/$1"
-    [[ -f "$path" && "$(stat -c '%a' "$path")" == 644 ]] || {
-      printf 'packaged runtime license is missing or unsafe: %s\n' "$1" >&2
-      exit 1
-    }
   }
-  require_runtime_license licenses/ghost/LICENSE
-  require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
-  require_runtime_license BUNDLED-LICENSES
+}
+require_runtime_license licenses/ghost/LICENSE
+require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
+require_runtime_license BUNDLED-LICENSES
 
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
-    graphical-session.target
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Install WantedBy \
-    graphical-session.target
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Service ReadWritePaths '%h %t'
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Service WorkingDirectory '%h'
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Service ExecStart /usr/bin/ghostd
-  require_unit_directive /usr/lib/systemd/user/ghostd.service Service NoNewPrivileges yes
-  if grep -Eq '^[[:space:]]*RestrictNamespaces=' \
-    "$root/usr/lib/systemd/user/ghostd.service"; then
-    printf 'ghostd.service blocks namespaces required by the Chromium sandbox\n' >&2
-    exit 1
-  fi
-
+require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
+  graphical-session.target
+require_unit_directive /usr/lib/systemd/user/ghostd.service Install WantedBy \
+  graphical-session.target
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service ReadWritePaths '%h %t'
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service WorkingDirectory '%h'
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service ExecStart /usr/bin/ghostd
+require_unit_directive /usr/lib/systemd/user/ghostd.service Service NoNewPrivileges yes
+if grep -Eq '^[[:space:]]*RestrictNamespaces=' \
+  "$root/usr/lib/systemd/user/ghostd.service"; then
+  printf 'ghostd.service blocks namespaces required by the Chromium sandbox\n' >&2
+  exit 1
 fi
 
 # Every symlink in the installed payload must resolve inside that payload.
@@ -164,4 +136,4 @@ if find "$root" -path '*/ghosts/*' -print -quit | grep -q .; then
   exit 1
 fi
 
-printf 'Ghost %s package smoke test passed: %s\n' "$component" "$root"
+printf 'Ghost package smoke test passed: %s\n' "$root"
