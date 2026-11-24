@@ -159,10 +159,8 @@ the directory the model's commands run in and holds Ghost's log, `.conversation.
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
 object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's text and tool calls (a failed call marked
-`failed`, a failed turn carrying `error`), the owner's `!` commands, title
-records, and `harness` records naming what carries the conversation (`local`;
-an earlier version's log names the agent CLI that did, and keeps the
-`compacted` records of one compacting its context). A torn last line is skipped, and so is a record ghostd no longer writes (earlier versions' per-run `resources`, idle `handoff` replies, `origin: "auto"` prompts, and the retired peers' messages and `sent`/`handed` records); an `event-…` conversation that the retired event intake opened reads as any other; logs are never rewritten. ghostd is the log's
+`failed`, a failed turn carrying `error`), the owner's `!` commands, and title
+records. A torn last line is skipped, and so is any record ghostd does not write (an earlier version's `harness`, `compacted`, `resources` or `handoff`); logs are never rewritten. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads. A conversation is listed once a message lands or the owner
@@ -227,10 +225,7 @@ before it would look anything up: the owner-context section names the
 Documents directory as where finished work and notes live, and
 the Ghost section has a ghost ask the owner with `ghost ask`, says a
 command it starts ends with the turn, and indexes the `ghost help`
-recipes by when to read one, so the CLI is the documentation: a task goes to
-an agent run in its project only when it needs that
-project's instructions, settings, or MCP servers, as the `harnesses` recipe
-says. Owner documents are read only when
+recipes by when to read one, so the CLI is the documentation. Owner documents are read only when
 relevant, from the model's shell, never injected
 automatically. The prompt is rendered before every turn, so a character the
 ghost rewrote is who it is on the next one.
@@ -245,9 +240,7 @@ commands run in the conversation directory with the conversation's identity
 (`GHOST`, `GHOST_SESSION`) in their environment, beside the daemon's resolved
 `GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOSTS_ROOT`, and `GHOSTD_HOOKS`, which every
 child of ghostd (a command, a hook, `ghost`) inherits, so a daemon started
-with flags is the one they address. The owner should always be able to see
-what answered: each reply records the model and provider, and the session row
-carries them. Ghost has no screen control: desktop work goes through
+with flags is the one they address. Ghost has no screen control: desktop work goes through
 Omarchy's commands, app CLIs, and config files, on the bet that Omarchy's
 command line keeps growing toward full coverage.
 
@@ -284,9 +277,7 @@ the Ghost section (`GHOST_POLICY` in
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. For work on code the model runs the owner's coding agent from
-its shell, in the project's directory ([Local model](#local-model), and the
-`ghost help harnesses` recipe indexed by `GHOST_POLICY` in
-[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that agent runs
+its shell, in the project's directory ([Local model](#local-model)); that agent runs
 with the owner's own settings for it — its full tool set, project discovery,
 auth, and session semantics. Ghost adds no command of its own around it and
 keeps no record of the run.
@@ -357,11 +348,11 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `harness` is what carried the latest stretch (`local`; an agent CLI in an earlier version's log), and `model`, `provider`, and `effort` what it ran on, as far as recorded (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `harness` is what carried the latest stretch (`local`; an agent CLI in an earlier version's log), and `model`, `provider`, and `effort` what it ran on, as far as recorded (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, `hook`, or `compacted`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `compacted` message marks where an agent CLI of an earlier version compacted its context. An owner `!command` reads as the owner's `!command` followed by its output. |
-| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
@@ -378,7 +369,7 @@ remote access is the summonghost.com app.
 
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
-emits `start`, then ordered `harness` (a pass starting, always `local`), `text_*`, `thinking` (the model's reasoning, as
+emits `start`, then ordered `pass` (the model starting on a prompt), `text_*`, `thinking` (the model's reasoning, as
 far as it shows it; never logged), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or model command has printed), `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
 running, by its `name` and `event`; clients show it as a settled turn), and `session_stop_continued` events, and exactly one
@@ -585,8 +576,7 @@ smallest loop that works: it sends the ghost's whole persona, plus the "Running 
 user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
 prompt. Nothing is searched ahead of the model. It keeps no session of its
 own, streams its text, reasoning, and commands, with a running command's
-latest output (at most every 100 ms), and records the model as
-the file's name and the provider as `local`. It sends `reasoning_effort`;
+latest output (at most every 100 ms). It sends `reasoning_effort`;
 sampling is the model's and llama-server's own default.
 
 It offers one tool ([`local-tools.ts`](packages/daemon/src/local-tools.ts)),

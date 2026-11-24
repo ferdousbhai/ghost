@@ -44,7 +44,7 @@ describe("ghost CLI against a real daemon server", () => {
     const sessions = await cli(["sessions", "--json"]);
     expect(sessions).toMatchObject({ code: 0 });
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
-      expect.objectContaining({ id: "conv-1", harness: "local" }),
+      expect.objectContaining({ id: "conv-1" }),
     ]);
     expect(await cli(["sessions", "-q"], { env: { ...env, GHOST: "casper" } })).toMatchObject({ code: 0, stdout: "conv-1\n" });
     expect(await cli(["sessions"], { env: { ...env, GHOST: "nobody" } })).toMatchObject({ code: 5 });
@@ -58,7 +58,7 @@ describe("ghost CLI against a real daemon server", () => {
     const sessions = await cli(["sessions", "--json"]);
     expect(sessions.code).toBe(0);
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
-      expect.objectContaining({ id: "conv-1", harness: "local" }),
+      expect.objectContaining({ id: "conv-1" }),
     ]);
 
     const status = await cli(["status", "--json"]);

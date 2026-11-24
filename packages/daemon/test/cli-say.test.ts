@@ -49,7 +49,7 @@ async function fakeDaemon(events: unknown[], resumed: unknown[] = []): Promise<{
 
 const successEvents = [
   { type: "start" },
-  { type: "harness", harness: "codex" },
+  { type: "pass" },
   { type: "text_delta", contentIndex: 0, delta: "hel" },
   { type: "text_delta", contentIndex: 0, delta: "lo " },
   { type: "text_delta", contentIndex: 0, delta: "there" },
@@ -108,7 +108,7 @@ describe("ghost say", () => {
   it("starts each text block on its own paragraph", async () => {
     const fake = await fakeDaemon([
       { type: "start" },
-      { type: "harness", harness: "codex" },
+      { type: "pass" },
       { type: "text_start", contentIndex: 0 },
       { type: "text_delta", contentIndex: 0, delta: "I'll check the log." },
       { type: "tool_execution_start", id: "1", toolName: "bash", arguments: { command: "tail log" } },

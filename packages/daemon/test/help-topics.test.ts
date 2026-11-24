@@ -19,7 +19,7 @@ describe("ghost help products", () => {
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["self", "harnesses", "background", "memory", "dictation", "notifications", "browser", "products"]);
+    expect(HELP_TOPICS).toEqual(["self", "background", "memory", "dictation", "notifications", "browser", "products"]);
     expect(isHelpTopic("self")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });
@@ -45,31 +45,6 @@ describe("ghost help topics", () => {
     expect(text).toContain("ghost say --follow-up");
     expect(text).toContain("`$GHOST` and `$GHOST_SESSION`");
     expect(text).toContain("A command you start ends when this turn does.");
-  });
-
-  it("harnesses: the launch path", () => {
-    const text = renderHelpTopic("harnesses");
-    expect(text).toContain("Your turns run in this conversation's own directory");
-    expect(text).toContain("only when it needs those; otherwise do it yourself");
-    expect(text).not.toContain("orchestrator");
-    expect(text).toContain("cd <project-dir> && <harness> <args>");
-    expect(text).not.toContain("ghost delegate");
-    expect(text).toContain("respects that project's settings");
-    expect(text).not.toContain("ghost harness");
-    expect(text).toContain("Browser automation uses agent-browser through Bash.");
-    expect(text).toContain("--permission-mode acceptEdits");
-    expect(text).toContain("--allowedTools Bash");
-    expect(text).not.toContain("~/.local/state/omarchy");
-  });
-
-  it("harnesses: herdr runs in Ghost's own session with owner-named, owner-authenticated harnesses", () => {
-    const text = renderHelpTopic("harnesses");
-    expect(text).toContain("every command takes `--session ghost`");
-    expect(text).toContain("systemd-run --user --unit=herdr-ghost herdr --session ghost server");
-    expect(text).toContain("Install only harnesses the owner names, with `mise use -g <package>`");
-    expect(text).toContain("never read, type, or store a credential");
-    expect(text).toContain("`--wait` alone is not proof");
-    expect(text).toContain("once `command -v <harness>` finds it");
   });
 
   it("memory: exact search first, Recall for unknown wording, the source file over any index", () => {

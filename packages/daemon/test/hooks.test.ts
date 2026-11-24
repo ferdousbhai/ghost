@@ -52,7 +52,6 @@ function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStop
     ghost_home: process.cwd(),
     cwd: process.cwd(),
     conversation_id: "session-1",
-    harness: "claude",
     ...overrides,
   };
 }
@@ -351,32 +350,6 @@ describe("GhostHookRunner", () => {
       killIfAlive(readPid(pidPath));
     }
   }, 10_000);
-
-  it("starts past a retired event and stray keys with a warning, serves the document without them, and refuses to write one", async () => {
-    const directory = temporaryDirectory();
-    const config = join(directory, "hooks.json");
-    const stop = [{ hooks: [{ type: "command", command: "/bin/true", name: "Review" }] }];
-    const document = { builtin: { next_work_turns: 1 }, hooks: { before_prompt: [{ hooks: [{ type: "command", command: "/bin/true" }] }], session_stop: stop } };
-    writeFileSync(config, JSON.stringify(document));
-    const logger = recordingLogger("warn");
-    const runner = GhostHookRunner.fromConfig(config, { logger });
-    expect(runner.hasHandlers("session_stop")).toBe(true);
-    expect(logger.records).toMatchObject([
-      { message: "skipping what hooks.json no longer admits; the next edit drops it", fields: { field: "builtin" } },
-      { message: "skipping what hooks.json no longer admits; the next edit drops it", fields: { field: "hooks.before_prompt" } },
-    ]);
-    expect(runner.config().document).toEqual({ hooks: { session_stop: stop } });
-    await expect(runner.replaceConfig(document)).rejects.toThrow(/no top-level "builtin"; send the document itself/u);
-    await expect(runner.replaceConfig({ hooks: document.hooks })).rejects.toThrow(/was retired/u);
-    // replaceConfig itself, not only the HTTP route, refuses a pasted reply.
-    await expect(runner.replaceConfig(runner.config())).rejects.toThrow(/no top-level "path", "document"/u);
-
-    // A client editing what the daemon serves writes it clean.
-    const served = structuredClone(runner.config().document) as { hooks: { session_stop: { hooks: { name: string }[] }[] } };
-    served.hooks.session_stop[0]!.hooks[0]!.name = "Reviewer";
-    await expect(runner.replaceConfig(served)).resolves.toMatchObject({ document: served });
-    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(served);
-  });
 
   it("rejects NUL commands and fails every command event open on execution rejection", async () => {
     const directory = temporaryDirectory();

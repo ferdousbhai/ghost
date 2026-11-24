@@ -106,7 +106,6 @@ describe("the local model", () => {
     expect(server.requests[2]?.messages.at(-1)?.content).toMatch(/sessions\/c1\n<\/output>$/u);
     expect(readFileSync(join(home, "Documents", "Notes", "trip.md"), "utf8")).toBe("The boat leaves at nine from the north pier.Packed\n");
     expect(events.filter((event) => event.type === "tool_execution_start")).toHaveLength(2);
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ harness: "local", model: "gemma-test", provider: "local" });
   });
 
   it("streams a running command's output into the turn, as a coding agent's steps are seen", async () => {

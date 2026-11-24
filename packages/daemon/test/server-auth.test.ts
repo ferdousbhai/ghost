@@ -7,8 +7,7 @@
  * `http://127.0.0.1:7717/api/ghosts/casper/messages` with no preflight, because
  * a simple request never asks permission — CORS only decides whether the page
  * may *read* the answer, and the attacker does not care about the answer. These
- * tests pin the three checks that make that request fail, and the one
- * deliberate exemption that must not be widened.
+ * tests pin the three checks that make that request fail.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
@@ -130,14 +129,6 @@ describe("the Origin check", () => {
     expect(response.status).toBe(403);
   });
 
-  it("still allows a loopback origin — a dev UI is a different origin", async () => {
-    const base = await serve();
-    for (const origin of ["http://localhost:5173", "http://127.0.0.1:7717"]) {
-      const response = await fetch(`${base}/api/ghosts`, { headers: { ...auth, origin } });
-      expect(response.status, origin).toBe(200);
-    }
-  });
-
   it("allows a request with no Origin at all — that is what a file-reading client sends", async () => {
     const base = await serve();
     expect((await fetch(`${base}/api/ghosts`, { headers: auth })).status).toBe(200);
@@ -198,24 +189,6 @@ describe("the content type of a mutating request", () => {
     })).status).toBe(200);
   });
 });
-
-describe("the deliberate exemption", () => {
-  it("answers a preflight without credentials, because a preflight cannot carry any", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/messages`, {
-      method: "OPTIONS",
-      headers: {
-        origin: "http://localhost:5173",
-        "access-control-request-method": "POST",
-        "access-control-request-headers": "content-type, authorization",
-      },
-    });
-    expect(response.status).toBe(204);
-    expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
-    expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
-  });
-});
-
 
 describe("a replaced token file", () => {
   it("is not honored until the daemon restarts", async () => {

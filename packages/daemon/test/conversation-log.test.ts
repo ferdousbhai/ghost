@@ -66,10 +66,9 @@ describe("indexed conversation reads", () => {
     const root = await scratch();
     const entries: LogEntry[] = [
       { type: "conversation", v: 1, id: "s", createdAt: at },
-      { type: "harness", at, harness: "codex", session: "h1" },
       user("Explain the new feature"),
       { type: "command", at, command: "printf hello", output: "hello", exitCode: 0, excluded: false },
-      { type: "assistant", at, harness: "codex", content: [{ type: "text", text: "answer" }], model: "model" },
+      { type: "assistant", at, content: [{ type: "text", text: "answer" }] },
       { type: "command", at, command: "private", output: "hidden", exitCode: 0, excluded: true },
       { type: "title", at, title: "Custom title" },
     ];

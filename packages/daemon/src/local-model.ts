@@ -22,7 +22,6 @@ export interface LocalModelConfig {
   readonly reasoningEffort: string;
 }
 
-export const LOCAL_HARNESS = "local";
 export const DEFAULT_LOCAL_CONTEXT = 32_768;
 export const DEFAULT_LOCAL_IDLE_MS = 5 * 60_000;
 /** A model's own default can be its deepest: Inkling 2 Mini's took six minutes over three commands. */

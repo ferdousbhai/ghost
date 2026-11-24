@@ -18,8 +18,6 @@ export type PassEvent =
   /** The latest of what a still-running tool has printed. */
   | { readonly type: "tool_update"; readonly id: string; readonly output: string }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
-  /** The model answering. */
-  | { readonly type: "model"; readonly model: string; readonly provider?: string }
   | { readonly type: "error"; readonly message: string };
 
 export interface PassInput {
@@ -175,7 +173,6 @@ export function untrusted(text: string, tag: string, note: string): string {
 export async function runLocalTurn(model: LocalModel, input: PassInput): Promise<void> {
   const endpoint = await model.acquire(() => input.onEvent({ type: "thinking", block: "load", delta: "Loading the local model…" }));
   try {
-    input.onEvent({ type: "model", model: model.name, provider: "local" });
     const messages: ChatMessage[] = [
       { role: "system", content: `${input.persona.trimEnd()}\n\n${localSection(input.codingAgent)}\n\nThe time now is ${new Date().toString()}.` },
       { role: "user", content: input.prompt },

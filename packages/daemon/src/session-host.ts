@@ -47,7 +47,7 @@ import type { TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import { trashPath } from "./trash.js";
-import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
+import type { LocalModel } from "./local-model.js";
 import { completeLocally, runLocalTurn, type PassEvent, type PassInput } from "./local-turn.js";
 
 
@@ -120,12 +120,6 @@ export interface SessionSummary {
   title: string | null;
   /** First owner text; display-only. */
   preview: string | null;
-  /** What carried the latest stretch of the conversation: `local`, or an agent an earlier version ran. */
-  harness: string | null;
-  /** What its latest pass ran on, as far as recorded; null otherwise. */
-  model: string | null;
-  provider: string | null;
-  effort: string | null;
   updatedAt: string;
   messageCount: number;
   pinned: boolean;
@@ -166,7 +160,6 @@ interface PassResult {
   readonly content: AssistantPart[];
   readonly error: string | null;
   readonly aborted: boolean;
-  readonly model: Extract<PassEvent, { type: "model" }> | null;
 }
 
 type TerminalError = Extract<TurnEvent, { type: "error" }>;
@@ -485,24 +478,15 @@ export class SessionHost {
     if (!this.answerer) return { type: "error", reason: "error", errorMessage: NO_LOCAL_MODEL };
     const { sessionDir } = ghostPaths(ghost.dir);
     const entries = (await readLog(sessionDir, id)) ?? [];
-    const bound = logState(entries);
-    const dir = conversationDir(sessionDir, id);
-    // The log says what carries the conversation and where; an earlier version's may name an agent.
-    if (bound.harness !== LOCAL_HARNESS || bound.harnessDir !== dir) {
-      await appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: LOCAL_HARNESS, session: null, dir }]);
-    }
     const carried = handoffContext(entries.slice(0, entries.findLastIndex((entry) => entry.type === "user")));
     const passPrompt = [...(carried ? [`<conversation-so-far>\n${carried}\n</conversation-so-far>`] : []), prompt].join("\n\n");
-    stream.emit({ type: "harness", harness: LOCAL_HARNESS });
+    stream.emit({ type: "pass" });
     const result = await this.runPass(ghost, id, this.answerer, passPrompt, stream, blocks, signal);
     await appendLog(sessionDir, id, [{
       type: "assistant",
       at: new Date().toISOString(),
-      harness: LOCAL_HARNESS,
       content: result.content,
       ...(result.error ? { error: result.error } : {}),
-      ...(result.model ? { model: result.model.model } : {}),
-      ...(result.model?.provider ? { provider: result.model.provider } : {}),
     }]);
     return result.error === null ? null : { type: "error", reason: result.aborted ? "aborted" : "error", errorMessage: result.error };
   }
@@ -543,7 +527,6 @@ export class SessionHost {
     let open: { key: string; index: number; part: number; text: string } | null = null;
     let error: string | null = null;
     let thoughtBlock: string | null = null;
-    let model: Extract<PassEvent, { type: "model" }> | null = null;
     const closeBlock = () => {
       if (!open) return;
       content[open.part] = { type: "text", text: open.text };
@@ -591,9 +574,6 @@ export class SessionHost {
           stream.emit({ type: "tool_execution_end", id: event.id, toolName: tool.name, isError: event.isError, ...(summary ? { summary } : {}) });
           return;
         }
-        case "model":
-          model = event;
-          return;
         case "error":
           error = event.message;
           return;
@@ -608,8 +588,8 @@ export class SessionHost {
       if (!signal.aborted) error = errorMessage(failure);
     });
     closeBlock();
-    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, model };
-    return { content, error, aborted: false, model };
+    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true };
+    return { content, error, aborted: false };
   }
 
   private async turnEnd(
@@ -644,7 +624,6 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const last = ((await readLog(sessionDir, id)) ?? []).findLast((entry) => entry.type === "assistant");
     if (last?.type !== "assistant") return null;
-    const { harness } = last;
     const message = { role: "assistant", content: last.content };
     const result = await this.hooks.emitSessionStop({
       type: "session_stop",
@@ -654,7 +633,6 @@ export class SessionHost {
       ...hookEventBase(ghost, id, sessionDir, signal),
       stop_hook_active: active,
       owner_prompt: ownerPrompt,
-      harness,
     }, onHook);
     return ghostSessionStopContinuation(result) ?? null;
   }
@@ -763,10 +741,6 @@ export class SessionHost {
         id,
         title: state.title,
         preview: state.preview,
-        harness: state.harness,
-        model: state.model,
-        provider: state.provider,
-        effort: state.effort,
         updatedAt,
         messageCount: state.messageCount,
         pinned: pins.includes(id),

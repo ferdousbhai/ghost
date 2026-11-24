@@ -98,7 +98,6 @@ describe("a turn", () => {
 
     expect(fake.calls().map((call) => call.prompt)).toEqual(["ping", "<conversation-so-far>\nOwner: ping\n\nYou: pong\n</conversation-so-far>\n\nagain"]);
     const transcript = await sessions.readTranscript("casper", "c1");
-    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("local");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
       ["assistant", [{ type: "text", text: "pong" }]],

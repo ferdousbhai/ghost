@@ -2,9 +2,8 @@
  * A conversation's own record, `sessions/<id>/.conversation.jsonl` in the
  * ghost home: what
  * the owner said, what the ghost answered, the tools it ran, the owner's `!`
- * commands, and which harness carried each stretch. Each harness keeps its
- * own transcript for resume; this log is what the window, `ghost show`, and a
- * harness switch read, so it is the one history that outlives any harness.
+ * commands. The window, `ghost show` and the phone read it, and each turn is
+ * handed its newest part: the model keeps no session of its own.
  */
 import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
@@ -17,7 +16,7 @@ const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
 export const MAX_LOG_TEXT = 200_000;
 const PREVIEW_MAX = 120;
-/** How much of the earlier conversation a newly bound harness is handed. */
+/** How much of the earlier conversation a turn is handed. */
 export const HANDOFF_CONTEXT_CHARS = 24_000;
 
 interface ToolCallPart {
@@ -36,24 +35,11 @@ export type LogEntry =
   | {
     readonly type: "assistant";
     readonly at: string;
-    readonly harness: string;
     readonly content: readonly AssistantPart[];
     readonly error?: string;
-    /** The model, its provider, and the reasoning effort, as far as the harness said. */
-    readonly model?: string;
-    readonly provider?: string;
-    readonly effort?: string;
   }
   | { readonly type: "command"; readonly at: string; readonly command: string; readonly output: string; readonly exitCode: number | null; readonly excluded: boolean }
-  /**
-   * A harness took over the conversation in `dir`; `session` is its own id
-   * when it reports one. A home rename moves `dir`, which the harness's own
-   * session store does not follow.
-   */
-  | { readonly type: "harness"; readonly at: string; readonly harness: string; readonly session: string | null; readonly dir?: string }
-  | { readonly type: "title"; readonly at: string; readonly title: string | null }
-  /** The harness compacted its own context during a pass. */
-  | { readonly type: "compacted"; readonly at: string; readonly harness: string; readonly trigger: string; readonly preTokens?: number };
+  | { readonly type: "title"; readonly at: string; readonly title: string | null };
 
 const CONVERSATION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u;
 
@@ -139,14 +125,7 @@ interface LogState {
   readonly title: string | null;
   readonly preview: string | null;
   readonly messageCount: number;
-  /** The harness bound by the last `harness` entry, and where it ran. */
-  readonly harness: string | null;
-  readonly harnessDir: string | null;
-  /** What the bound harness's latest pass ran on; null once another harness binds. */
-  readonly model: string | null;
-  readonly provider: string | null;
-  readonly effort: string | null;
-  /** When the owner or the ghost last added to the conversation; a harness record is not that. */
+  /** When the owner or the ghost last added to the conversation. */
   readonly activeAt: string | null;
 }
 
@@ -194,13 +173,10 @@ function logStateAccumulator() {
   let derived: string | null = null;
   let ownerWrote = false;
   let count = 0;
-  let harness: string | null = null;
-  let harnessDir: string | null = null;
-  let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
     count += messageCount(entry);
-    if (entry.type !== "conversation" && entry.type !== "harness" && entry.type !== "compacted") activeAt = entry.at;
+    if (entry.type !== "conversation") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -214,24 +190,14 @@ function logStateAccumulator() {
           derived = derivedTitle(entry.text);
         }
         break;
-      case "assistant":
-        if (entry.harness === harness && (entry.model ?? entry.effort) !== undefined) {
-          ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
-        }
-        break;
       case "command":
         if (!entry.excluded) preview ??= firstLine(`!${entry.command}`);
-        break;
-      case "harness":
-        if (entry.harness !== harness) ran = { model: null, provider: null, effort: null };
-        harness = entry.harness;
-        harnessDir = entry.dir ?? harnessDir;
         break;
       default:
         break;
     }
   };
-  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessDir, ...ran, activeAt }) };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, activeAt }) };
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {
@@ -241,7 +207,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "compacted";
+  role: "user" | "assistant" | "hook";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -278,9 +244,6 @@ export function entryMessages(entry: LogEntry, entryId: string, skip: number, ta
       ...(entry.error ? { errorMessage: entry.error } : {}),
     }];
   }
-  if (entry.type === "compacted") {
-    return [{ role: "compacted", content: [{ type: "text", text: compactedText(entry) }], entryId }];
-  }
   if (entry.type === "command" && !entry.excluded) {
     // The owner's `!command`, then its output, as the live turn showed them.
     const messages: TranscriptMessage[] = [];
@@ -291,17 +254,12 @@ export function entryMessages(entry: LogEntry, entryId: string, skip: number, ta
   return [];
 }
 
-/** What a compaction notice says after "Context compacted": `auto · 288k tokens`. */
-export function compactedText(event: { readonly trigger: string; readonly preTokens?: number }): string {
-  return event.preTokens === undefined ? event.trigger : `${event.trigger} · ${Math.round(event.preTokens / 1000)}k tokens`;
-}
-
 function assistantText(content: readonly AssistantPart[]): string {
   return content.map((part) => part.type === "text" ? part.text : `[ran ${part.name}]`).join("\n");
 }
 
 /**
- * The earlier conversation as text, for a harness that did not carry it:
+ * The earlier conversation as text, handed to each turn:
  * the newest `HANDOFF_CONTEXT_CHARS`, owner and ghost lines labelled.
  */
 export function handoffContext(entries: readonly LogEntry[]): string | null {
@@ -358,16 +316,15 @@ function sameFile(a: Stats, b: Stats): boolean {
 /** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 export function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
-    : entry.type === "user" || entry.type === "assistant" || entry.type === "compacted" ? 1 : 0;
+    : entry.type === "user" || entry.type === "assistant" ? 1 : 0;
 }
 /**
  * The entry types ghostd writes. Any other line is skipped: a retired record
- * of an earlier version (`resources`, an idle `handoff`, a peer's `sent` or
- * `handed`, or a user message with `origin: "auto"` or `"peer"`) or one from a
- * later one.
+ * of an earlier version (`harness`, `compacted`, `resources`, a `handoff`, or
+ * a user message with `origin: "auto"` or `"peer"`) or one from a later one.
  */
 const ENTRY_TYPES: ReadonlySet<string> = new Set<LogEntry["type"]>(
-  ["conversation", "user", "assistant", "command", "harness", "title", "compacted"]);
+  ["conversation", "user", "assistant", "command", "title"]);
 const USER_ORIGINS: ReadonlySet<unknown> = new Set([undefined, "follow_up", "hook"]);
 
 function parseEntry(bytes: Buffer): LogEntry | null {

@@ -8,8 +8,8 @@ import { GhostError } from "./errors.js";
 
 export type TurnEvent =
   | { type: "start" }
-  /** The turn starting on the local model; an owner `!command` sends none. */
-  | { type: "harness"; harness: string }
+  /** The model starting on a prompt; an owner `!command` sends none. */
+  | { type: "pass" }
   /** The follow-ups still waiting, sent whenever one is queued or starts. */
   | { type: "queue"; followUp: string[] }
   | {
@@ -26,7 +26,7 @@ export type TurnEvent =
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
-  /** The harness's reasoning, as far as it shows it; a new block starts on a new line. */
+  /** The model's reasoning, as far as it shows it; a new block starts on a new line. */
   | { type: "thinking"; delta: string }
   | {
       type: "tool_execution_start";

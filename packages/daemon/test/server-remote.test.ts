@@ -126,18 +126,12 @@ describe("tailnet identity", () => {
       body: Buffer.from("89504e47", "hex"),
     });
     expect(attach.status).toBe(403);
-    const copy = await fetch(`${base}/api/ghosts/casper/sessions/remote-1/attachments`, {
-      method: "POST",
-      headers: { ...asTailnet("owner@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
-      body: JSON.stringify({ path: "/etc/hostname" }),
-    });
-    expect(await copy.json()).toMatchObject({ error: { code: "local_only" } });
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
       .toEqual({ role: "owner" });
     const ownerWrite = await fetch(`${base}/api/ghosts/casper/character`, {
       method: "PUT",
-      headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
+      headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json" },
       body: JSON.stringify({ body: "# Casper\n" }),
     });
     expect(ownerWrite.status).toBe(200);
@@ -211,7 +205,7 @@ describe("tailnet identity", () => {
     }
   });
 
-  it("refuses a page on the tailnet host itself: only loopback and remote.apps are origins", async () => {
+  it("refuses a page on the tailnet host itself: only remote.apps are origins", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts`, {
       headers: asTailnet("owner@example.com", { origin: "https://ghostbox.example.ts.net", host: "ghostbox.example.ts.net" }),
@@ -303,10 +297,6 @@ describe("a web app in remote.apps", () => {
 
     const plain = await fetch(`${base}/api/ghosts`, { method: "OPTIONS", headers: { origin: APP } });
     expect(plain.headers.get("access-control-allow-private-network")).toBeNull();
-    // A loopback client may still be offered the token header, and is never offered private network.
-    const local = await fetch(`${base}/api/ghosts`, { method: "OPTIONS", headers: { origin: "http://localhost:5173", "access-control-request-private-network": "true" } });
-    expect(local.headers.get("access-control-allow-headers")).toBe("content-type, authorization");
-    expect(local.headers.get("access-control-allow-private-network")).toBeNull();
   });
 
   it("keeps a guest calling through the app read-only", async () => {

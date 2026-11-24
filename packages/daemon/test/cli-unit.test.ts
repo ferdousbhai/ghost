@@ -18,10 +18,6 @@ function session(id: string): SessionSummary {
     id,
     title: null,
     preview: null,
-    harness: "claude",
-    model: null,
-    provider: null,
-    effort: null,
     updatedAt: "2026-01-01T00:00:00.000Z",
     messageCount: 0,
     pinned: false,
@@ -56,7 +52,7 @@ describe("a ghost's own shell addresses its conversation", () => {
       paths.push(path);
       if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/transcript")) {
-        return jsonResponse({ id: "conv-mine", title: null, harness: null, messages: [], total: 0, truncated: false });
+        return jsonResponse({ id: "conv-mine", title: null, messages: [], total: 0, truncated: false });
       }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };

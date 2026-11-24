@@ -1,7 +1,5 @@
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { apiTokenPath, ensureApiToken, tokenMatches } from "./token-store.js";
@@ -94,13 +92,6 @@ interface TurnLog {
   readonly followers: Set<() => void>;
 }
 
-/**
- * The daemon serves no web page; a local UI on a
- * loopback port is a different origin on the same interface. Allow exactly
- * that and `remote.apps`, and nothing else — a page on another origin must not
- * be able to read a ghost's conversations through the user's own browser.
- */
-const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 
 function jsonResponse(
   response: ServerResponse,
@@ -249,20 +240,21 @@ function mediaType(header: string | string[] | undefined): string {
 }
 
 /**
- * A loopback client may send the token; an app origin may not, so it is not
- * offered `authorization`. Chrome's private-network preflight is answered
- * for an app, the one public origin calling a tailnet address.
+ * The daemon serves no web page. Only a `remote.apps` origin is answered, so
+ * a page on any other origin cannot read a ghost's conversations through the
+ * owner's own browser. An app is identified by Tailscale, never by the token,
+ * so it is not offered `authorization`. Chrome's private-network preflight is
+ * answered for it: a public origin calling a tailnet address.
  */
 function applyCors(request: IncomingMessage, response: ServerResponse, apps: ReadonlySet<string>): void {
   const origin = request.headers.origin;
   if (typeof origin !== "string") return;
-  const app = apps.has(origin);
-  if (!app && !LOOPBACK_ORIGIN.test(origin)) return;
+  if (!apps.has(origin)) return;
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("vary", "origin");
   response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
-  response.setHeader("access-control-allow-headers", app ? "content-type" : "content-type, authorization");
-  if (app && request.headers["access-control-request-private-network"] === "true") {
+  response.setHeader("access-control-allow-headers", "content-type");
+  if (request.headers["access-control-request-private-network"] === "true") {
     response.setHeader("access-control-allow-private-network", "true");
   }
 }
@@ -364,7 +356,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // identity alone; anything else is a cross-site page.
     const origin = request.headers.origin;
     const app = typeof origin === "string" && remoteApps.has(origin);
-    if (typeof origin === "string" && !app && !LOOPBACK_ORIGIN.test(origin)) {
+    if (typeof origin === "string" && !app) {
       errorResponse(response, 403, "forbidden_origin", "That origin may not call this daemon.");
       return null;
     }
@@ -480,23 +472,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (!closed) keepalive = setInterval(() => write(SSE_KEEPALIVE_COMMENT), SSE_KEEPALIVE_INTERVAL_MS);
   };
 
-  /**
-   * An image body from any owner, or JSON `{ path }` naming a local image
-   * from the machine-local token.
-   */
-  const handleSaveAttachment = async ({ ghost, id, request, response, admission }: RequestContext): Promise<void> => {
-    let bytes: Uint8Array;
-    if (mediaType(request.headers["content-type"]) !== "application/json") {
-      bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
-    } else {
-      if (admission.identity) throw new GhostError("local_only", "Only the machine-local token attaches a local file.", 403);
-      const path = stringField(await readJsonObjectBody(request, maxBodyBytes), "path");
-      if (!isAbsolute(path)) throw new GhostError("invalid_request", "\"path\" must be absolute.", 400);
-      const size = await stat(path).then((s) => s.isFile() ? s.size : -1, () => -1);
-      if (size < 0) throw new GhostError("not_found", `No file at ${path}.`, 404);
-      if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", `An attachment is at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MiB.`, 413);
-      bytes = await readFile(path);
-    }
+  /** An image body, from any owner. */
+  const handleSaveAttachment = async ({ ghost, id, request, response }: RequestContext): Promise<void> => {
+    const bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
     jsonResponse(response, 201, { path: await options.host.saveAttachment(ghost, id, bytes) });
   };
 

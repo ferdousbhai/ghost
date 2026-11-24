@@ -39,12 +39,9 @@ names this file alone.
 Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
 replaces it; `ghost hooks set` edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
-needs a restart. Groups and handlers run in file order. An event earlier
-versions ran (`before_prompt`) and any top-level key other than `hooks` are
-skipped at startup with a warning in the journal, so an upgrade never stops
-the daemon. The daemon admits the document without them: `GET
-/api/hooks/config` serves it so, and the next edit writes the file clean;
-`PUT /api/hooks/config` refuses a document that still names them.
+needs a restart. Groups and handlers run in file order. A document naming an
+unknown event, or any top-level key other than `hooks`, is refused, at startup
+and by `PUT /api/hooks/config`.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
@@ -101,12 +98,11 @@ contains the same message directly:
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
   "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
-  "conversation_id": "conversation-a",
-  "harness": "local"
+  "conversation_id": "conversation-a"
 }
 ```
 
-`harness` is what answered the pass, always `local`. `messages` exposes only that
+`messages` exposes only that
 pass, its content Ghost's assistant parts (`text`, and `toolCall` with
 `failed: true` on a call that failed).
 `owner_prompt` is the owner's request and `turn_id` a UUID naming it; both

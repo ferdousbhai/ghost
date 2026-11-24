@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ArgsError, flagBoolean, flagString } from "./args.js";
+import { ArgsError, flagBoolean } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { conversationId, ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
@@ -16,10 +16,8 @@ function newConversationId(): string {
 
 async function messageText(
   positionals: readonly string[],
-  explicit: string | undefined,
   stdin: CliStdin,
 ): Promise<string> {
-  if (explicit !== undefined) return explicit;
   if (positionals.length === 1 && positionals[0] === "-") return stdinText(stdin);
   if (positionals.length > 0) return positionals.join(" ");
   if (!stdinIsTty(stdin)) return stdinText(stdin);
@@ -55,10 +53,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   const followUp = flagBoolean(parsed, "follow-up");
   const startNew = flagBoolean(parsed, "new");
   if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
-  if (flagString(parsed, "message") !== undefined && parsed.positionals.length > 0) {
-    throw new ArgsError("say takes its text as arguments or -m, not both");
-  }
-  const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
+  const text = await messageText(parsed.positionals, ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
   const name = await resolveGhost(ctx);
   const requestedSession = preferredSessionId(ctx);
@@ -87,7 +82,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
   // An owner `!command` streams as one bash card before any pass starts;
   // its output is the card's summary (its tail), and it is this
   // turn's whole answer. ghostd alone decides what a command is.
-  let harnessStarted = false;
+  let passStarted = false;
   let ownerCommand = false;
   let finalText = "";
   let terminal: "done" | "error" | undefined;
@@ -108,8 +103,8 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
         resume = { turn: String(event.turn), from: Number(event.from) };
         return;
       }
-      if (event.type === "harness") harnessStarted = true;
-      else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
+      if (event.type === "pass") passStarted = true;
+      else if (event.type === "tool_execution_start" && !passStarted) ownerCommand = true;
       if (event.type === "error") {
         terminal = "error";
         ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);

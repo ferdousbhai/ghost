@@ -316,7 +316,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const types = events.map((event) => event.type);
     expect(types).toEqual([
       "start",
-      "harness",
+      "pass",
       "tool_execution_start",
       "tool_execution_end",
       "text_start",
@@ -544,14 +544,10 @@ describe("GET /api/ghosts/:name/sessions", () => {
     };
     expect(sessions).toHaveLength(1);
     expect(Object.keys(sessions[0]!).sort()).toEqual([
-      "effort",
-      "harness",
       "id",
       "messageCount",
-      "model",
       "pinned",
       "preview",
-      "provider",
       "question",
       "running",
       "title",
@@ -562,7 +558,6 @@ describe("GET /api/ghosts/:name/sessions", () => {
       id: "conv-1",
       title: "Who are you",
       preview: "Who are you?",
-      harness: "local",
       messageCount: 2,
       pinned: false,
       unread: true,
@@ -929,17 +924,12 @@ describe("routing and transport", () => {
     expect(await transcript.json()).toMatchObject({ id: "conv-1" });
   });
 
-  it("allows a loopback browser origin and refuses a remote one", async () => {
+  it("offers CORS to no origin that is not an app", async () => {
     const base = await serve();
-    const local = await fetch(`${base}/api/ghosts`, {
-      headers: { origin: "http://localhost:5173" },
-    });
-    expect(local.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
-
-    const remote = await fetch(`${base}/api/ghosts`, {
-      headers: { origin: "https://evil.example" },
-    });
-    expect(remote.headers.get("access-control-allow-origin")).toBeNull();
+    for (const origin of ["http://localhost:5173", "https://evil.example"]) {
+      const response = await fetch(`${base}/api/ghosts`, { headers: { origin } });
+      expect(response.headers.get("access-control-allow-origin"), origin).toBeNull();
+    }
   });
 
   it("refuses an oversized body", async () => {
@@ -984,22 +974,10 @@ describe("attachments", () => {
     expect(Buffer.from(await served.arrayBuffer())).toEqual(PNG);
   });
 
-  it("copies a local file named by path, and refuses what is not an image", async () => {
+  it("refuses what is not an image, and serves only a stored one", async () => {
     const base = await serve();
-    const local = join(temp!.root, "shot.png");
-    writeFileSync(local, PNG);
-    const copied = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: local }) });
-    expect(copied.status).toBe(201);
-    // The media type is matched as the CORS gate matches it: case and parameters aside.
-    const cased = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "Application/JSON; charset=utf-8" }, body: JSON.stringify({ path: local }) });
-    expect(cased.status).toBe(201);
-
     const text = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "image/png" }, body: "not an image" });
     expect(text.status).toBe(415);
-    const relative = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "shot.png" }) });
-    expect(relative.status).toBe(400);
-    const directory = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: temp!.root }) });
-    expect(directory.status).toBe(404);
     for (const name of ["..%2F.conversation.jsonl", "x.png", "abc-0000000g.png"]) {
       expect((await fetch(`${url(base, "c1")}/${name}`)).status, name).toBe(404);
     }

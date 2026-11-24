@@ -43,21 +43,10 @@ describe("shared hook policy", () => {
     ]) expect(() => parseHooksDocument(invalid, path)).toThrow();
   });
 
-  it("skips a retired event or stray key only where told of it, and refuses it otherwise", () => {
-    const retired = { builtin: {}, hooks: { ...config.hooks, before_prompt: [{ hooks: [{ type: "command", command: "old" }] }] } };
-    const skipped: string[] = [];
-    expect(parseHooksDocument(retired, path, (field) => skipped.push(field)).map((hook) => hook.command))
-      .toEqual(parseHooksDocument(config, path).map((hook) => hook.command));
-    expect(skipped).toEqual(["builtin", "hooks.before_prompt"]);
-    expect(() => parseHooksDocument(retired, path)).toThrow(/no top-level "builtin"; send the document itself/u);
-    expect(() => parseHooksDocument({ hooks: retired.hooks }, path)).toThrow(/"before_prompt" was retired/u);
-    expect(() => parseHooksDocument({ hooks: { other: [] } }, path, () => {})).toThrow(/unsupported hook event "other"/u);
-  });
-
   it("stops at the first real continuation", async () => {
     const commands = parseHooksDocument(config, path);
     const called: string[] = [];
-    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, turn_id: "turn-1", stop_hook_active: false, harness: "claude" };
+    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, turn_id: "turn-1", stop_hook_active: false };
     expect(await runSessionStopHooks(commands, stop, async (hook) => {
       called.push(hook.command);
       return hook.command === "continue" ? { decision: "block", reason: "Revise" } : { continue: true };

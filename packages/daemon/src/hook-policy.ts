@@ -19,8 +19,6 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   turn_id: string;
   last_assistant_message: unknown;
   stop_hook_active: boolean;
-  /** The harness that answered the pass. */
-  harness: string;
 }
 
 export interface GhostSessionStopResult {
@@ -73,13 +71,6 @@ const HOOK_EVENTS: Record<GhostHookEvent["type"], { name: string; description: s
   turn_end: { name: "Turn-end command hook", description: "Observes final turn success or failure without continuing it." },
 };
 
-/**
- * Events earlier versions ran. At startup a `hooks.json` naming one, or a
- * top-level key other than `hooks`, is admitted without it, so an upgrade
- * never stops the daemon; a write through `PUT /api/hooks/config` refuses both.
- */
-const RETIRED_HOOK_EVENTS: ReadonlySet<string> = new Set(["before_prompt"]);
-
 function displayText(value: unknown, fallback: string, label: string, maximum: number): string {
   if (value === undefined) return fallback;
   if (typeof value !== "string" || !value.trim() || value.trim().length > maximum) {
@@ -89,46 +80,25 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
 }
 
 /**
- * A document `parseHooksDocument` admitted at startup, as `PUT
- * /api/hooks/config` would accept it: only `hooks`, without retired events.
- * The daemon serves this, so the next edit writes the file clean.
- */
-export function admittedHooksDocument(document: Record<string, unknown>): Record<string, unknown> {
-  if (!isRecord(document.hooks)) return {};
-  return { hooks: Object.fromEntries(Object.entries(document.hooks).filter(([eventName]) => !RETIRED_HOOK_EVENTS.has(eventName))) };
-}
-
-/**
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
 export function parseHooksDocument(
   parsed: unknown,
   path: string,
-  /**
-   * Given at startup: told of each stray top-level key (`"builtin"`) or
-   * retired event (`"hooks.before_prompt"`) skipped instead of refused.
-   */
-  onSkipped?: (field: string) => void,
 ): CommandHook[] {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
   const stray = Object.keys(parsed).filter((key) => key !== "hooks");
   // A document names only `hooks`, so a pasted `{ path, document }` reply is
   // refused instead of silently disabling every hook.
-  if (stray.length > 0 && !onSkipped) {
+  if (stray.length > 0) {
     throw new Error(`${path} has no top-level ${stray.map((key) => JSON.stringify(key)).join(", ")}; send the document itself.`);
   }
-  for (const key of stray) onSkipped?.(key);
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
   for (const eventName of Object.keys(hooks)) {
-    if (Object.hasOwn(HOOK_EVENTS, eventName)) continue;
-    if (!RETIRED_HOOK_EVENTS.has(eventName)) {
-      throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
-    }
-    if (!onSkipped) throw new Error(`${path}: hook event ${JSON.stringify(eventName)} was retired; remove it.`);
-    onSkipped(`hooks.${eventName}`);
+    if (!Object.hasOwn(HOOK_EVENTS, eventName)) throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
   }
 
   const result: CommandHook[] = [];

@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  admittedHooksDocument, parseCommandResult, parseHooksDocument,
+  parseCommandResult, parseHooksDocument,
   runSessionStopHooks,
   type CommandHook, type HookCommandResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostSessionStopEvent,
@@ -86,15 +86,10 @@ export class GhostHookRunner {
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): ConfiguredHookRunner {
     const document = readCommandHooksDocument(path);
-    const logger = options.logger ?? silentLogger;
-    const commands = parseHooksDocument(document, path, (field) => {
-      logger.warn("skipping what hooks.json no longer admits; the next edit drops it", { path, field });
-    });
-    const admitted = admittedHooksDocument(document as Record<string, unknown>);
     return new ConfiguredHookRunner({
       ...options,
-      commands,
-      commandConfig: { path, document: admitted },
+      commands: parseHooksDocument(document, path),
+      commandConfig: { path, document: document as Record<string, unknown> },
     });
   }
 

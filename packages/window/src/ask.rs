@@ -378,7 +378,7 @@ impl AskPage {
             answer.step.set_visible(true);
         };
         match event["type"].as_str().unwrap_or_default() {
-            "harness" => step(format!("Starting {}…", event["harness"].as_str().unwrap_or("the agent"))),
+            "pass" => step("Thinking…".to_string()),
             "thinking" => {
                 if let Some(text) = event["delta"].as_str().filter(|text| text.contains("Loading")) {
                     step(text.trim().to_string());
