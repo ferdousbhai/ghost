@@ -1,8 +1,8 @@
 // A stand-in for llama-server in the window preview: ghostd spawns it as `local.server`, and it answers every
-// chat with one short cited reply, so Ask can be checked without loading a model.
+// chat with one short reply that names its file, so Ask can be checked without loading a model.
 const args = process.argv.slice(2);
 const port = Number(args[args.indexOf("--port") + 1]);
-const reply = "The boat leaves at **nine**, from the north pier [S1].\n\n- Bring the tickets.\n- Sara is meeting you there [S2].";
+const reply = "The boat leaves at **nine**, from the north pier (Documents/Notes/Ferry trip.md).\n\n- Bring the tickets.\n- Sara is meeting you there.";
 
 Bun.serve({
   port,
