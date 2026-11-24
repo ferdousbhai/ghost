@@ -2,7 +2,7 @@
 //! The assistant's Markdown as GTK labels: paragraphs, headings, lists, emphasis and code.
 
 use gtk::{glib, prelude::*};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// One block of the answer: its Pango markup and how it is shown.
 #[derive(Debug, PartialEq)]
@@ -27,12 +27,11 @@ pub fn blocks(md: &str) -> Vec<Block> {
     let mut heading = false;
     let mut code: Option<String> = None;
     let flush = |cur: &mut String, out: &mut Vec<Block>, heading: bool, in_item: bool, lists: &Vec<Option<u64>>, marker: &str| {
-        let text = cur.trim().to_owned();
+        let markup = cur.trim().to_owned();
         cur.clear();
-        if text.is_empty() {
+        if markup.is_empty() {
             return;
         }
-        let markup = text;
         out.push(if heading {
             Block::Heading(markup)
         } else if in_item {
@@ -43,9 +42,9 @@ pub fn blocks(md: &str) -> Vec<Block> {
     };
     for ev in Parser::new_ext(md, Options::ENABLE_STRIKETHROUGH) {
         match ev {
-            Event::Start(Tag::Heading { level, .. }) => {
+            Event::Start(Tag::Heading { .. }) => {
                 flush(&mut cur, &mut out, heading, in_item, &lists, &item_marker);
-                heading = level <= HeadingLevel::H6;
+                heading = true;
             }
             Event::End(TagEnd::Heading(_)) => {
                 flush(&mut cur, &mut out, heading, in_item, &lists, &item_marker);
@@ -145,9 +144,9 @@ mod tests {
 
     #[test]
     fn emphasis_and_unclosed_markup() {
-        let b = blocks("Boil it **one minute** [S2].");
+        let b = blocks("Boil it **one minute**.");
         let Block::Para(m) = &b[0] else { panic!("{b:?}") };
-        assert_eq!(m, "Boil it <b>one minute</b> [S2].");
+        assert_eq!(m, "Boil it <b>one minute</b>.");
         assert!(valid_markup(m));
         assert!(!valid_markup("<b>half"), "unclosed markup is refused");
     }

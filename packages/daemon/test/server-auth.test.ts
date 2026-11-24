@@ -98,10 +98,6 @@ describe("the bearer token", () => {
     for (const path of [
       "/api/ghosts",
       "/api/ghosts/casper/sessions",
-      "/api/ghosts/casper/model",
-      "/api/ghosts/casper/models",
-      "/api/ghosts/casper/providers",
-      "/api/ghosts/casper/sessions/pi%3Adraft/project/draft",
       "/api/hooks/config",
       "/api/nonsense",
     ]) {

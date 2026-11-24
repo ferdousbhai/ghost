@@ -17,17 +17,17 @@ SyslogIdentifier=ghostd
 Restart=on-failure
 RestartSec=2
 # On SIGTERM ghostd aborts running turns and closes; this is the only deadline,
-# for a harness or sidecar that ignores cancellation.
+# for a command that ignores cancellation.
 TimeoutStopSec=10s
 KillMode=mixed
 SendSIGKILL=yes
 
-# Do NOT put credential values in this unit or an EnvironmentFile: each harness
-# reads its own sign-in from its own configuration.
+# Do NOT put credential values in this unit or an EnvironmentFile: each coding
+# agent reads its own sign-in from its own configuration.
 
 # systemd's default PATH is /usr/local/bin:/usr/bin, and the login PATH the
 # user manager imports arrives only after the graphical session is up. The CLIs
-# a ghost delegates to install into ~/.local/bin and the like, so name the
+# a ghost runs install into ~/.local/bin and the like, so name the
 # owner's tool directories here rather than depend on start-up order.
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:%h/.bun/bin:/usr/local/bin:/usr/bin
 

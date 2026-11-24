@@ -41,27 +41,3 @@ export async function freePort(): Promise<number> {
   }
   throw new Error(`no free loopback port found in ${PORT_FLOOR}-${PORT_CEILING}`);
 }
-
-export async function waitUntilServing(
-  port: number,
-  child: { exitCode: number | null },
-): Promise<void> {
-  // Generous on purpose: a cold start on a slow or emulated machine (the
-  // aarch64 proof for ghost#52 took eight seconds) must not read as failure.
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`daemon exited before listening (${child.exitCode})`);
-    }
-    try {
-      const response = await fetch(`http://${DAEMON_HOST}:${port}/api/status`, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      if (response.status === 200 || response.status === 401) return;
-    } catch {
-      // The listener is not ready yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`daemon did not listen on port ${port}`);
-}

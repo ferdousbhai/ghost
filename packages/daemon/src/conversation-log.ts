@@ -139,12 +139,9 @@ interface LogState {
   readonly title: string | null;
   readonly preview: string | null;
   readonly messageCount: number;
-  /** The harness bound by the last `harness` entry, its session id, and where it ran. */
+  /** The harness bound by the last `harness` entry, and where it ran. */
   readonly harness: string | null;
-  readonly harnessSession: string | null;
   readonly harnessDir: string | null;
-  /** Whether that harness has run a turn in the conversation directory yet. */
-  readonly harnessStarted: boolean;
   /** What the bound harness's latest pass ran on; null once another harness binds. */
   readonly model: string | null;
   readonly provider: string | null;
@@ -198,9 +195,7 @@ function logStateAccumulator() {
   let ownerWrote = false;
   let count = 0;
   let harness: string | null = null;
-  let harnessSession: string | null = null;
   let harnessDir: string | null = null;
-  let harnessStarted = false;
   let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
@@ -220,8 +215,6 @@ function logStateAccumulator() {
         }
         break;
       case "assistant":
-        // A turn that failed before saying or doing anything left nothing to continue.
-        if (entry.harness === harness && entry.content.length > 0) harnessStarted = true;
         if (entry.harness === harness && (entry.model ?? entry.effort) !== undefined) {
           ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
         }
@@ -230,20 +223,15 @@ function logStateAccumulator() {
         if (!entry.excluded) preview ??= firstLine(`!${entry.command}`);
         break;
       case "harness":
-        if (entry.harness !== harness || (entry.dir !== undefined && entry.dir !== harnessDir)) {
-          harnessStarted = false;
-          harnessSession = null;
-        }
         if (entry.harness !== harness) ran = { model: null, provider: null, effort: null };
         harness = entry.harness;
-        harnessSession = entry.session ?? harnessSession;
         harnessDir = entry.dir ?? harnessDir;
         break;
       default:
         break;
     }
   };
-  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessDir, ...ran, activeAt }) };
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {

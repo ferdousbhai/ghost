@@ -50,7 +50,7 @@ else
   trap 'rm -rf -- "$work"' EXIT
   curl -fsSL -o "$work/recipe.tar.gz" "$assets/ghost-recipe.tar.gz"
   tar -xzf "$work/recipe.tar.gz" -C "$work"
-  # The recipe checks both release archives against their published SHA-256s.
+  # The recipe checks the release archive against its published SHA-256.
   # --nocheck: the release ran these checks when it was published.
   (cd -- "$work/ghost" && makepkg --syncdeps --install --noconfirm --needed --nocheck)
 fi

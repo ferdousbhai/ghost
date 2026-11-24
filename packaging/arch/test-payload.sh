@@ -43,7 +43,6 @@ verify_recipe() (
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
   package
   [[ " ${depends[*]} " == *' bun>='* && " ${depends[*]} " == *' gtk4>='* ]]
-  [[ " ${depends[*]} " != *quickshell* ]]
   # A machine holding the earlier split takes this one package in its place.
   [[ " ${replaces[*]} " == *" $replaced "* && " ${conflicts[*]} " == *" $replaced "* ]]
   [[ "$(cat "$work/assembly")" == *'packages/window/target/release/ghost-window' ]]

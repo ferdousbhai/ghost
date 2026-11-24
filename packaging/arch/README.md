@@ -90,13 +90,3 @@ until it has passed on that exact tree, and the `Native packages` workflow
 builds this PKGBUILD (which runs the same checks) in clean Arch Linux x86_64
 and Arch Linux ARM aarch64 chroots on every pull request and master push.
 Releases are cut locally.
-
-For a real service-context check on a graphical Arch login, run:
-
-```sh
-/usr/lib/ghost/package-smoke/service-smoke.sh
-```
-
-It uses `/usr/bin/ghost status` to verify that the terminal client can
-authenticate to the active packaged daemon. CI chroots do not run a graphical
-user manager, so this stays a release-machine check.

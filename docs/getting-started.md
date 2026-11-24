@@ -102,7 +102,7 @@ Confirm the client can reach and authenticate to the daemon:
 ghost status
 ```
 
-It prints the daemon URL, the token file path, the ghost count, and
+It prints the daemon URL, the token file path, the ghost, and
 remote-access state; that it prints at all means the daemon answered and
 accepted the token (otherwise it exits 3 or 4). The bearer token is minted on
 first run at `~/.local/state/ghost/api-token` (mode 0600); the window and CLI read
@@ -194,7 +194,7 @@ codes.
 
 | Path | What |
 |---|---|
-| `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, and `sessions/<id>/`, one directory per conversation |
+| `~/ghosts/<name>/` | the ghost home: `character.md` and `sessions/<id>/`, one directory per conversation |
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |

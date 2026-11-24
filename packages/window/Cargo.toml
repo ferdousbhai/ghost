@@ -17,8 +17,6 @@ path = "src/main.rs"
 omui = { git = "https://github.com/ferdousbhai/omui", rev = "d5796183fdcc1dab218c7af5343bc0f29389db0e" }
 # The GTK 4 stack omui is built on; cargo resolves both to one gtk4.
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_14"] }
-glib = "0.22.9"
-gio = { version = "0.22.9", features = ["v2_72"] }
 pulldown-cmark = { version = "0.13", default-features = false }
 serde_json = "1.0"
 async-channel = "2.3"

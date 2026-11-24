@@ -36,7 +36,7 @@ remote client at all. See [concepts](docs/concepts.md) for rationale.
 
 Durable state has three scopes:
 
-- **Ghost-private:** character, conversations, settings, and runtime
+- **Ghost-private:** character, conversations, and their
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
   folder of the owner's XDG Documents directory, and tasks in its `Reminders`
@@ -277,7 +277,7 @@ daemon's private `/tmp`, and ends it with `ghost say --follow-up`, which
 queues after a live turn or, when the conversation is idle, starts its next
 turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
-table, no jobs API, no jobs strip, and cannot cancel what it did not start;
+table, no jobs API, and cannot cancel what it did not start;
 the Ghost section (`GHOST_POLICY` in
 [`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)) points at the recipe,
 `ghost help background`.
@@ -361,7 +361,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, `hook`, or `compacted`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `compacted` message marks where an agent CLI of an earlier version compacted its context. An owner `!command` reads as the owner's `!command` followed by its output. |
-| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
+| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
@@ -490,7 +490,7 @@ the daemon into. Removing it preserves owner data.
   own step (`omarchy-install-ai-ghost`, also attached to the release), which
   starts ghostd; its first start makes the ghost home.
 
-Protocols implemented by a sidecar have one detailed document:
+Hooks have one detailed document:
 [`docs/hooks.md`](docs/hooks.md).
 
 Browser automation belongs to the installed `agent-browser` CLI and its skill,
@@ -618,7 +618,7 @@ is answered with what was wrong, and nothing runs.
 ## Lifecycle invariants
 
 - Never start a test daemon against `~/ghosts` or the live port 7717.
-  Canary/smoke daemons isolate Ghost config and owner hooks.
+  Canary daemons isolate Ghost config and owner hooks.
   Tests use scratch homes and the window preview's private
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;

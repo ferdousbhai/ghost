@@ -28,4 +28,3 @@ pacman -T "${constraints[@]}"
 bun --version
 chown -R builder:builder /build /output /cache/pnpm
 su builder -c "cd /build/packaging/arch && GHOST_SOURCE_REPO=file:///build GHOST_SOURCE_REF=commit=$commit PKGDEST=/output PKGEXT=.pkg.tar.zst makepkg --force ${nodeps[*]}"
-printf "%s\n" "$commit" > /output/source-commit.txt

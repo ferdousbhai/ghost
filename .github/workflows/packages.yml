@@ -50,7 +50,5 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: ghost-${{ matrix.arch }}
-          path: |
-            dist/*.pkg.tar.zst
-            dist/source-commit.txt
+          path: dist/*.pkg.tar.zst
           if-no-files-found: error

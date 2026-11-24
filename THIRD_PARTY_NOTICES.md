@@ -2,7 +2,7 @@
 
 ## Lucide
 
-The shell assets use Lucide's `ghost`, `copy`, and `mic` glyphs. Ghost's window
+The app icon is Lucide's `ghost` glyph. Ghost's window
 (`ghost-window`) holds the Lucide 1.35.0 icons that
 [omui](https://github.com/ferdousbhai/omui) bundles, each stroke outlined as a
 filled path and renamed `om-<name>-symbolic`.

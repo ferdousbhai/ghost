@@ -66,7 +66,7 @@ export function resolveSessionPrefix(rows: readonly SessionSummary[], requested:
 
 /**
  * `requested` as an id or unique prefix of a listed conversation, else as
- * given: one no message has landed in yet is not listed, and a turn or switch
+ * given: one no message has landed in yet is not listed, and a turn
  * may still address it.
  */
 export async function conversationId(client: DaemonClient, name: string, requested: string): Promise<string> {

@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import { buildGhostSystemPrompt, characterSection, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
+import { buildGhostSystemPrompt, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
 import { readCharacter } from "./home.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
 import { errorMessage, GhostError } from "./errors.js";
@@ -250,7 +250,7 @@ export class SessionHost {
   private readonly live = new Map<string, LiveTurn>();
   /** Each admitted turn's stop: the turn outlives its client, so only `stopTurn` or shutdown ends it early. */
   private readonly admissions = new Map<string, AbortController>();
-  /** A session being switched or trashed cannot admit a turn or another mutation. */
+  /** A session being trashed cannot admit a turn or another mutation. */
   private readonly reservedSessions = new Set<string>();
   private readonly metadataWrites = new Map<string, Promise<unknown>>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
@@ -324,25 +324,21 @@ export class SessionHost {
   }
 
   /**
-   * The ghost's whole system prompt (`persona`: its character and the stable
-   * policy sections) and the character alone.
+   * The ghost's whole system prompt: its character and the stable policy sections.
    * Rendered before every turn, so a character the ghost (or the owner)
    * rewrote is who it is on the next one.
    */
-  async renderPersona(ghost: Ghost): Promise<{ persona: string; character: string }> {
+  async renderPersona(ghost: Ghost): Promise<string> {
     const character = await readCharacter(ghost.dir);
-    return {
-      persona: buildGhostSystemPrompt({
-        ghostName: ghost.name,
-        character,
-        homeDir: ghost.dir,
-        extraSections: stablePolicySections({
-          documents: this.documentsDir(),
-          firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
-        }),
+    return buildGhostSystemPrompt({
+      ghostName: ghost.name,
+      character,
+      homeDir: ghost.dir,
+      extraSections: stablePolicySections({
+        documents: this.documentsDir(),
+        firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
       }),
-      character: characterSection({ ghostName: ghost.name, character }),
-    };
+    });
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────
@@ -437,7 +433,7 @@ export class SessionHost {
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
         const passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
-        const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
+        const failure = await this.runTurnOnModel(ghost, id, passPrompt, stream, blocks, signal);
         // A failed pass ends the turn only when nothing is queued behind it:
         // the owner's follow-ups were accepted and still run.
         terminal = failure ?? { type: "done" };
@@ -478,7 +474,7 @@ export class SessionHost {
    * Run one prompt on the local model, handed the conversation so far: it
    * keeps no session of its own. Returns the terminal error, or null on success.
    */
-  private async runPasses(
+  private async runTurnOnModel(
     ghost: Ghost,
     id: string,
     prompt: string,
@@ -507,7 +503,6 @@ export class SessionHost {
       ...(result.error ? { error: result.error } : {}),
       ...(result.model ? { model: result.model.model } : {}),
       ...(result.model?.provider ? { provider: result.model.provider } : {}),
-      ...(result.model?.effort ? { effort: result.model.effort } : {}),
     }]);
     return result.error === null ? null : { type: "error", reason: result.aborted ? "aborted" : "error", errorMessage: result.error };
   }
@@ -538,7 +533,7 @@ export class SessionHost {
   ): Promise<PassResult> {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
-    const { persona } = await this.renderPersona(ghost);
+    const persona = await this.renderPersona(ghost);
     await mkdir(dir, { recursive: true, mode: 0o700 });
 
     const content: AssistantPart[] = [];

@@ -779,7 +779,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       await options.host.deleteSession(ghost, id);
       jsonResponse(response, 200, { ok: true });
     }),
-    // Idempotent, so the shell sends the state it wants rather than a toggle.
+    // Idempotent, so a client sends the state it wants rather than a toggle.
     route("PUT", "api/ghosts/:ghost/sessions/:id/pin", async ({ ghost, id, response, body }) => {
       const pinned = booleanField(await body(), "pinned");
       await options.host.setPinned(ghost, id, pinned);

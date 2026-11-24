@@ -1,7 +1,7 @@
 /**
  * Images the owner attaches to a conversation. They live in the conversation
  * directory, the harness's working directory, so a message names one by its
- * relative path and the harness opens it with its own file tools.
+ * relative path and the model opens it from its shell.
  */
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
