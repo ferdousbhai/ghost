@@ -574,7 +574,7 @@ the daemon into. Removing it preserves owner data.
   prints the daemon restart that loads the new bundle. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
-  archive, runtime archive, and `SHA256SUMS`; Omarchy's sync reads GitHub's
+  archive and `SHA256SUMS`; Omarchy's sync reads GitHub's
   asset digests. Owners install from Omarchy's package repository. Ahead of
   its sync, `ferdousbhai.com/ghost/install.sh` (the release's `install.sh`)
   installs the same package: from that repository when it has the latest

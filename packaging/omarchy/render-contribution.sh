@@ -5,8 +5,8 @@ set -euo pipefail
 script_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 release_root="$script_root/../release"
 template_root="$script_root/pkgbuilds/ghost"
-usage='render-contribution.sh <output-dir> <version> <source-sha256> <runtime-sha256>'
-[[ "$#" -eq 4 ]] || {
+usage='render-contribution.sh <output-dir> <version> <source-sha256>'
+[[ "$#" -eq 3 ]] || {
   printf 'usage: %s\n' "$usage" >&2
   exit 1
 }

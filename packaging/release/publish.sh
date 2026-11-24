@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cut a Ghost release from this machine: build the source and runtime archives,
-# verify them, tag the commit, and publish a GitHub release on
+# Cut a Ghost release from this machine: build the source archive,
+# verify it, tag the commit, and publish a GitHub release on
 # ferdousbhai/ghost (GHOST_RELEASE_REPOSITORY to override). Omarchy's
 # package repository builds the `ghost` package from that release: its
 # sync-upstream workflow follows the tags and rewrites the recipe's pkgver and
@@ -78,33 +78,23 @@ work="$script_root/work"
 rm -rf -- "$out" "$work"
 mkdir -p -- "$out" "$work"
 
-bash "$script_root/prepare-pnpm-engine.sh" "$source_root"
-pnpm fetch --frozen-lockfile
-SOURCE_DATE_EPOCH="$epoch" GHOST_RELEASE_WORK_ROOT="$work" \
-  bash "$script_root/build-runtime-source.sh" \
-    "$source_root" "$out" "$version" any "$commit"
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$script_root/make-source-archive.sh" \
     "$source_root" "$out/ghost-$version.tar.gz" "$version" HEAD
 # The verifier reads the sanitized archive, not this tree.
 tar -xf "$out/ghost-$version.tar.gz" -C "$work"
 bash "$script_root/verify-release-source.sh" "$work/ghost-$version" "$version" "$commit" "$epoch"
-GHOST_RELEASE_WORK_ROOT="$work" \
-  bash "$script_root/smoke-runtime-source.sh" \
-    "$out/ghost-runtime-$version-linux-any.tar.zst" \
-    "$source_root" "$version" any "$commit" "$epoch"
 rm -rf -- "$work"
-(cd -- "$out" && sha256sum -- "ghost-$version.tar.gz" "ghost-runtime-$version-linux-any.tar.zst" > SHA256SUMS)
+(cd -- "$out" && sha256sum -- "ghost-$version.tar.gz" > SHA256SUMS)
 
 source_sha="$(sed -n 1p "$out/SHA256SUMS" | cut -d' ' -f1)"
-runtime_sha="$(sed -n 2p "$out/SHA256SUMS" | cut -d' ' -f1)"
 # Omarchy's recipe is the one rendered here (pkgbuilds/ghost in
-# omacom/omarchy-pkgs); building it from the archives beside it, rather than
-# the release URLs that do not exist yet, proves the release builds there.
+# omacom/omarchy-pkgs); building it from the archive beside it, rather than
+# the release URL that does not exist yet, proves the release builds there.
 mkdir -p -- "$work"
 build="$(mktemp -d "$work/package-build.XXXXXX")"
-bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha" "$runtime_sha"
-cp -- "$out/ghost-$version.tar.gz" "$out/ghost-runtime-$version-linux-any.tar.zst" "$build/ghost/"
+bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha"
+cp -- "$out/ghost-$version.tar.gz" "$build/ghost/"
 (
   cd -- "$build/ghost"
   LC_ALL=C PKGDEST="$build/pkg" PKGEXT=.pkg.tar.zst makepkg --force
@@ -115,7 +105,7 @@ rm -rf -- "$work"
 # owner ahead of Omarchy's sync: Omarchy's own recipe for this release, the
 # installer, and the Install menu's steps it ends with.
 recipe="$(mktemp -d)"
-bash "$source_root/packaging/omarchy/render-contribution.sh" "$recipe/ghost" "$version" "$source_sha" "$runtime_sha"
+bash "$source_root/packaging/omarchy/render-contribution.sh" "$recipe/ghost" "$version" "$source_sha"
 tar -czf "$out/ghost-recipe.tar.gz" -C "$recipe" --owner=0 --group=0 --sort=name ghost
 rm -rf -- "$recipe"
 install -m 755 -- "$source_root/packaging/release/install.sh" "$out/install.sh"
@@ -133,10 +123,9 @@ git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`omarchy pkg add ghost\`, from Omarchy's package repository. Ahead of it, \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` builds Omarchy's own recipe for this release. The source and runtime archives are what Omarchy builds the package from." \
+  --notes "Install on Omarchy: \`omarchy pkg add ghost\`, from Omarchy's package repository. Ahead of it, \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` builds Omarchy's own recipe for this release. The source archive is what Omarchy builds the package from." \
   -- \
   "$out/ghost-$version.tar.gz" \
-  "$out/ghost-runtime-$version-linux-any.tar.zst" \
   "$out/SHA256SUMS" \
   "$out/ghost-recipe.tar.gz" \
   "$out/install.sh" \

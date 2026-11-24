@@ -10,9 +10,8 @@ toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
 tree. Ghost's application code is packaged for offline use; the agent CLIs a
 ghost's turns run on are the owner's own.
 
-The stable `ghost` release-source machinery lives under `packaging/release/`; its
-v3 runtime source carries the same bundles, launchers, and exact bundled-license
-closure.
+The stable `ghost` recipe lives under `packaging/omarchy/`; it builds the same
+bundles, launchers, and bundled-license closure from a release's source archive.
 
 Build the checkout package without installing it (a plain `makepkg` builds
 origin `master`; these variables point it at this checkout's HEAD):
@@ -45,11 +44,8 @@ the shared Chromium session and task tabs). Each product installs its own skill
 (`<cli> skill install`). Machine skills are whatever each agent CLI discovers on
 its own.
 
-This remains the rolling, checkout-only development package: `pnpm install`
-may populate its store during `build()`. The stable `ghost` package uses the
-[v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
-and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
-source and runtime inputs as a GitHub release (`../release/publish.sh`);
+This remains the rolling, checkout-only development package. Ghost publishes
+a source archive as a GitHub release (`../release/publish.sh`);
 Omarchy's package repository carries `ghost` and owns the stable package
 build and promotion (see [the release README](../release/README.md)).
 

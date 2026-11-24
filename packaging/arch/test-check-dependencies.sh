@@ -69,7 +69,6 @@ require_install_hook_activation "$install_script" post_upgrade \
 
 bash "$script_dir/test-payload.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
-bash "$source_root/packaging/release/test-runtime-source.sh"
 bash "$source_root/packaging/release/test-install-script.sh"
 bash "$source_root/packaging/omarchy/test-contribution.sh"
 
@@ -102,7 +101,6 @@ require_srcinfo_entry depends jq "$work/ghost-dev.SRCINFO"
 bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost" \
   0.0.1 \
-  0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
 [[ "$(stat -c '%a' "$work/ghost/.SRCINFO")" == 644 ]]
 # The stable recipe needs what the development one does at run and check

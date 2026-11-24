@@ -3,20 +3,18 @@ set -euo pipefail
 
 script_root="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 template_root="$script_root/../omarchy/pkgbuilds/ghost"
-usage='render-arch-package.sh <output-dir> <version> <source-sha256> <runtime-sha256>'
-[[ "$#" -eq 4 ]] || {
+usage='render-arch-package.sh <output-dir> <version> <source-sha256>'
+[[ "$#" -eq 3 ]] || {
   printf 'usage: %s\n' "$usage" >&2
   exit 1
 }
 output="${1:?usage: $usage}"
 version="${2:?usage: $usage}"
 source_sha="${3:?usage: $usage}"
-runtime_sha="${4:?usage: $usage}"
 release_repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 
 bash "$script_root/verify-release-version.sh" --valid "$version"
 [[ "$source_sha" =~ ^[0-9a-f]{64}$ ]]
-[[ "$runtime_sha" =~ ^[0-9a-f]{64}$ ]]
 [[ "$release_repository" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || {
   printf 'invalid GHOST_RELEASE_REPOSITORY: %s\n' "$release_repository" >&2
   exit 1
@@ -38,7 +36,6 @@ chmod 755 "$output"
 sed \
   -e "s/@@VERSION@@/$version/g" \
   -e "s/@@SOURCE_SHA256@@/$source_sha/g" \
-  -e "s/@@RUNTIME_SHA256@@/$runtime_sha/g" \
   -e "s|@@RELEASE_REPOSITORY@@|$release_repository|g" \
   "$template_root/PKGBUILD.in" > "$output/PKGBUILD"
 chmod 644 "$output/PKGBUILD"

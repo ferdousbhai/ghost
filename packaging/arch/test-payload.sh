@@ -36,7 +36,9 @@ verify_recipe() (
   source "$recipe"
   srcdir="$work/recipe-source-$pkgname"
   mkdir -p "$srcdir"
+  # The checkout recipe builds in ghost/, the stable one in ghost-<version>/.
   ln -s "$source_root" "$srcdir/ghost"
+  ln -s "$source_root" "$srcdir/ghost-$pkgver"
   pkgdir="$work/recipe"
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
   package
@@ -48,7 +50,7 @@ verify_recipe() (
 )
 verify_recipe "$source_root/packaging/arch/PKGBUILD" ghost-runtime-dev
 bash "$source_root/packaging/release/render-arch-package.sh" "$work/recipe-stable" 0.3.0 \
-  "$(printf '%064d' 0)" "$(printf '%064d' 0)"
+  "$(printf '%064d' 0)"
 verify_recipe "$work/recipe-stable/PKGBUILD" ghost-runtime
 
 printf 'Package payload regression passed\n'
