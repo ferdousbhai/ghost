@@ -1,6 +1,5 @@
 //! Ask: a conversation with the ghost, which answers from the owner's own data. The conversations are the
-//! ghost's own (the HUD and `ghost say` show the same ones); a local answer cites its search hits as [S1], and
-//! a citation opens the item it names, as lastbook-for-omarchy's chat does.
+//! ghost's own (the HUD and `ghost say` show the same ones).
 
 use std::{
     cell::{Cell, RefCell},
@@ -14,26 +13,16 @@ use serde_json::{Value, json};
 use crate::{
     api::{Cancel, Frame, segment},
     md,
-    ui::{App, route_of},
+    ui::App,
 };
 
-/// One answer on the page: its steps, its Markdown, and the hits it may cite.
+/// One answer on the page: its steps, its Markdown, and what failed.
 struct Answer {
     step: gtk::Label,
     body: gtk::Box,
-    sources: gtk::Box,
+    errors: gtk::Box,
     text: RefCell<String>,
-    hits: RefCell<Vec<Value>>,
     dirty: Cell<bool>,
-}
-
-/// Whether the answer cites this key: `[S3]`, or inside a group like `[S1, S3]`.
-fn cites(text: &str, key: &str) -> bool {
-    text.match_indices(key).any(|(at, _)| {
-        let before = text[..at].chars().next_back();
-        let after = text[at + key.len()..].chars().next();
-        matches!(before, Some('[' | ' ' | ',' | ';')) && !after.is_some_and(|c| c.is_ascii_digit())
-    })
 }
 
 pub struct AskPage {
@@ -248,7 +237,7 @@ impl AskPage {
                             Some("assistant") => {
                                 let answer = this.answer();
                                 *answer.text.borrow_mut() = text;
-                                this.draw(&answer, true);
+                                this.draw(&answer);
                             }
                             _ => {}
                         }
@@ -277,12 +266,12 @@ impl AskPage {
         let step = omui::label("", "step");
         step.set_visible(false);
         let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        let sources = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        let errors = gtk::Box::new(gtk::Orientation::Vertical, 4);
         frame.append(&step);
         frame.append(&body);
-        frame.append(&sources);
+        frame.append(&errors);
         self.convo.append(&frame);
-        Rc::new(Answer { step, body, sources, text: RefCell::new(String::new()), hits: RefCell::new(Vec::new()), dirty: Cell::new(false) })
+        Rc::new(Answer { step, body, errors, text: RefCell::new(String::new()), dirty: Cell::new(false) })
     }
 
     fn to_end(&self) {
@@ -293,44 +282,8 @@ impl AskPage {
         });
     }
 
-    /// Draw the answer's Markdown; once it is finished its citations open what they name.
-    fn draw(self: &Rc<Self>, answer: &Rc<Answer>, finished: bool) {
-        let text = answer.text.borrow().clone();
-        let hits = answer.hits.borrow().clone();
-        let known = move |key: &str| finished && hits.iter().any(|hit| hit["key"].as_str() == Some(key));
-        let this = self.clone();
-        let opened = answer.clone();
-        md::render(&answer.body, &text, &known, move |uri: &str| {
-            let hit = uri.strip_prefix("cite:").and_then(|key| opened.hits.borrow().iter().find(|hit| hit["key"].as_str() == Some(key)).cloned());
-            if let Some(hit) = hit {
-                this.app.navigate(route_of(&hit));
-            }
-        });
-        if !finished {
-            return;
-        }
-        omui::clear(&answer.sources);
-        let cited: Vec<Value> = answer.hits.borrow().iter().filter(|hit| hit["key"].as_str().is_some_and(|key| cites(&text, key))).cloned().collect();
-        if cited.is_empty() {
-            return;
-        }
-        let heading = omui::label("Sources", "section-title");
-        heading.set_margin_top(6);
-        answer.sources.append(&heading);
-        for hit in cited {
-            let key = hit["key"].as_str().unwrap_or_default().trim_start_matches('S').to_string();
-            let label = format!(
-                "[{key}] {} · {}",
-                hit["title"].as_str().unwrap_or_default(),
-                self.app.source_label(hit["source"].as_str().unwrap_or_default())
-            );
-            let button = gtk::Button::with_label(&label);
-            button.add_css_class("chip");
-            button.set_halign(gtk::Align::Start);
-            let this = self.clone();
-            button.connect_clicked(move |_| this.app.navigate(route_of(&hit)));
-            answer.sources.append(&button);
-        }
+    fn draw(&self, answer: &Answer) {
+        md::render(&answer.body, &answer.text.borrow());
     }
 
     fn ask(self: &Rc<Self>) {
@@ -360,7 +313,7 @@ impl AskPage {
         let drawn = answer.clone();
         glib::timeout_add_local(Duration::from_millis(60), move || {
             if drawn.dirty.replace(false) {
-                this.draw(&drawn, false);
+                this.draw(&drawn);
                 this.to_end();
             }
             if this.live.borrow().as_ref().is_some_and(|(live, _)| Rc::ptr_eq(live, &drawn)) {
@@ -401,7 +354,7 @@ impl AskPage {
             *this.live.borrow_mut() = None;
             // The redraw timer must not draw the unfinished form over the finished one.
             answer.dirty.set(false);
-            this.draw(&answer, true);
+            this.draw(&answer);
             this.send.set_label("Ask");
             this.to_end();
             this.refresh_chats().await;
@@ -411,7 +364,7 @@ impl AskPage {
     fn fail(&self, answer: &Rc<Answer>, message: &str) {
         let label = omui::label(message, "error");
         label.set_selectable(true);
-        answer.sources.append(&label);
+        answer.errors.append(&label);
     }
 
     fn on_event(&self, answer: &Rc<Answer>, event: &Value) {
@@ -440,7 +393,6 @@ impl AskPage {
                     step(line.trim().to_string());
                 }
             }
-            "sources" => answer.hits.borrow_mut().extend(event["items"].as_array().cloned().unwrap_or_default()),
             "text_start" => {
                 if !answer.text.borrow().is_empty() {
                     answer.text.borrow_mut().push_str("\n\n");

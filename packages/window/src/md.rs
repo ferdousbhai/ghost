@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! The assistant's Markdown as GTK labels: paragraphs, headings, lists, emphasis and code, with citation keys like [S3]
-//! turned into links ("cite:S3") the chat page answers.
+//! The assistant's Markdown as GTK labels: paragraphs, headings, lists, emphasis and code.
 
 use gtk::{glib, prelude::*};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -14,59 +13,12 @@ pub enum Block {
     Code(String),
 }
 
-/// Citation keys the assistant writes (S for library sources, M for map results), including grouped forms like [S1, S2].
-fn cite_links(escaped: &str, cited: &dyn Fn(&str) -> bool) -> String {
-    let mut out = String::new();
-    let mut rest = escaped;
-    while let Some(start) = rest.find('[') {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + 1..];
-        let Some(end) = after.find(']') else {
-            out.push_str(&rest[start..]);
-            return out;
-        };
-        let inner = &after[..end];
-        let keys: Vec<&str> = inner.split([',', ';']).map(str::trim).collect();
-        let all_keys =
-            !keys.is_empty() && keys.iter().all(|k| k.len() >= 2 && matches!(&k[..1], "S" | "M") && k[1..].chars().all(|c| c.is_ascii_digit()));
-        if all_keys {
-            for k in keys {
-                let label = k.trim_start_matches('S');
-                // Bracketed and full size: superscripts of [S2][S4] side by side read as "24".
-                if cited(k) {
-                    out.push_str(&format!("<a href=\"cite:{k}\">[{label}]</a>"));
-                } else {
-                    out.push_str(&format!("<span alpha=\"60%\">[{label}]</span>"));
-                }
-            }
-        } else {
-            out.push('[');
-            out.push_str(inner);
-            out.push(']');
-        }
-        rest = &after[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Whether a label can show this markup. GtkLabel reads <a href> itself, but Pango's parser rejects it, so links are
-/// taken out before asking Pango.
+/// Whether a label can show this markup.
 pub fn valid_markup(m: &str) -> bool {
-    let mut plain = String::with_capacity(m.len());
-    let mut rest = m;
-    while let Some(i) = rest.find("<a ") {
-        plain.push_str(&rest[..i]);
-        match rest[i..].find('>') {
-            Some(j) => rest = &rest[i + j + 1..],
-            None => return false,
-        }
-    }
-    plain.push_str(rest);
-    gtk::pango::parse_markup(&plain.replace("</a>", ""), '\0').is_ok()
+    gtk::pango::parse_markup(m, '\0').is_ok()
 }
 
-pub fn blocks(md: &str, cited: &dyn Fn(&str) -> bool) -> Vec<Block> {
+pub fn blocks(md: &str) -> Vec<Block> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut lists: Vec<Option<u64>> = Vec::new();
@@ -80,7 +32,7 @@ pub fn blocks(md: &str, cited: &dyn Fn(&str) -> bool) -> Vec<Block> {
         if text.is_empty() {
             return;
         }
-        let markup = cite_links(&text, cited);
+        let markup = text;
         out.push(if heading {
             Block::Heading(markup)
         } else if in_item {
@@ -151,10 +103,10 @@ pub fn blocks(md: &str, cited: &dyn Fn(&str) -> bool) -> Vec<Block> {
     out
 }
 
-/// The answer as widgets in `into` (emptied first). `on_link` gets "cite:S3" when a citation is clicked.
-pub fn render(into: &gtk::Box, md: &str, cited: &dyn Fn(&str) -> bool, on_link: impl Fn(&str) + Clone + 'static) {
+/// The answer as widgets in `into` (emptied first).
+pub fn render(into: &gtk::Box, md: &str) {
     omui::clear(into);
-    for b in blocks(md, cited) {
+    for b in blocks(md) {
         let (markup, class, indent, marker) = match &b {
             Block::Para(m) => (m.clone(), "md-p", 0, None),
             Block::Heading(m) => (m.clone(), "md-h", 0, None),
@@ -170,11 +122,6 @@ pub fn render(into: &gtk::Box, md: &str, cited: &dyn Fn(&str) -> bool, on_link: 
         label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
         label.set_selectable(true);
         label.set_hexpand(true);
-        let f = on_link.clone();
-        label.connect_activate_link(move |_, uri| {
-            f(uri);
-            glib::Propagation::Stop
-        });
         if let Some(marker) = marker {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             row.set_margin_start(4 + 18 * indent as i32);
@@ -197,30 +144,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn citations_become_links_only_when_cited() {
-        let b = blocks("Boil it **one minute** [S2][S9], or [S1, S3].", &|k| k != "S9");
+    fn emphasis_and_unclosed_markup() {
+        let b = blocks("Boil it **one minute** [S2].");
         let Block::Para(m) = &b[0] else { panic!("{b:?}") };
-        assert!(m.contains("<b>one minute</b>"));
-        assert!(m.contains("<a href=\"cite:S2\">[2]</a>"));
-        assert!(m.contains("[9]") && !m.contains("cite:S9"), "an uncited key is not a link");
-        assert!(m.contains("cite:S1") && m.contains("cite:S3"), "grouped keys split");
+        assert_eq!(m, "Boil it <b>one minute</b> [S2].");
         assert!(valid_markup(m));
         assert!(!valid_markup("<b>half"), "unclosed markup is refused");
     }
 
     #[test]
     fn lists_headings_and_escaping() {
-        let b = blocks("### Steps\n1. Fill <1 L> & stir\n2. Wait\n\n- note", &|_| true);
+        let b = blocks("### Steps\n1. Fill <1 L> & stir\n2. Wait\n\n- note");
         assert_eq!(b[0], Block::Heading("Steps".into()));
         assert_eq!(b[1], Block::Item { depth: 0, marker: "1.".into(), markup: "Fill &lt;1 L&gt; &amp; stir".into() });
         assert!(matches!(&b[2], Block::Item { marker, .. } if marker == "2."));
         assert!(matches!(&b[3], Block::Item { marker, .. } if marker == "•"));
-    }
-
-    #[test]
-    fn brackets_that_are_not_citations_stay() {
-        let b = blocks("See [the manual] and [S] and [S1x].", &|_| true);
-        let Block::Para(m) = &b[0] else { panic!() };
-        assert_eq!(m, "See [the manual] and [S] and [S1x].");
     }
 }

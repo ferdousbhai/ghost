@@ -30,8 +30,6 @@ Not done:
 - Ghost still starts its own `llama-server`. Omarchy's model engine does not
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
-- The `sources` turn event and the window's and HUD's cited-hit handling are
-  now never fed by a local turn; they are left in place, unused.
 - The shrink under "Unfinished" below, `ghost delegate` included.
 - A running command's output now streams into the turn, so a coding agent's
   steps show in the HUD's tool card and as the window's status line. Claude
