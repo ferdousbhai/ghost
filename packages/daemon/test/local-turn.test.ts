@@ -121,6 +121,20 @@ describe("the local model", () => {
     expect(chosen.server.requests).toHaveLength(0);
   });
 
+  it("names only the owner's coding agent, by that agent's own one-shot command", async () => {
+    const withCodex = host([{ text: "ok" }], fakeHarness(replies("unused"), "codex"));
+    await turn(withCodex.sessions, "hi");
+    const system = String(withCodex.server.requests[0]?.messages[0]?.content);
+    expect(system).toContain('run the owner\'s coding agent in the project\'s directory and read its answer: `codex exec "<task>"`.');
+    expect(system).not.toContain("claude -p");
+    expect(withCodex.cloud.calls()).toHaveLength(0);
+
+    // An agent the section has no command for is not named at all.
+    const other = host([{ text: "ok" }]);
+    await turn(other.sessions, "hi");
+    expect(String(other.server.requests[0]?.messages[0]?.content)).not.toContain("coding agent");
+  });
+
   it("runs as many rounds as the model asks for, and never withdraws the tool", async () => {
     const rounds = 12;
     const { sessions, server } = host([

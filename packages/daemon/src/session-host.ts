@@ -59,7 +59,7 @@ import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, r
 import { serializeByKey } from "./promise-chain.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
-import { completeLocally, runLocalTurn } from "./local-turn.js";
+import { CODING_AGENT_COMMANDS, completeLocally, runLocalTurn } from "./local-turn.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
@@ -499,7 +499,7 @@ export class SessionHost {
   /**
    * The cloud harnesses Ghost has a row for, best first: `preferred`, then
    * Omarchy's default agent, then every other eligible one. Turns and the
-   * local model's `delegate` share this order.
+   * coding agent a local turn names share this order.
    */
   private async cloudHarnesses(preferred: readonly (string | null)[]): Promise<string[]> {
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
@@ -987,7 +987,10 @@ export class SessionHost {
     const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
     const exit: HarnessExit = "run" in row
       ? await row.run({
-        prompt: turn.prompt, persona, cwd: dir, env, signal, onEvent }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
+        prompt: turn.prompt, persona, cwd: dir, env, signal, onEvent,
+        // The owner's choice, as for a turn: this ghost's own agent, else Omarchy's default, else the first installed.
+        codingAgent: (await this.cloudHarnesses([readHarnessSetting(ghost.dir)])).find((agent) => agent in CODING_AGENT_COMMANDS) ?? null,
+      }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
         if (!signal.aborted) error = errorMessage(failure);
         return { code: 1, signal: null, stderr: "" };
       })

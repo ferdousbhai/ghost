@@ -14,7 +14,7 @@
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "../src/persona.js";
 import { stablePolicySections } from "../src/session-host.js";
-import { LOCAL_SECTION } from "../src/local-turn.js";
+import { CODING_AGENT_COMMANDS, localSection } from "../src/local-turn.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
@@ -98,11 +98,15 @@ describe("the stable prompt policy budget", () => {
   });
 });
 
-/** Only a local pass adds it, after the whole persona; it has its own ceiling. */
-const LOCAL_CEILING = 907;
+/** Only a local pass adds it, after the whole persona; it has its own ceiling, measured with the longest command. */
+const LOCAL_CEILING = 780;
 
 describe("the local model's section", () => {
-  it("stays at or below its ceiling", () => {
-    expect(LOCAL_SECTION.length).toBeLessThanOrEqual(LOCAL_CEILING);
+  it("stays at or below its ceiling, and names only the owner's coding agent", () => {
+    const sizes = Object.keys(CODING_AGENT_COMMANDS).map((agent) => localSection(agent).length);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(LOCAL_CEILING);
+    expect(localSection("codex")).toContain('`codex exec "<task>"`');
+    expect(localSection("codex")).not.toContain("claude");
+    for (const none of [null, "pi"]) expect(localSection(none)).not.toContain("coding agent");
   });
 });
