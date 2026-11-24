@@ -8,7 +8,7 @@
  */
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { GhostError } from "./errors.js";
 import { which } from "./harnesses.js";
@@ -407,50 +407,6 @@ const notes: Source = {
   }),
   available: () => true,
 };
-
-/** A note's or list's name as a file name: one line, no path separators, not hidden. */
-function fileName(name: string, what: string): string {
-  const clean = name.replace(/[\\/\p{Cc}]/gu, " ").replace(/\s+/gu, " ").replace(/^[.\s]+/u, "").slice(0, 120).trim();
-  if (!clean) throw new GhostError("invalid_request", `${what} needs a name.`, 400);
-  return clean;
-}
-
-async function appendText(path: string, text: string, opening: string): Promise<boolean> {
-  await mkdir(dirname(path), { recursive: true });
-  const existing = await readFile(path, "utf8").catch(() => null);
-  await writeFile(path, existing === null ? `${opening}${text}\n` : `${existing}${existing.endsWith("\n") || existing === "" ? "" : "\n"}${text}\n`);
-  return existing === null;
-}
-
-/** Keep something for later: a new note `Notes/<title>.md`, or more text at the end of that note. */
-export async function saveNote(context: SourceContext, title: string, text: string): Promise<{ path: string; created: boolean }> {
-  const body = text.trim();
-  if (!body) throw new GhostError("invalid_request", "A note needs text.", 400);
-  const name = fileName(title, "A note");
-  const path = join(folderOf("notes", context), `${name}.md`);
-  const created = await appendText(path, body, `# ${name}\n\n`);
-  return { path, created };
-}
-
-/**
- * Add one reminder to `Reminders/<list>.md`, icloud-reminders' own format:
- * a `- [ ]` line, its due date after 📅. The date is absolute, so the line
- * means the same day whenever it is read.
- */
-export async function addReminder(context: SourceContext, text: string, list = "Reminders", due?: string): Promise<{ path: string; line: string }> {
-  const what = oneLine(text, 500);
-  if (!what) throw new GhostError("invalid_request", "A reminder needs text.", 400);
-  if (due !== undefined && !/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/u.test(due)) {
-    throw new GhostError("invalid_request", "A due date is YYYY-MM-DD, or YYYY-MM-DD HH:MM.", 400);
-  }
-  const name = fileName(list, "A reminder list");
-  const path = join(folderOf("reminders", context), `${name}.md`);
-  const line = `- [ ] ${what}${due ? ` 📅 ${due}` : ""}`;
-  await appendText(path, line, `# ${name}\n\n`);
-  return { path, line };
-}
-
-// ── Reminders: the lists icloud-reminders keeps as Markdown files ──────
 
 const reminders: Source = { ...folderSource("reminders", "Reminders", async (context, limit, cursor) => {
   const root = folderOf("reminders", context);

@@ -59,8 +59,7 @@ import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, r
 import { serializeByKey } from "./promise-chain.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
-import { completeLocally, runLocalTurn, type DelegateResult } from "./local-turn.js";
-import { TOOL_RESULT_CHARS } from "./local-tools.js";
+import { completeLocally, runLocalTurn } from "./local-turn.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
@@ -810,28 +809,6 @@ export class SessionHost {
   }
 
   /**
-   * The local model's `delegate`: one headless run of the first cloud harness
-   * that answers, in the conversation's directory, with the ghost's persona.
-   * Its reply returns to the local model, not the owner.
-   */
-  private async delegateTask(
-    ghost: Ghost, dir: string, env: NodeJS.ProcessEnv, persona: string, task: string, signal: AbortSignal,
-  ): Promise<DelegateResult> {
-    const ordered = await this.cloudHarnesses([readHarnessSetting(ghost.dir)]);
-    const prompt = `Your local self, which keeps the owner's content on this computer, hands you this task. Do it, then reply with the result.\n\n${task}`;
-    let lastError = "No cloud agent is installed to delegate to.";
-    for (const harness of ordered) {
-      const pass = await this.cloudPass(harness, { prompt, persona, dir, env, signal });
-      if (!pass) return { harness, text: "Stopped.", isError: true };
-      const text = pass.text.slice(0, TOOL_RESULT_CHARS);
-      if (text && pass.error === null) return { harness, text, isError: false };
-      if (text) return { harness, text: `${text}\n(${harness} then failed: ${pass.error})`, isError: true };
-      lastError = `${harness}: ${pass.error ?? "no answer"}`;
-    }
-    return { harness: null, text: `No cloud agent could take the task. ${lastError}`, isError: true };
-  }
-
-  /**
    * One headless run of a cloud harness outside a turn (a delegated task, a
    * hook completion): its trimmed text and the error that ended it, or null
    * when `signal` stopped it. Answering ends the harness's rest, as a turn's
@@ -919,7 +896,7 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
-    const { persona, character } = await this.renderPersona(ghost);
+    const { persona } = await this.renderPersona(ghost);
     await this.prepareDirectory(ghost.dir, dir, persona);
     const launch = "run" in row ? null : row.launch({ ...turn, persona });
     await writeLaunchFiles(dir, launch?.files);
@@ -1010,9 +987,7 @@ export class SessionHost {
     const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
     const exit: HarnessExit = "run" in row
       ? await row.run({
-        prompt: turn.prompt, message: turn.message ?? turn.prompt, character, cwd: dir, home: this.ownerHome, env, signal, onEvent,
-        delegate: (task) => this.delegateTask(ghost, dir, env, persona, task, signal),
-      }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
+        prompt: turn.prompt, persona, cwd: dir, env, signal, onEvent }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
         if (!signal.aborted) error = errorMessage(failure);
         return { code: 1, signal: null, stderr: "" };
       })

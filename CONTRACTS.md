@@ -126,8 +126,8 @@ decisions, its own reflections), and `Reminders`, one Markdown checklist per
 list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
 notes, `- [x]` done). These are the folders and formats icloud-notes and
 icloud-reminders sync, so connecting iCloud later syncs what is already
-there. A harness writes them with its native file tools; the local model with
-`save_note` and `add_reminder` ([Local model](#local-model)). They are
+there. A harness writes them with its native file tools; the local model with its
+shell ([Local model](#local-model)). They are
 readable by the owner
 ([Product boundary](#product-boundary) says what may index them).
 Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
@@ -706,8 +706,8 @@ skill, and its standalone app stays an alternative.
 three operations, `list` (newest first, paged by an opaque `cursor`), `read`
 (one item), and `search`, returning items
 `{ source, id, title, snippet, at, path?, page?, line? }` (`at` in
-milliseconds or null; `id` is what `read` takes). The local model's search
-and the API below are this one layer; a source whose product is missing is
+milliseconds or null; `id` is what `read` takes). The API below
+is this one layer; a source whose product is missing is
 `available: false`, and using it is `409 source_unavailable`.
 
 | Source | Product and what Ghost uses | list | read | search |
@@ -775,46 +775,34 @@ for the idle minutes, on daemon stop, or after a failed load. ghostd kills
 only that process. Another program loading the same file (Lastbook) holds its
 own copy; Ghost does not stop it, and frees its own when idle.
 
-A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) first
-searches the owner's message and opens its first three file or library
-hits (up to 2000 characters each), then sends the ghost's character alone
-(not the stable policy sections, which direct a shell, file tools, and the
-`ghost` CLI it has not; a delegated task gets the whole persona) plus the
-"Running locally" section and the current time, and, as the user message,
-the conversation so far (`HANDOFF_CONTEXT_CHARS`), the prompt, and the hits
-and opened text in a `<found>` block marked as reference text. Thinking is
-off (`enable_thinking: false`), as in Lastbook. It keeps no session of its
-own, streams the same events a harness parser emits (the first search shows
-as a `search` tool call), and records the model as the file's name and the
-provider as `local`. It offers five tools
-([`local-tools.ts`](packages/daemon/src/local-tools.ts)) for at most three
-rounds, then makes one more call without them:
+A local pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) is the
+smallest harness that works: it sends the ghost's whole persona, as a harness
+gets it, plus the "Running locally" section and the current time, and, as the
+user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
+prompt. Nothing is searched ahead of the model. It keeps no session of its
+own, streams the same events a harness parser emits, and records the model as
+the file's name and the provider as `local`. Sampling and thinking are the
+model's and llama-server's own defaults.
 
-- `search(query)`: the [sources](#sources) `files` (which finds a file
-  Recall has not indexed yet, or every file when Recall is missing or
-  failing) and `lastbook`, and, for the model's queries but not the first
-  search, `mail` and `contacts`. Hits are numbered `S1`, `S2`, … in that
-  source order for this pass only.
-- `read(id, page?)`: one hit by its id, never a path: a PDF's page (column
-  padding collapsed), the lines around a ripgrep match, a mail thread, a
-  contact, or a text file whole when it fits in one result, else Recall's
-  passage, else (a hit Recall did not index) the file's start.
-- `save_note(title, text)` and `add_reminder(text, list?, due?)`: the only
-  writes it has, confined to [the ghost's memory](#character-and-notes): a
-  new `Notes/<title>.md` or more text at that note's end, and one `- [ ]`
-  line at the end of `Reminders/<list>.md` (`Reminders.md` when no list is
-  named; `due` is `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`, so the line means the
-  same day whenever it is read). A name becomes one file name, never a path.
-- `delegate(task)`: one headless run of a harness, in the conversation's
-  directory with the ghost's persona, tried in the order
-  above minus `local`; its reply, not its tool calls, returns to the model.
-  The task leaves the machine; the section tells the model to send only
-  what it needs.
+It offers one tool ([`local-tools.ts`](packages/daemon/src/local-tools.ts)),
+`bash(command)`: a command line run as the owner in the conversation's
+directory, with the conversation's environment, no sandbox and no
+confirmation. The owner's products are command lines with a skill each under
+`~/.agents/skills`, so the shell is how the model searches, reads, writes and
+acts, and how it starts a coding agent (`omarchy agent prompt`, or
+`ghost delegate` for a headless run whose answer it reads). The section asks
+it to say what a command will do, and wait for the owner's yes, before one
+that sends something to another person, spends money, or deletes what cannot
+be restored; nothing in ghostd enforces that.
 
-Results are cut at 8000 characters, and each reaches the model in a
-`<result>` block marked, like `<found>`, as reference text, not instructions. Owner content reaches a cloud model only
-through a delegated task or a conversation the owner moved to a harness.
-Recall's coverage is its own configuration.
+The loop runs the model's commands until it answers without one. There is no
+cap on rounds, no final round without the tool, and no trimming of the
+conversation: a turn that runs on is the owner's to stop, which ends the
+running command and everything it started. A command cannot be typed into.
+One result is bounded at 200 000 characters, its start and its end kept and
+what lies between counted, and reaches the model in an `<output>` block
+marked as data, not instructions. A call that is not `bash` with a `command`
+is answered with what was wrong, and nothing runs.
 
 ## Harness and lifecycle invariants
 

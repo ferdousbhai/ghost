@@ -11,12 +11,25 @@ it must be:
   sub-agent's is in a coding agent.
 - No release without the owner's go.
 
-Done since: Google in Connect (`google`, `google-drive`, `google-workspace`)
-and in the sources (`keep`, `google-drive`, `google-photos`).
+Done since:
 
-Not done: the local model's tools are still `search`, `read`, `save_note`,
-`add_reminder` and `delegate`, with no shell tool; the shrink under
-"Unfinished" below.
+- Google in Connect (`google`, `google-drive`, `google-workspace`) and in the
+  sources (`keep`, `google-drive`, `google-photos`).
+- The local model's harness is minimal: the whole persona, one tool (`bash`,
+  unsandboxed, unconfirmed), no cap on rounds, no forced answer, no trimming.
+  Its former tools (`search`, `read`, `save_note`, `add_reminder`, `delegate`)
+  are gone; a coding agent is started from the shell.
+
+Not done:
+
+- No model has answered through the new loop: it is tested against a stand-in
+  server only. The owner wants Thinking Machines' Inkling 2 Mini (26B, about
+  20 GB, released 2026-11-20); whether llama-server runs its GGUF, and with
+  which tool-call template, is not checked.
+- The `sources` turn event and the window's and HUD's cited-hit handling are
+  now never fed by a local turn; they are left in place, unused.
+- The shrink under "Unfinished" below, except that `ghost delegate` stays: it
+  is how the local model runs a coding agent and reads its answer.
 
 What follows is the freeze of 2026-11-20, kept for what it records.
 

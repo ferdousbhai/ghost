@@ -429,11 +429,8 @@ impl AskPage {
             "tool_execution_start" => {
                 let arguments = &event["arguments"];
                 step(match event["toolName"].as_str().unwrap_or_default() {
-                    "search" => format!("Searching: {}", arguments["query"].as_str().unwrap_or_default()),
-                    "read" => format!("Reading {}", arguments["id"].as_str().unwrap_or_default()),
-                    "save_note" => format!("Saving a note: {}", arguments["title"].as_str().unwrap_or_default()),
-                    "add_reminder" => format!("Adding a reminder: {}", arguments["text"].as_str().unwrap_or_default()),
-                    "delegate" => "Handing a task to a cloud agent…".to_string(),
+                    // The local model's one tool: the command itself says what it is doing.
+                    "bash" => format!("Running: {}", arguments["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default()),
                     name => format!("Running {name}…"),
                 });
             }

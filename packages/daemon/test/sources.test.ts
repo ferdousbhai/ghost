@@ -2,8 +2,7 @@ import { chmodSync, existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSyn
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError } from "../src/errors.js";
-import { readFileSync } from "node:fs";
-import { addReminder, listSource, listSources, pictureOf, readSource, saveNote, searchSources, type SourceContext } from "../src/sources.js";
+import { listSource, listSources, pictureOf, readSource, searchSources, type SourceContext } from "../src/sources.js";
 import { listConnections } from "../src/connections.js";
 import { tempDir } from "./helpers/fixtures.js";
 
@@ -134,27 +133,6 @@ describe("sources", () => {
     expect((await listSource("reminders", context, 10, null)).items).toEqual([
       expect.objectContaining({ source: "reminders", title: "Groceries", snippet: "2 open: Milk" }),
     ]);
-  });
-
-  it("saves a note and a reminder as Markdown the products sync, inside Ghost's two folders only", async () => {
-    const context = owner({});
-    const saved = await saveNote(context, "Ferry trip", "The boat leaves at nine.");
-    expect(saved).toEqual({ path: join(context.home, "Documents", "Notes", "Ferry trip.md"), created: true });
-    expect(await saveNote(context, "Ferry trip", "Tickets are in the blue folder.")).toMatchObject({ created: false });
-    expect(readFileSync(saved.path, "utf8")).toBe("# Ferry trip\n\nThe boat leaves at nine.\nTickets are in the blue folder.\n");
-    // A title is one file name, never a path.
-    expect((await saveNote(context, "../../.ssh/authorized_keys", "x")).path).toBe(join(context.home, "Documents", "Notes", "ssh authorized_keys.md"));
-    await expect(saveNote(context, " / ", "x")).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(saveNote(context, "Empty", "  ")).rejects.toMatchObject({ code: "invalid_request" });
-
-    const added = await addReminder(context, "Buy ferry\ntickets", "Trip", "2026-11-20");
-    expect(added.line).toBe("- [ ] Buy ferry tickets 📅 2026-11-20");
-    await addReminder(context, "Pack", "Trip", "2026-11-20 08:30");
-    expect(readFileSync(added.path, "utf8")).toBe("# Trip\n\n- [ ] Buy ferry tickets 📅 2026-11-20\n- [ ] Pack 📅 2026-11-20 08:30\n");
-    expect((await addReminder(context, "Call Sara")).path).toBe(join(context.home, "Documents", "Reminders", "Reminders.md"));
-    await expect(addReminder(context, "Later", "Trip", "tomorrow")).rejects.toMatchObject({ code: "invalid_request" });
-    // What was written is what the sources list.
-    expect((await listSource("reminders", context, 10, null)).items.map((item) => item.title).sort()).toEqual(["Reminders", "Trip"]);
   });
 
   it("says what a source cannot do, and which sources are set up", async () => {
