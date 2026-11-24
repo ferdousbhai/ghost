@@ -3,7 +3,7 @@
  * `POST /api/ghosts/:name/complete`, and `ghostd hook-complete`, which asks
  * its own daemon for it.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -67,14 +67,14 @@ function localModel(reply: string) {
   return { model, prompts, acquired: () => acquired };
 }
 
-function host(fakes: FakeHarness[], options: Partial<SessionHostOptions> = {}): { sessions: SessionHost; home: string } {
+function host(fakes: [FakeHarness] | [], options: Partial<SessionHostOptions> = {}): { sessions: SessionHost; home: string } {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   const home = seedGhost(temp.root, { name: "casper" });
   const sessions = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(...fakes),
+    ...(fakes[0] ? onlyHarnesses(fakes[0]) : {}),
     ...options,
   });
   return { sessions, home };
@@ -83,73 +83,23 @@ function host(fakes: FakeHarness[], options: Partial<SessionHostOptions> = {}): 
 const signal = () => AbortSignal.timeout(10_000);
 
 describe("SessionHost.complete", () => {
-  it("returns the harness's trimmed text, run in a scratch directory it then removes", async () => {
-    const fake = harness([{ events: [{ type: "text", block: "a", delta: "  APPROVE\n" }] }]);
+  it("returns the trimmed text, and refuses an empty prompt or an empty answer", async () => {
+    const fake = harness([{ events: [{ type: "text", block: "a", delta: "  APPROVE\n" }] }, { events: [] }]);
     const { sessions } = host([fake]);
 
-    await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
-    const [call] = fake.calls();
-    expect(call).toMatchObject({ prompt: "Review this.", resume: false, ghost: "casper", session: null });
-    expect(call?.cwd.startsWith(join(tmpdir(), "ghost-hook-"))).toBe(true);
-    expect(existsSync(call!.cwd)).toBe(false);
-  });
-
-  it("falls through a failing harness to the next one, and names every failure when none completes", async () => {
-    const broken = harness([{ exit: 1, stderr: "not signed in" }, { exit: 1, stderr: "not signed in" }], "broken");
-    const silent = harness([{ events: [] }], "silent");
-    const working = harness([{ events: [{ type: "text", block: "a", delta: "done" }] }], "working");
-    const { sessions } = host([broken, silent, working]);
-
-    await expect(sessions.complete("casper", "Classify.", signal())).resolves.toBe("done");
-    expect([broken, silent, working].map((fake) => fake.calls().length)).toEqual([1, 1, 1]);
-  });
-
-  it("names every failure when no harness completes, and refuses an empty prompt", async () => {
-    const broken = harness([{ exit: 1, stderr: "not signed in" }], "broken");
-    const refused = harness([{ events: [{ type: "error", message: "usage limit reached" }] }], "refused");
-    const { sessions } = host([broken, refused]);
-
     await expect(sessions.complete("casper", "   ", signal())).rejects.toThrow(/non-empty/u);
-    await expect(sessions.complete("casper", "Classify.", signal()))
-      .rejects.toThrow(/broken: not signed in.*refused: usage limit reached/u);
+    await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
+    expect(fake.calls().map((call) => call.prompt)).toEqual(["Review this."]);
+    await expect(sessions.complete("casper", "Classify.", signal())).rejects.toMatchObject({ code: "completion_failed" });
   });
 
-  it("reports an exit by its stderr tail or status and rests the harness, as a delegated task does", async () => {
-    const noisy = harness([{ exit: 1, stderr: "warming up\nnot signed in\nrun login" }], "noisy");
-    const quiet = harness([{ exit: 3 }], "quiet");
-    const killed = harness([{ kill: "SIGKILL" }], "killed");
-    const { sessions } = host([noisy, quiet, killed]);
-
-    await expect(sessions.complete("casper", "Classify.", signal())).rejects.toThrow(
-      "noisy: warming up\nnot signed in\nrun login; quiet: quiet exited with status 3.; killed: killed exited with signal SIGKILL.",
-    );
-    const resting = (await sessions.listHarnesses("casper")).harnesses.filter((row) => row.resting).map((row) => row.id);
-    expect(resting.sort()).toEqual(["killed", "noisy", "quiet"]);
-  });
-
-  it("completes on the daemon's own local model, as a turn would, never falling through to a cloud harness", async () => {
-    const cloud = harness([{ events: [{ type: "text", block: "a", delta: "from the cloud" }] }], "cloud");
+  it("completes on the daemon's own local model, with no persona or tools", async () => {
     const local = localModel(" APPROVE ");
-    const { sessions, home } = host([cloud], { localModel: local.model });
+    const { sessions } = host([], { localModel: local.model });
 
     await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("APPROVE");
     expect(local.prompts).toEqual([[{ role: "user", content: "Review this." }]]);
     expect(local.acquired()).toBe(1);
-    expect(cloud.calls()).toEqual([]);
-
-    // A ghost that prefers a cloud harness keeps it.
-    writeFileSync(join(home, "settings.yml"), "harness: cloud\n");
-    await expect(sessions.complete("casper", "Review this.", signal())).resolves.toBe("from the cloud");
-    expect(local.prompts).toHaveLength(1);
-  });
-
-  it("refuses a ghost that prefers the local model when none is configured", async () => {
-    const cloud = harness([{ events: [{ type: "text", block: "a", delta: "from the cloud" }] }], "cloud");
-    const { sessions, home } = host([cloud]);
-    writeFileSync(join(home, "settings.yml"), "harness: local\n");
-
-    await expect(sessions.complete("casper", "Review this.", signal())).rejects.toThrow(/none is configured/u);
-    expect(cloud.calls()).toEqual([]);
   });
 
   it("answers a session_stop hook while the turn awaiting it holds its admission", async () => {
@@ -191,7 +141,7 @@ describe("ghostd hook-complete", () => {
 
     await expect(run(JSON.stringify({ ghost_home: home, prompt: "Review this." }), daemon.env))
       .resolves.toEqual({ code: 0, stdout: `${JSON.stringify({ text: "APPROVE" })}\n`, stderr: "" });
-    expect(daemon.harness.calls()).toMatchObject([{ prompt: "Review this.", ghost: "casper", session: null }]);
+    expect(daemon.harness.calls()).toMatchObject([{ prompt: "Review this." }]);
   });
 
   it("sets no deadline of its own, so the hook's timeout bounds the call", async () => {
@@ -224,7 +174,7 @@ describe("ghostd hook-complete", () => {
     hang.abort();
 
     // The held harness is killed rather than left to answer: the gate never opens.
-    await expect(outcome).rejects.toThrow(/cancelled/u);
+    await expect(outcome).rejects.toThrow(/stopped/u);
     expect((await asked).code).toBe(1);
     expect(existsSync(daemon.harness.calls()[0]!.cwd)).toBe(false);
   });

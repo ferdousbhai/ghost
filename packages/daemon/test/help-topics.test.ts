@@ -44,10 +44,10 @@ describe("ghost help topics", () => {
     expect(text).toContain("`systemctl --user stop <unit>` ends it");
     expect(text).toContain("ghost say --follow-up");
     expect(text).toContain("`$GHOST` and `$GHOST_SESSION`");
-    expect(text).toContain("end when this turn's headless run does");
+    expect(text).toContain("A command you start ends when this turn does.");
   });
 
-  it("harnesses: the launch path and the handoff note", () => {
+  it("harnesses: the launch path", () => {
     const text = renderHelpTopic("harnesses");
     expect(text).toContain("Your turns run in this conversation's own directory");
     expect(text).toContain("only when it needs those; otherwise do it yourself");
@@ -55,13 +55,11 @@ describe("ghost help topics", () => {
     expect(text).toContain("cd <project-dir> && <harness> <args>");
     expect(text).not.toContain("ghost delegate");
     expect(text).toContain("respects that project's settings");
-    expect(text).toContain("`ghost harnesses` lists installed agents and informational usage");
+    expect(text).not.toContain("ghost harness");
     expect(text).toContain("Browser automation uses agent-browser through Bash.");
     expect(text).toContain("--permission-mode acceptEdits");
     expect(text).toContain("--allowedTools Bash");
     expect(text).not.toContain("~/.local/state/omarchy");
-    expect(text).toContain("handoff note");
-    expect(text).toContain("Never spend a window you were not asked to spend.");
   });
 
   it("harnesses: herdr runs in Ghost's own session with owner-named, owner-authenticated harnesses", () => {
@@ -71,7 +69,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("Install only harnesses the owner names, with `mise use -g <package>`");
     expect(text).toContain("never read, type, or store a credential");
     expect(text).toContain("`--wait` alone is not proof");
-    expect(text).toContain("after `ghost harnesses` confirms it is installed");
+    expect(text).toContain("once `command -v <harness>` finds it");
   });
 
   it("memory: exact search first, Recall for unknown wording, the source file over any index", () => {

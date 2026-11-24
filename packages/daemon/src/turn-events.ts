@@ -23,8 +23,6 @@ export type TurnEvent =
   /** An owner command hook running; a `session_stop` one runs after the reply is complete. */
   | { type: "hook_start"; name: string; event: "session_stop" }
   | { type: "hook_end"; name: string; event: "session_stop" }
-  /** The harness compacted its context mid-turn; the transcript keeps it as a `compacted` message. */
-  | { type: "compacted"; trigger: string; preTokens?: number }
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
@@ -50,7 +48,6 @@ export type TurnEvent =
       summary?: string;
     }
   | { type: "done" }
-  | LimitReachedEvent
   | {
       type: "error";
       reason: string;
@@ -65,68 +62,6 @@ export interface TurnResumeEvent {
   type: "resume";
   turn: string;
   from: number;
-}
-
-/**
- * A harness refused on quota. Sent before the terminal `error`, whose
- * message it classifies, so a client can name the limit.
- */
-export interface LimitReachedEvent {
-  type: "limit_reached";
-  harness: string;
-  kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
-}
-
-const LIMIT_WORDS: Record<LimitReachedEvent["kind"], string> = {
-  rate_limit: "rate limit reached",
-  usage_limit: "usage limit reached",
-  overloaded: "is overloaded",
-  billing: "needs billing attention",
-};
-
-/** "claude usage limit reached". */
-export function limitNotice(event: Pick<LimitReachedEvent, "harness" | "kind">): string {
-  return `${event.harness} ${LIMIT_WORDS[event.kind]}`;
-}
-
-const LIMIT_PATTERNS: ReadonlyArray<[RegExp, LimitReachedEvent["kind"]]> = [
-  [/\b429\b|rate.?limit|too many requests/iu, "rate_limit"],
-  [/usage limit|hit your limit|limit reached|quota|exceeded your|out of credits|insufficient(_| )credits/iu, "usage_limit"],
-  [/overloaded|capacity|503\b|529\b/iu, "overloaded"],
-  [/billing|payment|credit balance/iu, "billing"],
-];
-
-/** The kind of limit a runtime's error text describes, or null for an ordinary failure. */
-export function classifyLimitMessage(text: string): LimitReachedEvent["kind"] | null {
-  for (const [pattern, kind] of LIMIT_PATTERNS) if (pattern.test(text)) return kind;
-  return null;
-}
-
-/** A date, with an optional time, after words that announce a return: "regain access on 2026-11-01 at 00:00 UTC". */
-const STATED_DATE = /(?:regain access|access (?:returns|resumes)|resets?|available again|try again|retry)\D{0,24}?(\d{4}-\d{2}-\d{2})(?:(?:\s+at\s+|T)(\d{1,2}):(\d{2}))?/iu;
-/** A span: "try again in 30 minutes", "retry after 120 seconds", "resets in 2 hours". */
-const STATED_SPAN = /(?:try again|retry|resets?)\s+(?:in|after)\s+(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b/iu;
-const SPAN_MS: Readonly<Record<string, number>> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-/** No refusal is believed past a month; a wrong parse costs at most that. */
-const MAX_STATED_WAIT_MS = 31 * 86_400_000;
-
-/**
- * When a refusal says access returns, as epoch milliseconds: a stated date
- * (read as UTC, the zone providers state) or a stated span from `now`. Null
- * when it states none, or nothing in the future within a month.
- */
-export function statedReturn(text: string, now: number): number | null {
-  let at: number | null = null;
-  const date = STATED_DATE.exec(text);
-  if (date) {
-    const [year, month, day] = (date[1] as string).split("-").map(Number) as [number, number, number];
-    at = Date.UTC(year, month - 1, day, Number(date[2] ?? 0), Number(date[3] ?? 0));
-  } else {
-    const span = STATED_SPAN.exec(text);
-    if (span) at = now + Number(span[1]) * (SPAN_MS[(span[2] as string)[0]?.toLowerCase() ?? ""] ?? 0);
-  }
-  if (at === null || !Number.isFinite(at) || at <= now || at - now > MAX_STATED_WAIT_MS) return null;
-  return at;
 }
 
 export function encodeSseEvent(event: unknown): string {

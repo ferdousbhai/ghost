@@ -1,9 +1,8 @@
 /**
  * `ghostd hook-complete`: one completion for a trusted command hook (a
  * stop-hook reviewer, a classifier), asked of the daemon that owns the ghost
- * (`POST /api/ghosts/:name/complete`). The daemon picks the harness as a new
- * conversation's turn would, and a ghost on the local model completes on the
- * daemon's own loaded copy rather than a second one started here.
+ * (`POST /api/ghosts/:name/complete`), so it completes on the daemon's own
+ * loaded copy of the local model rather than a second one started here.
  */
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, resolve } from "node:path";

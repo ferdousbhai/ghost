@@ -11,9 +11,8 @@
  *
  * Only surfaces Ghost owns:
  *
- * - **The persona** a harness finds in its conversation directory.
- * - **The launch**: prompt, resume flag, harness session, cwd, and conversation
- *   identity.
+ * - **The persona** a pass is given.
+ * - **The pass**: prompt, cwd, and conversation identity.
  * - **The turn event stream** of every turn, canonicalised.
  * - **The rendered transcript** and the conversation listing.
  * - **The ghost home on disk** after the conversation.
@@ -25,8 +24,8 @@
  * - **Wall-clock everything**: timestamps in text and `updatedAt`.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
  *
- * Tool-call ids and harness session ids come from the scripted harness, so a
- * change there is a real change.
+ * Tool-call ids come from the scripted answerer, so a change there is a real
+ * change.
  *
  * ## Regenerating
  *

@@ -1,109 +1,84 @@
 /**
- * A scripted agent CLI. Tests never run a real harness: this one is a small
- * script the host spawns like any other row, printing one normalized
- * `HarnessEvent` per line for each turn and recording what it was launched
- * with (prompt, resume, cwd, conversation env, the AGENTS.md it found) so
- * assertions are made against what a harness actually receives.
+ * A scripted answerer. Tests never load a model: this stands where the local
+ * model does, emitting each turn's scripted events and recording what the
+ * pass was given (prompt, cwd, conversation env, persona), so assertions are
+ * made against what a pass actually receives.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { HarnessEvent, HarnessRow } from "../../src/harness-table.js";
-import type { HarnessReport } from "../../src/harnesses.js";
+import type { PassEvent } from "../../src/local-turn.js";
+import type { Answerer } from "../../src/session-host.js";
 
-/** One turn of the fake harness, in the order turns are launched. */
+/** One turn of the fake, in the order turns are run. */
 export interface FakeTurn {
-  readonly events?: readonly HarnessEvent[];
-  readonly exit?: number;
-  readonly stderr?: string;
-  /** End the turn by this signal instead of an exit status. */
-  readonly kill?: NodeJS.Signals;
-  /** Hold the turn until this file exists (see `release`). */
+  readonly events?: readonly PassEvent[];
+  /** Fail the pass after its events, with this message. */
+  readonly fail?: string;
+  /** Hold the turn until this file exists (see `gate`), or the turn is stopped. */
   readonly gate?: string;
 }
 
 export interface FakeCall {
   readonly n: number;
   readonly prompt: string;
-  readonly resume: boolean;
-  readonly sessionId: string | null;
+  /** The prompt without the conversation so far that every pass is handed. */
+  readonly message: string;
   readonly cwd: string;
   readonly ghost: string | null;
   readonly session: string | null;
-  readonly agents: string | null;
+  readonly persona: string;
+  readonly codingAgent: string | null;
 }
 
 export interface FakeHarness {
-  readonly id: string;
-  readonly row: HarnessRow;
+  readonly answerer: Answerer;
   calls(): FakeCall[];
-  /** Replace the script for the turns not yet launched. */
+  /** Replace the script; turn n still runs entry n of it, or its last. */
   setTurns(turns: readonly FakeTurn[]): void;
   /** A gate path for a turn to wait on, and the call that opens it. */
   gate(name: string): { path: string; release(): void };
   cleanup(): void;
 }
 
-const SCRIPT = `
-import { once } from "node:events";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-const [turnsPath, counterPath, logPath, prompt, resume, sessionId] = process.argv.slice(2);
-const n = existsSync(counterPath) ? Number(readFileSync(counterPath, "utf8")) : 0;
-writeFileSync(counterPath, String(n + 1));
-appendFileSync(logPath, JSON.stringify({
-  n, prompt, resume: resume === "resume", sessionId: sessionId || null, cwd: process.cwd(),
-  ghost: process.env.GHOST ?? null, session: process.env.GHOST_SESSION ?? null,
-  agents: existsSync("AGENTS.md") ? readFileSync("AGENTS.md", "utf8") : null,
-}) + "\\n");
-const turns = JSON.parse(readFileSync(turnsPath, "utf8"));
-const turn = turns[Math.min(n, turns.length - 1)] ?? {};
-if (turn.gate) while (!existsSync(turn.gate)) await new Promise((r) => setTimeout(r, 10));
-for (const event of turn.events ?? []) {
-  if (!process.stdout.write(JSON.stringify(event) + "\\n")) await once(process.stdout, "drain");
-}
-if (turn.stderr) process.stderr.write(turn.stderr);
-// process.exit drops whatever the pipes have not taken yet: let both flush first.
-await Promise.all([process.stdout, process.stderr].map((pipe) => new Promise((r) => pipe.write("", r))));
-if (turn.kill) process.kill(process.pid, turn.kill);
-process.exit(turn.exit ?? 0);
-`;
-
 /** Text events for the common case: each string is one reply. */
 export function replies(...texts: string[]): FakeTurn[] {
   return texts.map((text) => ({ events: [{ type: "text", block: "reply", delta: text }] }));
 }
 
-export function fakeHarness(turns: readonly FakeTurn[], id = "fake"): FakeHarness {
-  const dir = mkdtempSync(join(tmpdir(), "ghost-fake-harness-"));
-  const script = join(dir, "harness.mjs");
-  const turnsPath = join(dir, "turns.json");
-  const counterPath = join(dir, "counter");
-  const logPath = join(dir, "calls.jsonl");
-  writeFileSync(script, SCRIPT);
-  writeFileSync(turnsPath, JSON.stringify(turns));
-  const row: HarnessRow = {
-    id,
-    launch: (turn) => ({
-      argv: [
-        process.execPath, script, turnsPath, counterPath, logPath,
-        turn.prompt, turn.resume ? "resume" : "new", turn.sessionId ?? "",
-      ],
-    }),
-    parser: () => (line) => {
-      try {
-        return [JSON.parse(line) as HarnessEvent];
-      } catch {
-        return [];
-      }
-    },
+export function fakeHarness(turns: readonly FakeTurn[]): FakeHarness {
+  const dir = mkdtempSync(join(tmpdir(), "ghost-fake-answerer-"));
+  let script = turns;
+  const calls: FakeCall[] = [];
+  const next = (): FakeTurn => script[Math.min(calls.length - 1, script.length - 1)] ?? {};
+  const held = async (turn: FakeTurn, signal: AbortSignal): Promise<void> => {
+    while (turn.gate && !existsSync(turn.gate)) {
+      if (signal.aborted) throw new Error("stopped");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
   };
   return {
-    id,
-    row,
-    calls: () => existsSync(logPath)
-      ? readFileSync(logPath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as FakeCall)
-      : [],
-    setTurns: (next) => writeFileSync(turnsPath, JSON.stringify(next)),
+    answerer: {
+      async turn(input) {
+        calls.push({
+          n: calls.length, prompt: input.prompt, message: input.prompt.replace(/^<conversation-so-far>\n[\s\S]*\n<\/conversation-so-far>\n\n/u, ""), cwd: input.cwd, persona: input.persona, codingAgent: input.codingAgent,
+          ghost: input.env.GHOST ?? null, session: input.env.GHOST_SESSION ?? null,
+        });
+        const turn = next();
+        await held(turn, input.signal);
+        for (const event of turn.events ?? []) input.onEvent(event);
+        if (turn.fail !== undefined) throw new Error(turn.fail);
+      },
+      async complete(prompt, signal) {
+        calls.push({ n: calls.length, prompt, message: prompt, cwd: "", persona: "", codingAgent: null, ghost: null, session: null });
+        const turn = next();
+        await held(turn, signal);
+        if (turn.fail !== undefined) throw new Error(turn.fail);
+        return (turn.events ?? []).flatMap((event) => event.type === "text" ? [event.delta] : []).join("");
+      },
+    },
+    calls: () => [...calls],
+    setTurns: (replacement) => { script = replacement; },
     gate: (name) => {
       const path = join(dir, `gate-${name}`);
       return { path, release: () => writeFileSync(path, "") };
@@ -112,21 +87,7 @@ export function fakeHarness(turns: readonly FakeTurn[], id = "fake"): FakeHarnes
   };
 }
 
-/** SessionHost options that make `harnesses` the only harnesses on the machine. */
-export function onlyHarnesses(...harnesses: FakeHarness[]): {
-  eligibleHarnesses: () => Promise<readonly string[]>;
-  harnessReport: () => Promise<HarnessReport>;
-  harnessRows: (id: string) => HarnessRow | null;
-  defaultHarness: () => Promise<string | null>;
-} {
-  const rows = new Map(harnesses.map((harness) => [harness.id, harness.row]));
-  return {
-    eligibleHarnesses: async () => harnesses.map((harness) => harness.id),
-    harnessReport: async () => ({
-      harnesses: harnesses.map((harness) => ({ id: harness.id, usage: null })),
-      refresh: "omarchy agent usage update",
-    }),
-    harnessRows: (id) => rows.get(id) ?? null,
-    defaultHarness: async () => null,
-  };
+/** SessionHost options that make `harness` what answers. */
+export function onlyHarnesses(harness: FakeHarness): { answerer: Answerer; codingAgent: () => Promise<string | null> } {
+  return { answerer: harness.answerer, codingAgent: async () => null };
 }

@@ -44,7 +44,7 @@ describe("ghost CLI against a real daemon server", () => {
     const sessions = await cli(["sessions", "--json"]);
     expect(sessions).toMatchObject({ code: 0 });
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
-      expect.objectContaining({ id: "conv-1", harness: "fake" }),
+      expect.objectContaining({ id: "conv-1", harness: "local" }),
     ]);
     expect(await cli(["sessions", "-q"], { env: { ...env, GHOST: "casper" } })).toMatchObject({ code: 0, stdout: "conv-1\n" });
     expect(await cli(["sessions"], { env: { ...env, GHOST: "nobody" } })).toMatchObject({ code: 5 });
@@ -58,7 +58,7 @@ describe("ghost CLI against a real daemon server", () => {
     const sessions = await cli(["sessions", "--json"]);
     expect(sessions.code).toBe(0);
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
-      expect.objectContaining({ id: "conv-1", harness: "fake" }),
+      expect.objectContaining({ id: "conv-1", harness: "local" }),
     ]);
 
     const status = await cli(["status", "--json"]);
@@ -88,26 +88,7 @@ describe("ghost CLI against a real daemon server", () => {
     expect(await cli(["browser", "allow"])).toMatchObject({ code: 2 });
   });
 
-  it("shows and sets the agent a ghost prefers, and switches a conversation", async () => {
-    const shown = await cli(["harness"]);
-    expect(shown).toMatchObject({ code: 0 });
-    expect(shown.stdout).toBe("casper runs on automatic (now fake)\n");
-    expect(await cli(["harness", "fake", "-q"])).toMatchObject({ code: 0 });
-    expect((await cli(["harness"])).stdout).toContain("casper runs on fake");
-    expect(await cli(["harness", "--none", "-q"])).toMatchObject({ code: 0 });
-    expect(await cli(["harness", "fake", "--none"])).toMatchObject({ code: 2 });
-    expect(await cli(["harness", "nope"])).not.toMatchObject({ code: 0 });
-
-    // From a ghost's own shell, the conversation is $GHOST_SESSION.
-    const switched = await cli(["switch", "fake"], { env: { ...env, GHOST: "casper", GHOST_SESSION: "conv-1" } });
-    expect(switched).toMatchObject({ code: 0, stdout: "Conversation conv-1 now runs on fake.\n" });
-    // A prefix names the listed conversation, as -s does elsewhere, not a new one.
-    expect(await cli(["switch", "fake", "-s", "conv"]))
-      .toMatchObject({ code: 0, stdout: "Conversation conv-1 now runs on fake.\n" });
-    // One no message has landed in yet is addressed as given.
-    expect(await cli(["switch", "fake", "-s", "fresh-1"]))
-      .toMatchObject({ code: 0, stdout: "Conversation fresh-1 now runs on fake.\n" });
-    // and `say` reaches the same unlisted conversation `switch` just named.
+  it("says into a conversation no message has landed in yet, addressed as given", async () => {
     const said = await cli(["say", "-s", "fresh-1", "-q", "hi"]);
     expect(said.code, said.stderr).toBe(0);
     expect((await host.listSessions("casper")).map((row) => row.id)).toContain("fresh-1");

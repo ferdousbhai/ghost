@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,30 +40,6 @@ describe("ghost smoke", () => {
       { step: "turn", ok: true, detail: "skipped (--no-turn)" },
     ]);
   }, 20_000);
-
-  it.skipIf(process.platform === "win32")("sets --harness through the daemon, which refuses an id it has no row for", async () => {
-    home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-harness-"));
-    // Stubs answer for Omarchy and the one agent, so the listing never reads
-    // what the host has installed.
-    const bin = join(home, "bin");
-    mkdirSync(bin);
-    const script = (name: string, body: string) => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
-    script("omarchy", `[ "$1" = commands ] && echo '{"commands":[{"route":"omarchy default agent","args":"[claude]"}]}'`);
-    script("omarchy-install-claude-cli", "exit 0");
-    script("claude", "exit 0");
-    const env = {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH ?? ""}`,
-      GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}`,
-    };
-    const chosen = await runCli(["smoke", "--no-turn", "--harness", "claude", "--json"], { env, home });
-    expect(chosen.code, chosen.stderr).toBe(0);
-    expect(chosen.stdout.trim().split("\n").map((line) => JSON.parse(line))).toContainEqual(
-      { step: "harness", ok: true, detail: "claude" });
-    const refused = await runCli(["smoke", "--no-turn", "--harness", "nope", "--json"], { env, home });
-    expect(refused.code).not.toBe(0);
-    expect(refused.stdout).toContain('"step":"harness"');
-  }, 40_000);
 });
 
 describe("DaemonClient request budgets", () => {

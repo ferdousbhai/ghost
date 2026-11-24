@@ -1,19 +1,18 @@
 /**
- * Conversations, as ghostd hosts them: each turn is one headless run of an
- * agent CLI the owner already has (see `harness-table.ts`), started in the
- * conversation's own directory with the ghost's persona and tools, its output
- * streamed to the client and recorded in the conversation log. ghostd keeps
- * no model, agent loop, or credentials; it owns the persona, the log, the
- * owner's hooks, the choice of harness, and the ghost's lifecycle.
+ * Conversations, as ghostd hosts them: each turn runs on the local model
+ * (`local-turn.ts`) in the conversation's own directory with the ghost's
+ * persona, its output streamed to the client and recorded in the conversation
+ * log. ghostd owns the persona, the log, the owner's hooks, and the ghost's
+ * lifecycle; nothing of a turn leaves the machine unless a command the model
+ * runs sends it.
  */
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdir, readdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { buildGhostSystemPrompt, characterSection, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
 import { readCharacter } from "./home.js";
-import { findSourceRoot } from "./running-source.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { readAttachment, saveAttachment } from "./attachments.js";
@@ -31,21 +30,12 @@ import {
   readLog,
   requireConversationId,
   readTranscriptPage,
-  unseenCommands,
   type AssistantPart,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
-import { runHarness, writeLaunchFiles, type HarnessExit } from "./harness-process.js";
-import {
-  harnessRow,
-  SUPPORTED_HARNESSES,
-  type HarnessEvent,
-  type HarnessRow,
-  type TurnRow,
-} from "./harness-table.js";
+import { chooseCodingAgent } from "./coding-agent.js";
+import { runProcess } from "./process.js";
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -53,22 +43,17 @@ import {
   GHOST_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import { classifyLimitMessage, statedReturn, type TurnEvent } from "./turn-events.js";
+import type { TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import { trashPath } from "./trash.js";
 import { LOCAL_HARNESS, type LocalModel } from "./local-model.js";
-import { CODING_AGENT_COMMANDS, completeLocally, runLocalTurn } from "./local-turn.js";
+import { completeLocally, runLocalTurn, type PassEvent, type PassInput } from "./local-turn.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
 const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 
-/** How long one read of Omarchy's harness report is reused. */
-const HARNESS_REPORT_TTL_MS = 60_000;
-
-/** Where earlier packages installed the skills Ghost shipped. */
-const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
 /** The live tail of a tool's output shown on its card. */
 const TOOL_SUMMARY_MAX = 800;
 /**
@@ -76,14 +61,6 @@ const TOOL_SUMMARY_MAX = 800;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
-/**
- * How long a harness that failed before answering is tried last when its
- * refusal does not say when access returns: a limit (quota, rate, credit) for
- * an hour, anything else for a quarter. A retry an hour later costs one failed
- * start; trying it first every turn costs one per turn.
- */
-const REST_AFTER_LIMIT_MS = 60 * 60_000;
-const REST_AFTER_FAILURE_MS = 15 * 60_000;
 const MAX_QUESTION_LENGTH = 2_000;
 const MAX_QUESTION_OPTIONS = 6;
 const MAX_QUESTION_OPTION_LENGTH = 120;
@@ -95,22 +72,25 @@ export interface SessionHostOptions {
   hooks?: GhostHookRunner;
   /** The app's link to a conversation for `turn_end`'s `url`, or null. */
   conversationUrl?: (ghost: string, id: string) => Promise<string | null>;
-  /**
-   * The harnesses a turn may run on, in Omarchy's order; production reads
-   * Omarchy's eligibility report. A test supplies its own list and rows.
-   */
-  eligibleHarnesses?: () => Promise<readonly string[]>;
-  /** Omarchy's installed agents with their usage, for the agent picker. */
-  harnessReport?: () => Promise<HarnessReport>;
-  harnessRows?: (id: string) => HarnessRow | null;
-  /** The model ghostd runs itself, when the owner configured one (CONTRACTS.md "Local model"). */
+  /** The model ghostd runs (CONTRACTS.md "Local model"); without one no turn can run. */
   localModel?: LocalModel | null;
-  /** Omarchy's default agent; production asks `omarchy-default-agent`. */
-  defaultHarness?: () => Promise<string | null>;
-  /** The environment harnesses run with; the daemon's own by default. */
+  /** What answers in place of the local model; a test supplies a script. */
+  answerer?: Answerer | null;
+  /** The owner's coding agent, which a turn's prompt names; production asks Omarchy. */
+  codingAgent?: () => Promise<string | null>;
+  /** The environment commands run with; the daemon's own by default. */
   env?: NodeJS.ProcessEnv;
-  /** The waits before rerunning an event turn that could not reach its model; a test supplies short ones. */
 }
+
+/** What answers a ghost's turns and its hooks' completions. */
+export interface Answerer {
+  /** One pass; throws with the message the turn reports as its error. */
+  turn(input: PassInput): Promise<void>;
+  /** One completion with no persona, conversation, or tools. */
+  complete(prompt: string, signal: AbortSignal): Promise<string>;
+}
+
+const NO_LOCAL_MODEL = "No local model is configured: set `local.model` in ~/.config/ghost/config.json.";
 
 interface RunTurnOptions {
   sessionId?: string | null;
@@ -140,9 +120,9 @@ export interface SessionSummary {
   title: string | null;
   /** First owner text; display-only. */
   preview: string | null;
-  /** The harness that carried the latest stretch of the conversation. */
+  /** What carried the latest stretch of the conversation: `local`, or an agent an earlier version ran. */
   harness: string | null;
-  /** What that harness's latest pass ran on, as far as it said; null otherwise. */
+  /** What its latest pass ran on, as far as recorded; null otherwise. */
   model: string | null;
   provider: string | null;
   effort: string | null;
@@ -174,30 +154,6 @@ interface ConversationUpdatedEvent {
 
 type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
-/** A harness that failed before answering, tried last until `until`. */
-interface HarnessRest {
-  until: string;
-  /** The failure that sent it to the back, as the harness reported it. */
-  reason: string;
-}
-
-/** The agents a ghost can run on, as the picker shows them. */
-export interface HarnessChoices {
-  /**
-   * `effort` is the one its launch asks for, null where the owner's setting
-   * stands; `resting` is set while a recent failure keeps it at the back.
-   */
-  harnesses: (Harness & { effort: string | null; resting: HarnessRest | null })[];
-  /** The ghost's `settings.yml` `harness`, or null for automatic. */
-  ghostDefault: string | null;
-  /**
-   * What a new conversation would start on now: the first harness
-   * `harnessCandidates` would try (the local model when it is the default),
-   * or null when none can run.
-   */
-  automatic: string | null;
-}
-
 interface LiveTurn {
   /** The owner's queued messages, in order, which a client shows. */
   readonly followUps: string[];
@@ -205,15 +161,12 @@ interface LiveTurn {
   readonly emit: (event: TurnEvent) => void;
 }
 
-/** One harness pass: what it said and did, and how it ended. */
+/** One pass: what it said and did, and how it ended. */
 interface PassResult {
   readonly content: AssistantPart[];
   readonly error: string | null;
   readonly aborted: boolean;
-  /** It produced output, so handing the prompt to another harness would repeat its work. */
-  readonly produced: boolean;
-  /** The model the harness reported, if it did. */
-  readonly model: Extract<HarnessEvent, { type: "model" }> | null;
+  readonly model: Extract<PassEvent, { type: "model" }> | null;
 }
 
 type TerminalError = Extract<TurnEvent, { type: "error" }>;
@@ -237,17 +190,6 @@ function tail(text: string): string | undefined {
 function ownerCommand(prompt: string): { command: string; excluded: boolean } | null {
   const match = /^(?!!\[)(!!?)\s*([\s\S]*)$/u.exec(prompt.trim());
   return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
-}
-
-/**
- * Why a harness run failed, as far as its exit says: it could not start, the
- * tail of its stderr, or its status or signal; null for a clean exit.
- */
-function exitError(id: string, exit: HarnessExit): string | null {
-  if (exit.spawnError !== undefined) return `${id} could not start: ${exit.spawnError}`;
-  if (exit.code === 0) return null;
-  return exit.stderr.trim().split("\n").slice(-6).join("\n")
-    || `${id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
 }
 
 function keyOf(ghostName: string, id: string): string {
@@ -301,10 +243,8 @@ export class SessionHost {
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
   private readonly conversationUrl: ((ghost: string, id: string) => Promise<string | null>) | undefined;
-  private readonly eligibleHarnesses: () => Promise<readonly string[]>;
-  private readonly harnessReport: () => Promise<HarnessReport>;
-  private readonly defaultHarness: () => Promise<string | null>;
-  private readonly rowOf: (id: string) => TurnRow | null;
+  private readonly answerer: Answerer | null;
+  private readonly codingAgent: () => Promise<string | null>;
   private readonly localModel: LocalModel | null;
   private readonly env: NodeJS.ProcessEnv;
   private readonly live = new Map<string, LiveTurn>();
@@ -314,7 +254,6 @@ export class SessionHost {
   private readonly reservedSessions = new Set<string>();
   private readonly metadataWrites = new Map<string, Promise<unknown>>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
-  private reportCache?: { at: number; report: Promise<HarnessReport> };
   private shuttingDown = false;
 
   constructor(options: SessionHostOptions) {
@@ -324,14 +263,11 @@ export class SessionHost {
     this.conversationUrl = options.conversationUrl;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
-    this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
-    this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
-    this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
-    this.localModel = options.localModel ?? null;
-    const rows = options.harnessRows ?? harnessRow;
-    const local = this.localModel;
-    const localRow: TurnRow | null = local ? { id: LOCAL_HARNESS, run: (input) => runLocalTurn(local, input) } : null;
-    this.rowOf = (id) => id === LOCAL_HARNESS ? localRow : rows(id);
+    const local = options.localModel ?? null;
+    this.localModel = local;
+    this.answerer = options.answerer
+      ?? (local ? { turn: (input) => runLocalTurn(local, input), complete: (prompt, signal) => completeLocally(local, prompt, signal) } : null);
+    this.codingAgent = options.codingAgent ?? (() => chooseCodingAgent(this.env));
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -375,9 +311,9 @@ export class SessionHost {
     }
   }
 
-  // ── Persona and harness configuration ─────────────────────────────────
+  // ── Persona ───────────────────────────────────────────────────────────
 
-  /** Where the owner's sources are read from (CONTRACTS.md "Sources"): the home and environment local turns see. */
+  /** Where the owner's sources are read from (CONTRACTS.md "Sources"): the home and environment turns see. */
   sourceContext(signal: AbortSignal): { home: string; env: NodeJS.ProcessEnv; signal: AbortSignal } {
     return { home: this.ownerHome, env: this.env, signal };
   }
@@ -389,7 +325,7 @@ export class SessionHost {
 
   /**
    * The ghost's whole system prompt (`persona`: its character and the stable
-   * policy sections) and the character alone, which is what a local pass gets.
+   * policy sections) and the character alone.
    * Rendered before every turn, so a character the ghost (or the owner)
    * rewrote is who it is on the next one.
    */
@@ -407,190 +343,6 @@ export class SessionHost {
       }),
       character: characterSection({ ghostName: ghost.name, character }),
     };
-  }
-
-  /**
-   * Lay out the conversation directory a harness runs in: the persona as
-   * `AGENTS.md` (and the `CLAUDE.md`/`GEMINI.md` names other harnesses read),
-   * and no skills: the `ghost` CLI is a ghost's documentation, and the owner's
-   * own skills are where every harness already looks.
-   */
-  private async prepareDirectory(ghostDir: string, dir: string, persona: string): Promise<void> {
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    await writeFile(join(dir, "AGENTS.md"), persona, { mode: 0o600 });
-    for (const alias of ["CLAUDE.md", "GEMINI.md"]) await this.ensureLink(join(dir, alias), "AGENTS.md");
-    // Ghost links no skills: harnesses find the owner's own. Earlier versions
-    // linked their shipped and per-ghost skills here; take those links away,
-    // and leave any other link alone.
-    const madeByGhost = (link: string, target: string, within: boolean): boolean => {
-      const resolved = resolve(dirname(link), target);
-      const root = within ? dirname(resolved) : resolved;
-      return root === PACKAGED_SKILLS || root === join(ghostDir, "skills") || (basename(root) === "skills" && findSourceRoot(dirname(root)) === dirname(root));
-    };
-    for (const root of [".claude", ".agents"]) {
-      const linked = join(dir, root, "skills");
-      const whole = await readlink(linked).catch(() => null);
-      if (whole !== null) {
-        if (madeByGhost(linked, whole, false)) await rm(linked);
-        continue;
-      }
-      const entries = await readdir(linked, { withFileTypes: true }).catch(() => null);
-      if (entries === null) continue;
-      for (const entry of entries) {
-        if (!entry.isSymbolicLink()) continue;
-        const link = join(linked, entry.name);
-        if (madeByGhost(link, await readlink(link), true)) await rm(link);
-      }
-      if ((await readdir(linked)).length === 0) await rm(linked, { recursive: true });
-    }
-  }
-
-  /** Point the link at `target`, so a renamed home relinks on its next turn; anything not a link is left alone. */
-  private async ensureLink(path: string, target: string): Promise<void> {
-    try {
-      if ((await readlink(path)) === target) return;
-      await rm(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
-    }
-    await symlink(target, path);
-  }
-
-  /** The harness report, shared by turns and the picker for a minute; it takes most of a second. */
-  private cachedReport(): Promise<HarnessReport> {
-    const now = Date.now();
-    if (this.reportCache && now - this.reportCache.at < HARNESS_REPORT_TTL_MS) return this.reportCache.report;
-    const entry = { at: now, report: this.harnessReport() };
-    this.reportCache = entry;
-    entry.report.catch(() => {
-      if (this.reportCache === entry) this.reportCache = undefined;
-    });
-    return entry.report;
-  }
-
-  /** Installed harnesses, in Omarchy's order. */
-  private omarchyEligible(): Promise<readonly string[]> {
-    return this.cachedReport()
-      .then(eligibleIds)
-      .catch((error: unknown) => {
-        this.logger.warn("harness report unavailable; trying every supported harness", { error: errorMessage(error) });
-        return SUPPORTED_HARNESSES;
-      });
-  }
-
-  /**
-   * The harnesses to try for a turn, best first: the one already carrying
-   * the conversation, the ghost's `harness` setting, Omarchy's default agent,
-   * then every other eligible one Ghost has a row for.
-   */
-  private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
-    // The local model is the default when configured, and never a fallback:
-    // a conversation on it runs only there, so the owner's content stays local.
-    const setting = readHarnessSetting(ghost.dir);
-    if (current === LOCAL_HARNESS || (current === null && (setting === LOCAL_HARNESS || (setting === null && this.localModel)))) {
-      return this.localModel ? [LOCAL_HARNESS] : [];
-    }
-    return this.cloudHarnesses([current, setting]);
-  }
-
-  /**
-   * The cloud harnesses Ghost has a row for, best first: `preferred`, then
-   * Omarchy's default agent, then every other eligible one. Turns and the
-   * coding agent a local turn names share this order.
-   */
-  private async cloudHarnesses(preferred: readonly (string | null)[]): Promise<string[]> {
-    const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
-    const ordered = orderHarnesses(eligible.filter((id) => id !== LOCAL_HARNESS && this.rowOf(id) !== null), [...preferred, omarchyDefault]);
-    // A harness that just failed before answering goes to the back, not out:
-    // if everything ahead of it fails too, it is still tried.
-    return [...ordered.filter((id) => !this.restingFor(id)), ...ordered.filter((id) => this.restingFor(id))];
-  }
-
-  /** Machine-wide, since a harness's sign-in and credit are the owner's, not one ghost's. */
-  private readonly resting = new Map<string, { until: number; reason: string }>();
-
-  private restingFor(id: string): HarnessRest | null {
-    const rest = this.resting.get(id);
-    if (!rest) return null;
-    if (rest.until <= Date.now()) {
-      this.resting.delete(id);
-      return null;
-    }
-    return { until: new Date(rest.until).toISOString(), reason: rest.reason };
-  }
-
-  /** Until the refusal says access returns, else for the default span. */
-  private rest(id: string, reason: string): void {
-    const now = Date.now();
-    const until = statedReturn(reason, now)
-      ?? now + (classifyLimitMessage(reason) ? REST_AFTER_LIMIT_MS : REST_AFTER_FAILURE_MS);
-    this.resting.set(id, { until, reason: reason.slice(0, 300) });
-  }
-
-  // ── Agent choice ──────────────────────────────────────────────────────
-
-  private requireRow(id: string): void {
-    if (!this.rowOf(id)) {
-      throw new GhostError("unknown_harness", `Ghost cannot run on ${JSON.stringify(id)}; it has no row for that agent.`, 400);
-    }
-  }
-
-  /** Installed agents Ghost can run on, with Omarchy's usage, the ghost's preference, and what runs automatically. */
-  async listHarnesses(ghostName: string): Promise<HarnessChoices> {
-    const ghost = this.registry.get(ghostName);
-    const [report, [automatic]] = await Promise.all([this.cachedReport(), this.harnessCandidates(ghost, null)]);
-    return {
-      harnesses: [
-        ...report.harnesses.flatMap((harness) => {
-          const row = this.rowOf(harness.id);
-          return row ? [{ ...harness, effort: ("run" in row ? undefined : row.effort) ?? null, resting: this.restingFor(harness.id) }] : [];
-        }),
-        ...(this.localModel ? [{ id: LOCAL_HARNESS, usage: null, effort: null, resting: null }] : []),
-      ],
-      ghostDefault: readHarnessSetting(ghost.dir),
-      automatic: automatic ?? null,
-    };
-  }
-
-  /** The ghost's preferred agent, ahead of Omarchy's default; null is automatic. */
-  async setGhostHarness(ghostName: string, id: string | null): Promise<HarnessChoices> {
-    if (id !== null) this.requireRow(id);
-    // The owner naming it is the retry.
-    if (id !== null) this.resting.delete(id);
-    await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
-    return this.listHarnesses(ghostName);
-  }
-
-  /**
-   * Run this conversation's next turn on `id`. The agent takes over the way
-   * a fallback does: it is handed the conversation so far, then kept.
-   */
-  async chooseHarness(ghostName: string, sessionId: string, id: string): Promise<{ id: string; harness: string }> {
-    this.requireRow(id);
-    this.resting.delete(id);
-    const listed = id === LOCAL_HARNESS || (await this.cachedReport()).harnesses.some((harness) => harness.id === id);
-    if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
-    const ghost = this.registry.get(ghostName);
-    const conversation = requireConversationId(sessionId);
-    const key = keyOf(ghost.name, conversation);
-    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
-      throw new GhostError("session_busy", "Wait for this conversation to finish before switching agents.", 409);
-    }
-    this.reservedSessions.add(key);
-    try {
-      const { sessionDir } = ghostPaths(ghost.dir);
-      const entries = await readLog(sessionDir, conversation);
-      if (entries === null || logState(entries).harness !== id) {
-        await appendLog(sessionDir, conversation, [
-          ...(entries === null ? [newConversationEntry(conversation, new Date())] : []),
-          { type: "harness", at: new Date().toISOString(), harness: id, session: null, dir: conversationDir(sessionDir, conversation) },
-        ]);
-      }
-      this.announce(ghost.name, conversation);
-      return { id: conversation, harness: id };
-    } finally {
-      this.reservedSessions.delete(key);
-    }
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────
@@ -723,10 +475,8 @@ export class SessionHost {
   }
 
   /**
-   * Run one prompt on the best harness that will take it. A harness that
-   * fails before producing anything (not signed in, out of quota, missing)
-   * hands the prompt to the next eligible one, which is given the earlier
-   * conversation as context. Returns the terminal error, or null on success.
+   * Run one prompt on the local model, handed the conversation so far: it
+   * keeps no session of its own. Returns the terminal error, or null on success.
    */
   private async runPasses(
     ghost: Ghost,
@@ -736,188 +486,76 @@ export class SessionHost {
     blocks: { next: number },
     signal: AbortSignal,
   ): Promise<TerminalError | null> {
+    if (!this.answerer) return { type: "error", reason: "error", errorMessage: NO_LOCAL_MODEL };
     const { sessionDir } = ghostPaths(ghost.dir);
-    let entries = (await readLog(sessionDir, id)) ?? [];
-    const candidates = await this.harnessCandidates(ghost, logState(entries).harness);
-    if (candidates.length === 0) {
-      return {
-        type: "error",
-        reason: "error",
-        errorMessage: logState(entries).harness === LOCAL_HARNESS || readHarnessSetting(ghost.dir) === LOCAL_HARNESS
-          ? "This conversation runs on the local model, and none is configured: set `local.model` in ~/.config/ghost/config.json."
-          : "No supported agent CLI is installed. See `ghost harnesses`.",
-      };
+    const entries = (await readLog(sessionDir, id)) ?? [];
+    const bound = logState(entries);
+    const dir = conversationDir(sessionDir, id);
+    // The log says what carries the conversation and where; an earlier version's may name an agent.
+    if (bound.harness !== LOCAL_HARNESS || bound.harnessDir !== dir) {
+      await appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: LOCAL_HARNESS, session: null, dir }]);
     }
-    let lastError = "The turn failed.";
-    for (const harness of candidates) {
-      const row = this.rowOf(harness) as TurnRow;
-      const bound = logState(entries);
-      const dir = conversationDir(sessionDir, id);
-      // A harness new to the conversation, or to its directory since a home
-      // rename, has not seen it; one continuing it has not seen the owner's
-      // `!` commands since its last turn.
-      const moved = bound.harnessDir !== null && bound.harnessDir !== dir;
-      if (bound.harness !== harness || moved || bound.harnessDir === null) {
-        await appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness, session: null, dir }]);
-      }
-      // The local model keeps no session of its own: every pass is handed the conversation.
-      const fresh = "run" in row || bound.harness !== harness || moved || !bound.harnessStarted;
-      const earlier = entries.slice(0, entries.findLastIndex((entry) => entry.type === "user"));
-      const carried = fresh ? handoffContext(earlier) : null;
-      const commands = fresh ? null : unseenCommands(entries);
-      const passPrompt = [
-        ...(carried ? [`<conversation-so-far>\n${carried}\n</conversation-so-far>`] : []),
-        ...(commands ? [`<owner-commands>\n${commands}\n</owner-commands>`] : []),
-        prompt,
-      ].join("\n\n");
-      stream.emit({ type: "harness", harness });
-      const result = await this.runPass(ghost, id, row, {
-        prompt: passPrompt,
-        message: entries.findLast((entry) => entry.type === "user")?.text,
-        resume: !fresh,
-        sessionId: fresh ? null : bound.harnessSession,
-      }, stream, blocks, signal);
-      if (result.error === null) this.resting.delete(harness);
-      if (result.error === null || result.aborted || result.produced) {
-        const effort = result.model?.effort ?? ("run" in row ? undefined : row.effort);
-        await appendLog(sessionDir, id, [{
-          type: "assistant",
-          at: new Date().toISOString(),
-          harness,
-          content: result.content,
-          ...(result.error ? { error: result.error } : {}),
-          ...(result.model ? { model: result.model.model } : {}),
-          ...(result.model?.provider ? { provider: result.model.provider } : {}),
-          ...(effort ? { effort } : {}),
-        }]);
-        return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
-      }
-      lastError = result.error;
-      this.rest(harness, result.error);
-      this.logger.warn("harness failed before answering; trying the next", { ghost: ghost.name, conversation: id, harness, error: result.error });
-      entries = (await readLog(sessionDir, id)) ?? [];
-    }
-    const last = candidates.at(-1) as string;
-    await appendLog(sessionDir, id, [{ type: "assistant", at: new Date().toISOString(), harness: last, content: [], error: lastError }]);
-    return this.failure(stream, last, lastError, false);
-  }
-
-  /**
-   * One headless run of a cloud harness outside a turn (a delegated task, a
-   * hook completion): its trimmed text and the error that ended it, or null
-   * when `signal` stopped it. Answering ends the harness's rest, as a turn's
-   * pass does; failing before any text starts one.
-   */
-  private async cloudPass(harness: string, run: {
-    prompt: string; persona: string; dir: string; env: NodeJS.ProcessEnv; signal: AbortSignal;
-  }): Promise<{ text: string; error: string | null } | null> {
-    const row = this.rowOf(harness) as HarnessRow;
-    const launch = row.launch({ prompt: run.prompt, resume: false, sessionId: null, persona: run.persona });
-    await writeLaunchFiles(run.dir, launch.files);
-    let text = "";
-    let error: string | null = null;
-    const exit = await runHarness({
-      launch, cwd: run.dir, env: { ...run.env, ...(await accountEnv(harness, this.env)) }, signal: run.signal, parse: row.parser(),
-      onEvent: (event) => {
-        if (event.type === "text") text += event.delta;
-        else if (event.type === "error") error = event.message;
-        else if (event.type === "retry") error = null;
-      },
-    });
-    if (run.signal.aborted) return null;
-    error ??= exitError(harness, exit);
-    text = text.trim();
-    if (text && error === null) this.resting.delete(harness);
-    else if (!text && error !== null) this.rest(harness, error);
-    return { text, error };
+    const carried = handoffContext(entries.slice(0, entries.findLastIndex((entry) => entry.type === "user")));
+    const passPrompt = [...(carried ? [`<conversation-so-far>\n${carried}\n</conversation-so-far>`] : []), prompt].join("\n\n");
+    stream.emit({ type: "harness", harness: LOCAL_HARNESS });
+    const result = await this.runPass(ghost, id, this.answerer, passPrompt, stream, blocks, signal);
+    await appendLog(sessionDir, id, [{
+      type: "assistant",
+      at: new Date().toISOString(),
+      harness: LOCAL_HARNESS,
+      content: result.content,
+      ...(result.error ? { error: result.error } : {}),
+      ...(result.model ? { model: result.model.model } : {}),
+      ...(result.model?.provider ? { provider: result.model.provider } : {}),
+      ...(result.model?.effort ? { effort: result.model.effort } : {}),
+    }]);
+    return result.error === null ? null : { type: "error", reason: result.aborted ? "aborted" : "error", errorMessage: result.error };
   }
 
   /**
    * One completion for a trusted command hook (`ghostd hook-complete`), on the
-   * harness a new conversation would start on, in a scratch directory with no
-   * persona, conversation, or Ghost tools; on the local model, this daemon's
-   * own copy, never then a cloud one. It takes no ghost lease, admission, or
-   * conversation lock: the turn awaiting the `session_stop` hook that asks
-   * holds its own, and waiting for it would deadlock.
+   * local model with no persona, conversation, or tools. It takes no
+   * admission or conversation lock: the turn awaiting the `session_stop` hook
+   * that asks holds its own, and waiting for it would deadlock.
    */
   async complete(ghostName: string, prompt: string, signal: AbortSignal): Promise<string> {
     if (!prompt.trim()) throw new GhostError("invalid_request", "prompt must be a non-empty string.", 400);
-    const ghost = this.registry.get(ghostName);
-    const candidates = await this.harnessCandidates(ghost, null);
-    if (candidates[0] === LOCAL_HARNESS) {
-      // harnessCandidates names the local model only while one is configured.
-      const text = (await completeLocally(this.localModel as LocalModel, prompt, signal)).trim();
-      if (!text) throw new GhostError("completion_failed", "The local model returned no text for the prompt.", 502);
-      return text;
-    }
-    if (candidates.length === 0 && readHarnessSetting(ghost.dir) === LOCAL_HARNESS) {
-      throw new GhostError("harness_not_installed", "This ghost runs on the local model, and none is configured.", 409);
-    }
-    const failures: string[] = [];
-    for (const harness of candidates) {
-      const dir = await mkdtemp(join(tmpdir(), "ghost-hook-"));
-      try {
-        // `GHOST` names the ghost, as in a turn, so a harness stop hook that
-        // stands down inside Ghost runs does not review this completion.
-        const pass = await this.cloudPass(harness, { prompt, persona: "", dir, env: { ...this.env, GHOST: ghost.name }, signal });
-        if (!pass) throw new Error("The completion was cancelled.");
-        if (pass.text && pass.error === null) return pass.text;
-        failures.push(`${harness}: ${pass.error ?? "no answer"}`);
-      } finally {
-        await rm(dir, { recursive: true, force: true });
-      }
-    }
-    throw new GhostError("completion_failed", failures.length > 0
-      ? `No harness completed the prompt (${failures.join("; ")}).`
-      : "No harness is eligible to complete the prompt.", 502);
-  }
-
-  private failure(stream: AdmittedTurnOptions, harness: string, message: string, aborted: boolean): TerminalError {
-    const kind = aborted ? null : classifyLimitMessage(message);
-    if (kind) stream.emit({ type: "limit_reached", harness, kind });
-    return { type: "error", reason: aborted ? "aborted" : "error", errorMessage: message };
+    this.registry.get(ghostName);
+    if (!this.answerer) throw new GhostError("no_local_model", NO_LOCAL_MODEL, 409);
+    const text = (await this.answerer.complete(prompt, signal)).trim();
+    if (!text) throw new GhostError("completion_failed", "The local model returned no text for the prompt.", 502);
+    return text;
   }
 
   private async runPass(
     ghost: Ghost,
     id: string,
-    row: TurnRow,
-    turn: { prompt: string; message?: string; resume: boolean; sessionId: string | null },
+    answerer: Answerer,
+    prompt: string,
     stream: AdmittedTurnOptions,
     blocks: { next: number },
     signal: AbortSignal,
   ): Promise<PassResult> {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
-    const account = accountEnv(row.id, this.env);
     const { persona } = await this.renderPersona(ghost);
-    await this.prepareDirectory(ghost.dir, dir, persona);
-    const launch = "run" in row ? null : row.launch({ ...turn, persona });
-    await writeLaunchFiles(dir, launch?.files);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
 
-    const at = new Date().toISOString();
     const content: AssistantPart[] = [];
     const tools = new Map<string, { name: string; part: number }>();
     // The text block streaming now and its logged part, the last one while it is open,
-    // so a block key a harness reuses after a tool call logs a new part, as the stream shows.
+    // so a block key reused after a tool call logs a new part, as the stream shows.
     let open: { key: string; index: number; part: number; text: string } | null = null;
     let error: string | null = null;
-    let produced = false;
     let thoughtBlock: string | null = null;
-    let model: Extract<HarnessEvent, { type: "model" }> | null = null;
-    /** The harness session this pass reported, if it reported one. */
-    let reported: string | null = null;
-    const writes: Promise<void>[] = [];
+    let model: Extract<PassEvent, { type: "model" }> | null = null;
     const closeBlock = () => {
       if (!open) return;
       content[open.part] = { type: "text", text: open.text };
       stream.emit({ type: "text_end", contentIndex: open.index, content: open.text });
       open = null;
     };
-    const logCompaction = (event: Extract<HarnessEvent, { type: "compacted" }>): void => {
-      writes.push(appendLog(sessionDir, id, [{ type: "compacted", at: event.at ?? new Date().toISOString(), harness: row.id, trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) }]));
-    };
-    const onEvent = (event: HarnessEvent): void => {
+    const onEvent = (event: PassEvent): void => {
       switch (event.type) {
         case "thinking":
           // Reasoning streams for the activity line; it is not an answer and is not logged.
@@ -927,7 +565,6 @@ export class SessionHost {
           return;
         case "text": {
           if (event.delta === "") return;
-          produced = true;
           const key = event.block;
           if (open?.key !== key) {
             closeBlock();
@@ -941,7 +578,6 @@ export class SessionHost {
         }
         case "tool_start":
           if (tools.has(event.id)) return;
-          produced = true;
           closeBlock();
           tools.set(event.id, { name: event.name, part: content.length });
           content.push({ type: "toolCall", id: event.id, name: event.name, arguments: event.args });
@@ -963,55 +599,22 @@ export class SessionHost {
         case "model":
           model = event;
           return;
-        case "session":
-          reported = event.id;
-          writes.push(appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: row.id, session: event.id, dir }]));
-          return;
         case "error":
           error = event.message;
-          return;
-        case "retry":
-          error = null;
-          return;
-        case "compacted":
-          logCompaction(event);
-          stream.emit({ type: "compacted", trigger: event.trigger, ...(event.preTokens !== undefined ? { preTokens: event.preTokens } : {}) });
           return;
       }
     };
 
-    const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
-    const exit: HarnessExit = "run" in row
-      ? await row.run({
-        prompt: turn.prompt, persona, cwd: dir, env, signal, onEvent,
-        // The owner's choice, as for a turn: this ghost's own agent, else Omarchy's default, else the first installed.
-        codingAgent: (await this.cloudHarnesses([readHarnessSetting(ghost.dir)])).find((agent) => agent in CODING_AGENT_COMMANDS) ?? null,
-      }).then(() => ({ code: 0, signal: null, stderr: "" }), (failure: unknown) => {
-        if (!signal.aborted) error = errorMessage(failure);
-        return { code: 1, signal: null, stderr: "" };
-      })
-      : await runHarness({
-        launch: launch as NonNullable<typeof launch>,
-        cwd: dir,
-        env,
-        parse: row.parser(),
-        onEvent,
-        signal,
-      });
+    await answerer.turn({
+      prompt, persona, cwd: dir, signal, onEvent,
+      env: { ...this.env, ...conversationEnvironment(ghost.name, id) },
+      codingAgent: await this.codingAgent(),
+    }).catch((failure: unknown) => {
+      if (!signal.aborted) error = errorMessage(failure);
+    });
     closeBlock();
-    // The session record lands before the pass's assistant entry.
-    await Promise.all(writes);
-    if (reported !== null && "inspectSession" in row && row.inspectSession && !exit.spawnError && !signal.aborted) {
-      for (const fact of await row.inspectSession(reported, env, at).catch(() => [])) {
-        // Found after the reply streamed: logged ahead of it, shown when the client reloads the transcript.
-        if (fact.type === "compacted") logCompaction(fact);
-        else if (model === null) onEvent(fact);
-      }
-      await Promise.all(writes);
-    }
-    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
-    error ??= exitError(row.id, exit);
-    return { content, error, aborted: false, produced, model };
+    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, model };
+    return { content, error, aborted: false, model };
   }
 
   private async turnEnd(
@@ -1078,8 +681,8 @@ export class SessionHost {
       update = undefined;
       stream.emit({ type: "tool_execution_update", id: toolId, summary: tail(output.slice(-4 * TOOL_SUMMARY_MAX)) });
     };
-    const exit = await runHarness({
-      launch: { argv: ["bash", "-c", command] },
+    const exit = await runProcess({
+      argv: ["bash", "-c", command],
       cwd: this.ownerHome,
       env: { ...this.env, ...conversationEnvironment(ghost.name, id) },
       onStdout: (chunk) => {
@@ -1116,7 +719,7 @@ export class SessionHost {
     controller.abort();
   }
 
-  /** Queue text for after the current pass; a harness takes no input mid-run. */
+  /** Queue text for after the current pass, which takes no input mid-run. */
   async queueMessage(ghostName: string, sessionId: string, text: string): Promise<QueuedMessages> {
     this.registry.get(ghostName);
     const key = keyOf(ghostName, requireConversationId(sessionId));

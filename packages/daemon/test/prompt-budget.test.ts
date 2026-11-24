@@ -14,7 +14,8 @@
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "../src/persona.js";
 import { stablePolicySections } from "../src/session-host.js";
-import { CODING_AGENT_COMMANDS, localSection } from "../src/local-turn.js";
+import { CODING_AGENT_COMMANDS } from "../src/coding-agent.js";
+import { localSection } from "../src/local-turn.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
@@ -50,12 +51,12 @@ function renderStablePolicy(): Record<string, string> {
 const CEILINGS: Record<string, number> = {
   "Character file": 560,
   "Computer use": 273,
-  "Ghost": 666,
+  "Ghost": 652,
   "Owner context": 577,
   "First meeting": 321,
 };
 
-const TOTAL_CEILING = 2397;
+const TOTAL_CEILING = 2383;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

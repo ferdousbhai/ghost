@@ -472,8 +472,8 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
 
-  it("still terminates the stream when the harness fails", async () => {
-    const base = await serve([{ exit: 1, stderr: "boom: the harness crashed" }]);
+  it("still terminates the stream when the pass fails", async () => {
+    const base = await serve([{ fail: "boom: the model crashed" }]);
     const { status, events } = await postTurn(base, TURN_BODY);
     expect(status).toBe(200);
     expect(events[0]?.type).toBe("start");
@@ -519,7 +519,7 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     expect(completed.events[ownerIndex]).toEqual({ type: "owner_message", text: "Keep the result understated." });
     expect(completed.events.slice(ownerIndex).some((event) => event.type === "text_delta")).toBe(true);
     expect(terminalCount(completed.events)).toBe(1);
-    expect(harness!.calls().map((call) => call.prompt)).toEqual(["Set the type.", "Keep the result understated."]);
+    expect(harness!.calls().map((call) => call.message)).toEqual(["Set the type.", "Keep the result understated."]);
 
     expect(await (await fetch(queueUrl(base, "conv-queue"))).json())
       .toEqual({ streaming: false, followUp: [] });
@@ -562,7 +562,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       id: "conv-1",
       title: "Who are you",
       preview: "Who are you?",
-      harness: "fake",
+      harness: "local",
       messageCount: 2,
       pinned: false,
       unread: true,
@@ -625,23 +625,6 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
       sessions: Array<{ id: string; pinned: boolean }>;
     }
   ).sessions;
-
-  it("lists agents, sets and clears the ghost's preference, and switches a conversation", async () => {
-    const base = await serve();
-    const ghostHarness = (init?: RequestInit) => fetch(`${base}/api/ghosts/casper/harness`, init);
-    const put = (body: unknown): RequestInit => ({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-
-    expect(await (await ghostHarness()).json()).toMatchObject({ harnesses: [{ id: "fake" }], ghostDefault: null });
-    expect(await (await ghostHarness(put({ harness: "fake" }))).json()).toMatchObject({ ghostDefault: "fake" });
-    expect(await (await ghostHarness(put({ harness: null }))).json()).toMatchObject({ ghostDefault: null });
-    expect((await ghostHarness(put({ harness: "nope" }))).status).toBe(400);
-    expect((await ghostHarness(put({}))).status).toBe(400);
-    expect((await ghostHarness({ method: "DELETE" })).status).toBe(405);
-
-    const switched = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/harness`, put({ harness: "fake" }));
-    expect(await switched.json()).toEqual({ id: "conv-1", harness: "fake" });
-    expect((await fetch(`${base}/api/ghosts/casper/sessions/conv-1/harness`, put({ harness: null }))).status).toBe(400);
-  });
 
   it("pins a conversation, lists it first, and unpins it again", async () => {
     const base = await serve();

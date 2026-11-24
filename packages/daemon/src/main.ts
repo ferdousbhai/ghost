@@ -37,9 +37,8 @@ Subcommands:
                            401. To replace it, delete the file and restart.
   hook-complete            Command-hook bridge. Reads ghost_home and prompt as
                            JSON on stdin, asks the running daemon, and writes
-                           one completion as JSON on stdout, from the harness
-                           a new conversation would start on (or the local
-                           model).
+                           one completion as JSON on stdout, from the local
+                           model.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -134,7 +133,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 /**
- * Point every child — a harness turn, a hook, `ghostd hook-complete`, `ghost`
+ * Point every child — a turn's commands, a hook, `ghostd hook-complete`, `ghost`
  * — at this daemon: a `--port`, `--config`, or `--ghosts-root` flag is
  * otherwise invisible to them, and they would address the default daemon.
  */

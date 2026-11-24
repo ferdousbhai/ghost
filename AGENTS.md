@@ -8,19 +8,19 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, a window, 
 
 ## Authoritative contract
 
-`CONTRACTS.md` defines the ghost-home layout, daemon API, the harness table, package boundaries, and lifecycle invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
+`CONTRACTS.md` defines the ghost-home layout, daemon API, the local model's loop, package boundaries, and lifecycle invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
 
 ## Glossary
 
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
 - **ghost** — the owner's one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
-- **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
+- **local model** — the GGUF model ghostd runs and loops over; every turn runs on it. **coding agent** — an agent CLI the owner already has (claude, codex, agy), which the model runs from its shell. In code and on the wire, `harness` names what carried a conversation: `local`, or an agent CLI in an older log.
 - **daemon** (`ghostd`) — the HTTP API that owns conversations; **window** (`ghost-window`) — the GTK app that talks to it.
 
 ## Taste
 
 Use the simplest design that makes correct behavior obvious. Follow
-`CONTRACTS.md`'s product boundary: use existing CLI/skill and harness behavior,
+`CONTRACTS.md`'s product boundary: use existing CLI/skill behavior,
 justify new surfaces, and weigh dependencies by installed size. Delete
 superseded machinery rather than preserving parallel implementations.
 

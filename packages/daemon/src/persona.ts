@@ -59,7 +59,7 @@ interface GhostSystemPromptInput {
 
 /**
  * The character alone, or its unwritten stand-in: all a local pass gets, since
- * the policy sections after it are for a harness with a shell and file tools.
+ * the policy sections after it are for a model with a shell.
  */
 export function characterSection(input: Pick<GhostSystemPromptInput, "ghostName" | "character">): string {
   const body = input.character?.body;

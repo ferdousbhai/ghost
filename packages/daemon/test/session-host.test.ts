@@ -1,17 +1,15 @@
 /**
- * The session host over a scripted harness: what a turn hands the harness
- * (persona, cwd, env, resume), what it streams back, what the
- * conversation log keeps, and how it chooses and falls back between harnesses.
+ * The session host over a scripted answerer: what a turn hands a pass
+ * (persona, cwd, env), what it streams back, and what the conversation log
+ * keeps.
  */
-import { fileURLToPath } from "node:url";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
-import type { LocalModel } from "../src/local-model.js";
 import { readPins, readReads } from "../src/sidecars.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
@@ -34,7 +32,7 @@ function harness(...args: Parameters<typeof fakeHarness>): FakeHarness {
   return created;
 }
 
-function host(options: Partial<SessionHostOptions> & { harnesses: FakeHarness[] }): SessionHost {
+function host(options: Partial<SessionHostOptions> & { harnesses: [FakeHarness] }): SessionHost {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper", character: "# Casper\n\nYou are Casper, a letterpress printer.\n" });
@@ -42,7 +40,7 @@ function host(options: Partial<SessionHostOptions> & { harnesses: FakeHarness[] 
   return new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(...fakes),
+    ...onlyHarnesses(fakes[0]),
     ...rest,
   });
 }
@@ -73,14 +71,14 @@ describe("a turn", () => {
     const [call] = fake.calls();
     expect(call).toMatchObject({
       prompt: "What do you do?",
-      resume: false,
       cwd: conversationDir(sessionDir(), "c1"),
       ghost: "casper",
       session: "c1",
     });
-    expect(call?.agents).toContain("You are Casper, a letterpress printer.");
-    expect(call?.agents).toContain("## Character file");
-    expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(true);
+    expect(call?.persona).toContain("You are Casper, a letterpress printer.");
+    expect(call?.persona).toContain("## Character file");
+    // The persona reaches the model directly: no file of it is left for a coding agent run there to read.
+    expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(false);
   });
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {
@@ -89,18 +87,18 @@ describe("a turn", () => {
     await turn(sessions, "first");
     writeFileSync(ghostPaths(join(temp.root, "casper")).characterFile, "# Casper\n\nYou are Casper, now a bookbinder.\n");
     await turn(sessions, "second");
-    expect(fake.calls()[1]?.agents).toContain("now a bookbinder");
+    expect(fake.calls()[1]?.persona).toContain("now a bookbinder");
   });
 
-  it("resumes the harness's own session on a later turn and records both in the log", async () => {
+  it("hands a later turn the conversation so far and records both in the log", async () => {
     const fake = harness(replies("pong", "pong again"));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "ping");
     await turn(sessions, "again");
 
-    expect(fake.calls().map((call) => [call.prompt, call.resume])).toEqual([["ping", false], ["again", true]]);
+    expect(fake.calls().map((call) => call.prompt)).toEqual(["ping", "<conversation-so-far>\nOwner: ping\n\nYou: pong\n</conversation-so-far>\n\nagain"]);
     const transcript = await sessions.readTranscript("casper", "c1");
-    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("fake");
+    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("local");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
       ["assistant", [{ type: "text", text: "pong" }]],
@@ -130,146 +128,26 @@ describe("a turn", () => {
   });
 
   // pi reports a failed request, then retries it itself: the retry's answer stands.
-  it("answers when the harness recovers from an error by retrying", async () => {
-    const fake = harness([{ events: [
-      { type: "error", message: "Connection error." },
-      { type: "retry" },
-      { type: "text", block: "r", delta: "ok" },
-    ] }]);
+  it("ends in an error that keeps what was said before it", async () => {
+    const fake = harness([{ events: [{ type: "text", block: "a", delta: "partial" }], fail: "connection reset" }]);
     const sessions = host({ harnesses: [fake] });
     const events = await turn(sessions, "hello");
 
-    expect(events.at(-1)?.type).toBe("done");
-    const assistant = (await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant");
-    expect(assistant?.content).toEqual([{ type: "text", text: "ok" }]);
-    expect(assistant).not.toHaveProperty("errorMessage");
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "connection reset" });
+    expect((await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ errorMessage: "connection reset", content: [{ type: "text", text: "partial" }] });
   });
 
-  it("ends in an error, not a fallback, when the harness failed after answering", async () => {
-    const first = harness([{ events: [{ type: "text", block: "a", delta: "partial" }, { type: "error", message: "connection reset" }] }], "first");
-    const second = harness(replies("unused"), "second");
-    const sessions = host({ harnesses: [first, second] });
-    const events = await turn(sessions, "hello");
-
-    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "connection reset" });
-    expect(second.calls()).toEqual([]);
-    expect((await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant")).toMatchObject({ errorMessage: "connection reset" });
+  it("names the coding agent the owner chose to the pass", async () => {
+    const fake = harness(replies("ok"));
+    const sessions = host({ harnesses: [fake], codingAgent: async () => "codex" });
+    await turn(sessions, "hi");
+    expect(fake.calls()[0]?.codingAgent).toBe("codex");
   });
 });
 
-describe("harness choice", () => {
-  it("hands a prompt the first harness refused to the next one", async () => {
-    const refusing = harness([{ exit: 1, stderr: "Not logged in. Run login first." }], "first");
-    const willing = harness(replies("here"), "second");
-    const sessions = host({ harnesses: [refusing, willing] });
-    const events = await turn(sessions, "hello");
-
-    expect(text(events)).toBe("here");
-    expect(events.at(-1)).toMatchObject({ type: "done" });
-    expect((await sessions.listSessions("casper"))[0]?.harness).toBe("second");
-    expect(events.filter((event) => event.type === "harness")).toEqual([
-      { type: "harness", harness: "first" },
-      { type: "harness", harness: "second" },
-    ]);
-  });
-
-  // A spent or misconfigured harness is not tried first again turn after turn:
-  // a new conversation starts on the one that answered.
-  it("tries a harness that just failed before answering last, until it answers again", async () => {
-    const spent = harness([{ exit: 1, stderr: "429 You have reached your API usage limits." }], "first");
-    const willing = harness(replies("one", "two", "three"), "second");
-    const sessions = host({ harnesses: [spent, willing] });
-    await turn(sessions, "hello", "c1");
-    expect(spent.calls()).toHaveLength(1);
-
-    const fresh = await turn(sessions, "again", "c2");
-    expect(text(fresh)).toBe("two");
-    expect(spent.calls()).toHaveLength(1);
-    const resting = (await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting;
-    expect(resting?.reason).toContain("usage limits");
-    // A limit rests it for about an hour.
-    expect(Date.parse(resting?.until ?? "") - Date.now()).toBeGreaterThan(50 * 60_000);
-
-    // Naming it is the owner's retry.
-    await sessions.chooseHarness("casper", "c2", "first");
-    expect((await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting).toBeNull();
-  });
-
-  it("rests a harness until the time its refusal names", async () => {
-    const back = new Date(Date.now() + 3 * 86_400_000);
-    const day = back.toISOString().slice(0, 10);
-    const spent = harness([{ exit: 1, stderr: `429 monthly API usage threshold. You will regain access on ${day} at 00:00 UTC.` }], "first");
-    const sessions = host({ harnesses: [spent, harness(replies("here"), "second")] });
-    await turn(sessions, "hello");
-    const resting = (await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting;
-    expect(resting?.until).toBe(`${day}T00:00:00.000Z`);
-  });
-
-  it("still tries a resting harness when everything ahead of it fails", async () => {
-    const flaky = harness([{ exit: 1, stderr: "Connection error." }, ...replies("back")], "first");
-    const broken = harness([{ exit: 1, stderr: "model_not_found" }], "second");
-    const sessions = host({ harnesses: [flaky, broken] });
-    await turn(sessions, "hello", "c1");
-    // Both rest now; the next turn still reaches the one that recovered.
-    const events = await turn(sessions, "again", "c2");
-    expect(text(events)).toBe("back");
-    expect((await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting).toBeNull();
-  });
-
-  it("lists the model and effort the carrying harness last reported, and forgets them on a switch", async () => {
-    const first = harness([{ events: [{ type: "model", model: "gpt-6-astra", provider: "openai-codex" }, { type: "text", block: "r", delta: "hi" }] }], "first");
-    const sessions = host({ harnesses: [first, harness(replies("hey"), "second")] });
-    await turn(sessions, "hello");
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ harness: "first", model: "gpt-6-astra", provider: "openai-codex", effort: null });
-
-    await sessions.chooseHarness("casper", "c1", "second");
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ harness: "second", model: null, provider: null, effort: null });
-  });
-
-  it("asks a harness whose output names no model for the session it reported", async () => {
-    const quiet = harness([{ events: [{ type: "session", id: "thread-1" }, { type: "text", block: "r", delta: "hi" }] }], "quiet");
-    const asked: string[] = [];
-    Object.assign(quiet.row, {
-      effort: "low",
-      inspectSession: async (session: string) => {
-        asked.push(session);
-        return [{ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" }];
-      },
-    });
-    const sessions = host({ harnesses: [quiet] });
-    await turn(sessions, "hello");
-    expect(asked).toEqual(["thread-1"]);
-    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ model: "gpt-6.1-sol", provider: "openai", effort: "medium" });
-  });
-
-  it("names a quota refusal when no harness is left", async () => {
-    const spent = harness([{ exit: 1, stderr: "You've hit your usage limit." }], "only");
-    const sessions = host({ harnesses: [spent] });
-    const events = await turn(sessions, "hello");
-
-    expect(events).toContainEqual({ type: "limit_reached", harness: "only", kind: "usage_limit" });
-    expect(events.at(-1)).toMatchObject({ type: "error" });
-  });
-
-  it("carries the conversation so far to a harness that takes over", async () => {
-    const first = harness(replies("I am Casper.", "unused"), "first");
-    const second = harness(replies("Still Casper."), "second");
-    let eligible = ["first", "second"];
-    const sessions = host({
-      harnesses: [first, second],
-      eligibleHarnesses: async () => eligible,
-    });
-    await turn(sessions, "Who are you?");
-    eligible = ["second"];
-    await turn(sessions, "And now?");
-
-    const [call] = second.calls();
-    expect(call?.resume).toBe(false);
-    expect(call?.prompt).toContain("<conversation-so-far>\nOwner: Who are you?\n\nYou: I am Casper.\n</conversation-so-far>");
-    expect(call?.prompt.endsWith("And now?")).toBe(true);
-  });
-
-  it("hands the log to the harness again after the owner moved the home under another name", async () => {
+describe("where a turn runs", () => {
+  it("runs in the home's new place after the owner moved it under another name", async () => {
     const fake = harness(replies("I am Casper.", "Still here."));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "Who are you?");
@@ -278,46 +156,18 @@ describe("harness choice", () => {
     await sessions.runTurn("wisp", { sessionId: "c1", prompt: "And now?", emit: (event) => events.push(event) });
 
     const second = fake.calls()[1];
-    expect(second?.resume).toBe(false);
     expect(second?.cwd).toBe(conversationDir(ghostPaths(join(temp.root, "wisp")).sessionDir, "c1"));
     expect(second?.prompt).toContain("Owner: Who are you?");
   });
 
-  it("links no skills into a conversation, and takes away only the links earlier versions made", async () => {
-    const fake = harness(replies("one", "two"));
-    const sessions = host({ harnesses: [fake] });
-    await turn(sessions, "hi");
-    const cwd = fake.calls()[0]?.cwd ?? "";
-    expect(existsSync(join(cwd, ".claude", "skills"))).toBe(false);
-    mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
-    symlinkSync("/usr/lib/ghost/skills/web-browser", join(cwd, ".agents", "skills", "web-browser"));
-    symlinkSync(join(temp.root, "casper", "skills", "mine"), join(cwd, ".agents", "skills", "mine"));
-    symlinkSync(fileURLToPath(new URL("../../../skills/checkout", import.meta.url)), join(cwd, ".agents", "skills", "checkout"));
-    symlinkSync("/opt/elsewhere/theirs", join(cwd, ".agents", "skills", "theirs"));
-    writeFileSync(join(cwd, ".agents", "skills", "notes.md"), "the owner's");
-    mkdirSync(join(cwd, ".claude"), { recursive: true });
-    symlinkSync(join(temp.root, "casper", "skills"), join(cwd, ".claude", "skills"));
-    await sessions.runTurn("casper", { sessionId: "c1", prompt: "again", emit: () => {} });
-    expect(lstatSync(join(cwd, ".agents", "skills", "web-browser"), { throwIfNoEntry: false })).toBeUndefined();
-    expect(lstatSync(join(cwd, ".agents", "skills", "mine"), { throwIfNoEntry: false })).toBeUndefined();
-    expect(lstatSync(join(cwd, ".agents", "skills", "checkout"), { throwIfNoEntry: false })).toBeUndefined();
-    expect(lstatSync(join(cwd, ".claude", "skills"), { throwIfNoEntry: false })).toBeUndefined();
-    expect(readlinkSync(join(cwd, ".agents", "skills", "theirs"))).toBe("/opt/elsewhere/theirs");
-    expect(readFileSync(join(cwd, ".agents", "skills", "notes.md"), "utf8")).toBe("the owner's");
-  });
-
-  it("prefers the ghost's harness setting over Omarchy's order", async () => {
-    const first = harness(replies("from first"), "first");
-    const second = harness(replies("from second"), "second");
-    const sessions = host({ harnesses: [first, second] });
-    writeFileSync(join(temp.root, "casper", "settings.yml"), "harness: second\n");
-    expect(text(await turn(sessions, "hi"))).toBe("from second");
-  });
-
-  it("fails plainly when no harness is eligible", async () => {
-    const sessions = host({ harnesses: [], eligibleHarnesses: async () => [] });
+  it("fails plainly when no local model is configured", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    seedGhost(temp.root, { name: "casper" });
+    const sessions = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome });
     const events = await turn(sessions, "hi");
-    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: expect.stringContaining("ghost harnesses") });
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: expect.stringContaining("local.model") });
+    await expect(sessions.complete("casper", "Review this.", new AbortController().signal)).rejects.toMatchObject({ code: "no_local_model" });
   });
 });
 
@@ -342,7 +192,7 @@ describe("queued follow-ups and aborts", () => {
       { type: "owner_message", text: "two" },
     ]);
     expect(text(events)).toBe("firstsecond");
-    expect(fake.calls().map((call) => [call.prompt, call.resume])).toEqual([["one", false], ["two", true]]);
+    expect(fake.calls().map((call) => call.prompt.split("\n").at(-1))).toEqual(["one", "two"]);
     expect(events.filter((event) => event.type === "done" || event.type === "error")).toHaveLength(1);
   });
 
@@ -385,7 +235,7 @@ describe("queued follow-ups and aborts", () => {
   it("still runs a follow-up queued behind a pass that failed", async () => {
     const fake = harness([]);
     const gate = fake.gate("first");
-    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "half" }], exit: 1, stderr: "crashed", gate: gate.path }, ...replies("second")]);
+    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "half" }], fail: "crashed", gate: gate.path }, ...replies("second")]);
     const sessions = host({ harnesses: [fake] });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
@@ -393,7 +243,7 @@ describe("queued follow-ups and aborts", () => {
     await sessions.queueMessage("casper", "c1", "two");
     gate.release();
     await running;
-    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
+    expect(fake.calls().map((call) => call.message)).toEqual(["one", "two"]);
     expect(events.at(-1)).toEqual({ type: "done" });
     const { messages } = await sessions.readTranscript("casper", "c1", {});
     expect(messages.map((message) => [message.role, message.errorMessage ?? null])).toEqual([
@@ -411,7 +261,7 @@ describe("queued follow-ups and aborts", () => {
     await expect(sessions.queueMessage("casper", "c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
   });
 
-  it("kills the harness on stop and ends the turn aborted", async () => {
+  it("stops the pass on stop and ends the turn aborted", async () => {
     const fake = harness([]);
     fake.setTurns([{ gate: fake.gate("never").path }]);
     const sessions = host({ harnesses: [fake] });
@@ -545,35 +395,13 @@ describe("owner commands and hooks", () => {
     expect(messages).toEqual([]);
   });
 
-  it("streams and logs a compaction where the harness reports it", async () => {
-    const sessions = host({ harnesses: [harness([{ events: [
-      { type: "compacted", trigger: "auto", preTokens: 287944 },
-      { type: "text", block: "reply", delta: "picked up" },
-    ] }])] });
-    const events = await turn(sessions, "go on");
-    expect(events).toContainEqual({ type: "compacted", trigger: "auto", preTokens: 287944 });
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
-    expect(messages.map((message) => message.role)).toEqual(["user", "compacted", "assistant"]);
-  });
-
-  it("logs a compaction found in the harness's own session record ahead of the reply, without streaming it", async () => {
-    const fake = harness([{ events: [{ type: "session", id: "thread-c" }, { type: "text", block: "reply", delta: "done" }] }]);
-    const inspected = { ...fake, row: { ...fake.row, inspectSession: async () => [{ type: "compacted" as const, trigger: "auto", preTokens: 372416, at: "2026-11-16T08:03:02.000Z" }] } };
-    const sessions = host({ harnesses: [inspected] });
-    const events = await turn(sessions, "go on");
-    expect(events.some((event) => event.type === "compacted")).toBe(false);
-    const { messages } = await sessions.readTranscript("casper", "c1", {});
-    expect(messages.map((message) => message.role)).toEqual(["user", "compacted", "assistant"]);
-    expect(messages[1]?.content).toEqual([{ type: "text", text: "auto · 372k tokens" }]);
-  });
-
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });
     await turn(sessions, "hello");
     await turn(sessions, "!!echo secret");
     await turn(sessions, "next");
-    expect(fake.calls()[1]?.prompt).toBe("next");
+    expect(fake.calls()[1]?.message).toBe("next");
   });
 
   it("continues the turn while a session_stop hook asks it to", async () => {
@@ -595,7 +423,7 @@ describe("owner commands and hooks", () => {
       { type: "hook_end", name: "Review", event: "session_stop" },
       expect.objectContaining({ type: "done" }),
     ]);
-    expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
+    expect(fake.calls()[1]?.message).toBe("Stop hook feedback:\nverify it");
     expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
     const [first, continued] = stop.inputs();
     expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: expect.any(String), stop_hook_active: false });
@@ -648,7 +476,7 @@ describe("owner commands and hooks", () => {
     await running;
 
     // The first pass is not reviewed; the follow-up's own pass is.
-    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two", "Stop hook feedback:\nverify it"]);
+    expect(fake.calls().map((call) => call.message)).toEqual(["one", "two", "Stop hook feedback:\nverify it"]);
     expect(events.findIndex((event) => event.type === "owner_message"))
       .toBeLessThan(events.findIndex((event) => event.type === "session_stop_continued"));
     const [reviewed, continued] = stop.inputs();
@@ -667,101 +495,13 @@ describe("owner commands and hooks", () => {
     writeFileSync(stop.go, "");
     await running;
 
-    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
+    expect(fake.calls().map((call) => call.message)).toEqual(["one", "two"]);
     expect(events).toContainEqual({ type: "owner_message", text: "two" });
     expect(events.some((event) => event.type === "session_stop_continued")).toBe(false);
     const [first, reviewed] = stop.inputs();
     expect(first).toMatchObject({ owner_prompt: "one", turn_id: expect.any(String) });
     expect(reviewed).toMatchObject({ owner_prompt: "two", stop_hook_active: false });
     expect(reviewed?.turn_id).not.toBe(first?.turn_id);
-  });
-});
-
-describe("choosing the agent", () => {
-  it("lists the agents with the automatic choice, and sets and clears the ghost's own", async () => {
-    const first = harness(replies("from first"), "first");
-    const second = harness(replies("from second"), "second");
-    const sessions = host({ harnesses: [first, second], defaultHarness: async () => "first" });
-    const settings = join(temp.root, "casper", "settings.yml");
-    writeFileSync(settings, "# the owner's note\nother: kept\n");
-
-    expect(await sessions.listHarnesses("casper")).toMatchObject({
-      harnesses: [{ id: "first", effort: null }, { id: "second", effort: null }],
-      ghostDefault: null,
-      automatic: "first",
-    });
-    expect(await sessions.setGhostHarness("casper", "second")).toMatchObject({ ghostDefault: "second", automatic: "second" });
-    expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\nharness: second\n");
-    expect(text(await turn(sessions, "hi"))).toBe("from second");
-
-    expect((await sessions.setGhostHarness("casper", null)).ghostDefault).toBeNull();
-    expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\n");
-    await expect(sessions.setGhostHarness("casper", "nope")).rejects.toMatchObject({ code: "unknown_harness" });
-  });
-
-  it("reports the local model as the automatic choice when it is configured, as turns run", async () => {
-    const first = harness(replies("unused"), "first");
-    const sessions = host({ harnesses: [first], defaultHarness: async () => "first", localModel: {} as LocalModel });
-    expect(await sessions.listHarnesses("casper")).toMatchObject({ ghostDefault: null, automatic: "local" });
-    expect((await sessions.setGhostHarness("casper", "first")).automatic).toBe("first");
-  });
-
-  it("switches one conversation, handing the new agent the conversation so far", async () => {
-    const first = harness(replies("I am Casper.", "unused"), "first");
-    const second = harness(replies("Still Casper."), "second");
-    const sessions = host({ harnesses: [first, second] });
-    await turn(sessions, "Who are you?");
-    await sessions.chooseHarness("casper", "c1", "second");
-    expect(text(await turn(sessions, "And now?"))).toBe("Still Casper.");
-
-    const [call] = second.calls();
-    expect(call?.resume).toBe(false);
-    expect(call?.prompt).toContain("Owner: Who are you?\n\nYou: I am Casper.");
-    expect((await sessions.listSessions("casper"))[0]?.harness).toBe("second");
-    await expect(sessions.chooseHarness("casper", "c1", "nope")).rejects.toMatchObject({ code: "unknown_harness" });
-    // A new conversation can be pointed at an agent before its first turn.
-    await sessions.chooseHarness("casper", "c2", "first");
-    await turn(sessions, "hello", "c2");
-    expect(first.calls().map((c) => c.prompt)).toContain("hello");
-  });
-  it("a running turn cannot have its harness switched underneath it", async () => {
-    const first = harness([], "first");
-    const held = first.gate("turn");
-    first.setTurns([{ gate: held.path, ...replies("done")[0] }]);
-    const sessions = host({ harnesses: [first, harness(replies("unused"), "second")] });
-    const running = turn(sessions, "start");
-    await waitFor(() => first.calls().length === 1);
-
-    await expect(sessions.chooseHarness("casper", "c1", "second")).rejects.toMatchObject({ code: "session_busy" });
-    held.release();
-    await running;
-    expect((await sessions.listSessions("casper"))[0]?.harness).toBe("first");
-  });
-  it("lets the owner choose a harness the report lists", async () => {
-    const fake = harness(replies("x"));
-    const sessions = host({
-      harnesses: [fake],
-      harnessReport: async () => ({
-        harnesses: [{ id: "fake", usage: null }],
-        refresh: "omarchy agent usage update",
-      }),
-    });
-    await expect(sessions.chooseHarness("casper", "c1", "fake")).resolves.toEqual({ id: "c1", harness: "fake" });
-  });
-  it("shares one harness report between the picker, a choice, and a turn", async () => {
-    const fake = harness(replies("x"));
-    let reports = 0;
-    const sessions = host({
-      harnesses: [fake],
-      harnessReport: async () => {
-        reports += 1;
-        return { harnesses: [{ id: "fake", usage: null }], refresh: "omarchy agent usage update" };
-      },
-    });
-    await sessions.listHarnesses("casper");
-    await sessions.chooseHarness("casper", "c1", "fake");
-    await turn(sessions, "hello");
-    expect(reports).toBe(1);
   });
 });
 
@@ -887,7 +627,7 @@ describe("completion delivery", () => {
   });
   it("reports failed turns and fails open when the delivery service is unavailable", async () => {
     const notifications: GhostHookEvent[] = [];
-    const sessions = host({ harnesses: [harness([{ exit: 1, stderr: "service unavailable" }])], hooks: delivery(notifications, true) });
+    const sessions = host({ harnesses: [harness([{ fail: "service unavailable" }])], hooks: delivery(notifications, true) });
     const events = await turn(sessions, "Try it");
     await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);

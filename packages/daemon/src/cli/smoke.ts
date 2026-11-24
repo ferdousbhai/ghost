@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { defaultConfigPath } from "../config.js";
 import { freePort, waitUntilServing } from "../loopback.js";
-import { ArgsError, flagBoolean, flagString } from "./args.js";
+import { ArgsError, flagBoolean } from "./args.js";
 import { EXIT_CODE } from "./client.js";
 import { ghostCli } from "./main.js";
 import { emit } from "./output.js";
@@ -111,11 +112,21 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
     GHOSTD_PORT: String(port),
     GHOSTD_API_TOKEN_FILE: tokenFile,
     XDG_STATE_HOME: join(scratch, "state"),
-    // Harnesses keep their sign-ins under the owner's own XDG config and data
-    // directories, so only Ghost's config moves into the scratch tree.
+    // Only Ghost's config moves into the scratch tree.
     GHOSTD_CONFIG: join(scratch, "config", "ghost", "config.json"),
     GHOSTD_HOOKS: join(scratch, "config", "ghost", "hooks.json"),
   };
+  // The scratch daemon answers on the owner's local model, and takes nothing else of their config.
+  try {
+    const owned = ctx.runtime.env.GHOSTD_CONFIG?.trim() || defaultConfigPath(ctx.runtime.env, ctx.runtime.home);
+    const { local } = JSON.parse(readFileSync(owned, "utf8")) as { local?: unknown };
+    if (local !== undefined) {
+      mkdirSync(join(scratch, "config", "ghost"), { recursive: true });
+      writeFileSync(join(scratch, "config", "ghost", "config.json"), JSON.stringify({ local }));
+    }
+  } catch {
+    // No config, or one the daemon itself would refuse: the turn step says no model is configured.
+  }
   const command = daemonCommand(ctx);
   const child = spawn(command[0] as string, [...command.slice(1), "--port", String(port)], {
     cwd: process.cwd(),
@@ -154,13 +165,6 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
     const { ghost } = JSON.parse(await runScratchCli(["status", "--json"], options)) as { ghost: string | null };
     if (!ghost) throw new Error("the daemon made no ghost home on its first start");
     report("ghost", true, ghost);
-    const harness = flagString(parsed, "harness");
-    if (harness) {
-      step = "harness";
-      // Through the daemon, as every CLI change to a ghost goes (CONTRACTS.md).
-      await runScratchCli(["harness", harness, "-q"], options);
-      report("harness", true, harness);
-    }
     step = "turn";
     if (flagBoolean(parsed, "no-turn")) {
       report("turn", true, "skipped (--no-turn)", true);
@@ -175,8 +179,8 @@ export async function smokeCommand(ctx: CliContext): Promise<number> {
       if (!reply) throw new Error("turn returned no text");
       report("turn", true, reply);
 
-      // A second turn in the same conversation resumes the harness's own
-      // session: the reply must show the conversation kept its context.
+      // A second turn in the same conversation is handed the first: the
+      // reply must show the conversation kept its context.
       step = "second turn";
       const sessionId = readSessionId(
         (await runScratchCli(["sessions", "--json"], options)),

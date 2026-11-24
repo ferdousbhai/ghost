@@ -12,11 +12,8 @@ import {
   characterCommand,
   readCommand,
   remoteCommand,
-  harnessCommand,
-  switchCommand,
 } from "./admin.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
-import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { hooksCommand } from "./hooks.js";
 import { sayCommand } from "./say.js";
@@ -161,37 +158,12 @@ export const COMMANDS: readonly Command[] = [
     run: statusCommand,
   },
   {
-    verb: "harnesses",
-    usage: "harnesses [--json] [-q]",
-    summary: "List installed agent CLIs and informational usage windows.",
-    example: "ghost harnesses --json",
-    positionals: [0, 0],
-    run: harnessesCommand,
-  },
-  {
-    verb: "harness",
-    usage: "harness [<agent>|--none] [--json] [-q]",
-    summary: "Show or set the agent a ghost prefers (--none: automatic).",
-    example: "ghost harness claude",
-    positionals: [0, 1],
-    flags: { boolean: ["none"] },
-    run: harnessCommand,
-  },
-  {
-    verb: "switch",
-    usage: "switch <agent> [-s <id>] [--json] [-q]",
-    summary: "Run a conversation's next turn on another agent, handing it the conversation so far.",
-    example: "ghost switch codex",
-    positionals: [1, 1],
-    run: switchCommand,
-  },
-  {
     verb: "smoke",
-    usage: "smoke [--harness <id>] [--keep] [--no-turn] [--json] [-q]",
+    usage: "smoke [--keep] [--no-turn] [--json] [-q]",
     summary: "Exercise a throwaway daemon and ghost home.",
     example: "ghost smoke --no-turn --json",
     positionals: [0, 0],
-    flags: { boolean: ["keep", "no-turn"], value: ["harness"] },
+    flags: { boolean: ["keep", "no-turn"] },
     run: smokeCommand,
   },
   {

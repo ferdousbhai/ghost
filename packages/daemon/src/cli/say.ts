@@ -1,6 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { compactedText } from "../conversation-log.js";
-import { limitNotice, type LimitReachedEvent } from "../turn-events.js";
 import { ArgsError, flagBoolean, flagString } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { conversationId, ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, sessionPath, stdinIsTty, stdinText } from "./common.js";
@@ -86,7 +84,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
     ?? await turnConversationId(ctx, name, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
-  // An owner `!command` streams as one bash card before any harness starts;
+  // An owner `!command` streams as one bash card before any pass starts;
   // its output is the card's summary (its tail), and it is this
   // turn's whole answer. ghostd alone decides what a command is.
   let harnessStarted = false;
@@ -112,9 +110,7 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
       }
       if (event.type === "harness") harnessStarted = true;
       else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
-      if (event.type === "limit_reached") {
-        ctx.runtime.stderr.write(`ghost: ${limitNotice(event as unknown as LimitReachedEvent)}\n`);
-      } else if (event.type === "error") {
+      if (event.type === "error") {
         terminal = "error";
         ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);
       } else if (event.type === "done" && terminal !== "error") terminal = "done";
@@ -133,8 +129,6 @@ export async function sayCommand(ctx: CliContext): Promise<number> {
           human = `${event.text}\n`;
         } else if (event.type === "session_stop_continued" && typeof event.reason === "string") {
           human = `Stop hook · ${event.reason}\n`;
-        } else if (event.type === "compacted" && typeof event.trigger === "string") {
-          human = `Context compacted · ${compactedText({ trigger: event.trigger, ...(typeof event.preTokens === "number" ? { preTokens: event.preTokens } : {}) })}\n`;
         } else if (event.type === "tool_execution_end" && ownerCommand && typeof event.summary === "string") {
           human = quiet = `${event.summary}\n`;
         } else if (event.type === "done") {

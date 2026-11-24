@@ -11,7 +11,7 @@ import { existsSync } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { GhostError } from "./errors.js";
-import { which } from "./harnesses.js";
+import { which } from "./coding-agent.js";
 import { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
 
 export const SOURCE_IDS = ["files", "notes", "reminders", "keep", "whatsapp", "drive", "google-drive", "mail", "contacts", "calendar", "photos", "google-photos", "lastbook"] as const;

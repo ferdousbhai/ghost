@@ -25,6 +25,13 @@ Done since:
   surface. With it went the `desktop` field of a message, the QR route
   (`/api/remote/qr.svg`) and the `qrencode` dependency, and the
   `ghost`/`ghost-runtime` package split: one package, `ghost`, replaces both.
+- Every turn runs on the local model. The table of ten cloud agent CLIs, the
+  failover between them, their usage display, `ghost harness`, `ghost switch`,
+  `ghost harnesses`, `settings.yml`, and the persona files written into each
+  conversation directory are deleted; with no `local.model` configured no
+  turn runs.
+- The package builds the daemon from the release's source archive; the
+  prebuilt runtime archive and its verifiers are deleted.
 - The window is on omui 0.5.7, its composer has the keyboard when Ask shows,
   and Escape empties a source page's search.
 

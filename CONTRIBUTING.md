@@ -18,7 +18,7 @@ their GitHub identity; an existing instruction to push is sufficient.
 2. Update contracts and all affected consumers together. Add a focused test
    for behavior changes; run the affected tests and package typecheck.
 3. Commit the problem, change, and reason. Justify any prompt-budget increase
-   in the message. A ghost-authored change can identify its harness in a trailer.
+   in the message. A ghost-authored change can identify its model in a trailer.
 4. Push only within the authorized scope. Master pushes require the full
    `pnpm verify` gate after the final commit; never bypass the hook.
 5. If using a PR, describe the resulting behavior and validation, then remove

@@ -5,7 +5,7 @@
  * names the command; a client runs it in a terminal the owner sees, because
  * every one of them asks the owner something (a password, a sign-in, a code).
  */
-import { which } from "./harnesses.js";
+import { which } from "./coding-agent.js";
 import { json, oneLine, runCommand, type SourceContext } from "./sources.js";
 
 export interface ConnectionAction {

@@ -1,5 +1,5 @@
 pkgbase = ghost-dev
-	pkgdesc = An orchestration layer for all your agent harnesses
+	pkgdesc = Your own data and your ghost, answered by a model on your machine
 	pkgver = 0.0.1.r100.g0c04ce7
 	pkgrel = 1
 	url = https://github.com/ferdousbhai/ghost

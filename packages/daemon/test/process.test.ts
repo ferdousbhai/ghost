@@ -2,10 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { runHarness } from "../src/harness-process.js";
-import type { HarnessEvent } from "../src/harness-table.js";
+import { runProcess } from "../src/process.js";
 
-it("closes inherited pipes and never parses descendant output after settlement", async () => {
+it("closes inherited pipes and takes no descendant output after settlement", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ghost-harness-drain-"));
   const gate = join(directory, "write-late");
   const pidFile = join(directory, "descendant.pid");
@@ -27,18 +26,17 @@ it("closes inherited pipes and never parses descendant output after settlement",
     child.unref();
     process.stdout.write("early\\n");
   `);
-  const events: HarnessEvent[] = [];
+  let output = "";
   try {
-    const result = await runHarness({
-      launch: { argv: [process.execPath, parent] }, cwd: directory, env: process.env,
+    const result = await runProcess({
+      argv: [process.execPath, parent], cwd: directory, env: process.env,
       signal: new AbortController().signal,
-      parse: (line) => [{ type: "text", block: "reply", delta: line }],
-      onEvent: (event) => events.push(event),
+      onStdout: (chunk) => { output += chunk; },
     });
     expect(result.code).toBe(0);
     writeFileSync(gate, "ready");
     await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(events).toEqual([{ type: "text", block: "reply", delta: "early" }]);
+    expect(output).toBe("early\n");
   } finally {
     killCaptured(pidFile);
     rmSync(directory, { recursive: true, force: true });
@@ -94,10 +92,10 @@ it.each(["inherit", "ignore"] as const)("kills the stopped leader's surviving pr
   `);
   const controller = new AbortController();
   try {
-    await runHarness({
-      launch: { argv: [process.execPath, parent] }, cwd: directory, env: process.env,
+    await runProcess({
+      argv: [process.execPath, parent], cwd: directory, env: process.env,
       signal: controller.signal,
-      parse: () => { controller.abort(); return []; }, onEvent: () => {},
+      onStdout: () => controller.abort(),
     });
     const pid = readPid(pidFile);
     expect(pid).toBeGreaterThan(0);
@@ -124,8 +122,8 @@ it("delivers newline-free stdout while the child is still running", async () => 
   `);
   let output = "";
   try {
-    const result = await runHarness({
-      launch: { argv: [process.execPath, script] }, cwd: directory, env: process.env,
+    const result = await runProcess({
+      argv: [process.execPath, script], cwd: directory, env: process.env,
       signal: AbortSignal.timeout(3000),
       onStdout: (chunk) => {
         output += chunk;

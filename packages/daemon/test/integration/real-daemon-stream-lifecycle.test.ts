@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SSE_KEEPALIVE_INTERVAL_MS, type TurnEvent } from "../../src/turn-events.js";
-import type { HarnessEvent } from "../../src/harness-table.js";
+import type { PassEvent } from "../../src/local-turn.js";
 import type { FakeTurn } from "../helpers/fake-harness.js";
 import {
   startRealDaemonHarness,
@@ -36,15 +36,15 @@ function expectOneTerminalAtWireEnd(stream: RealSseClient): void {
   expect(stream.frames.slice(terminalFrame + 1)).toEqual([]);
 }
 
-function text(delta: string): HarnessEvent {
+function text(delta: string): PassEvent {
   return { type: "text", block: "a", delta };
 }
 
-function toolCalls(count: number): HarnessEvent[] {
+function toolCalls(count: number): PassEvent[] {
   return Array.from({ length: count }, (_, index) => [
     { type: "tool_start", id: `t${index}`, name: "Bash", args: { command: `step ${index}` } },
     { type: "tool_end", id: `t${index}`, isError: false, output: `ok ${index}` },
-  ] satisfies HarnessEvent[]).flat();
+  ] satisfies PassEvent[]).flat();
 }
 
 /** A gate file the scripted harness waits on; set before the daemon starts. */
@@ -105,10 +105,7 @@ describe("real ghostd streaming lifecycle", () => {
     expect(stream.events[ownerIndex]).toEqual({ type: "owner_message", text: followUpText });
     expect(stream.events.slice(0, ownerIndex).filter((event) => event.type === "tool_execution_end")).toHaveLength(8);
     expect(stream.events.slice(ownerIndex + 1).some((event) => event.type === "text_start")).toBe(true);
-    expect(daemon!.harness.calls().map((call) => [call.prompt, call.resume])).toEqual([
-      ["Run the long integration task.", false],
-      [followUpText, true],
-    ]);
+    expect(daemon!.harness.calls().map((call) => call.message)).toEqual(["Run the long integration task.", followUpText]);
     expect(terminalEvents(stream.events)).toEqual([
       expect.objectContaining({ type: "done" }),
     ]);

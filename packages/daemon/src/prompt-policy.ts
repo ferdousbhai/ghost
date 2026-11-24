@@ -13,16 +13,14 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 ].join("\n");
 
 /**
- * Asking the owner (harnesses withhold their own question tools when run
- * headless, and `ghost ask` marks the conversation as waiting), that the
- * harness's own background jobs die with the turn, and the index of `ghost
- * help` recipes.
+ * Asking the owner (`ghost ask` marks the conversation as waiting), that a
+ * command dies with the turn, and the index of `ghost help` recipes.
  */
 export const GHOST_POLICY = [
   "## Ghost",
   "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
     + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
-    + "next message is the answer. One question at a time. Your harness's own background jobs end "
+    + "next message is the answer. One question at a time. A command you start ends "
     + "with the turn. Before any of these, read its recipe, `ghost help <topic>`: another project's "
     + "work (harnesses), work outliving this turn (background), "
     + "reaching the owner away (notifications), "

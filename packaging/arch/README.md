@@ -7,8 +7,8 @@ the `ghost-runtime-dev` package earlier checkouts split the daemon into.
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
 toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
-tree. Ghost's application code is packaged for offline use; the agent CLIs a
-ghost's turns run on are the owner's own.
+tree. Ghost's application code is packaged for offline use; the model a
+ghost's turns run on is a file the owner provides.
 
 The stable `ghost` recipe lives under `packaging/omarchy/`; it builds the same
 bundles, launchers, and bundled-license closure from a release's source archive.
@@ -41,8 +41,7 @@ updates.
 The package ships no skills: the `ghost` CLI is a ghost's documentation
 (`ghost help products` indexes the recommended products, `ghost help browser`
 the shared Chromium session and task tabs). Each product installs its own skill
-(`<cli> skill install`). Machine skills are whatever each agent CLI discovers on
-its own.
+(`<cli> skill install`). Machine skills are the owner's own, under `~/.agents/skills`.
 
 This remains the rolling, checkout-only development package. Ghost publishes
 a source archive as a GitHub release (`../release/publish.sh`);

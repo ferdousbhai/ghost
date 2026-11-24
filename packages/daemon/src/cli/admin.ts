@@ -1,11 +1,9 @@
 import { ArgsError, flagBoolean } from "./args.js";
-import { conversationId, readArgumentFile, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
+import { readArgumentFile, ghostPath, resolveGhost, resolveTarget } from "./common.js";
 import { emit, primary, writeJson } from "./output.js";
 import { EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import type { RemoteStatus } from "../remote-serve.js";
-import type { HarnessChoices } from "../session-host.js";
-
 
 /** `ghost character [set <file>]`: print or replace `character.md` through the daemon's validating writer. */
 export async function characterCommand(ctx: CliContext): Promise<number> {
@@ -59,48 +57,5 @@ export async function remoteCommand(ctx: CliContext): Promise<number> {
     return EXIT_CODE.failure;
   }
   emit(ctx, status, () => `Remote access is ${action === "on" ? `on at ${status.hostname}` : "off"}.\n${appLines}`);
-  return 0;
-}
-
-/**
- * The preference, and any agent a recent failure keeps at the back;
- * `ghost harnesses` lists installed agents and usage.
- */
-function harnessChoicesText(name: string, body: HarnessChoices, changed: boolean): string {
-  const preferred = body.ghostDefault ?? (body.automatic ? `automatic (now ${body.automatic})` : "automatic");
-  const resting = body.harnesses.flatMap((harness) => harness.resting
-    ? [`${harness.id} is tried last until ${new Date(harness.resting.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${harness.resting.reason}\n`]
-    : []);
-  return `${changed ? `Ghost ${name} now runs on ${preferred}.` : `${name} runs on ${preferred}`}\n${resting.join("")}`;
-}
-
-/** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
-export async function harnessCommand(ctx: CliContext): Promise<number> {
-  const { parsed } = ctx;
-  const id = parsed.positionals[0];
-  if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
-  const name = await resolveGhost(ctx);
-  const body = id || flagBoolean(parsed, "none")
-    ? await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })
-    : await ctx.client.request("GET", ghostPath(name, "/harness"));
-  emit(ctx, body, (result) => {
-    const changed = Boolean(id) || flagBoolean(parsed, "none");
-    const text = harnessChoicesText(name, result as HarnessChoices, changed);
-    return changed ? text : primary(text);
-  });
-  return 0;
-}
-
-/** `ghost switch <id>`: run this conversation's next turn on another agent. */
-export async function switchCommand(ctx: CliContext): Promise<number> {
-  const { parsed } = ctx;
-  const id = parsed.positionals[0];
-  if (!id) throw new ArgsError("ghost switch needs the agent to switch to");
-  const name = await resolveGhost(ctx);
-  const requested = preferredSessionId(ctx);
-  const path = sessionPath(name, requested ? await conversationId(ctx.client, name, requested)
-    : (await resolveSession(ctx.client, name, undefined)).id);
-  const body = await ctx.client.request<{ id: string; harness: string }>("PUT", `${path}/harness`, { harness: id });
-  emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
 }

@@ -6,7 +6,6 @@ import { bash, TOOL_RESULT_CHARS } from "../src/local-tools.js";
 import { untrusted } from "../src/local-turn.js";
 import { SessionHost } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 type Reply = { text?: string; call?: { name: string; args: Record<string, unknown> }; status?: number };
@@ -53,7 +52,7 @@ function makeScratch(): string {
   return dir;
 }
 
-function host(script: Reply[], cloud: FakeHarness = fakeHarness(replies("from the cloud"), "cloud")) {
+function host(script: Reply[], codingAgent: string | null = null) {
   temp?.cleanup();
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -62,15 +61,15 @@ function host(script: Reply[], cloud: FakeHarness = fakeHarness(replies("from th
   mkdirSync(notes, { recursive: true });
   writeFileSync(join(notes, "trip.md"), "The boat leaves at nine from the north pier.");
   const server = fakeServer(script);
-  closers.push(server.close, cloud.cleanup);
+  closers.push(server.close);
   const sessions = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(cloud),
+    codingAgent: async () => codingAgent,
     env: { ...process.env, HOME: temp.ownerHome, PATH: `${dirname(process.execPath)}:/usr/bin` },
     localModel: server.model,
   });
-  return { sessions, server, cloud, root: temp.root, home: temp.ownerHome };
+  return { sessions, server, root: temp.root, home: temp.ownerHome };
 }
 
 async function turn(sessions: SessionHost, prompt: string): Promise<TurnEvent[]> {
@@ -82,17 +81,16 @@ async function turn(sessions: SessionHost, prompt: string): Promise<TurnEvent[]>
 const text = (events: readonly TurnEvent[]) => events.flatMap((event) => event.type === "text_delta" ? [event.delta] : []).join("");
 
 describe("the local model", () => {
-  it("answers a new conversation by default, running the commands it asks for until it answers", async () => {
-    const { sessions, server, cloud, home } = host([
+  it("answers a conversation, running the commands it asks for until it answers", async () => {
+    const { sessions, server, home } = host([
       { call: { name: "bash", args: { command: 'cat "$HOME/Documents/Notes/trip.md"' } } },
       { call: { name: "bash", args: { command: 'echo "Packed" >> "$HOME/Documents/Notes/trip.md"; pwd' } } },
       { text: "Nine, from the north pier (trip.md)." },
     ]);
-    expect((await sessions.listHarnesses("casper")).harnesses.map((row) => row.id)).toContain("local");
     const events = await turn(sessions, "When does the boat leave?");
 
     expect(text(events)).toBe("Nine, from the north pier (trip.md).");
-    // One tool, and the whole persona a harness gets, since this model has a shell too.
+    // One tool, and the whole persona.
     expect(server.requests[0]?.tools).toEqual([expect.objectContaining({ function: expect.objectContaining({ name: "bash" }) })]);
     expect(server.requests[0]?.reasoning_effort).toBe("low");
     const system = String(server.requests[0]?.messages[0]?.content);
@@ -108,7 +106,6 @@ describe("the local model", () => {
     expect(server.requests[2]?.messages.at(-1)?.content).toMatch(/sessions\/c1\n<\/output>$/u);
     expect(readFileSync(join(home, "Documents", "Notes", "trip.md"), "utf8")).toBe("The boat leaves at nine from the north pier.Packed\n");
     expect(events.filter((event) => event.type === "tool_execution_start")).toHaveLength(2);
-    expect(cloud.calls()).toHaveLength(0);
     expect((await sessions.listSessions("casper"))[0]).toMatchObject({ harness: "local", model: "gemma-test", provider: "local" });
   });
 
@@ -125,26 +122,19 @@ describe("the local model", () => {
     expect(types.indexOf("tool_execution_update")).toBeLessThan(types.indexOf("tool_execution_end"));
   });
 
-  it("is not a fallback, and leaves a conversation the owner put on a cloud agent alone", async () => {
+  it("ends the turn in the model's own error", async () => {
     const failing = host([{ status: 500 }]);
     expect((await turn(failing.sessions, "hi")).at(-1)).toMatchObject({ type: "error", errorMessage: expect.stringContaining("500") });
-    expect(failing.cloud.calls()).toHaveLength(0);
-
-    const chosen = host([]);
-    writeFileSync(join(chosen.root, "casper", "settings.yml"), "harness: cloud\n");
-    expect(text(await turn(chosen.sessions, "hi"))).toBe("from the cloud");
-    expect(chosen.server.requests).toHaveLength(0);
   });
 
   it("names only the owner's coding agent, by that agent's own one-shot command", async () => {
-    const withCodex = host([{ text: "ok" }], fakeHarness(replies("unused"), "codex"));
+    const withCodex = host([{ text: "ok" }], "codex");
     await turn(withCodex.sessions, "hi");
     const system = String(withCodex.server.requests[0]?.messages[0]?.content);
     expect(system).toContain('run the owner\'s coding agent in the project\'s directory, by this command exactly but for the task, and read its answer: `codex exec "<task>"`.');
     expect(system).not.toContain("claude -p");
-    expect(withCodex.cloud.calls()).toHaveLength(0);
 
-    // An agent the section has no command for is not named at all.
+    // With none of them installed, the section names none.
     const other = host([{ text: "ok" }]);
     await turn(other.sessions, "hi");
     expect(String(other.server.requests[0]?.messages[0]?.content)).not.toContain("coding agent");

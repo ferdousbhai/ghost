@@ -335,16 +335,6 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
   return context || null;
 }
 
-/** Owner `!` commands since the harness last ran, which it has not seen. */
-export function unseenCommands(entries: readonly LogEntry[]): string | null {
-  const commands: string[] = [];
-  for (const entry of entries) {
-    if (entry.type === "assistant") commands.length = 0;
-    if (entry.type === "command" && !entry.excluded) commands.push(`Owner ran \`${entry.command}\` (exit ${entry.exitCode ?? "signal"}):\n${entry.output}`);
-  }
-  return commands.length > 0 ? commands.join("\n\n") : null;
-}
-
 interface IndexedEntry {
   start: number;
   end: number;

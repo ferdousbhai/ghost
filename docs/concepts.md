@@ -1,22 +1,24 @@
 # Concepts
 
-Ghost gives the owner's installed agent CLIs a persistent persona, shared
-conversation history, and a window on the owner's own data. The daemon owns that
+Ghost gives the owner a persistent persona, one conversation history, and a
+window on their own data. The daemon owns that
 state; the window and terminal are clients of the same authenticated API.
 [Getting started](getting-started.md) covers use;
 [CONTRACTS.md](../CONTRACTS.md) defines storage, wire, and lifecycle guarantees.
 
-## Why harnesses own execution
+## Why a local model answers
 
-Each harness already owns its model, credentials, tools, permissions, retries,
-and compaction. Running it directly avoids a second implementation inside
-Ghost. A harness adapter is launch flags and an output parser.
+A ghost answers from the owner's notes, mail, chats, files and photos. A
+model on the owner's machine keeps all of that there, so it is the only thing
+a turn runs on; Ghost has no cloud model, provider, or sign-in of its own.
 
-Ghost preserves history across harness changes. It can try another installed
-harness when one fails before producing text or starting a tool; afterward it
-ends the turn with the error, avoiding replay of possible side effects.
-Usage reports are informational, never admission gates. Ghost adds no provider,
-spend, or concurrency caps.
+The model's loop is the smallest that works: the persona, one tool (a shell
+that runs as the owner), and no cap on rounds. The owner's products are
+command lines with a skill each, so the shell reaches all of them. Work on
+code goes to the coding agent the owner already uses, run by its own command
+from that shell: the agent keeps its model, credentials, tools and
+permissions, and what the model hands it is the one thing that leaves the
+machine.
 
 ## Why files own durable context
 
@@ -30,8 +32,8 @@ ghost searches it when a task needs it. Recall, an optional separate product,
 can index chosen folders, but its hits only point at the source files, which
 stay authoritative.
 
-A conversation has its own working directory. A delegated harness run can
-use a project's directory and discover that project's instructions normally.
+A conversation has its own working directory. A coding agent run in
+a project's directory discovers that project's instructions normally.
 Ghost adds no trusted-project registry, private memory database, plan mode,
 or todo API.
 
@@ -53,8 +55,7 @@ or todo API.
 
 ## Adding behavior
 
-First consider an installed CLI and its skill, an owner hook, or a harness
-feature. A new Ghost surface needs a demonstrated constraint those cannot
+First consider an installed CLI and its skill, or an owner hook. A new Ghost surface needs a demonstrated constraint those cannot
 meet and must say what it replaces. Dependencies cost installed bytes as well
 as code.
 

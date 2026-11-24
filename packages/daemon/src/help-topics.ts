@@ -1,7 +1,7 @@
 /**
  * The long recipes a ghost needs only when it does one particular thing:
- * editing or restarting itself, handing work to another
- * harness, finding a note, transcribing audio. The prompt's Ghost section
+ * editing or restarting itself, handing work to a coding
+ * agent, finding a note, transcribing audio. The prompt's Ghost section
  * indexes them by name and `ghost help <topic>` prints them, so their cost
  * lands on the turn that needs them and not on every turn. The
  * text is still contract text the ghost acts on: keep it exact, and keep the
@@ -38,18 +38,15 @@ function self(): string[] {
 
 function harnesses(): string[] {
   return [
-    "# Other harnesses",
+    "# Coding agents",
     "Your turns run in this conversation's own directory, which holds only Ghost's files; no project's instructions, settings, or MCP servers load into them. Hand a task to an agent run in the project only when it needs those; otherwise do it yourself.",
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
     "Run each handoff with the project directory as its cwd, `cd <project-dir> && <harness> <args>` (e.g. `claude -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "`claude -p` edits files only with `--permission-mode acceptEdits` and runs commands (tests) only with `--allowedTools Bash`; put the task right after `-p`, since `--allowedTools`, `--add-dir`, and other list flags would swallow a task after them.",
-    "`ghost harnesses` lists installed agents and informational usage.",
     "Browser automation uses agent-browser through Bash.",
-    "Your own turns run on one of these agents too. `ghost harness` shows which this ghost prefers; `ghost harness <agent>` sets it (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
-    "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
     "",
     "## Long-lived sessions in herdr",
-    "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, after `ghost harnesses` confirms it is installed. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
+    "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, once `command -v <harness>` finds it. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
     "Install only harnesses the owner names, with `mise use -g <package>`, as `omarchy default agent` installs them (claude, codex, pi, opencode, crush, copilot; `github:can1357/oh-my-pi` for omp, `github:OpenRouterLabs/ori-releases` for ori, `npm:@xai-official/grok` for grok, `antigravity-cli` for agy). Each uses the owner's own account: start it, ask the owner to sign in, and never read, type, or store a credential. Then `herdr integration install <harness>` lets herdr resume it; tell the owner you did.",
     "`herdr --session ghost workspace create --cwd <project-dir> --label <label>` returns a root pane; `herdr --session ghost agent start <name> --kind <harness> --pane <id>` starts the harness there; `agent prompt <name> \"<task>\"` hands it work. Confirm submission and read results with `agent read <name> --source recent-unwrapped`: `--wait` alone is not proof. `blocked` means it is asking something: read it, and ask the owner unless the answer is plainly within the task they gave. `agent send-keys <name> ctrl+c` stops it. To be woken when it settles, detach `herdr --session ghost agent wait <name>` with the `ghost help background` recipe. The owner can watch with `herdr session attach ghost`.",
   ];
@@ -58,7 +55,7 @@ function harnesses(): string[] {
 function background(): string[] {
   return [
     "# Background work",
-    "Your harness's own background jobs end when this turn's headless run does. Work that must outlive the turn runs detached, logs to a file, and wakes you when it ends:",
+    "A command you start ends when this turn does. Work that must outlive the turn runs detached, logs to a file, and wakes you when it ends:",
     "```sh",
     "systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20 \\",
     "  setsid -f bash -c 'cmd > \"$XDG_RUNTIME_DIR/<name>.log\" 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log $XDG_RUNTIME_DIR/<name>.log\" >/dev/null 2>&1'",

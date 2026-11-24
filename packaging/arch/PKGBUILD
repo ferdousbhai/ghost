@@ -5,7 +5,7 @@ pkgname=ghost-dev
 # authoritative and is expected to lag HEAD.
 pkgver=0.0.1.r100.g0c04ce7
 pkgrel=1
-pkgdesc="An orchestration layer for all your agent harnesses"
+pkgdesc="Your own data and your ghost, answered by a model on your machine"
 # The window is native code.
 arch=('x86_64' 'aarch64')
 url="https://github.com/ferdousbhai/ghost"

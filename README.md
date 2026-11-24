@@ -1,25 +1,24 @@
 # Ghost
 
-> **Frozen on 2026-11-20.** No feature work and no releases: official Omarchy 4.5
-> now ships most of what Ghost did. See [docs/status.md](docs/status.md).
+> **Resumed on 2026-11-24 with a narrower aim; no release since 0.11.9.** See
+> [docs/status.md](docs/status.md).
 
-**An orchestration layer for all your agent harnesses.** Ghost runs locally
-on [Omarchy](https://omarchy.org), coordinating Claude Code, Codex, Grok,
-Copilot, OpenCode, pi, and other installed agent CLIs. Each harness keeps
-its own sign-in, tools, and limits. If one cannot take a turn, Ghost tries
-the next. Your ghost keeps one character and conversation history across them.
+**Your own data and your ghost, answered by a model on your machine.** Ghost
+runs locally on [Omarchy](https://omarchy.org). Its window shows your notes,
+reminders, mail, chats, files and photos, read through the products that
+already hold them, and a persona answers from them. Every turn runs on a
+local model, so none of it leaves the computer.
 
 Talk to it in its window or the terminal; both share one conversation
 history, and `ghost say` joins the most recent conversation:
 
 ```sh
 ghost say "What should I focus on today?"
-ghost switch claude
 ghost say "Continue that thought."
 ```
 
-What Ghost adds to a harness: the persona, a history that survives switching
-agents, browser automation through agent-browser and Bash, and owner hooks.
+The model has one tool, a shell. For work on code it runs the coding agent
+you already use (Claude Code, Codex, Antigravity) by that agent's own command.
 Notes are Markdown in the owner's Documents directory, never indexed or
 injected. A ghost can maintain its own code
 ([docs/self-maintenance.md](docs/self-maintenance.md)), and the

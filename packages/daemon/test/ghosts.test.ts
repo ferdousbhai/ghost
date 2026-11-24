@@ -127,7 +127,6 @@ describe("GhostRegistry.get", () => {
 describe("ghostPaths", () => {
   it("puts settings and conversations inside the ghost home", () => {
     const paths = ghostPaths("/tmp/ghosts/casper");
-    expect(paths.settingsFile).toBe("/tmp/ghosts/casper/settings.yml");
     expect(paths.sessionDir).toBe("/tmp/ghosts/casper/sessions");
   });
 });

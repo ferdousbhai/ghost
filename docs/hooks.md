@@ -1,12 +1,12 @@
 # Ghost hooks
 
-Ghost owns an awaited lifecycle boundary around each harness pass of a
-conversation turn. The harness carrying the turn (Claude Code, Codex, …), and
-any harness the ghost runs from Bash, keeps its own native hook behavior;
+Ghost owns an awaited lifecycle boundary around each pass of a
+conversation turn. A coding agent the ghost runs from its shell (Claude Code,
+Codex, …) keeps its own native hook behavior;
 Ghost does not translate, duplicate, or await those hooks.
 
 Ghost supports two events. `session_stop` runs after a
-harness pass ends and before Ghost emits the turn's terminal `done` frame. It
+pass ends and before Ghost emits the turn's terminal `done` frame. It
 can accept the pass or return context for a continuation pass. `turn_end` runs once
 after the whole streamed turn succeeds or fails, including queued passes and owner
 commands; cancelled turns are quiet. It delivers optional completion notifications
@@ -58,16 +58,15 @@ Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
 `ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
 document with the file, which must be the document itself (`hooks` at its top level), so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
-awaited command hooks. They run for every conversation, above the
-harness, and commands run with the daemon user's permissions. It is therefore
+awaited command hooks. They run for every conversation,
+and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.
 
 There is no second hook mechanism. A ghost home carries no executable
 extension code; everything a hook does is a command in `hooks.json`.
 
-Each machine command runs in an owned process group, the same way a harness
-does. Abort, timeout, or more than 1 MiB of stdout terminates the whole
+Each machine command runs in an owned process group. Abort, timeout, or more than 1 MiB of stdout terminates the whole
 descendant tree (TERM, then KILL after 3 s) and drains its pipes before the
 lifecycle boundary returns; the last 8 KiB of stderr is kept for a block
 reason. A hook ends with its own process: output still arriving 2 s
@@ -103,11 +102,11 @@ contains the same message directly:
   "ghost_home": "/home/me/ghosts/casper",
   "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
   "conversation_id": "conversation-a",
-  "harness": "claude"
+  "harness": "local"
 }
 ```
 
-`harness` is the harness that answered the pass. `messages` exposes only that
+`harness` is what answered the pass, always `local`. `messages` exposes only that
 pass, its content Ghost's assistant parts (`text`, and `toolCall` with
 `failed: true` on a call that failed).
 `owner_prompt` is the owner's request and `turn_id` a UUID naming it; both
@@ -158,18 +157,9 @@ Trusted command hooks that need a classifier can invoke
 `{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin, asks the
 daemon that owns that home (`POST /api/ghosts/:name/complete`, at the port and
 token a hook's environment names), and returns `{ "text": "..." }`: one
-headless run of the harness a new conversation would start on, in a scratch
-directory with no persona, conversation, or Ghost tools; a harness that fails
-hands the prompt to the next. It runs the same model and effort a turn does,
-with the owner's own CLI configuration, hooks included, and the daemon's
-environment plus `GHOST` naming the ghost (no `GHOST_SESSION`), as a turn's
-harness has: a harness stop hook that stands down inside Ghost runs (as
-keep-going's does) does not review the review. The hook's own environment
-does not reach the harness. When the [local model](../CONTRACTS.md#local-model) is configured and
-the ghost's `harness` is `local` or unset, the prompt runs on the daemon's own
-loaded model instead, as a turn would: one completion without tools, never
-falling through to a cloud harness. A ghost whose `harness` is `local` with no
-local model configured is refused, and so is a call when the daemon is not
+completion on the daemon's own loaded [local model](../CONTRACTS.md#local-model), with no persona,
+conversation, or tools, so a hook's prompt stays on the machine. It is
+refused with no local model configured, and so is a call when the daemon is not
 running. `hook-complete` sets no deadline of its own: the calling hook's
 `timeout` kills its process group, which closes the request and stops the
 completion.

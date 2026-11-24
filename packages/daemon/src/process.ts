@@ -1,63 +1,45 @@
 /**
- * One headless harness turn as a child process: spawned in its own process
- * group in the conversation directory, its stdout parsed line by line into
- * normalized events, and the whole group ended on abort. ghostd kills only
- * the group it spawned.
+ * A command as a child process (an owner's `!command`, a hook): spawned in
+ * its own process group, its stdout handed on as it arrives, and the whole
+ * group ended on abort. ghostd kills only the group it spawned.
  */
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import type { HarnessEvent, HarnessLaunch } from "./harness-table.js";
 
-/** How long a harness gets to exit after SIGTERM before the group is killed. */
+/** How long a command gets to exit after SIGTERM before the group is killed. */
 const KILL_GRACE_MS = 3_000;
-/** The stderr kept for an error message and limit classification. */
+/** The stderr kept for an error message. */
 const STDERR_TAIL_BYTES = 8_192;
-/** How long output may keep arriving after a harness or hook process itself exits. */
+/** How long output may keep arriving after the process itself exits. */
 const PIPE_DRAIN_MS = 2_000;
 
-export interface HarnessExit {
+export interface ProcessExit {
   readonly code: number | null;
   readonly signal: NodeJS.Signals | null;
-  /** The last bytes of stderr, for a failure that printed no event. */
+  /** The last bytes of stderr. */
   readonly stderr: string;
   /** The process could not start (not installed, not executable). */
   readonly spawnError?: string;
 }
 
-interface HarnessProcessOptions {
-  readonly launch: HarnessLaunch;
+interface ProcessOptions {
+  readonly argv: readonly string[];
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
   /** Written to the process's stdin, which is then closed; omitted, stdin is /dev/null. */
   readonly stdin?: string;
+  readonly onStdout: (chunk: string) => void;
 }
 
-/** Harness protocols are JSONL; owner shell output is streamed as raw chunks. */
-type HarnessRunOptions = HarnessProcessOptions & (
-  | { readonly parse: (line: string) => HarnessEvent[]; readonly onEvent: (event: HarnessEvent) => void; readonly onStdout?: never }
-  | { readonly onStdout: (chunk: string) => void; readonly parse?: never; readonly onEvent?: never }
-);
-
-/** Write the launch's files into the conversation directory. */
-export async function writeLaunchFiles(cwd: string, files: Readonly<Record<string, string>> | undefined): Promise<void> {
-  for (const [relative, content] of Object.entries(files ?? {})) {
-    const path = join(cwd, relative);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, content, { mode: 0o600 });
-  }
-}
-
-export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
-  const [command, ...args] = options.launch.argv;
+export function runProcess(options: ProcessOptions): Promise<ProcessExit> {
+  const [command, ...args] = options.argv;
   if (command === undefined) return Promise.resolve({ code: null, signal: null, stderr: "", spawnError: "empty command" });
   return new Promise((resolve) => {
     let stderr = "";
     let settled = false;
     let drainTimer: NodeJS.Timeout | undefined;
-    const finish = (exit: HarnessExit): void => {
+    const finish = (exit: ProcessExit): void => {
       if (settled) return;
       settled = true;
       if (options.signal.aborted) signalGroup("SIGKILL");
@@ -95,22 +77,9 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
     if (options.signal.aborted) abort();
     else options.signal.addEventListener("abort", abort, { once: true });
 
-    let pending = "";
-    const feed = (line: string): void => {
-      if (settled || !options.parse || !options.onEvent || line.trim() === "") return;
-      for (const event of options.parse(line)) options.onEvent(event);
-    };
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
-      if (settled) return;
-      if (options.onStdout) { options.onStdout(chunk); return; }
-      pending += chunk;
-      let newline = pending.indexOf("\n");
-      while (newline >= 0) {
-        feed(pending.slice(0, newline));
-        pending = pending.slice(newline + 1);
-        newline = pending.indexOf("\n");
-      }
+      if (!settled) options.onStdout(chunk);
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
@@ -118,13 +87,10 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
       stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES);
     });
     child.on("error", (error) => finish({ code: null, signal: null, stderr, spawnError: error.message }));
-    // A detached descendant may keep the pipes open after the harness exits;
-    // the turn ends with the harness, not with its grandchildren.
+    // A detached descendant may keep the pipes open after the command exits;
+    // it ends with the command, not with its grandchildren.
     const close = (code: number | null, signal: NodeJS.Signals | null): void => {
-      if (settled) return;
-      feed(pending);
-      pending = "";
-      finish({ code, signal, stderr });
+      if (!settled) finish({ code, signal, stderr });
     };
     child.on("exit", (code, signal) => {
       if (settled) return;

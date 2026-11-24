@@ -7,7 +7,7 @@ import {
   type GhostSessionStopEvent,
   type GhostSessionStopResult, type GhostTurnEndEvent,
 } from "./hook-policy.js";
-import { runHarness } from "./harness-process.js";
+import { runProcess } from "./process.js";
 import { type Logger, silentLogger } from "./log.js";
 import { readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
@@ -42,8 +42,8 @@ async function runCommandHook(hook: CommandHook, event: GhostHookEvent): Promise
   const overflow = new AbortController();
   let stdout = "";
   let bytes = 0;
-  const exit = await runHarness({
-    launch: { argv: ["/bin/bash", "-c", hook.command] },
+  const exit = await runProcess({
+    argv: ["/bin/bash", "-c", hook.command],
     cwd: event.cwd,
     env: process.env,
     signal: AbortSignal.any([event.signal, timeout, overflow.signal]),

@@ -310,7 +310,6 @@ describe("ghost help", () => {
       ["ask", "--clear", "Ship it?"],
       ["character", "edit"],
       ["character", "set"],
-      ["harness", "claude", "--none"],
       ["hooks", "show", "extra"],
       ["character", "show", "extra"],
       ["say", "hello", "-m", "world"],
@@ -326,8 +325,8 @@ describe("ghost help", () => {
       throw new Error(`unexpected request to ${String(input)}`);
     };
     for (const argv of [
-      ...["harness", "sessions", "character", "status"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
-      ...["say hi", "sessions", "show", "harness", "hooks", "remote", "status", "harnesses", "smoke", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
+      ...["sessions", "character", "status"].map((verb) => [...verb.split(" "), "-s", "conv-1"]),
+      ...["say hi", "sessions", "show", "hooks", "remote", "status", "smoke", "help memory"].map((verb) => [...verb.split(" "), "-g", "casper"]),
     ]) {
       const result = await runCli(argv, { env: { GHOST: "casper", GHOST_SESSION: "conv-1" }, home: "/tmp/ghost-cli-unit", fetch });
       expect(result.code, argv.join(" ")).toBe(2);

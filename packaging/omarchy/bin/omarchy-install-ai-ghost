@@ -16,4 +16,4 @@ systemctl --user enable --now ghostd.service
 echo ""
 echo "Ghost is installed, and in your app launcher."
 echo ""
-echo "Or talk to your ghost from a terminal:  ghost say \"hello\"   (its turns run on the agent CLIs you are signed into)"
+echo "Or talk to your ghost from a terminal:  ghost say \"hello\"   (its turns run on a model on this machine: set local.model in ~/.config/ghost/config.json)"

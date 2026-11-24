@@ -480,14 +480,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (!closed) keepalive = setInterval(() => write(SSE_KEEPALIVE_COMMENT), SSE_KEEPALIVE_INTERVAL_MS);
   };
 
-  /** `{ harness }`: an agent id, or (for the ghost default) null for automatic. */
-  const readHarnessBody = async ({ body }: RequestContext, nullable: boolean): Promise<string | null> => {
-    const { harness } = await body();
-    if (typeof harness === "string" && harness !== "") return harness;
-    if (nullable && harness === null) return null;
-    throw new GhostError("invalid_request", nullable ? '"harness" must be an agent id or null.' : '"harness" must be an agent id.', 400);
-  };
-
   /**
    * An image body from any owner, or JSON `{ path }` naming a local image
    * from the machine-local token.
@@ -769,12 +761,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       await writeCharacter(options.registry.get(ghost).dir, text);
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
-    route("GET", "api/ghosts/:ghost/harness", async ({ ghost, response }) => {
-      jsonResponse(response, 200, await options.host.listHarnesses(ghost));
-    }),
-    route("PUT", "api/ghosts/:ghost/harness", async (context) => {
-      jsonResponse(context.response, 200, await options.host.setGhostHarness(context.ghost, await readHarnessBody(context, true)));
-    }),
     route("POST", "api/ghosts/:ghost/complete", async ({ ghost, request, response, body }) => {
       const prompt = stringField(await body(), "prompt");
       const { signal, release } = abortOnClose(request, response);
@@ -792,9 +778,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("DELETE", "api/ghosts/:ghost/sessions/:id", async ({ ghost, id, response }) => {
       await options.host.deleteSession(ghost, id);
       jsonResponse(response, 200, { ok: true });
-    }),
-    route("PUT", "api/ghosts/:ghost/sessions/:id/harness", async (context) => {
-      jsonResponse(context.response, 200, await options.host.chooseHarness(context.ghost, context.id, await readHarnessBody(context, false) as string));
     }),
     // Idempotent, so the shell sends the state it wants rather than a toggle.
     route("PUT", "api/ghosts/:ghost/sessions/:id/pin", async ({ ghost, id, response, body }) => {

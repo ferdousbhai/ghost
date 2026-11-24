@@ -16,7 +16,6 @@ export interface Ghost {
 export const GHOST_SESSIONS_DIRNAME = "sessions";
 /** The home a first start makes: the owner has one ghost, and a root without one gets this. */
 export const FIRST_GHOST_NAME = "ghost";
-const GHOST_SETTINGS_FILENAME = "settings.yml";
 
 /**
  * Ghost names are both URL path segments and directory names, so the
@@ -58,13 +57,11 @@ export function isGhostHome(dir: string): boolean {
 }
 
 export function ghostPaths(dir: string): {
-  settingsFile: string;
   sessionDir: string;
   characterFile: string;
 } {
   const home = resolve(dir);
   return {
-    settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
     characterFile: join(home, CHARACTER_FILENAME),
   };

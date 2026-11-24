@@ -46,14 +46,13 @@ You are casper, a letterpress printer. You answer in short sentences.
 `;
 
 describe("golden: session", () => {
-  it("runs two turns on one harness session and records them in the conversation", async () => {
+  it("runs two turns and records them in the conversation", async () => {
     temp = makeTempGhosts();
     const dir = seedGhost(temp.root, { name: "casper", character: CHARACTER });
     const notePath = join(temp.ownerHome, "Documents", "owner-prefers-short.md");
     harness = fakeHarness([
       {
         events: [
-          { type: "session", id: "fake-session-1" },
           { type: "tool_start", id: "t1", name: "Write", args: { path: notePath, content: "The owner wants short answers." } },
           { type: "tool_end", id: "t1", isError: false, output: "Wrote 1 file." },
           { type: "text", block: "a", delta: "Written down." },
@@ -90,19 +89,17 @@ describe("golden: session", () => {
       });
       const turn = index + 1;
       const call = harness.calls()[index];
-      expect(call, `turn ${turn} must reach the harness`).toBeDefined();
-      const persona = call!.agents ?? "";
+      expect(call, `turn ${turn} must reach the model`).toBeDefined();
+      const persona = call!.persona;
       expect(persona).toContain(CHARACTER.trim());
       expect(persona).toContain("`ghost help <topic>`");
 
       sections.push({ title: `turn ${turn}: owner prompt`, body: prompt });
-      sections.push({ title: `turn ${turn}: persona (AGENTS.md)`, body: normalizer.text(persona.trimEnd()) });
+      sections.push({ title: `turn ${turn}: persona`, body: normalizer.text(persona.trimEnd()) });
       sections.push({
-        title: `turn ${turn}: harness launch`,
+        title: `turn ${turn}: pass`,
         body: normalizer.json({
           prompt: call!.prompt,
-          resume: call!.resume,
-          sessionId: call!.sessionId,
           cwd: call!.cwd,
           ghost: call!.ghost,
           session: call!.session,

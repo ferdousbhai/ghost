@@ -11,11 +11,10 @@ of — this page.
   Arch/Hyprland support promise.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
-- **An agent CLI** — Omarchy installs Claude Code, Codex, Grok, Copilot,
-  OpenCode, pi, and others, and a ghost's turns run on them, on your own
-  subscriptions. With none yet, OpenCode answers on its free models with no
-  sign-in; sign into any other the way you normally would (`claude`,
-  `codex login`, …) and it joins in.
+- **A model on this machine.** Every turn runs on a local model, so your
+  notes, chats, mail and files stay on the computer: a GGUF file and
+  `llama-server` ([section 5](#5-the-local-model)). Without one Ghost shows
+  your data but answers nothing.
 
 ## 1. Install the package
 
@@ -61,23 +60,23 @@ Nothing to install: a ghost reads the product index with `ghost help
 products`. It lists the recommended products; the ghost installs a product
 when needed, and the product installs its own skill
 (`<cli> skill install`). Ghost uses
-these product CLIs through the harness's Bash/shell tool and native skill
-discovery; no additional daemon integration or MCP server is needed.
+these product CLIs from the model's shell, reading each one's skill; no
+additional daemon integration or MCP server is needed.
 
 Each skill explains how to detect and install its missing CLI and use existing
 accounts. The owner completes sign-in windows and keeps passwords/recovery keys
 out of chat. Installing a package does not authorize sending messages, changing
 mail routing, or restoring/syncing files.
 
-Start a fresh harness session after installing a skill. A ghost sees the
-same skills your agents do; Ghost adds none of its own. Source checkouts are
+A ghost sees the
+same skills your agents do (`~/.agents/skills`); Ghost adds none of its own. Source checkouts are
 never loaded into a conversation automatically. No daemon restart is needed.
 
 ## 2. Where shared notes go
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: the ghost reads and writes
-it with its harness's native file tools. A ghost's own memory is two folders
+it from its shell. A ghost's own memory is two folders
 there, with or without iCloud: `Notes` (Markdown notes) and `Reminders` (one
 checklist per list). Ghost does not index the directory
 or read any of it until a request calls for it. For search by meaning, a
@@ -129,40 +128,26 @@ helps with what you asked first, learns about you in the gaps, and offers a
 character draft for your approval before writing itself. Nothing is blocked
 waiting for that.
 
-## 5. Which agent answers
+## 5. The local model
 
-Nothing to configure: each turn runs on one of the agent CLIs you already use,
-headless, in the conversation's own directory under the ghost home. Ghost
-picks, per turn, the one already carrying the conversation, then the ghost's
-`harness` setting, then your Omarchy default agent (`omarchy default agent
-<name>`), then any other installed agent:
+Set `local` in `~/.config/ghost/config.json` and restart ghostd:
 
-```sh
-ghost harnesses          # installed agents and informational usage
+```json
+{ "local": { "model": "/path/to/model.gguf", "server": "/path/to/llama-server" } }
 ```
 
-From the terminal, or by asking the ghost, which runs the same commands:
+`server` may be left out when `llama-server` is on your `PATH`. What to
+install, which model fits which machine, and the alternatives are in
+`ghost help products`, under "Running locally"; what was measured on real
+machines is in [local-models.md](local-models.md). Ghost starts the server on
+the first turn and stops it after five idle minutes.
 
-```sh
-ghost harness            # which agent this ghost prefers
-ghost harness codex      # prefer codex for this ghost (--none: automatic)
-ghost switch claude      # run this conversation's next turn on claude
-```
-
-A switched conversation's new agent is handed the conversation so far. The
-preference lives in the ghost's `settings.yml` as `harness: codex`.
-
-An agent that fails before replying or starting a tool hands the turn to the
-next, with the conversation so far. A later failure ends the turn with an error. The model, sign-in, tools,
-and permissions are that agent's own, configured as you would for yourself;
-Ghost has no model picker or provider login. The exception is a model on this
-machine: once `local.model` in `~/.config/ghost/config.json` names a GGUF
-file, Ghost runs it itself as the `local` agent and new conversations start
-there, so your notes, chats, mail and files stay on the computer; it hands
-other work to the agents above. What to install for it, and the alternatives,
-are in `ghost help products`, under "Running locally".
-For the hard questions, a ghost
-also hands work from Bash to a specialist (`claude -p …`).
+The model has one tool, a shell that runs as you, and Ghost has no other
+model, model picker, or provider login. For work on code it runs your coding
+agent (Claude Code, Codex, or Antigravity: your Omarchy default agent when it
+is one of them, else the first installed) by that agent's own command, in the
+project's directory, with that agent's own sign-in. What it hands that agent
+leaves the machine; nothing else does.
 
 ## 6. First conversation
 
@@ -248,8 +233,8 @@ leaves personas, conversations, tokens, and your documents untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the window and CLI read `~/.local/state/ghost/api-token` |
-| A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
-| You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
+| A turn fails at once | Is `local.model` set in `~/.config/ghost/config.json`, and does `llama-server` start? `journalctl --user -u ghostd -e` has its error |
+| You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` for a real two-turn check on your local model |
 
 After an upgrade, restart the daemon to load the new bundle:
 

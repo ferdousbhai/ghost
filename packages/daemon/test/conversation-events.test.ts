@@ -120,7 +120,7 @@ describe("conversation unread state", () => {
     });
     expect((await host!.listSessions("casper"))[0]).toMatchObject({
       id: "conv-1",
-      harness: "fake",
+      harness: "local",
       unread: true,
     });
   });
