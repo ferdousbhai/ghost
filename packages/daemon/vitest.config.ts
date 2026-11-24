@@ -4,8 +4,7 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     setupFiles: ["test/setup.ts"],
-    // Session-host and server tests spawn a scripted harness process per
-    // turn; give them room without being generous.
+    // Integration tests start a real daemon; give them room without being generous.
     testTimeout: 30_000,
     hookTimeout: 30_000,
     // Tests point process-global env (XDG dirs) at scratch state; run files

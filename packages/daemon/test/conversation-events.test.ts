@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, replies, type FakeAnswerer } from "./helpers/fake-answerer.js";
 
 let temp: TempGhosts | null = null;
-let harness: FakeHarness | null = null;
+let harness: FakeAnswerer | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 
@@ -23,12 +23,12 @@ afterEach(async () => {
 async function setup(streamCutBytes?: number): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  harness = fakeHarness(replies("hello"));
+  harness = fakeAnswerer(replies("hello"));
   seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(harness),
+    ...answeredBy(harness),
   });
   listening = await startDaemonServer({
     registry: temp.registry,

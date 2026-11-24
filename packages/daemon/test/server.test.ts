@@ -26,12 +26,12 @@ import {
 import { TurnBuffer } from "../src/turn-buffer.js";
 import { SessionHost } from "../src/session-host.js";
 import { SIDECAR_FILENAMES } from "../src/sidecars.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, replies, type FakeAnswerer, type FakeTurn } from "./helpers/fake-answerer.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts | null = null;
-let harness: FakeHarness | null = null;
+let harness: FakeAnswerer | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 const gates: Array<() => void> = [];
@@ -59,12 +59,12 @@ async function serve(
 ) {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  harness = fakeHarness(turns);
+  harness = fakeAnswerer(turns);
   seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(harness),
+    ...answeredBy(harness),
   });
   listening = await startDaemonServer({
     registry: temp.registry,

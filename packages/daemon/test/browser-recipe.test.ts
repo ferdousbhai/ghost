@@ -1,10 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { renderHelpTopic } from "../packages/daemon/src/help-topics.ts";
+import { renderHelpTopic } from "../src/help-topics.js";
 
 const exec = promisify(execFile);
 
@@ -29,7 +29,7 @@ else
 fi
 `);
     await chmod(stub, 0o755);
-    const skill = renderHelpTopic("browser", { ghostName: undefined, unitDir: dir, cliPath: "ghost" });
+    const skill = renderHelpTopic("browser");
     const recipe = /```sh\n([\s\S]+?)\n```/.exec(skill)?.[1];
     expect(recipe).toBeDefined();
     const run = (tab: string) => exec("bash", ["-c", `${recipe}\nexport BROWSER_TAB="$TEST_TAB"\nfor i in {1..5}; do browser fill '#email' "$TEST_TAB" || exit; done`], {

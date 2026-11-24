@@ -4,7 +4,7 @@
  * This boots the production Registry -> SessionHost -> HTTP server chain on an
  * ephemeral loopback port. The ghost home, XDG roots, and process HOME all
  * point inside one OS-temp directory, and the only harness is a scripted one
- * (`fakeHarness`), so no agent CLI or model is ever reached.
+ * (`fakeAnswerer`), so no agent CLI or model is ever reached.
  *
  * The clients below use node:http with pooling disabled. SSE is decoded from
  * the bytes delivered by the real socket; no EventSource or route stub sits in
@@ -22,7 +22,7 @@ import { GhostRegistry } from "../../src/ghosts.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
 import type { TurnEvent } from "../../src/turn-events.js";
-import { fakeHarness, onlyHarnesses, type FakeHarness, type FakeTurn } from "../helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, type FakeAnswerer, type FakeTurn } from "../helpers/fake-answerer.js";
 import { seedGhost, serverServices } from "../helpers/fixtures.js";
 
 const API_TOKEN = "a".repeat(64);
@@ -224,7 +224,7 @@ export interface RealDaemonHarness {
   readonly ghostHome: string;
   readonly ghostName: string;
   readonly port: number;
-  readonly harness: FakeHarness;
+  readonly harness: FakeAnswerer;
   readonly host: SessionHost;
   /** Resolve once the harness has been launched `count` times in all. */
   waitForLaunches(count: number): Promise<void>;
@@ -271,14 +271,14 @@ export async function startRealDaemonHarness(
   process.env.GHOSTD_HOOKS = join(xdgConfigHome, "ghost", "hooks.json");
   process.env.GHOSTD_API_TOKEN_FILE = join(xdgStateHome, "ghost", "api-token");
 
-  let harness: FakeHarness | null = null;
+  let harness: FakeAnswerer | null = null;
   let host: SessionHost | null = null;
   let listening: ListeningServer | null = null;
   const clients = new Set<RealSseClient>();
   try {
     const registry = new GhostRegistry(ghostsRoot);
     registry.ensureRoot();
-    const fake = fakeHarness(options.turns);
+    const fake = fakeAnswerer(options.turns);
     harness = fake;
     const ghostName = options.ghostName ?? "casper";
     const ghostHome = seedGhost(ghostsRoot, { name: ghostName });
@@ -286,7 +286,7 @@ export async function startRealDaemonHarness(
       registry,
       ownerHome: disposableHome,
       env: { ...process.env },
-      ...onlyHarnesses(fake),
+      ...answeredBy(fake),
     });
     listening = await startDaemonServer({
       registry,

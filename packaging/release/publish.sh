@@ -46,19 +46,11 @@ if (( ! dry_run )) && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; the
 fi
 # Before anything is committed or pushed: a release ends in `gh release`.
 (( dry_run )) || gh auth status >/dev/null
-# The version lives in several manifests; a release starts by making them agree.
 current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
 if [[ "$current" != "$version" ]]; then
   # Refused before any manifest is touched, so a typo leaves a clean tree.
   bash "$script_root/verify-release-version.sh" --valid "$version"
-  mapfile -t manifests < <(bash "$script_root/verify-release-version.sh" --manifests)
-  for manifest in "${manifests[@]}"; do
-    sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$manifest"
-  done
-  bash "$script_root/verify-release-version.sh" "$source_root" | grep -Fxq "$version" || {
-    printf 'the manifests still do not all say %s after the bump\n' "$version" >&2
-    exit 1
-  }
+  sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$source_root/package.json"
   git commit -q -am "release: $version"
   printf 'bumped %s -> %s\n' "$current" "$version"
 fi

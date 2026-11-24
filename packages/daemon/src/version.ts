@@ -1,6 +1,7 @@
 /**
  * The daemon's own version. A bundled runtime carries it as a build-time
- * define (`scripts/build-runtime.sh`); a source checkout reads package.json.
+ * define (`scripts/build-runtime.sh`); a source checkout reads the root
+ * package.json, the one place the release version lives.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,7 +10,7 @@ import { fileURLToPath } from "node:url";
 function readPackageVersion(): string {
   try {
     const here = dirname(fileURLToPath(import.meta.url));
-    const text = readFileSync(join(here, "..", "package.json"), "utf8");
+    const text = readFileSync(join(here, "..", "..", "..", "package.json"), "utf8");
     return (JSON.parse(text) as { version?: string }).version ?? "0.0.0";
   } catch {
     return "0.0.0";

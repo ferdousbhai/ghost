@@ -13,7 +13,7 @@ import { startDaemonServer, type ListeningServer, type ServerOptions } from "../
 import { GhostHookRunner } from "../../src/hooks.js";
 import { SessionHost } from "../../src/session-host.js";
 import { fakeTailscale } from "./fake-tailscale.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./fake-harness.js";
+import { fakeAnswerer, answeredBy, replies, type FakeAnswerer, type FakeTurn } from "./fake-answerer.js";
 
 export interface TempGhosts {
   root: string;
@@ -85,7 +85,7 @@ export interface TestDaemon {
   env: NodeJS.ProcessEnv;
   host: SessionHost;
   listening: ListeningServer;
-  harness: FakeHarness;
+  harness: FakeAnswerer;
   temp: TempGhosts;
   tokenFile: string;
 }
@@ -102,12 +102,12 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const ghost = options.ghost ?? "casper";
   const temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  const harness = fakeHarness(options.turns ?? replies("hello"));
+  const harness = fakeAnswerer(options.turns ?? replies("hello"));
   seedGhost(temp.root, { name: ghost });
   const host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(harness),
+    ...answeredBy(harness),
   });
   const listening = await startDaemonServer({
     registry: temp.registry,

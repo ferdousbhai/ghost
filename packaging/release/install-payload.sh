@@ -12,24 +12,6 @@ window="$(realpath -e -- "${5:?usage: $usage}")"
 source_root="$(realpath "$source_root")"
 runtime_root="$(realpath "$runtime_root")"
 
-install_tree() {
-  local source_dir="$1"
-  local destination_dir="$2"
-  local directory file relative mode
-
-  install -d -m755 "$destination_dir"
-  while IFS= read -r -d '' directory; do
-    relative="${directory#"$source_dir"/}"
-    install -d -m755 "$destination_dir/$relative"
-  done < <(find "$source_dir" -mindepth 1 -type d -print0)
-  while IFS= read -r -d '' file; do
-    relative="${file#"$source_dir"/}"
-    mode=644
-    [[ -x "$file" ]] && mode=755
-    install -Dm"$mode" "$file" "$destination_dir/$relative"
-  done < <(find "$source_dir" -type f -print0)
-}
-
 install -Dm755 "$runtime_root/bin/ghostd" "$pkgdir/usr/bin/ghostd"
 install -Dm755 "$runtime_root/bin/ghost" "$pkgdir/usr/bin/ghost"
 install -Dm644 "$runtime_root/lib/ghostd.js" \
@@ -48,10 +30,6 @@ install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACT
 for doc in "$source_root"/docs/*.md; do
   install -Dm644 "$doc" "$pkgdir/usr/share/doc/ghost/docs/${doc##*/}"
 done
-install -Dm644 "$runtime_root/BUNDLED-LICENSES" \
-  "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"
-install_tree "$runtime_root/licenses" \
-  "$pkgdir/usr/share/licenses/$pkgname/runtime/licenses"
 
 # The window is the app the launcher entry opens, named by its app id so
 # the compositor finds the entry's icon for it.

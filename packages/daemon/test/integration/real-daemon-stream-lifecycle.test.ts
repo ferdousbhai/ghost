@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SSE_KEEPALIVE_INTERVAL_MS, type TurnEvent } from "../../src/turn-events.js";
 import type { PassEvent } from "../../src/local-turn.js";
-import type { FakeTurn } from "../helpers/fake-harness.js";
+import type { FakeTurn } from "../helpers/fake-answerer.js";
 import {
   startRealDaemonHarness,
   within,

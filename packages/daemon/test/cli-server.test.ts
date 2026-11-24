@@ -6,11 +6,11 @@ import type { SessionHost } from "../src/session-host.js";
 import { runCli } from "./helpers/cli.js";
 import { startTestDaemon, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse } from "./helpers/http-fetch.js";
-import type { FakeHarness } from "./helpers/fake-harness.js";
+import type { FakeAnswerer } from "./helpers/fake-answerer.js";
 
 const API_TOKEN = "a".repeat(64);
 let temp: TempGhosts;
-let harness: FakeHarness;
+let harness: FakeAnswerer;
 let host: SessionHost;
 let listening: ListeningServer | null;
 let tokenFile: string;

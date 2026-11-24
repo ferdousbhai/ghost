@@ -12,18 +12,18 @@ import { parseHooksDocument } from "../src/hook-policy.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import type { LocalModel } from "../src/local-model.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, replies, type FakeAnswerer } from "./helpers/fake-answerer.js";
 import { makeTempGhosts, seedGhost, startTestDaemon, type TempGhosts, type TestDaemon } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
 let daemon: TestDaemon | null = null;
-const harnesses: FakeHarness[] = [];
+const fakes: FakeAnswerer[] = [];
 const dirs: string[] = [];
 const closers: Array<() => void> = [];
 
 afterEach(async () => {
   for (const close of closers.splice(0)) close();
-  for (const harness of harnesses.splice(0)) harness.cleanup();
+  for (const fake of fakes.splice(0)) fake.cleanup();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   if (daemon) {
     await daemon.listening.close();
@@ -35,9 +35,9 @@ afterEach(async () => {
   temp = null;
 });
 
-function harness(...args: Parameters<typeof fakeHarness>): FakeHarness {
-  const created = fakeHarness(...args);
-  harnesses.push(created);
+function harness(...args: Parameters<typeof fakeAnswerer>): FakeAnswerer {
+  const created = fakeAnswerer(...args);
+  fakes.push(created);
   return created;
 }
 
@@ -67,14 +67,14 @@ function localModel(reply: string) {
   return { model, prompts, acquired: () => acquired };
 }
 
-function host(fakes: [FakeHarness] | [], options: Partial<SessionHostOptions> = {}): { sessions: SessionHost; home: string } {
+function host(fakes: [FakeAnswerer] | [], options: Partial<SessionHostOptions> = {}): { sessions: SessionHost; home: string } {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   const home = seedGhost(temp.root, { name: "casper" });
   const sessions = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...(fakes[0] ? onlyHarnesses(fakes[0]) : {}),
+    ...(fakes[0] ? answeredBy(fakes[0]) : {}),
     ...options,
   });
   return { sessions, home };

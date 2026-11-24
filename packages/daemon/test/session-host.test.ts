@@ -13,34 +13,34 @@ import { GhostHookRunner } from "../src/hooks.js";
 import { readPins, readReads } from "../src/sidecars.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
-import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, replies, type FakeAnswerer } from "./helpers/fake-answerer.js";
 import { makeTempGhosts, seedGhost, tempDir, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts;
-const harnesses: FakeHarness[] = [];
+const fakes: FakeAnswerer[] = [];
 const cleanups: Array<() => void> = [];
 
 afterEach(() => {
-  for (const harness of harnesses.splice(0)) harness.cleanup();
+  for (const fake of fakes.splice(0)) fake.cleanup();
   for (const cleanup of cleanups.splice(0)) cleanup();
   temp?.cleanup();
 });
 
-function harness(...args: Parameters<typeof fakeHarness>): FakeHarness {
-  const created = fakeHarness(...args);
-  harnesses.push(created);
+function harness(...args: Parameters<typeof fakeAnswerer>): FakeAnswerer {
+  const created = fakeAnswerer(...args);
+  fakes.push(created);
   return created;
 }
 
-function host(options: Partial<SessionHostOptions> & { harnesses: [FakeHarness] }): SessionHost {
+function host(options: Partial<SessionHostOptions> & { fake: FakeAnswerer }): SessionHost {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper", character: "# Casper\n\nYou are Casper, a letterpress printer.\n" });
-  const { harnesses: fakes, ...rest } = options;
+  const { fake, ...rest } = options;
   return new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    ...onlyHarnesses(fakes[0]),
+    ...answeredBy(fake),
     ...rest,
   });
 }
@@ -62,7 +62,7 @@ function sessionDir(): string {
 describe("a turn", () => {
   it("runs the harness in the conversation's directory with the ghost's persona and identity", async () => {
     const fake = harness(replies("I set type."));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events = await turn(sessions, "What do you do?");
 
     expect(events[0]).toEqual({ type: "start" });
@@ -83,7 +83,7 @@ describe("a turn", () => {
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {
     const fake = harness(replies("one", "two"));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     await turn(sessions, "first");
     writeFileSync(ghostPaths(join(temp.root, "casper")).characterFile, "# Casper\n\nYou are Casper, now a bookbinder.\n");
     await turn(sessions, "second");
@@ -92,7 +92,7 @@ describe("a turn", () => {
 
   it("hands a later turn the conversation so far and records both in the log", async () => {
     const fake = harness(replies("pong", "pong again"));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     await turn(sessions, "ping");
     await turn(sessions, "again");
 
@@ -115,7 +115,7 @@ describe("a turn", () => {
         { type: "text", block: "a", delta: "It failed." },
       ],
     }]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events = await turn(sessions, "run false");
 
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_start", id: "t1", toolName: "Bash" }));
@@ -130,7 +130,7 @@ describe("a turn", () => {
   // pi reports a failed request, then retries it itself: the retry's answer stands.
   it("ends in an error that keeps what was said before it", async () => {
     const fake = harness([{ events: [{ type: "text", block: "a", delta: "partial" }], fail: "connection reset" }]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events = await turn(sessions, "hello");
 
     expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "connection reset" });
@@ -140,7 +140,7 @@ describe("a turn", () => {
 
   it("names the coding agent the owner chose to the pass", async () => {
     const fake = harness(replies("ok"));
-    const sessions = host({ harnesses: [fake], codingAgent: async () => "codex" });
+    const sessions = host({ fake: fake, codingAgent: async () => "codex" });
     await turn(sessions, "hi");
     expect(fake.calls()[0]?.codingAgent).toBe("codex");
   });
@@ -149,7 +149,7 @@ describe("a turn", () => {
 describe("where a turn runs", () => {
   it("runs in the home's new place after the owner moved it under another name", async () => {
     const fake = harness(replies("I am Casper.", "Still here."));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     await turn(sessions, "Who are you?");
     renameSync(join(temp.root, "casper"), join(temp.root, "wisp"));
     const events: TurnEvent[] = [];
@@ -176,7 +176,7 @@ describe("queued follow-ups and aborts", () => {
     const fake = harness([]);
     const gate = fake.gate("first");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second")]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -200,7 +200,7 @@ describe("queued follow-ups and aborts", () => {
     const fake = harness([]);
     const gate = fake.gate("hold");
     fake.setTurns([{ gate: gate.path, events: [{ type: "text", block: "a", delta: "ok" }] }]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const seen: string[][] = [];
     sessions.subscribeConversationEvents("casper", () => {
       seen.push([]);
@@ -225,7 +225,7 @@ describe("queued follow-ups and aborts", () => {
       { type: "tool_end", id: "t1", isError: false, output: "ok" },
       { type: "text", block: "run", delta: "Done: X" },
     ] }]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     await turn(sessions, "check it");
     const { messages } = await sessions.readTranscript("casper", "c1", {});
     expect(messages.at(-1)?.content.map((part) => part.type === "text" ? part.text : part.type))
@@ -236,7 +236,7 @@ describe("queued follow-ups and aborts", () => {
     const fake = harness([]);
     const gate = fake.gate("first");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "half" }], fail: "crashed", gate: gate.path }, ...replies("second")]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -252,19 +252,19 @@ describe("queued follow-ups and aborts", () => {
   });
 
   it("refuses a stop when nothing is running", () => {
-    const sessions = host({ harnesses: [harness(replies("x"))] });
+    const sessions = host({ fake: harness(replies("x")) });
     expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));
   });
 
   it("refuses a queued message when nothing is streaming", async () => {
-    const sessions = host({ harnesses: [harness(replies("x"))] });
+    const sessions = host({ fake: harness(replies("x")) });
     await expect(sessions.queueMessage("casper", "c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
   });
 
   it("stops the pass on stop and ends the turn aborted", async () => {
     const fake = harness([]);
     fake.setTurns([{ gate: fake.gate("never").path }]);
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -316,7 +316,7 @@ describe("owner commands and hooks", () => {
 
   it("runs `!command` in the owner home and hands its output to the next turn", async () => {
     const fake = harness(replies("seen"));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events = await turn(sessions, "!echo printed-$GHOST_SESSION");
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: false }));
     expect(fake.calls()).toEqual([]);
@@ -332,7 +332,7 @@ describe("owner commands and hooks", () => {
   });
 
   it("bounds a newline-free owner command's output and preserves its actual trailing bytes", async () => {
-    const sessions = host({ harnesses: [harness([])] });
+    const sessions = host({ fake: harness([]) });
     await turn(sessions, "!printf '%0600000d' 0; printf tail");
     const entry = (await readLog(sessionDir(), "c1"))?.find((item) => item.type === "command");
     if (entry?.type !== "command") throw new Error("Owner command was not logged.");
@@ -342,7 +342,7 @@ describe("owner commands and hooks", () => {
   });
 
   it("stops a running `!command`", async () => {
-    const sessions = host({ harnesses: [harness([])] });
+    const sessions = host({ fake: harness([]) });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
@@ -354,7 +354,7 @@ describe("owner commands and hooks", () => {
   });
 
   it("lists a conversation of owner commands while one runs and after", async () => {
-    const sessions = host({ harnesses: [harness(replies("on it"))] });
+    const sessions = host({ fake: harness(replies("on it")) });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c9", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
@@ -375,7 +375,7 @@ describe("owner commands and hooks", () => {
   });
 
   it("fences a command's output so a ``` line inside stays code", async () => {
-    const sessions = host({ harnesses: [harness([])] });
+    const sessions = host({ fake: harness([]) });
     await turn(sessions, "!printf '# Readme\\n```sh\\nls\\n```\\n'");
     const { messages } = await sessions.readTranscript("casper", "c1", {});
     expect(messages.at(-1)?.content).toEqual([{ type: "text", text: "````\n# Readme\n```sh\nls\n```\n````" }]);
@@ -383,7 +383,7 @@ describe("owner commands and hooks", () => {
 
   it("hands a message that is only a photo to the harness, not to bash", async () => {
     const fake = harness(replies("a red bicycle"));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     const events = await turn(sessions, "![image](attachments/k1-photo.jpg)");
     expect(events.some((event) => event.type === "tool_execution_start" && event.toolName === "bash")).toBe(false);
     expect(fake.calls()[0]?.prompt).toContain("![image](attachments/k1-photo.jpg)");
@@ -397,7 +397,7 @@ describe("owner commands and hooks", () => {
 
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
-    const sessions = host({ harnesses: [fake] });
+    const sessions = host({ fake: fake });
     await turn(sessions, "hello");
     await turn(sessions, "!!echo secret");
     await turn(sessions, "next");
@@ -407,7 +407,7 @@ describe("owner commands and hooks", () => {
   it("continues the turn while a session_stop hook asks it to", async () => {
     const stop = recordingStopHook();
     const fake = harness(replies("done", "verified"));
-    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const sessions = host({ fake: fake, hooks: stop.hooks });
     const events = await turn(sessions, "do it");
 
     // Each run of the hook is bracketed by its name and event, so a client can
@@ -437,7 +437,7 @@ describe("owner commands and hooks", () => {
     const fake = harness([]);
     const gate = fake.gate("asking");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "Write this as my character file?" }], gate: gate.path }, ...replies("written")]);
-    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "draft your character", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -453,7 +453,7 @@ describe("owner commands and hooks", () => {
   it("gives repeated identical owner requests distinct hook identities", async () => {
     const stop = recordingStopHook();
     const fake = harness(replies("done", "verified", "done again", "verified again"));
-    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const sessions = host({ fake: fake, hooks: stop.hooks });
     await turn(sessions, "do it");
     await turn(sessions, "do it");
     const ids = stop.inputs().map((input) => input.turn_id);
@@ -467,7 +467,7 @@ describe("owner commands and hooks", () => {
     const fake = harness([]);
     const gate = fake.gate("first");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second", "verified")]);
-    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -487,7 +487,7 @@ describe("owner commands and hooks", () => {
   it("lets a follow-up sent while the stop hook runs win over its continuation", async () => {
     const stop = recordingStopHook(true);
     const fake = harness(replies("first", "second"));
-    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const sessions = host({ fake: fake, hooks: stop.hooks });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => existsSync(stop.started));
@@ -507,7 +507,7 @@ describe("owner commands and hooks", () => {
 
 describe("conversation metadata", () => {
   it("keeps concurrent pin and read changes to different conversations", async () => {
-    const sessions = host({ harnesses: [harness(replies("one", "two"))] });
+    const sessions = host({ fake: harness(replies("one", "two")) });
     await turn(sessions, "first", "c1");
     await turn(sessions, "second", "c2");
 
@@ -525,7 +525,7 @@ describe("conversation metadata", () => {
   });
 
   it("lists, titles, pins, reads, and trashes a conversation", async () => {
-    const sessions = host({ harnesses: [harness(replies("hi"))] });
+    const sessions = host({ fake: harness(replies("hi")) });
     await turn(sessions, "Plan the zine\nwith details");
     let [row] = await sessions.listSessions("casper");
     expect(row).toMatchObject({ id: "c1", title: "Plan the zine", preview: "Plan the zine", messageCount: 2, pinned: false, unread: true });
@@ -543,7 +543,7 @@ describe("conversation metadata", () => {
   });
 
   it("skips a torn last log line", async () => {
-    const sessions = host({ harnesses: [harness(replies("hi"))] });
+    const sessions = host({ fake: harness(replies("hi")) });
     await turn(sessions, "hello");
     const before = (await readLog(sessionDir(), "c1"))?.length;
     writeFileSync(logPath(sessionDir(), "c1"), `${readFileSync(logPath(sessionDir(), "c1"), "utf8")}{"type":"us`);
@@ -574,7 +574,7 @@ describe("completion delivery", () => {
   it("delivers a final bounded excerpt and exact conversation link once after done", async () => {
     const notifications: GhostHookEvent[] = [];
     const fake = harness(replies(`Finished.\n${"a".repeat(400)}`));
-    const sessions = host({ harnesses: [fake], hooks: delivery(notifications), conversationUrl: async (ghost, id) => `https://summonghost.com/#/ghost.example.ts.net/${ghost}/${id}` });
+    const sessions = host({ fake: fake, hooks: delivery(notifications), conversationUrl: async (ghost, id) => `https://summonghost.com/#/ghost.example.ts.net/${ghost}/${id}` });
     const events = await turn(sessions, "Make the report");
     await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
@@ -599,7 +599,7 @@ describe("completion delivery", () => {
     });
     const fake = harness([]), gate = fake.gate("first");
     fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second")]);
-    const sessions = host({ harnesses: [fake], hooks });
+    const sessions = host({ fake: fake, hooks });
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: () => {} });
     await waitFor(() => fake.calls().length === 1);
     await sessions.queueMessage("casper", "c1", "two");
@@ -618,7 +618,7 @@ describe("completion delivery", () => {
         return { exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };
       },
     });
-    const sessions = host({ harnesses: [harness([...replies("One."), ...replies("Two.")])], hooks });
+    const sessions = host({ fake: harness([...replies("One."), ...replies("Two.")]), hooks });
     await turn(sessions, "First");
     await waitFor(() => notifications.length === 1);
     expect((await turn(sessions, "Second")).at(-1)?.type).toBe("done");
@@ -627,7 +627,7 @@ describe("completion delivery", () => {
   });
   it("reports failed turns and fails open when the delivery service is unavailable", async () => {
     const notifications: GhostHookEvent[] = [];
-    const sessions = host({ harnesses: [harness([{ fail: "service unavailable" }])], hooks: delivery(notifications, true) });
+    const sessions = host({ fake: harness([{ fail: "service unavailable" }]), hooks: delivery(notifications, true) });
     const events = await turn(sessions, "Try it");
     await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
@@ -637,7 +637,7 @@ describe("completion delivery", () => {
   it("keeps cancelled turns quiet", async () => {
     const notifications: GhostHookEvent[] = [], fake = harness([]);
     fake.setTurns([{ gate: fake.gate("never").path }]);
-    const sessions = host({ harnesses: [fake], hooks: delivery(notifications) });
+    const sessions = host({ fake: fake, hooks: delivery(notifications) });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: event => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
@@ -647,12 +647,12 @@ describe("completion delivery", () => {
   });
   it("does no remote discovery when notification delivery is disabled", async () => {
     let lookups = 0;
-    const sessions = host({ harnesses: [harness(replies("done"))], conversationUrl: async () => { lookups++; return null; } });
+    const sessions = host({ fake: harness(replies("done")), conversationUrl: async () => { lookups++; return null; } });
     await turn(sessions, "Do it");
     expect(lookups).toBe(0);
   });
   it("does not let a late read receipt move the read watermark backwards", async () => {
-    const sessions = host({ harnesses: [harness(replies("done"))] });
+    const sessions = host({ fake: harness(replies("done")) });
     await turn(sessions, "Do it");
     const latest = new Date(); await sessions.markRead("casper", "c1", latest);
     await sessions.markRead("casper", "c1", new Date(0));

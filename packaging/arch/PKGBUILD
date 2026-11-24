@@ -55,7 +55,6 @@ pkgver() {
 build() {
   cd -- "$srcdir/ghost"
 
-  bash packaging/release/prepare-pnpm-engine.sh .
   pnpm install --frozen-lockfile
   # The window (packages/window) is cargo's; no build or home folder in its panic messages.
   export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"
@@ -72,7 +71,6 @@ check() {
   # The window's scripted QA needs a window built with its `qa` feature, which a package build does not make;
   # `pnpm verify` runs it.
   GHOST_WINDOW_QA=0 pnpm test
-  bun test scripts
   pnpm typecheck
   pnpm lint
 }

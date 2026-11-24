@@ -45,7 +45,6 @@ sha256sums=('@@SOURCE_SHA256@@')
 prepare() {
   cd -- "$srcdir/ghost-${pkgver}"
   # Everything the build downloads, it downloads here, from the two lockfiles.
-  bash packaging/release/prepare-pnpm-engine.sh .
   pnpm install --frozen-lockfile
   cargo fetch --locked --manifest-path packages/window/Cargo.toml
 }

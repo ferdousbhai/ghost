@@ -28,8 +28,8 @@ packaging/release/publish.sh 0.1.1 --dry-run   # build, verify, build the packag
 packaging/release/publish.sh 0.1.1             # bump, push, tag, publish
 ```
 
-`publish.sh` bumps the manifests `verify-release-version.sh` lists when
-they do not say the version yet and commits `release: <version>` (a dry run
+`publish.sh` bumps the version in the root `package.json` when
+it does not say the version yet and commits `release: <version>` (a dry run
 does this too); a real run then pushes, and the `pre-push` hook runs the
 whole gate. It builds the source archive with
 `SOURCE_DATE_EPOCH` pinned to the commit, verifies it, writes `SHA256SUMS`, renders the stable `PKGBUILD`

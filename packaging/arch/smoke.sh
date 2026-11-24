@@ -75,25 +75,9 @@ desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.
 GHOST_BUN_EXECUTABLE="$(command -v bun)" \
   "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
-mapfile -t runtime_license_manifests < <(
-  find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print
-)
-if (( ${#runtime_license_manifests[@]} != 1 )); then
-  printf 'package payload has %s bundled-license manifests, expected one\n' \
-    "${#runtime_license_manifests[@]}" >&2
-  exit 1
-fi
-runtime_license_root="$(dirname "${runtime_license_manifests[0]}")"
-require_runtime_license() {
-  local path="$runtime_license_root/$1"
-  [[ -f "$path" && "$(stat -c '%a' "$path")" == 644 ]] || {
-    printf 'packaged runtime license is missing or unsafe: %s\n' "$1" >&2
-    exit 1
-  }
-}
-require_runtime_license licenses/ghost/LICENSE
-require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
-require_runtime_license BUNDLED-LICENSES
+for license in LICENSE THIRD_PARTY_NOTICES.md; do
+  require_file "$(cd "$root" && printf '/%s' usr/share/licenses/*/"$license")"
+done
 
 require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
   graphical-session.target

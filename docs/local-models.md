@@ -1,13 +1,13 @@
 # Local models
 
-Findings on running a model on the owner's own machine. Ghost runs one itself
-as the `local` agent; its contract is
+Findings on running a model on the owner's own machine. Every Ghost turn runs
+on one; its contract is
 [CONTRACTS.md "Local model"](../CONTRACTS.md#local-model). This page records
 what was measured.
 
 ## Status
 
-- **In use (2026-11-24):** Inkling 2 Mini as the native `local` agent. See
+- **In use (2026-11-24):** Inkling 2 Mini. See
   [Inkling 2 Mini](#inkling-2-mini-2026-11-24).
 - **Before it (2026-11-17):** Gemma 4 26B A4B. See
   [Gemma 4 26B A4B](#gemma-4-26b-a4b-2026-11-17).
@@ -38,7 +38,8 @@ lists Intel GPUs only, so Ghost starts the server itself.
 - The server's defaults are temperature 1.0, top-p 1.0, top-k 50, and
   reasoning effort `high`. The template accepts `reasoning_effort` per request
   (`none`, `minimal`, `low`, `medium`, `high`, `max`); the model card says the
-  lowest still reasons. Ghost sends none of these.
+  lowest still reasons. Ghost sends only the effort, `low` unless
+  `local.reasoningEffort` says otherwise.
 - The load takes 11 s. On a 3,220-token prompt with every layer on Vulkan it
   read 80 tokens/s and wrote 7.7; on the CPU alone (8 threads) 39 and 5.8.
 - Real turns in a scratch daemon, each a new conversation, effort `high`:
@@ -69,32 +70,8 @@ Measured on this machine:
 - Generation ran at 23 tokens/s on a short prompt, but at 6.5 tokens/s in
   `llama-bench` minutes later with the machine otherwise idle (load 1.5).
   The cause was not found.
-- Native, in a scratch daemon: the load took 12 s. Asked the time and what
-  the owner's WhatsApp chats said about handing over a passport, it read the
-  clock from its prompt, searched with Recall, and named four chats, in 44 s.
-- A question for the Lastbook library took 2 min 21 s and ten tool calls
-  (it tried `find_files` and `grep_files` before reading the page it found),
-  and cited the right booklet and pages.
-- Those two runs used an earlier tool set (seven tools and an approval step
-  for commands), replaced the same day by search, read and delegate, with the
-  owner's message searched before the model runs and three tool rounds.
-
-With search, read and delegate, ripgrep and fzf beside Recall, thinking
-off, and the first search's top three hits opened into the prompt (all on
-2026-11-17, a scratch daemon, the model warm):
-
-- Thinking had cost about a minute per answer (about 1,000 tokens of it);
-  without it a turn took 22–39 s, the first after a load 32 s.
-- "What did my WhatsApp chats say about handing over a passport?" named
-  three or four of the right chats each time, from the first search alone.
-- "When was the scooter import tax invoice from PT Yan Trading, and how
-  much was it?" found it in `~/Work`. It never called `read`; until the
-  right hits were opened into the prompt it answered 15,981,273, a misreading
-  of the file name's `IDR 159812737`, in 7 of 8 runs. With them it quoted
-  `Rp 159.812.737` both times, but that is the invoice's subtotal, not its
-  `TOTAL` line (`Rp 93.248.737`).
-- Hits had been numbered in the order sources finished, so the fastest,
-  Lastbook, took `S1`; they are now numbered in source order.
+- Thinking cost about a minute per answer (about 1,000 tokens of it);
+  without it a turn took 22–39 s.
 
 Lastbook gives its copy back after 15 idle minutes; Ghost gives its own back
 after its idle minutes. Both can be resident at once for up to that long.
@@ -113,9 +90,7 @@ after its idle minutes. Both can be resident at once for up to that long.
 - **Crush** (2026-11-17): the 26B model through the Crush harness got 22,646
   prompt tokens a turn, almost all Crush's own, which took 309 s, and guessed
   the time four hours off rather than check the clock. That is why Ghost runs
-  the model itself with a prompt of about 1,500 tokens and a few tools
-  (search, read, delegate, and two that write its own notes and reminders),
-  as Lastbook does.
+  the model itself with a short prompt and one tool.
 
 ## Running one on Omarchy
 
@@ -130,12 +105,8 @@ after its idle minutes. Both can be resident at once for up to that long.
   `cmake` (`uvx cmake` works), `glslc` and the Vulkan headers.
 - Weights go in the Hugging Face hub cache (`~/.cache/huggingface/hub`),
   fetched with `uvx --from huggingface_hub hf download <repo> <file>`.
-- What `search` finds through Recall is Recall's own configuration. On the
-  test machine its root is the home folder, minus code and scratch folders it
-  lists as excluded, so a new folder is indexed without anyone adding it.
 
 ## Open questions
 
-1. Does the 26B model hold up over long conversations and many tool calls?
-2. Why generation sometimes drops from 23 to about 6 tokens/s.
-3. Whether to stop Lastbook's idle copy before loading Ghost's.
+1. Why generation sometimes drops from 23 to about 6 tokens/s.
+2. Whether to stop Lastbook's idle copy before loading Ghost's.

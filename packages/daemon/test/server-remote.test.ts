@@ -6,7 +6,7 @@ import { SessionHost } from "../src/session-host.js";
 import type { RunningSource } from "../src/running-source.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts, serverServices } from "./helpers/fixtures.js";
-import { fakeHarness, onlyHarnesses, replies } from "./helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, replies } from "./helpers/fake-answerer.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 import { fakeTailscale, missingBinary } from "./helpers/fake-tailscale.js";
 
@@ -337,7 +337,7 @@ describe("the summonghost.com app's routes", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
-    host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...onlyHarnesses(fakeHarness(replies("hello"))) });
+    host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, ...answeredBy(fakeAnswerer(replies("hello"))) });
     listening = await startDaemonServer({
       registry: temp.registry, host, ...serverServices(temp.registry), port: 0, apiToken: TOKEN,
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }),

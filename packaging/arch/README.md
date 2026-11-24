@@ -11,7 +11,7 @@ tree. Ghost's application code is packaged for offline use; the model a
 ghost's turns run on is a file the owner provides.
 
 The stable `ghost` recipe lives under `packaging/omarchy/`; it builds the same
-bundles, launchers, and bundled-license closure from a release's source archive.
+bundles and launchers from a release's source archive.
 
 Build the checkout package without installing it (a plain `makepkg` builds
 origin `master`; these variables point it at this checkout's HEAD):

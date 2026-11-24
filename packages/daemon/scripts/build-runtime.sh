@@ -19,12 +19,11 @@ cleanup() {
 trap cleanup EXIT
 
 runtime_root="$work/runtime"
-meta_root="$work/meta"
-mkdir -p "$runtime_root/bin" "$runtime_root/lib" "$meta_root"
+mkdir -p "$runtime_root/bin" "$runtime_root/lib"
 
 version="$(bun -e \
   'process.stdout.write((await Bun.file(process.argv[1]).json()).version)' \
-  "$package_root/package.json")"
+  "$source_root/package.json")"
 
 # Ghost's bundles carry its release version.
 build_bundle() {
@@ -38,10 +37,9 @@ build_bundle() {
     --minify \
     --keep-names \
     "$@" \
-    --metafile="$meta_root/$name.json" \
     --outfile="$runtime_root/lib/$name.js" \
     "$entry"
-  chmod 644 "$runtime_root/lib/$name.js" "$meta_root/$name.json"
+  chmod 644 "$runtime_root/lib/$name.js"
 }
 
 ghost_version=(--define "process.env.GHOSTD_VERSION=\"$version\"")
@@ -50,8 +48,6 @@ build_bundle "$package_root/src/cli/main.ts" ghost "${ghost_version[@]}"
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost"
 
-bun "$package_root/scripts/stage-runtime-licenses.ts" \
-  "$source_root" "$runtime_root" "$meta_root/ghostd.json" "$meta_root/ghost.json"
 find -P "$runtime_root" -type d -exec chmod 755 {} +
 find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {} +
 

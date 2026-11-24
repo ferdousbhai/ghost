@@ -31,7 +31,7 @@ export interface FakeCall {
   readonly codingAgent: string | null;
 }
 
-export interface FakeHarness {
+export interface FakeAnswerer {
   readonly answerer: Answerer;
   calls(): FakeCall[];
   /** Replace the script; turn n still runs entry n of it, or its last. */
@@ -46,7 +46,7 @@ export function replies(...texts: string[]): FakeTurn[] {
   return texts.map((text) => ({ events: [{ type: "text", block: "reply", delta: text }] }));
 }
 
-export function fakeHarness(turns: readonly FakeTurn[]): FakeHarness {
+export function fakeAnswerer(turns: readonly FakeTurn[]): FakeAnswerer {
   const dir = mkdtempSync(join(tmpdir(), "ghost-fake-answerer-"));
   let script = turns;
   const calls: FakeCall[] = [];
@@ -88,6 +88,6 @@ export function fakeHarness(turns: readonly FakeTurn[]): FakeHarness {
 }
 
 /** SessionHost options that make `harness` what answers. */
-export function onlyHarnesses(harness: FakeHarness): { answerer: Answerer; codingAgent: () => Promise<string | null> } {
+export function answeredBy(harness: FakeAnswerer): { answerer: Answerer; codingAgent: () => Promise<string | null> } {
   return { answerer: harness.answerer, codingAgent: async () => null };
 }

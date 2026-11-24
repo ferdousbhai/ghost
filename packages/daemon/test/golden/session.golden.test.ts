@@ -18,7 +18,7 @@ import { conversationDir } from "../../src/conversation-log.js";
 import { ghostPaths } from "../../src/ghosts.js";
 import { SessionHost } from "../../src/session-host.js";
 import type { TurnEvent } from "../../src/turn-events.js";
-import { fakeHarness, onlyHarnesses, type FakeHarness } from "../helpers/fake-harness.js";
+import { fakeAnswerer, answeredBy, type FakeAnswerer } from "../helpers/fake-answerer.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "../helpers/fixtures.js";
 import {
   expectGolden,
@@ -28,7 +28,7 @@ import {
 } from "./harness.js";
 
 let temp: TempGhosts | null = null;
-let harness: FakeHarness | null = null;
+let harness: FakeAnswerer | null = null;
 let host: SessionHost | null = null;
 
 afterEach(async () => {
@@ -50,7 +50,7 @@ describe("golden: session", () => {
     temp = makeTempGhosts();
     const dir = seedGhost(temp.root, { name: "casper", character: CHARACTER });
     const notePath = join(temp.ownerHome, "Documents", "owner-prefers-short.md");
-    harness = fakeHarness([
+    harness = fakeAnswerer([
       {
         events: [
           { type: "tool_start", id: "t1", name: "Write", args: { path: notePath, content: "The owner wants short answers." } },
@@ -70,7 +70,7 @@ describe("golden: session", () => {
       registry: temp.registry,
       ownerHome: temp.ownerHome,
       env: { PATH: `${stubBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: temp.ownerHome },
-      ...onlyHarnesses(harness),
+      ...answeredBy(harness),
     });
 
     const normalizer = new Normalizer()

@@ -7,16 +7,15 @@ cleanup() { find -P "$work" -depth -delete; }
 trap cleanup EXIT
 
 runtime="$work/runtime"
-mkdir -p "$runtime/bin" "$runtime/lib" "$runtime/licenses/ghost" \
-  "$runtime/licenses/npm/yaml/2.9.0"
+mkdir -p "$runtime/bin" "$runtime/lib"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghostd"
 printf 'console.log("0.3.0");\n' > "$runtime/lib/ghostd.js"
 cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost.js"
-cp "$source_root/LICENSE" "$runtime/licenses/ghost/LICENSE"
-cp "$source_root/THIRD_PARTY_NOTICES.md" "$runtime/licenses/ghost/THIRD_PARTY_NOTICES.md"
-cp "$source_root/LICENSE" "$runtime/licenses/npm/yaml/2.9.0/LICENSE"
-printf 'fixture\n' > "$runtime/BUNDLED-LICENSES"
+
+# The daemon bundles no npm package, so the package ships Ghost's licence and
+# notices alone. A dependency added here needs its licence shipped too.
+! grep -q '"dependencies"' "$source_root/packages/daemon/package.json"
 
 # A stand-in for the built window: the payload check only asks its version.
 printf '#!/bin/sh\necho 0.3.0\n' > "$work/ghost-window"
