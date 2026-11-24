@@ -45,11 +45,11 @@ describe("loadConfig", () => {
     expect(loadConfig({ env: {}, home: root }).local).toBeNull();
     writeConfig(root, { local: { model: "~/models/gemma.gguf" } });
     expect(loadConfig({ env: {}, home: root }).local).toEqual({
-      model: join(root, "models", "gemma.gguf"), server: "llama-server", contextSize: 32_768, idleMs: 300_000,
+      model: join(root, "models", "gemma.gguf"), server: "llama-server", contextSize: 32_768, idleMs: 300_000, reasoningEffort: "low",
     });
-    writeConfig(root, { local: { model: "/m.gguf", server: "~/bin/llama-server", contextSize: 8192, idleMinutes: 1 } });
-    expect(loadConfig({ env: {}, home: root }).local).toEqual({ model: "/m.gguf", server: join(root, "bin", "llama-server"), contextSize: 8192, idleMs: 60_000 });
-    for (const local of [{}, { model: "" }, { model: "/m.gguf", idleMinutes: 0 }, "gemma"]) {
+    writeConfig(root, { local: { model: "/m.gguf", server: "~/bin/llama-server", contextSize: 8192, idleMinutes: 1, reasoningEffort: "minimal" } });
+    expect(loadConfig({ env: {}, home: root }).local).toEqual({ model: "/m.gguf", server: join(root, "bin", "llama-server"), contextSize: 8192, idleMs: 60_000, reasoningEffort: "minimal" });
+    for (const local of [{}, { model: "" }, { model: "/m.gguf", idleMinutes: 0 }, { model: "/m.gguf", reasoningEffort: 1 }, "gemma"]) {
       writeConfig(root, { local });
       expect(() => loadConfig({ env: {}, home: root }), JSON.stringify(local)).toThrow(/local/);
     }

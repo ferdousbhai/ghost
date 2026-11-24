@@ -31,11 +31,13 @@ You are a model running on the owner's own computer, with one tool: bash, which 
 
 /**
  * The one-shot command of each coding agent the section can name: run with a
- * task, it works without asking and prints its answer. A model is likely to
- * know these already; Ghost teaches it no command of its own.
+ * task, it works without asking and prints its steps, then its answer. A
+ * model is likely to know these already; Ghost teaches it no command of its
+ * own. Claude prints only its answer unless it streams JSON, which `jq` turns
+ * back into lines: each text it writes, and each tool it uses with its input.
  */
 export const CODING_AGENT_COMMANDS: Readonly<Record<string, string>> = {
-  claude: 'claude -p "<task>"',
+  claude: String.raw`claude -p "<task>" --verbose --output-format stream-json | jq --unbuffered -r '.message.content[]?|.text//(select(.name)|"\(.name) \(.input)")'`,
   codex: 'codex exec "<task>"',
   agy: 'agy -p "<task>"',
 };
@@ -48,7 +50,7 @@ export const CODING_AGENT_COMMANDS: Readonly<Record<string, string>> = {
 export function localSection(codingAgent: string | null): string {
   const command = codingAgent === null ? undefined : CODING_AGENT_COMMANDS[codingAgent];
   return command === undefined ? LOCAL_BASE
-    : `${LOCAL_BASE} For work on code, run the owner's coding agent in the project's directory and read its answer: \`${command}\`.`;
+    : `${LOCAL_BASE} For work on code, run the owner's coding agent in the project's directory, by this command exactly but for the task, and read its answer: \`${command}\`.`;
 }
 
 interface ChatMessage {
@@ -80,6 +82,7 @@ async function complete(
       model: model.name,
       messages,
       ...(tools ? { tools: LOCAL_TOOLS } : {}),
+      reasoning_effort: model.config.reasoningEffort,
       stream: true,
     }),
     signal: input.signal,

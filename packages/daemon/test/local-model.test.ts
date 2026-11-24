@@ -10,6 +10,7 @@ it("fails to start cleanly when llama-server is missing, and stopping still reso
     server: join(directory, "no-such-llama-server"),
     contextSize: 1024,
     idleMs: 60_000,
+    reasoningEffort: "low",
   }, { info: () => {}, warn: () => {} });
   await expect(model.acquire()).rejects.toThrow(/could not start/u);
   // Under Bun a failed spawn never emits `exit`; a stop that waited for one

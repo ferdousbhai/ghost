@@ -760,9 +760,10 @@ of this table, never text from a product or a model.
 ### Local model
 
 `local` in `~/.config/ghost/config.json` is
-`{ model, server?, contextSize?, idleMinutes? }`: a GGUF file used in place,
+`{ model, server?, contextSize?, idleMinutes?, reasoningEffort? }`: a GGUF file used in place,
 the `llama-server` executable (default: `llama-server` on `PATH`; on Asahi, point it at a Vulkan build),
-the context in tokens (32768), and the idle minutes before it stops (5).
+the context in tokens (32768), the idle minutes before it stops (5), and how
+deeply the model reasons, as its chat template names the depths (`low`).
 Configured, `local` is the default runtime ([Harnesses](#harnesses)), listed
 with the harnesses (`GET …/harness`, the HUD agent menu) and chosen like one
 (`ghost switch local`, `ghost harness local`); `ghost harnesses`, which reads
@@ -782,8 +783,8 @@ user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
 prompt. Nothing is searched ahead of the model. It keeps no session of its
 own, streams the same events a harness parser emits, plus a running command's
 latest output (at most every 100 ms), and records the model as
-the file's name and the provider as `local`. Sampling and thinking are the
-model's and llama-server's own defaults.
+the file's name and the provider as `local`. It sends `reasoning_effort`;
+sampling is the model's and llama-server's own default.
 
 It offers one tool ([`local-tools.ts`](packages/daemon/src/local-tools.ts)),
 `bash(command)`: a command line run as the owner in the conversation's
@@ -791,8 +792,10 @@ directory, with the conversation's environment, no sandbox and no
 confirmation. The owner's products are command lines with a skill each under
 `~/.agents/skills`, so the shell is how the model searches, reads, writes and
 acts, and how it runs a coding agent: that agent's own one-shot command,
-whose answer it reads. The section names one command only, the owner's
-choice among `claude -p`, `codex exec` and `agy -p`: this ghost's own agent
+whose steps the owner sees as it prints them and whose answer the model
+reads. The section names one command only, the owner's
+choice among `claude -p` (streaming JSON through `jq`, since it otherwise
+prints nothing until it ends), `codex exec` and `agy -p`: this ghost's own agent
 (`ghost harness`), else Omarchy's default agent, else the first installed, as
 for a turn. With none of the three installed it names none. Ghost teaches the
 model no command of its own for this. The section asks

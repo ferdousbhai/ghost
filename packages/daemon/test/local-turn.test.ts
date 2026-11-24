@@ -10,7 +10,7 @@ import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 type Reply = { text?: string; call?: { name: string; args: Record<string, unknown> }; status?: number };
-type Request = { messages: Array<{ role: string; content: string }>; tools?: unknown[] };
+type Request = { messages: Array<{ role: string; content: string }>; tools?: unknown[]; reasoning_effort?: string };
 
 let temp: TempGhosts | undefined;
 let closers: Array<() => void> = [];
@@ -39,6 +39,7 @@ function fakeServer(script: Reply[]) {
   });
   const model = {
     name: "gemma-test",
+    config: { reasoningEffort: "low" },
     acquire: async () => ({ url: `http://127.0.0.1:${server.port}`, key: "k" }),
     release: () => {},
     stop: async () => {},
@@ -93,6 +94,7 @@ describe("the local model", () => {
     expect(text(events)).toBe("Nine, from the north pier (trip.md).");
     // One tool, and the whole persona a harness gets, since this model has a shell too.
     expect(server.requests[0]?.tools).toEqual([expect.objectContaining({ function: expect.objectContaining({ name: "bash" }) })]);
+    expect(server.requests[0]?.reasoning_effort).toBe("low");
     const system = String(server.requests[0]?.messages[0]?.content);
     expect(system).toMatch(/^# Casper\n/u);
     for (const section of ["## Ghost", "## Running locally"]) expect(system).toContain(section);
@@ -138,7 +140,7 @@ describe("the local model", () => {
     const withCodex = host([{ text: "ok" }], fakeHarness(replies("unused"), "codex"));
     await turn(withCodex.sessions, "hi");
     const system = String(withCodex.server.requests[0]?.messages[0]?.content);
-    expect(system).toContain('run the owner\'s coding agent in the project\'s directory and read its answer: `codex exec "<task>"`.');
+    expect(system).toContain('run the owner\'s coding agent in the project\'s directory, by this command exactly but for the task, and read its answer: `codex exec "<task>"`.');
     expect(system).not.toContain("claude -p");
     expect(withCodex.cloud.calls()).toHaveLength(0);
 

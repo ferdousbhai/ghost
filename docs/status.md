@@ -25,9 +25,8 @@ Not done:
 
 - Inkling 2 Mini answers through the loop on the owner's M1 Max, but slowly:
   about 8 tokens a second, a minute for a one-command answer and six for a
-  three-command one (`docs/local-models.md`). Reasoning effort is the
-  server's default, `high`; whether Ghost should send a lower one is the
-  owner's to decide.
+  three-command one at the model's default reasoning effort
+  (`docs/local-models.md`). Ghost now sends `low` (`local.reasoningEffort`).
 - Ghost still starts its own `llama-server`. Omarchy's model engine does not
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
@@ -35,8 +34,9 @@ Not done:
   now never fed by a local turn; they are left in place, unused.
 - The shrink under "Unfinished" below, `ghost delegate` included.
 - A running command's output now streams into the turn, so a coding agent's
-  steps show in the HUD's tool card and as the window's status line. It has
-  not been tried with a real coding agent run by the model.
+  steps show in the HUD's tool card and as the window's status line. Claude
+  prints its steps only as streamed JSON, so its command pipes that through
+  `jq`; the model ran it so on the owner's machine.
 
 What follows is the freeze of 2026-11-20, kept for what it records.
 

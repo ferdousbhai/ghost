@@ -99,7 +99,7 @@ describe("the stable prompt policy budget", () => {
 });
 
 /** Only a local pass adds it, after the whole persona; it has its own ceiling, measured with the longest command. */
-const LOCAL_CEILING = 780;
+const LOCAL_CEILING = 947;
 
 describe("the local model's section", () => {
   it("stays at or below its ceiling, and names only the owner's coding agent", () => {

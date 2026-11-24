@@ -9,7 +9,7 @@ import { errorMessage } from "./errors.js";
 import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
-import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, type LocalModelConfig } from "./local-model.js";
+import { DEFAULT_LOCAL_CONTEXT, DEFAULT_LOCAL_IDLE_MS, DEFAULT_LOCAL_REASONING_EFFORT, type LocalModelConfig } from "./local-model.js";
 
 type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & { apps?: string[] };
 
@@ -54,12 +54,15 @@ interface DaemonConfigFile {
   local?: LocalModelConfig;
 }
 
-/** `local`: `{ model, server?, contextSize?, idleMinutes? }`, paths `~`-expanded. */
+/** `local`: `{ model, server?, contextSize?, idleMinutes?, reasoningEffort? }`, paths `~`-expanded. */
 function parseLocal(raw: unknown, path: string, home: string): LocalModelConfig {
   if (!isRecord(raw)) throw new Error(`${path}: "local" must be a JSON object.`);
   if (typeof raw.model !== "string" || !raw.model.trim()) throw new Error(`${path}: "local.model" must be the path of a GGUF file.`);
   if (raw.server !== undefined && (typeof raw.server !== "string" || !raw.server.trim())) {
     throw new Error(`${path}: "local.server" must be the llama-server executable.`);
+  }
+  if (raw.reasoningEffort !== undefined && (typeof raw.reasoningEffort !== "string" || !raw.reasoningEffort.trim())) {
+    throw new Error(`${path}: "local.reasoningEffort" must be a reasoning depth the model names, such as "low".`);
   }
   const positive = (key: string, fallback: number): number => {
     const value = raw[key];
@@ -72,6 +75,7 @@ function parseLocal(raw: unknown, path: string, home: string): LocalModelConfig 
     server: typeof raw.server === "string" ? expandHome(raw.server, home) : "llama-server",
     contextSize: positive("contextSize", DEFAULT_LOCAL_CONTEXT),
     idleMs: positive("idleMinutes", DEFAULT_LOCAL_IDLE_MS / 60_000) * 60_000,
+    reasoningEffort: typeof raw.reasoningEffort === "string" ? raw.reasoningEffort.trim() : DEFAULT_LOCAL_REASONING_EFFORT,
   };
 }
 

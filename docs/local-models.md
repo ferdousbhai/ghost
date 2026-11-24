@@ -49,6 +49,13 @@ lists Intel GPUs only, so Ghost starts the server itself.
   its lines shown as they were printed; a turn stopped mid-command, which
   ended the command. All answers were right.
 
+- With reasoning effort `low`, which Ghost now sends, the file question took
+  44 s on a loaded model.
+- Asked to use the coding agent, it ran Claude's command with a `tail` in
+  place of the `jq` filter until the section said "by this command exactly
+  but for the task"; then twice of twice it ran it as written, in 56 and
+  88 s, and Claude's tool use and answer showed as they were printed.
+
 ## Gemma 4 26B A4B (2026-11-17)
 
 Model: `unsloth/gemma-4-26B-A4B-it-GGUF`, `gemma-4-26B-A4B-it-UD-Q4_K_M.gguf`

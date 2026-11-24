@@ -18,11 +18,15 @@ export interface LocalModelConfig {
   readonly contextSize: number;
   /** Unused this long, the server stops and its memory returns. */
   readonly idleMs: number;
+  /** How deeply the model reasons before it answers, as its chat template names the depths. */
+  readonly reasoningEffort: string;
 }
 
 export const LOCAL_HARNESS = "local";
 export const DEFAULT_LOCAL_CONTEXT = 32_768;
 export const DEFAULT_LOCAL_IDLE_MS = 5 * 60_000;
+/** A model's own default can be its deepest: Inkling 2 Mini's took six minutes over three commands. */
+export const DEFAULT_LOCAL_REASONING_EFFORT = "low";
 /** A 26B model from a cold disk takes about a minute; this bounds a hung load. */
 const LOAD_TIMEOUT_MS = 10 * 60_000;
 const STDERR_TAIL = 4_096;
