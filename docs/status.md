@@ -23,15 +23,20 @@ Done since:
 
 Not done:
 
-- No model has answered through the new loop: it is tested against a stand-in
-  server only. The owner wants Thinking Machines' Inkling 2 Mini (26B, about
-  20 GB, released 2026-11-20); whether llama-server runs its GGUF, and with
-  which tool-call template, is not checked.
+- Inkling 2 Mini answers through the loop on the owner's M1 Max, but slowly:
+  about 8 tokens a second, a minute for a one-command answer and six for a
+  three-command one (`docs/local-models.md`). Reasoning effort is the
+  server's default, `high`; whether Ghost should send a lower one is the
+  owner's to decide.
+- Ghost still starts its own `llama-server`. Omarchy's model engine does not
+  run on this machine yet; when it does, Ghost and Lastbook should both use
+  its endpoint.
 - The `sources` turn event and the window's and HUD's cited-hit handling are
   now never fed by a local turn; they are left in place, unused.
 - The shrink under "Unfinished" below, `ghost delegate` included.
-- The owner sees only the command line of a coding agent the model runs, not
-  its steps: `bash` returns output when the command ends and streams nothing.
+- A running command's output now streams into the turn, so a coding agent's
+  steps show in the HUD's tool card and as the window's status line. It has
+  not been tried with a real coding agent run by the model.
 
 What follows is the freeze of 2026-11-20, kept for what it records.
 

@@ -7,7 +7,9 @@ what was measured.
 
 ## Status
 
-- **In use (2026-11-17):** Gemma 4 26B A4B as the native `local` agent. See
+- **In use (2026-11-24):** Inkling 2 Mini as the native `local` agent. See
+  [Inkling 2 Mini](#inkling-2-mini-2026-11-24).
+- **Before it (2026-11-17):** Gemma 4 26B A4B. See
   [Gemma 4 26B A4B](#gemma-4-26b-a4b-2026-11-17).
 - **Not pursued:** Gemma 4 E4B, Qwen3.5-0.8B, and running a model through
   Crush. See [Tried before](#tried-before).
@@ -18,6 +20,34 @@ MacBook Pro 16-inch (M1 Max, 2021), 64 GB, running Omarchy on Asahi Linux.
 There is no Metal or MLX on Linux; the GPU is reached through the Asahi Vulkan
 driver (Honeykrisp, `vulkan-asahi` 26.2.6). The runtime is llama.cpp at
 `61dbf49`, built from source with `-DGGML_VULKAN=ON`.
+
+## Inkling 2 Mini (2026-11-24)
+
+Model: `ggml-org/Inkling-2-Mini-GGUF`, `Inkling-2-Mini-IQ4_NL.gguf` (17.6 GB),
+revision `e8a2cecf0e78`, served by llama.cpp's own release build `b12669`
+(`llama-b12669-bin-ubuntu-vulkan-arm64.tar.gz`, unpacked under `~/.local/lib`;
+it needs `libssl.so.3`). The machine is the one above, now on official Omarchy
+4.5 (`linux-aurora` 7.2.11, `vulkan-asahi` 26.2.5), where the driver offers
+32,081 MiB to Vulkan. Omarchy's own model engine (`omarchy-local-ai`,
+`omarchy models`) is not packaged for this machine and its llama.cpp runtime
+lists Intel GPUs only, so Ghost starts the server itself.
+
+- llama.cpp supports the looped architecture and the model's chat template:
+  tool calls come back as OpenAI `tool_calls` with `--jinja`, and reasoning as
+  `reasoning_content`. Nothing in the loop needed changing for it.
+- The server's defaults are temperature 1.0, top-p 1.0, top-k 50, and
+  reasoning effort `high`. The template accepts `reasoning_effort` per request
+  (`none`, `minimal`, `low`, `medium`, `high`, `max`); the model card says the
+  lowest still reasons. Ghost sends none of these.
+- The load takes 11 s. On a 3,220-token prompt with every layer on Vulkan it
+  read 80 tokens/s and wrote 7.7; on the CPU alone (8 threads) 39 and 5.8.
+- Real turns in a scratch daemon, each a new conversation, effort `high`:
+  a total and a date read from a file, 64 s with the load; three files
+  written and their sizes summed, 364 s over three commands; a command that
+  fails (it reported the message and exit status 2), 62 s; `seq 1 60000` (it
+  sent the output to a file and counted it), 113 s; a ten-second loop, 59 s,
+  its lines shown as they were printed; a turn stopped mid-command, which
+  ended the command. All answers were right.
 
 ## Gemma 4 26B A4B (2026-11-17)
 

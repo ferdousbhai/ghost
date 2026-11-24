@@ -475,7 +475,7 @@ The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `text_*`, `thinking` (the harness's reasoning, as
-far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
+far as it shows it; never logged), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or local-model command has printed), `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
 running, by its `name` and `event`; clients show it as a settled turn), `session_stop_continued`, `sources` (a local search's hits, each
 `{ key, source, id, title, path?, page?, line? }`: the `[S1]` an answer cites
@@ -780,7 +780,8 @@ smallest harness that works: it sends the ghost's whole persona, as a harness
 gets it, plus the "Running locally" section and the current time, and, as the
 user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
 prompt. Nothing is searched ahead of the model. It keeps no session of its
-own, streams the same events a harness parser emits, and records the model as
+own, streams the same events a harness parser emits, plus a running command's
+latest output (at most every 100 ms), and records the model as
 the file's name and the provider as `local`. Sampling and thinking are the
 model's and llama-server's own defaults.
 

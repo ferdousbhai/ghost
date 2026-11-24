@@ -953,6 +953,11 @@ export class SessionHost {
           content.push({ type: "toolCall", id: event.id, name: event.name, arguments: event.args });
           stream.emit({ type: "tool_execution_start", id: event.id, toolName: event.name, arguments: event.args, cwd: dir });
           return;
+        case "tool_update": {
+          const summary = tools.has(event.id) ? tail(event.output) : undefined;
+          if (summary) stream.emit({ type: "tool_execution_update", id: event.id, summary });
+          return;
+        }
         case "tool_end": {
           const tool = tools.get(event.id);
           if (!tool) return;

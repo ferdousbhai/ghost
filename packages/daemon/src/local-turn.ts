@@ -143,7 +143,7 @@ async function runTool(call: ToolCall, args: Record<string, unknown> | null, inp
   if (args === null || typeof args.command !== "string" || !args.command.trim()) {
     return { text: "The arguments were not {\"command\": \"…\"}; nothing was run.", isError: true };
   }
-  return bash(args.command, input);
+  return bash(args.command, { ...input, onOutput: (output) => input.onEvent({ type: "tool_update", id: call.id, output }) });
 }
 
 /**

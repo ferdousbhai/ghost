@@ -3,7 +3,7 @@
  * line run as the owner, with no sandbox and no confirmation. Everything the
  * owner's products do is behind their command lines, so a shell is the whole
  * tool set: searching is `recall` and `rg`, mail is `cloudmail`, a coding
- * agent is `omarchy agent prompt` or `ghost delegate`.
+ * agent is its own one-shot command.
  */
 import { spawn } from "node:child_process";
 
@@ -14,6 +14,9 @@ import { spawn } from "node:child_process";
  * outgrow the request.
  */
 export const TOOL_RESULT_CHARS = 200_000;
+const OUTPUT_UPDATE_MS = 100;
+/** The latest output a running command shows: more than any card displays. */
+const LATEST_CHARS = 4_000;
 
 interface ToolSpec {
   readonly type: "function";
@@ -36,9 +39,14 @@ export const LOCAL_TOOLS: readonly ToolSpec[] = [{
 
 /**
  * Run `command` in bash, in `cwd`, until it ends or `signal` stops the turn,
- * which ends the command and everything it started.
+ * which ends the command and everything it started. While it runs, `onOutput`
+ * is given the latest of what it has printed, at most every
+ * `OUTPUT_UPDATE_MS`: a coding agent's steps, seen as they happen.
  */
-export function bash(command: string, context: { cwd: string; env: NodeJS.ProcessEnv; signal: AbortSignal }): Promise<ToolResult> {
+export function bash(
+  command: string,
+  context: { cwd: string; env: NodeJS.ProcessEnv; signal: AbortSignal; onOutput?: (latest: string) => void },
+): Promise<ToolResult> {
   return new Promise((done) => {
     // Its own process group, so that stopping the turn stops what the command started too.
     const child = spawn("bash", ["-c", command], { cwd: context.cwd, env: context.env, stdio: ["ignore", "pipe", "pipe"], detached: true });
@@ -47,9 +55,19 @@ export function bash(command: string, context: { cwd: string; env: NodeJS.Proces
     let head = "";
     let tail = "";
     let total = 0;
+    let latest = "";
+    let update: ReturnType<typeof setTimeout> | undefined;
+    const sendUpdate = () => {
+      update = undefined;
+      context.onOutput?.(latest);
+    };
     const take = (chunk: Buffer) => {
       const text = chunk.toString("utf8");
       total += text.length;
+      if (context.onOutput) {
+        latest = (latest + text).slice(-LATEST_CHARS);
+        update ??= setTimeout(sendUpdate, OUTPUT_UPDATE_MS);
+      }
       const room = half - head.length;
       head += text.slice(0, Math.max(room, 0));
       if (text.length > room) tail = (tail + text.slice(Math.max(room, 0))).slice(-half);
@@ -66,6 +84,7 @@ export function bash(command: string, context: { cwd: string; env: NodeJS.Proces
     };
     context.signal.addEventListener("abort", stop, { once: true });
     const finish = (status: string, isError: boolean) => {
+      clearTimeout(update);
       context.signal.removeEventListener("abort", stop);
       const kept = head.length + tail.length;
       const output = kept < total ? `${head}\n… (${total - kept} characters left out) …\n${tail}` : head + tail;

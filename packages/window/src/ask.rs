@@ -434,6 +434,12 @@ impl AskPage {
                     name => format!("Running {name}…"),
                 });
             }
+            // A running command's latest line: a coding agent's steps as they happen.
+            "tool_execution_update" => {
+                if let Some(line) = event["summary"].as_str().and_then(|text| text.lines().rev().find(|line| !line.trim().is_empty())) {
+                    step(line.trim().to_string());
+                }
+            }
             "sources" => answer.hits.borrow_mut().extend(event["items"].as_array().cloned().unwrap_or_default()),
             "text_start" => {
                 if !answer.text.borrow().is_empty() {

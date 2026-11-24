@@ -39,6 +39,8 @@ export type HarnessEvent =
   | { readonly type: "text"; readonly block: string; readonly delta: string }
   | { readonly type: "thinking"; readonly block: string; readonly delta: string }
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
+  /** The latest of what a still-running tool has printed. */
+  | { readonly type: "tool_update"; readonly id: string; readonly output: string }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   /** The local model's search hits, by the key its answer cites them with. */
   | { readonly type: "sources"; readonly items: readonly SourceHit[] }
