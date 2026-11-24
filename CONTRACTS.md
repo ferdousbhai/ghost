@@ -789,8 +789,10 @@ It offers one tool ([`local-tools.ts`](packages/daemon/src/local-tools.ts)),
 directory, with the conversation's environment, no sandbox and no
 confirmation. The owner's products are command lines with a skill each under
 `~/.agents/skills`, so the shell is how the model searches, reads, writes and
-acts, and how it starts a coding agent (`omarchy agent prompt`, or
-`ghost delegate` for a headless run whose answer it reads). The section asks
+acts, and how it runs a coding agent: that agent's own one-shot command
+(`claude -p`, `codex exec`, `agy -p`: the three the section names), whose
+answer it reads. Ghost teaches it no
+command of its own for that. The section asks
 it to say what a command will do, and wait for the owner's yes, before one
 that sends something to another person, spends money, or deletes what cannot
 be restored; nothing in ghostd enforces that.

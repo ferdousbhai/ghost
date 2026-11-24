@@ -18,7 +18,8 @@ Done since:
 - The local model's harness is minimal: the whole persona, one tool (`bash`,
   unsandboxed, unconfirmed), no cap on rounds, no forced answer, no trimming.
   Its former tools (`search`, `read`, `save_note`, `add_reminder`, `delegate`)
-  are gone; a coding agent is started from the shell.
+  are gone; a coding agent is run from the shell by its own one-shot command
+  (`claude -p`), as the owner chose, so `ghost delegate` can go.
 
 Not done:
 
@@ -28,8 +29,9 @@ Not done:
   which tool-call template, is not checked.
 - The `sources` turn event and the window's and HUD's cited-hit handling are
   now never fed by a local turn; they are left in place, unused.
-- The shrink under "Unfinished" below, except that `ghost delegate` stays: it
-  is how the local model runs a coding agent and reads its answer.
+- The shrink under "Unfinished" below, `ghost delegate` included.
+- The owner sees only the command line of a coding agent the model runs, not
+  its steps: `bash` returns output when the command ends and streams nothing.
 
 What follows is the freeze of 2026-11-20, kept for what it records.
 
