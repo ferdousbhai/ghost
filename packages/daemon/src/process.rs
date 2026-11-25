@@ -338,4 +338,196 @@ mod tests {
         let ok = run_command("bash", &["-c", "echo hi; exit 2"], &env(), None, Duration::from_secs(5), &Abort::new()).unwrap();
         assert_eq!((ok.stdout.as_str(), ok.code), ("hi\n", 2));
     }
+
+    // ── process.test.ts ─────────────────────────────────────────────────
+
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("ghost-process-{}", crate::random::uuid()));
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+        fn path(&self, name: &str) -> String {
+            self.0.join(name).display().to_string()
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The pid a test's own child wrote, once it is there whole. An empty or
+    /// half-written file is no pid, never pid 0.
+    fn read_pid(path: &str) -> Option<i32> {
+        std::fs::read_to_string(path).ok()?.trim().parse().ok().filter(|pid| *pid > 0)
+    }
+
+    /// SIGKILL to a process this test's own command started; one already gone is fine.
+    fn kill_captured(path: &str) {
+        if let Some(pid) = read_pid(path) {
+            // SAFETY: a plain syscall on a pid this test's child recorded; ESRCH is success.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    /// A zombie has exited and holds nothing: only a process that can still run is alive.
+    fn alive(pid: i32) -> bool {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .is_ok_and(|stat| stat.rfind(')').and_then(|end| stat[end + 1..].split_whitespace().next()).is_some_and(|state| state != "Z"))
+    }
+
+    /// Poll for what has no signal to wait on: another process's files and exit.
+    fn wait_for<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(found) = check() {
+                return found;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn closes_inherited_pipes_and_takes_no_descendant_output_after_settlement() {
+        let scratch = Scratch::new();
+        let (gate, pid_file, outcome) = (scratch.path("write-late"), scratch.path("descendant.pid"), scratch.path("outcome"));
+        // A detached descendant keeps the command's stdout and writes to it once
+        // the gate opens, until a write fails: the reader letting go of the pipe.
+        let descendant = format!(
+            "trap '' PIPE; while [ ! -e '{gate}' ]; do sleep 0.01; done; deadline=$((SECONDS + 5)); \
+             while echo late 2>/dev/null; do if [ \"$SECONDS\" -ge \"$deadline\" ]; then echo open > '{outcome}.tmp'; mv '{outcome}.tmp' '{outcome}'; exit; fi; sleep 0.02; done; \
+             echo closed > '{outcome}.tmp'; mv '{outcome}.tmp' '{outcome}'"
+        );
+        let script = format!("setsid bash -c \"$DESCENDANT\" < /dev/null & echo $! > '{pid_file}.tmp'; mv '{pid_file}.tmp' '{pid_file}'; echo early");
+        let mut env = env();
+        env.insert("DESCENDANT".into(), descendant);
+        let mut output = String::new();
+        let started = Instant::now();
+        let exit = run_process(
+            ProcessOptions {
+                argv: &["bash", "-c", &script],
+                cwd: &scratch.0,
+                env: &env,
+                abort: &Abort::new(),
+                stdin: None,
+                merge_stderr: false,
+                tick: false,
+            },
+            |chunk| output.push_str(chunk),
+        );
+        let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // It ends with the command, after the drain it allows and no longer.
+            assert_eq!((exit.code, output.as_str()), (Some(0), "early\n"));
+            assert!(started.elapsed() >= PIPE_DRAIN && started.elapsed() < PIPE_DRAIN + Duration::from_secs(10));
+            std::fs::write(&gate, "ready").unwrap();
+            wait_for("the pipe's outcome", || std::path::Path::new(&outcome).exists().then_some(()));
+            assert_eq!(std::fs::read_to_string(&outcome).unwrap().trim(), "closed");
+        }));
+        kill_captured(&pid_file);
+        if let Err(panic) = checked {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[test]
+    fn kills_the_stopped_leaders_surviving_process_group_with_inherited_and_ignored_pipes() {
+        for redirect in ["", "< /dev/null > /dev/null 2>&1"] {
+            let scratch = Scratch::new();
+            let (ready, pid_file) = (scratch.path("ready"), scratch.path("descendant.pid"));
+            // The descendant is deaf to SIGTERM; the leader, which is not, says ready once the descendant is.
+            let descendant = format!("trap '' TERM; echo ready > '{ready}'; while :; do sleep 1; done");
+            let script = format!(
+                "bash -c \"$DESCENDANT\" {redirect} & echo $! > '{pid_file}.tmp'; mv '{pid_file}.tmp' '{pid_file}'; \
+                 while [ ! -e '{ready}' ]; do sleep 0.01; done; echo ready; while :; do sleep 1; done"
+            );
+            let mut env = env();
+            env.insert("DESCENDANT".into(), descendant);
+            let abort = Abort::new();
+            let stopper = abort.clone();
+            let exit = run_process(
+                ProcessOptions {
+                    argv: &["bash", "-c", &script],
+                    cwd: &scratch.0,
+                    env: &env,
+                    abort: &abort,
+                    stdin: None,
+                    merge_stderr: false,
+                    tick: false,
+                },
+                |_| stopper.abort(),
+            );
+            let pid = read_pid(&pid_file);
+            let checked = std::panic::catch_unwind(|| {
+                assert_eq!((exit.code, exit.signal), (None, Some(libc::SIGTERM)), "{redirect}");
+                let pid = pid.expect("the descendant's pid");
+                wait_for("the descendant to end", || (!alive(pid)).then_some(()));
+            });
+            kill_captured(&pid_file);
+            if let Err(panic) = checked {
+                std::panic::resume_unwind(panic);
+            }
+        }
+    }
+
+    #[test]
+    fn delivers_newline_free_stdout_while_the_child_is_still_running() {
+        let scratch = Scratch::new();
+        let gate = scratch.path("received");
+        // It finishes only once its first, unterminated, output has been handed on.
+        let script = format!("printf 'start🐈'; while [ ! -e '{gate}' ]; do sleep 0.005; done; printf finish");
+        let mut output = String::new();
+        let exit = run_process(
+            ProcessOptions {
+                argv: &["bash", "-c", &script],
+                cwd: &scratch.0,
+                env: &env(),
+                abort: &Abort::new(),
+                stdin: None,
+                merge_stderr: false,
+                tick: false,
+            },
+            |chunk| {
+                output.push_str(chunk);
+                if output.contains("start🐈") {
+                    std::fs::write(&gate, "ready").unwrap();
+                }
+            },
+        );
+        assert_eq!((exit.code, output.as_str()), (Some(0), "start🐈finish"));
+    }
+
+    #[test]
+    fn a_character_split_across_chunks_arrives_whole() {
+        let mut stream = Utf8Stream::default();
+        let cat = "🐈".as_bytes();
+        assert_eq!(stream.push(&[b'a', cat[0], cat[1]]), "a");
+        assert_eq!(stream.push(&cat[2..3]), "");
+        assert_eq!(stream.push(&[cat[3], b'b']), "🐈b");
+        // Bytes that are no character at all are replaced, not held for ever.
+        assert_eq!(stream.push(&[0xff, b'c']), "\u{fffd}c");
+    }
+
+    #[test]
+    fn an_empty_command_and_the_stderr_tail() {
+        let exit = run_process(
+            ProcessOptions { argv: &[], cwd: Path::new("/"), env: &env(), abort: &Abort::new(), stdin: None, merge_stderr: false, tick: false },
+            |_| {},
+        );
+        assert_eq!(exit, ProcessExit { spawn_error: Some("empty command".into()), ..Default::default() });
+        // Only the last of a long stderr is kept, for an error message.
+        let (exit, out) = bash("head -c 20000 /dev/zero | tr '\\0' e >&2; echo END >&2", &Abort::new(), None, false);
+        assert_eq!((exit.stderr.len(), out.as_str()), (STDERR_TAIL_BYTES, ""));
+        assert!(exit.stderr.ends_with("eEND\n"));
+        // A command that never reads its stdin still ends by its exit.
+        let (exit, _) = bash("exit 5", &Abort::new(), Some(&"x".repeat(1 << 20)), false);
+        assert_eq!(exit.code, Some(5));
+        assert_eq!((signal_name(libc::SIGTERM), signal_name(64)), ("SIGTERM".to_string(), "signal 64".to_string()));
+    }
 }

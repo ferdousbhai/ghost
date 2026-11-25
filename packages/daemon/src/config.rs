@@ -82,6 +82,11 @@ pub fn default_config_path(env: &Env, home: &Path) -> PathBuf {
     base_dir(env, Base::Config, home).join("ghost").join("config.json")
 }
 
+/// A JSON number that is a whole one, however it was written (`8192`, `8192.0`, `8.192e3`).
+fn whole(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_f64().filter(|n| n.fract() == 0.0 && (0.0..=9_007_199_254_740_991.0).contains(n)).map(|n| n as u64))
+}
+
 fn parse_port(raw: &str, source: &str) -> Result<u16, String> {
     raw.parse::<u16>().map_err(|_| format!("Invalid port from {source}: {}", Value::String(raw.to_string())))
 }
@@ -120,10 +125,10 @@ fn parse_local(raw: &Value, path: &str, home: &Path) -> Result<LocalModelConfig,
     };
     let positive = |key: &str, fallback: u64| match object.get(key) {
         None => Ok(fallback),
-        Some(value) => value.as_u64().filter(|n| *n >= 1).ok_or_else(|| format!("{path}: \"local.{key}\" must be a positive whole number.")),
+        Some(value) => whole(value).filter(|n| *n >= 1).ok_or_else(|| format!("{path}: \"local.{key}\" must be a positive whole number.")),
     };
     Ok(LocalModelConfig {
-        model: resolve(home, &expand_home(model, home)),
+        model: resolve(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")), &expand_home(model, home)),
         server,
         context_size: positive("contextSize", DEFAULT_LOCAL_CONTEXT)?,
         idle_ms: positive("idleMinutes", DEFAULT_LOCAL_IDLE_MINUTES)? * 60_000,
@@ -153,7 +158,7 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
         if !port.is_number() {
             return Err(format!("{shown}: \"port\" must be a number."));
         }
-        config.port = Some(parse_port(&port.to_string(), &shown)?);
+        config.port = Some(parse_port(&whole(port).map_or_else(|| port.to_string(), |port| port.to_string()), &shown)?);
     }
     if let Some(root) = file.get("ghostsRoot") {
         config.ghosts_root = Some(root.as_str().ok_or_else(|| format!("{shown}: \"ghostsRoot\" must be a string."))?.to_string());
@@ -293,6 +298,167 @@ mod tests {
         }
         std::fs::write(dir.join(".config/ghost/config.json"), "{").unwrap();
         assert!(load(&dir, &env).unwrap_err().contains("is not valid JSON"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // ── config.test.ts ──────────────────────────────────────────────────
+
+    fn rewrite(dir: &Path, config: Value) {
+        std::fs::write(dir.join(".config/ghost/config.json"), config.to_string()).unwrap();
+    }
+
+    #[test]
+    fn reads_the_local_model_expanding_home_with_defaults() {
+        let (dir, env) = scratch(Some(json!({ "local": { "model": "~/models/gemma.gguf" } })));
+        assert_eq!(
+            load(&dir, &env).unwrap().local,
+            Some(LocalModelConfig {
+                model: dir.join("models/gemma.gguf"),
+                server: "llama-server".into(),
+                context_size: 32_768,
+                idle_ms: 300_000,
+                reasoning_effort: "low".into(),
+            })
+        );
+        rewrite(
+            &dir,
+            json!({ "local": { "model": "/m.gguf", "server": "~/bin/llama-server", "contextSize": 8192, "idleMinutes": 1, "reasoningEffort": " minimal " } }),
+        );
+        assert_eq!(
+            load(&dir, &env).unwrap().local,
+            Some(LocalModelConfig {
+                model: PathBuf::from("/m.gguf"),
+                server: dir.join("bin/llama-server").to_string_lossy().into_owned(),
+                context_size: 8192,
+                idle_ms: 60_000,
+                reasoning_effort: "minimal".into(),
+            })
+        );
+        // A relative model is under the directory ghostd runs in, as `ghostsRoot` is.
+        rewrite(&dir, json!({ "local": { "model": "models/../m.gguf" } }));
+        assert_eq!(load(&dir, &env).unwrap().local.unwrap().model, std::env::current_dir().unwrap().join("m.gguf"));
+        for local in [
+            json!({}),
+            json!({ "model": "" }),
+            json!({ "model": "/m.gguf", "idleMinutes": 0 }),
+            json!({ "model": "/m.gguf", "idleMinutes": 1.5 }),
+            json!({ "model": "/m.gguf", "contextSize": -1 }),
+            json!({ "model": "/m.gguf", "contextSize": "8192" }),
+            json!({ "model": "/m.gguf", "reasoningEffort": 1 }),
+            json!({ "model": "/m.gguf", "reasoningEffort": " " }),
+            json!("gemma"),
+        ] {
+            rewrite(&dir, json!({ "local": local }));
+            assert!(load(&dir, &env).unwrap_err().contains("\"local"), "{local}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_whole_number_is_one_however_json_writes_it() {
+        let (dir, env) = scratch(None);
+        std::fs::write(
+            dir.join(".config/ghost/config.json"),
+            r#"{ "port": 8123.0, "local": { "model": "/m.gguf", "contextSize": 8.192e3, "idleMinutes": 2.0 } }"#,
+        )
+        .unwrap();
+        let config = load(&dir, &env).unwrap();
+        let local = config.local.unwrap();
+        assert_eq!((config.port, local.context_size, local.idle_ms), (8123, 8192, 120_000));
+        for port in [json!(70000), json!(-1), json!(80.5)] {
+            rewrite(&dir, json!({ "port": port }));
+            assert!(load(&dir, &env).unwrap_err().contains("Invalid port from"), "{port}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reads_the_remote_owner_guests_and_apps() {
+        let (dir, env) = scratch(Some(json!({ "remote": { "owner": "Owner@example.com", "guests": "none" } })));
+        assert_eq!(
+            load(&dir, &env).unwrap().remote,
+            RemoteConfig { owner: Some("Owner@example.com".into()), guests: Guests::None, apps: vec!["https://summonghost.com".into()] }
+        );
+        // `[]` admits none.
+        rewrite(&dir, json!({ "remote": { "apps": [] } }));
+        assert_eq!(load(&dir, &env).unwrap().remote.apps, Vec::<String>::new());
+        rewrite(&dir, json!({ "remote": { "apps": ["https://lab.summonghost.com", "https://app.example:8443"] } }));
+        assert_eq!(load(&dir, &env).unwrap().remote.apps, ["https://lab.summonghost.com", "https://app.example:8443"]);
+        for apps in [
+            json!("https://summonghost.com"),
+            json!(["http://summonghost.com"]),
+            json!(["https://summonghost.com/"]),
+            json!(["summonghost.com"]),
+            json!([7]),
+            json!(["https://Summonghost.com"]),
+            json!(["https://summonghost.com:443"]),
+            json!(["https://summonghost.com:08443"]),
+            json!(["https://user@summonghost.com"]),
+            json!(["https://"]),
+        ] {
+            rewrite(&dir, json!({ "remote": { "apps": apps } }));
+            assert!(load(&dir, &env).unwrap_err().contains("remote.apps"), "{apps}");
+        }
+        rewrite(&dir, json!({ "remote": [] }));
+        assert!(load(&dir, &env).unwrap_err().contains("\"remote\" must be a JSON object"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reads_the_xdg_config_file_and_honours_xdg_config_home() {
+        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "ghostsRoot": "~/Spirits", "offline": true })));
+        let config = load(&dir, &env).unwrap();
+        assert_eq!((config.port, config.ghosts_root, config.config_path), (8123, dir.join("Spirits"), dir.join(".config/ghost/config.json")));
+        let xdg = dir.join("xdg");
+        std::fs::create_dir_all(xdg.join("ghost")).unwrap();
+        std::fs::write(xdg.join("ghost/config.json"), json!({ "port": 9001 }).to_string()).unwrap();
+        env.insert("XDG_CONFIG_HOME".into(), xdg.display().to_string());
+        assert_eq!(default_config_path(&env, &dir), xdg.join("ghost/config.json"));
+        let config = load(&dir, &env).unwrap();
+        assert_eq!((config.port, config.hooks_path), (9001, xdg.join("ghost/hooks.json")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_environment_overrides_the_file_and_an_empty_variable_is_not_set() {
+        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "ghostsRoot": "/from-file", "offline": true })));
+        env.insert("GHOSTD_PORT".into(), " 7000 ".into());
+        env.insert("GHOSTS_ROOT".into(), dir.join("FromEnv").display().to_string());
+        let config = load(&dir, &env).unwrap();
+        assert_eq!((config.port, config.ghosts_root), (7000, dir.join("FromEnv")));
+        // An explicit override beats the environment.
+        assert_eq!(load_config(&Overrides { port: Some(7788), ..Default::default() }, &env, &dir).unwrap().port, 7788);
+        // Empty variables fall back: the default config path, the file's port and root, hooks beside the config.
+        for name in ["GHOSTD_CONFIG", "GHOSTD_PORT", "GHOSTS_ROOT", "GHOSTD_HOOKS"] {
+            env.insert(name.into(), "  ".into());
+        }
+        let config = load(&dir, &env).unwrap();
+        assert_eq!(config.config_path, dir.join(".config/ghost/config.json"));
+        assert_eq!((config.port, config.ghosts_root, config.hooks_path), (8123, PathBuf::from("/from-file"), dir.join(".config/ghost/hooks.json")));
+        // A named config file is the one read, and hooks.json is beside it.
+        let elsewhere = dir.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("c.json"), json!({ "port": 9100 }).to_string()).unwrap();
+        env.insert("GHOSTD_CONFIG".into(), elsewhere.join("c.json").display().to_string());
+        let config = load(&dir, &env).unwrap();
+        assert_eq!((config.port, config.hooks_path), (9100, elsewhere.join("hooks.json")));
+        let flagged = load_config(&Overrides { config_path: Some(dir.join("none.json")), ..Default::default() }, &env, &dir).unwrap();
+        assert_eq!((flagged.port, flagged.config_path, flagged.hooks_path), (DEFAULT_PORT, dir.join("none.json"), dir.join("hooks.json")));
+        env.insert("GHOSTD_PORT".into(), "not-a-port".into());
+        assert_eq!(load(&dir, &env).unwrap_err(), "Invalid port from GHOSTD_PORT: \"not-a-port\"");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn ignores_keys_it_does_not_read_such_as_the_retired_host_and_remote_peers() {
+        let (dir, env) = scratch(Some(
+            json!({ "host": "0.0.0.0", "someday": true, "remote": { "guests": "none", "peers": [{ "login": "wife@example.com" }], "later": 1 } }),
+        ));
+        let config = load(&dir, &env).unwrap();
+        assert_eq!(config.remote, RemoteConfig { owner: None, guests: Guests::None, apps: vec!["https://summonghost.com".into()] });
+        assert_eq!((config.port, config.local), (DEFAULT_PORT, None));
+        rewrite(&dir, json!({ "ghostsRoot": 7 }));
+        assert!(load(&dir, &env).unwrap_err().contains("\"ghostsRoot\" must be a string"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

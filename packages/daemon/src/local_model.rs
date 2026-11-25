@@ -10,7 +10,7 @@ use serde_json::json;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// A 26B model from a cold disk takes about a minute; this bounds a hung load.
@@ -74,6 +74,15 @@ fn url_safe_key() -> String {
 impl LocalModel {
     pub fn new(config: LocalModelConfig, logger: Logger, env: Env) -> Self {
         Self { inner: Arc::new(Inner { config, logger, env, state: Mutex::new(State::default()), changed: Condvar::new() }) }
+    }
+
+    /// Test seam: a model whose server already answers at `endpoint`. Nothing
+    /// is spawned for it and nothing is killed; it stays loaded until `stop`.
+    #[cfg(test)]
+    pub fn with_endpoint(config: LocalModelConfig, logger: Logger, env: Env, endpoint: Endpoint) -> Self {
+        let model = Self::new(config, logger, env);
+        model.inner.state.lock().unwrap().endpoint = Some(endpoint);
+        model
     }
 
     pub fn config(&self) -> &LocalModelConfig {
@@ -185,9 +194,12 @@ impl LocalModel {
             .map_err(|error| format!("The local model could not start: {error}"))?;
         let pid = child.id();
         let tail = Arc::new(Mutex::new(String::new()));
+        // Closed when stderr has been read to its end.
+        let (drained, stderr_end) = mpsc::channel::<()>();
         if let Some(mut stderr) = child.stderr.take() {
             let tail = tail.clone();
             std::thread::spawn(move || {
+                let _drained = drained;
                 let mut buffer = [0u8; 4096];
                 while let Ok(read) = stderr.read(&mut buffer) {
                     if read == 0 {
@@ -224,6 +236,8 @@ impl LocalModel {
                 }
             };
             if let Some(why) = exited {
+                // Its last words may still be in the pipe; a descendant holding the pipe open is not waited for.
+                let _ = stderr_end.recv_timeout(Duration::from_secs(1));
                 let tail = tail.lock().unwrap();
                 let lines: Vec<&str> = tail.trim().lines().collect();
                 let last = lines[lines.len().saturating_sub(4)..].join("\n");
@@ -274,5 +288,105 @@ impl LocalModel {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+
+    fn scratch() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ghost-local-model-{}", crate::random::uuid()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn model(directory: &Path, server: &str) -> LocalModel {
+        let config = LocalModelConfig {
+            model: directory.join("Gemma-Test.GGUF"),
+            server: directory.join(server).to_string_lossy().into_owned(),
+            context_size: 1024,
+            idle_ms: 60_000,
+            reasoning_effort: "low".to_string(),
+        };
+        LocalModel::new(config, Logger::silent(), crate::env::current())
+    }
+
+    #[test]
+    fn fails_to_start_cleanly_when_llama_server_is_missing_and_stopping_still_returns() {
+        let directory = scratch();
+        let model = model(&directory, "no-such-llama-server");
+        let told = std::cell::Cell::new(0);
+        let error = model.acquire(Some(&|| told.set(told.get() + 1))).unwrap_err();
+        assert!(error.starts_with("The local model could not start: "), "{error}");
+        // The caller was told it would wait, and holds nothing after the failure.
+        assert_eq!(told.get(), 1);
+        assert_eq!(model.inner.state.lock().unwrap().users, 0);
+        let started = Instant::now();
+        model.stop("test");
+        model.release();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        // The next turn tries again, and fails the same way.
+        assert!(model.acquire(None).unwrap_err().contains("could not start"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_server_that_exits_while_loading_is_reported_with_its_last_words() {
+        let directory = scratch();
+        let script = directory.join("llama-server");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nfor line in one two three four; do echo \"$line\" >&2; done\necho 'error: cannot open the model' >&2\nexit 3\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let model = model(&directory, "llama-server");
+        let error = model.acquire(None).unwrap_err();
+        // The status, and the last four lines it wrote.
+        assert_eq!(error, "The local model could not start: exited with status 3\ntwo\nthree\nfour\nerror: cannot open the model");
+        let state = model.inner.state.lock().unwrap();
+        assert!(state.child.is_none() && state.endpoint.is_none() && !state.loading && state.users == 0);
+        drop(state);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn names_the_model_by_its_file_without_the_extension() {
+        let directory = PathBuf::from("/nowhere");
+        assert_eq!(model(&directory, "llama-server").name(), "Gemma-Test");
+        let named = |file: &str| {
+            let config = LocalModelConfig { model: PathBuf::from(file), ..model(&directory, "x").config().clone() };
+            LocalModel::new(config, Logger::silent(), Env::new()).name()
+        };
+        assert_eq!(named("/models/gemma-3-27b.Q4_K_M.gguf"), "gemma-3-27b.Q4_K_M");
+        assert_eq!(named("/models/plain"), "plain");
+        assert_eq!(named("/models/é.gguf"), "é");
+    }
+
+    #[test]
+    fn hands_out_ports_below_the_ephemeral_range_and_fresh_keys() {
+        for _ in 0..8 {
+            assert!(PORT_RANGE.contains(&free_port().unwrap()));
+        }
+        let (first, second) = (url_safe_key(), url_safe_key());
+        assert!(first != second && first.len() == 32);
+        assert!(first.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+    }
+
+    #[test]
+    fn an_endpoint_already_running_is_held_and_released_without_a_process() {
+        let endpoint = Endpoint { address: "127.0.0.1:9".parse().unwrap(), key: "k".to_string() };
+        let held =
+            LocalModel::with_endpoint(model(Path::new("/nowhere"), "llama-server").config().clone(), Logger::silent(), Env::new(), endpoint.clone());
+        // Nobody waits for a load, so nobody is told of one.
+        assert_eq!(held.acquire(Some(&|| panic!("told of a load"))), Ok(endpoint.clone()));
+        assert_eq!(held.acquire(None), Ok(endpoint));
+        held.release();
+        held.release();
+        let state = held.inner.state.lock().unwrap();
+        assert!(state.users == 0 && state.child.is_none() && state.endpoint.is_some());
     }
 }

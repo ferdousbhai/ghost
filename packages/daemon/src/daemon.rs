@@ -107,20 +107,35 @@ extern "C" fn on_signal(signal: libc::c_int) {
     }
 }
 
-/// Block until SIGINT or SIGTERM arrives; returns its name.
-fn wait_for_shutdown_signal() -> &'static str {
-    let mut ends = [0 as libc::c_int; 2];
-    // SAFETY: plain syscalls on descriptors this function owns; the handler only writes to the pipe.
-    unsafe {
-        if libc::pipe(ends.as_mut_ptr()) != 0 {
-            return "none";
+/// SIGINT and SIGTERM, caught from `install` on: one that arrives before
+/// `wait` is still the stop it asks for, not the end of a half-started daemon.
+struct ShutdownSignal {
+    /// The read end of the handler's pipe; None when the pipe could not be made.
+    pipe: Option<libc::c_int>,
+}
+
+impl ShutdownSignal {
+    fn install() -> Self {
+        let mut ends = [0 as libc::c_int; 2];
+        // SAFETY: plain syscalls on descriptors this function makes; the handler only writes to the pipe.
+        unsafe {
+            if libc::pipe(ends.as_mut_ptr()) != 0 {
+                return Self { pipe: None };
+            }
+            SIGNAL_PIPE.store(ends[1], Ordering::Relaxed);
+            libc::signal(libc::SIGINT, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
         }
-        SIGNAL_PIPE.store(ends[1], Ordering::Relaxed);
-        libc::signal(libc::SIGINT, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t);
+        Self { pipe: Some(ends[0]) }
+    }
+
+    /// Block until one has arrived; returns its name.
+    fn wait(&self) -> &'static str {
+        let Some(pipe) = self.pipe else { return "none" };
         let mut byte = 0u8;
         loop {
-            let read = libc::read(ends[0], (&raw mut byte).cast(), 1);
+            // SAFETY: a read into one byte this function owns, from the pipe `install` made.
+            let read = unsafe { libc::read(pipe, (&raw mut byte).cast(), 1) };
             if read == 1 {
                 break;
             }
@@ -234,10 +249,12 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
             return 1;
         }
     };
+    // Caught before the daemon says it is up, so a stop sent the moment it does is a clean one.
+    let shutdown = ShutdownSignal::install();
     logger.info("listening", summary);
     // Stop accepting work, abort running turns, and close everything. A second
     // signal ends the process outright; systemd's `TimeoutStopSec` bounds the whole stop.
-    let signal = wait_for_shutdown_signal();
+    let signal = shutdown.wait();
     logger.info("shutting down", json!({ "signal": signal }));
     host.dispose_all();
     listening.close();
@@ -270,5 +287,90 @@ mod tests {
         assert_eq!(parse_args(&args(&["--log-level", "loud"])).unwrap_err(), "Invalid log level: loud");
         assert_eq!(parse_args(&args(&["--nope"])).unwrap_err(), "Unknown option '--nope'");
         assert!(parse_args(&args(&["--port"])).unwrap_err().contains("argument missing"));
+    }
+
+    // ── main.test.ts ────────────────────────────────────────────────────
+
+    #[test]
+    fn defaults_to_no_overrides() {
+        let parsed = parse_args(&[]).unwrap();
+        assert_eq!((parsed.overrides.port, parsed.overrides.ghosts_root, parsed.overrides.config_path), (None, None, None));
+        assert_eq!((parsed.log_level, parsed.help, parsed.version), (Level::Info, false, false));
+    }
+
+    #[test]
+    fn parses_the_serve_options() {
+        let parsed =
+            parse_args(&args(&["--port", "7788", "--ghosts-root", "/tmp/ghosts", "--config", "/tmp/config.json", "--log-level", "warn"])).unwrap();
+        assert_eq!(
+            (parsed.overrides.port, parsed.overrides.ghosts_root.as_deref(), parsed.overrides.config_path.as_deref()),
+            (Some(7788), Some("/tmp/ghosts"), Some(Path::new("/tmp/config.json")))
+        );
+        assert_eq!((parsed.log_level, parsed.help, parsed.version), (Level::Warn, false, false));
+        // The short port flag, and port 0 for any free port.
+        assert_eq!(parse_args(&args(&["-p", "9000"])).unwrap().overrides.port, Some(9000));
+        assert_eq!(parse_args(&args(&["--port=0"])).unwrap().overrides.port, Some(0));
+        assert_eq!(parse_args(&args(&["--log-level=error"])).unwrap().log_level, Level::Error);
+    }
+
+    #[test]
+    fn recognises_help_and_version() {
+        assert!(parse_args(&args(&["--help"])).unwrap().help && parse_args(&args(&["-h"])).unwrap().help);
+        assert!(parse_args(&args(&["-v"])).unwrap().version && parse_args(&args(&["--version"])).unwrap().version);
+    }
+
+    #[test]
+    fn rejects_nonsense_rather_than_guessing() {
+        let refused = |list: &[&str]| parse_args(&args(list)).unwrap_err();
+        assert!(refused(&["--port"]).contains("argument missing"));
+        assert!(refused(&["--config"]).contains("argument missing"));
+        assert_eq!(refused(&["--port", "70000"]), "Invalid port: 70000");
+        for port in ["-1", "80.5", "http", ""] {
+            assert_eq!(refused(&["--port", port]), format!("Invalid port: {port}"));
+        }
+        assert_eq!(refused(&["--log-level", "loud"]), "Invalid log level: loud");
+        assert_eq!(refused(&["--wat"]), "Unknown option '--wat'");
+        // A word that is no flag is not a ghost to serve or a command to run.
+        assert_eq!(refused(&["serve"]), "Unknown option 'serve'");
+    }
+
+    #[test]
+    fn help_advertises_every_subcommand_flag_and_variable() {
+        for command in ["api-token", "hook-complete"] {
+            assert!(USAGE.contains(&format!("ghostd {command}")), "{command}");
+        }
+        for flag in ["-p, --port <port>", "--ghosts-root <dir>", "--config <file>", "--log-level <level>", "-h, --help", "-v, --version"] {
+            assert!(USAGE.contains(flag), "{flag}");
+        }
+        for variable in ["GHOSTD_PORT", "GHOSTS_ROOT", "GHOSTD_CONFIG", "GHOSTD_HOOKS", "GHOSTD_API_TOKEN_FILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME"]
+        {
+            assert!(USAGE.contains(variable), "{variable}");
+        }
+        assert!(USAGE.ends_with('\n'));
+    }
+
+    #[test]
+    fn hands_a_daemons_flags_to_every_child_so_they_address_it_and_not_the_default_daemon() {
+        let scratch = std::env::temp_dir().join(format!("ghostd-env-{}", crate::random::uuid()));
+        std::fs::create_dir_all(&scratch).unwrap();
+        let (config_file, root) = (scratch.join("config.json").display().to_string(), scratch.join("ghosts").display().to_string());
+        let parsed = parse_args(&args(&["--port", "7788", "--config", &config_file, "--ghosts-root", &root])).unwrap();
+        let config = load_config(&parsed.overrides, &Env::new(), &scratch).unwrap();
+        let inherited = Env::from([("HOME".to_string(), scratch.display().to_string()), ("PATH".to_string(), "/usr/bin:/bin".to_string())]);
+        let env = daemon_env(&config, 7788, inherited.clone());
+        // What the daemon was started with stays; the four that name it are added.
+        assert_eq!(env.len(), inherited.len() + 4);
+        assert!(inherited.iter().all(|(name, value)| env.get(name) == Some(value)));
+        // A hook's shell sees the flag's port…
+        let print = "printf '%s %s %s %s' \"$GHOSTD_PORT\" \"$GHOSTD_CONFIG\" \"$GHOSTS_ROOT\" \"$GHOSTD_HOOKS\"";
+        let hook =
+            crate::process::run_command("/bin/bash", &["-c", print], &env, None, std::time::Duration::from_secs(30), &crate::abort::Abort::new())
+                .unwrap();
+        assert_eq!(hook.stdout, format!("7788 {config_file} {root} {}", scratch.join("hooks.json").display()));
+        // …and a child that loads the config from its environment resolves this daemon's.
+        assert_eq!(load_config(&Overrides::default(), &env, &scratch).unwrap(), config);
+        // The port is the one bound, whatever the configuration asked for.
+        assert_eq!(daemon_env(&config, 4242, inherited)["GHOSTD_PORT"], "4242");
+        std::fs::remove_dir_all(scratch).unwrap();
     }
 }

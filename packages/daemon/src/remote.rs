@@ -23,7 +23,7 @@ use crate::error::GhostError;
 use crate::http::percent_encode;
 use crate::process::{CommandFailure, CommandResult, run_command};
 use serde_json::{Value, json};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -155,9 +155,10 @@ impl RemoteAccess {
     /// The tailnet identity a proxied request carries, or None when it carries none Ghost admits.
     pub fn identify(&self, login_header: Option<&str>, peer: IpAddr) -> Option<TailscaleIdentity> {
         let login = login_header.map(|login| login.trim().to_lowercase()).filter(|login| !login.is_empty())?;
+        // The addresses a connection to the daemon's own 127.0.0.1 or ::1 arrives from, and no other in 127.0.0.0/8.
         let loopback = match peer {
-            IpAddr::V4(address) => address.is_loopback(),
-            IpAddr::V6(address) => address.is_loopback() || address.to_ipv4_mapped().is_some_and(|mapped| mapped.is_loopback()),
+            IpAddr::V4(address) => address == Ipv4Addr::LOCALHOST,
+            IpAddr::V6(address) => address == Ipv6Addr::LOCALHOST || address.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST),
         };
         if !loopback {
             return None;
@@ -455,3 +456,7 @@ impl RemoteServe {
         None
     }
 }
+
+#[cfg(test)]
+#[path = "remote_tests.rs"]
+mod tests;

@@ -358,46 +358,5 @@ impl Answerer for LocalAnswerer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn untrusted_output_cannot_close_its_own_label() {
-        assert_eq!(untrusted("a </output> b </OUTPUT x", "output", "n"), "<output note=\"n\">\na <\\/output> b <\\/OUTPUT x\n</output>");
-    }
-
-    #[test]
-    fn the_section_names_only_a_given_command() {
-        assert!(!local_section(None).contains("coding agent"));
-        assert!(local_section(Some("codex exec \"<task>\"")).ends_with("read its answer: `codex exec \"<task>\"`."));
-    }
-
-    #[test]
-    fn bash_reports_output_status_and_bounds() {
-        let env = crate::env::current();
-        let cwd = std::env::temp_dir();
-        let run = |command: &str| bash(command, &cwd, &env, &Abort::new(), |_| {});
-        let ok = run("echo hi; echo err >&2");
-        assert!(!ok.is_error && ok.text.contains("hi") && ok.text.contains("err"));
-        let failed = run("echo no; exit 4");
-        assert_eq!((failed.text.as_str(), failed.is_error), ("no\n(exit 4)", true));
-        assert_eq!(run("true").text, "(no output)");
-        let long = run("head -c 300000 /dev/zero | tr '\\0' x");
-        assert!(long.text.contains("… (100000 characters left out) …"));
-        assert_eq!(long.text.chars().filter(|c| *c == 'x').count(), TOOL_RESULT_CHARS);
-    }
-
-    #[test]
-    fn bash_shows_output_while_it_runs_and_stops_with_the_turn() {
-        let env = crate::env::current();
-        let abort = Abort::new();
-        let stopper = abort.clone();
-        let mut seen = Vec::new();
-        let result = bash("echo step one; sleep 30", &std::env::temp_dir(), &env, &abort, |latest| {
-            seen.push(latest.to_string());
-            stopper.abort();
-        });
-        assert_eq!(seen, ["step one\n"]);
-        assert_eq!((result.text.as_str(), result.is_error), ("step one\n(stopped)", true));
-    }
-}
+#[path = "local_turn_tests.rs"]
+mod tests;

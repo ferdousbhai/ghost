@@ -99,4 +99,48 @@ mod tests {
         assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "rel/../x")]), &dir), dir.join("x"));
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    // ── xdg-user-dirs.test.ts ───────────────────────────────────────────
+
+    #[test]
+    fn resolves_the_owners_documents_directory_the_way_the_desktop_does() {
+        let home = Path::new("/home/someone");
+        assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "$HOME/Dokumente")]), home), Path::new("/home/someone/Dokumente"));
+        assert_eq!(documents_dir(&env(&[]), home), Path::new("/home/someone/Documents"));
+        let dir = std::env::temp_dir().join(format!("ghost-xdg-{}", crate::random::uuid()));
+        std::fs::create_dir_all(dir.join(".config")).unwrap();
+        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\nXDG_DOCUMENTS_DIR=\"$HOME/Notes\"\n").unwrap();
+        // A systemd user unit inherits no XDG desktop variables, so the file decides.
+        assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Notes"));
+        // An unquoted value, an absolute one, and a line for another directory with a longer name.
+        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOCUMENTS_DIRS=\"$HOME/No\"\nXDG_DOCUMENTS_DIR=/srv/docs\n").unwrap();
+        assert_eq!(documents_dir(&env(&[]), &dir), Path::new("/srv/docs"));
+        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOCUMENTS_DIR=\"\"\n").unwrap();
+        assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Documents"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reads_user_dirs_from_xdg_config_home_and_an_empty_variable_defers_to_it() {
+        let dir = std::env::temp_dir().join(format!("ghost-xdg-{}", crate::random::uuid()));
+        let config = dir.join("elsewhere");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("user-dirs.dirs"), "XDG_DOCUMENTS_DIR=\"$HOME/Papers\"\n").unwrap();
+        let config = config.display().to_string();
+        assert_eq!(documents_dir(&env(&[("XDG_CONFIG_HOME", &config), ("XDG_DOCUMENTS_DIR", " ")]), &dir), dir.join("Papers"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn expands_home_only_at_the_start_of_a_path() {
+        let home = Path::new("/home/o");
+        assert_eq!(expand_home("~", home), home);
+        assert_eq!(expand_home("~/a", home), Path::new("/home/o/a"));
+        assert_eq!(expand_home("$HOME/a", home), Path::new("/home/o/a"));
+        for unchanged in ["~other/a", "/x/~/a", "a/$HOME/b", "$HOMEWARD"] {
+            assert_eq!(expand_home(unchanged, home), Path::new(unchanged));
+        }
+        assert_eq!(resolve(Path::new("/base"), Path::new("a/./b/../c")), Path::new("/base/a/c"));
+        assert_eq!(resolve(Path::new("/base"), Path::new("/abs/../x")), Path::new("/x"));
+    }
 }

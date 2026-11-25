@@ -155,4 +155,118 @@ mod tests {
         assert!(String::from_utf8(err).unwrap().contains("unknown option --loud"));
         std::fs::remove_dir_all(dir).unwrap();
     }
+
+    // ── token-store.test.ts ─────────────────────────────────────────────
+
+    fn env(pairs: &[(&str, &str)]) -> Env {
+        pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
+    }
+
+    #[test]
+    fn lives_under_xdg_state_unless_named_explicitly() {
+        let home = Path::new("/home/x");
+        assert_eq!(api_token_path(&env(&[("XDG_STATE_HOME", "/xdg/state")]), home), Path::new("/xdg/state/ghost/api-token"));
+        assert_eq!(api_token_path(&env(&[("XDG_STATE_HOME", "relative")]), home), Path::new("/home/x/.local/state/ghost/api-token"));
+        assert_eq!(api_token_path(&env(&[("GHOSTD_API_TOKEN_FILE", "/tmp/t")]), home), Path::new("/tmp/t"));
+        assert_eq!(api_token_path(&env(&[("GHOSTD_API_TOKEN_FILE", " ")]), home), Path::new("/home/x/.local/state/ghost/api-token"));
+    }
+
+    #[test]
+    fn is_minted_once_owner_only_and_read_back_the_same_ever_after() {
+        let dir = scratch();
+        let path = dir.join("state").join("api-token");
+        assert_eq!(read_api_token(&path), Ok(None));
+        let (token, created) = ensure_api_token(&path).unwrap();
+        assert!(created && token.len() == 64 && token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')), "{token}");
+        assert_eq!(ensure_api_token(&path), Ok((token.clone(), false)));
+        assert_eq!(read_api_token(&path), Ok(Some(token.clone())));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{token}\n"));
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        // Its directory is the owner's alone, and no temporary file is left in it.
+        assert_eq!(std::fs::metadata(dir.join("state")).unwrap().permissions().mode() & 0o777, 0o700);
+        let left: Vec<_> = std::fs::read_dir(dir.join("state")).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        assert_eq!(left, ["api-token"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_a_link_a_readable_by_others_file_and_a_malformed_one_instead_of_replacing_it() {
+        let dir = scratch();
+        let path = dir.join("state").join("api-token");
+        std::fs::create_dir(dir.join("state")).unwrap();
+        let write = |target: &Path, text: &str, mode: u32| {
+            std::fs::write(target, text).unwrap();
+            std::fs::set_permissions(target, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        let valid = format!("{}\n", "a".repeat(64));
+        write(&dir.join("real"), &valid, 0o600);
+        std::os::unix::fs::symlink(dir.join("real"), &path).unwrap();
+        assert!(ensure_api_token(&path).unwrap_err().starts_with("Cannot open token file "));
+        assert!(std::fs::symlink_metadata(&path).unwrap().file_type().is_symlink());
+        std::fs::remove_file(&path).unwrap();
+        // Not a file at all.
+        std::fs::create_dir(&path).unwrap();
+        assert!(ensure_api_token(&path).unwrap_err().contains("is not a regular file"));
+        std::fs::remove_dir(&path).unwrap();
+        for mode in [0o644, 0o640, 0o604] {
+            write(&path, &valid, mode);
+            assert!(ensure_api_token(&path).unwrap_err().contains("mode 0600"), "{mode:o}");
+        }
+        for malformed in
+            [format!("{}\n", "A".repeat(64)), "a".repeat(64), format!("{}\n", "a".repeat(63)), format!("{}\n\n", "a".repeat(64)), String::new()]
+        {
+            write(&path, &malformed, 0o600);
+            assert!(ensure_api_token(&path).unwrap_err().contains("malformed"), "{malformed:?}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), malformed);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn gives_everyone_who_mints_at_once_the_one_winning_token() {
+        let dir = scratch();
+        let path = dir.join("state").join("api-token");
+        let start = std::sync::Barrier::new(12);
+        let results: Vec<(String, bool)> = std::thread::scope(|scope| {
+            let minting: Vec<_> = (0..12)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        ensure_api_token(&path).unwrap()
+                    })
+                })
+                .collect();
+            minting.into_iter().map(|thread| thread.join().unwrap()).collect()
+        });
+        let winner = read_api_token(&path).unwrap().unwrap();
+        assert!(results.iter().all(|(token, _)| *token == winner));
+        assert_eq!(results.iter().filter(|(_, created)| *created).count(), 1);
+        assert_eq!(std::fs::read_dir(dir.join("state")).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_command_mints_prints_and_says_where_it_lives_and_how_to_replace_it() {
+        let dir = scratch();
+        let path = dir.join("state").join("api-token");
+        let run = |args: &[&str]| {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+            let code = api_token_command(&args, &path, &mut out, &mut err);
+            (code, String::from_utf8(out).unwrap(), String::from_utf8(err).unwrap())
+        };
+        let (code, out, err) = run(&[]);
+        let token = read_api_token(&path).unwrap().unwrap();
+        assert_eq!((code, err.as_str(), out.lines().next()), (0, "", Some(token.as_str())));
+        assert!(out.contains(&path.display().to_string()) && out.contains("delete the file and restart ghostd"));
+        // Only the token under --quiet, so it can be piped into curl.
+        assert_eq!(run(&["--quiet"]), (0, format!("{token}\n"), String::new()));
+        // An option it does not know is refused, --rotate included.
+        assert_eq!(run(&["--rotate"]), (2, String::new(), "api-token: unknown option --rotate\n".to_string()));
+        std::fs::write(&path, "nope\n").unwrap();
+        let (code, out, err) = run(&["-q"]);
+        assert_eq!((code, out.as_str()), (1, ""));
+        assert!(err.starts_with("api-token: Token file ") && err.contains("malformed"), "{err}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

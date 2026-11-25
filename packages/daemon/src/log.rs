@@ -65,6 +65,16 @@ fn format(record: &Record) -> String {
     format!("ghostd: {}{suffix}", record.message)
 }
 
+/// A record as stderr gets it: for the journal, its priority and no time.
+fn stderr_line(record: &Record, journal: bool) -> String {
+    let message = format(record);
+    if journal {
+        format!("<{}>{message}", record.level.journal_priority())
+    } else {
+        format!("{} {} {message}", crate::clock::now_iso(), record.level.name())
+    }
+}
+
 impl Logger {
     pub fn silent() -> Self {
         Self { min: Level::Error, sink: None, bound: Map::new() }
@@ -77,14 +87,7 @@ impl Logger {
     /// One line per record on stderr. Under systemd a `<N>` prefix sets the
     /// journal priority, and journald adds the time and the unit's identifier.
     pub fn stderr(min: Level, journal: bool) -> Self {
-        Self::new(min, move |record| {
-            let message = format(record);
-            if journal {
-                eprintln!("<{}>{message}", record.level.journal_priority());
-            } else {
-                eprintln!("{} {} {message}", crate::clock::now_iso(), record.level.name());
-            }
-        })
+        Self::new(min, move |record| eprintln!("{}", stderr_line(record, journal)))
     }
 
     /// A logger that keeps its records, for tests.
@@ -153,5 +156,65 @@ mod tests {
         assert!(!stderr_is_journal(None));
         assert!(!stderr_is_journal(Some("1:2")));
         assert!(!stderr_is_journal(Some("nonsense")));
+    }
+
+    // ── log.test.ts ─────────────────────────────────────────────────────
+
+    #[test]
+    fn merges_bound_fields_below_call_site_fields() {
+        let (root, records) = Logger::recording();
+        let logger = root.child(json!({ "ghost": "casper", "conversation": "first", "inherited": true }));
+        logger.info("opened", json!({ "conversation": "second", "local": true }));
+        // A child of a child keeps what its parent bound; the parent is unchanged by it.
+        logger.child(json!({ "part": "hooks", "ghost": "wraith" })).error("failed", Value::Null);
+        root.warn("bare", Value::Null);
+        let records = records.lock().unwrap();
+        let fields = |index: usize| Value::Object(records[index].fields.clone());
+        assert_eq!((records[0].level, records[0].message.as_str()), (Level::Info, "opened"));
+        assert_eq!(fields(0), json!({ "ghost": "casper", "conversation": "second", "inherited": true, "local": true }));
+        assert_eq!(fields(1), json!({ "ghost": "wraith", "conversation": "first", "inherited": true, "part": "hooks" }));
+        assert_eq!((records[2].level, fields(2)), (Level::Warn, json!({})));
+    }
+
+    #[test]
+    fn silent_loggers_and_their_children_say_nothing() {
+        let silent = Logger::silent();
+        let child = silent.child(json!({ "ghost": "casper" }));
+        child.error("unheard", json!({ "n": 1 }));
+        assert!(silent.sink.is_none() && child.sink.is_none());
+    }
+
+    #[test]
+    fn prefixes_the_journal_priority_under_systemd_and_writes_a_timestamped_line_anywhere_else() {
+        let stalled =
+            Record { level: Level::Warn, message: "stalled".to_string(), fields: json!({ "ghost": "casper" }).as_object().unwrap().clone() };
+        // journald adds the time itself.
+        assert_eq!(stderr_line(&stalled, true), r#"<4>ghostd: stalled {"ghost":"casper"}"#);
+        let priority = |level: Level| stderr_line(&Record { level, message: "m".to_string(), fields: Map::new() }, true);
+        assert_eq!((priority(Level::Info).as_str(), priority(Level::Error).as_str()), ("<6>ghostd: m", "<3>ghostd: m"));
+        let plain = stderr_line(&stalled, false);
+        let (time, rest) = plain.split_once(' ').unwrap();
+        assert_eq!(rest, r#"warn  ghostd: stalled {"ghost":"casper"}"#);
+        // 2026-11-25T08:15:30.123Z
+        let shape: String = time.chars().map(|c| if c.is_ascii_digit() { '0' } else { c }).collect();
+        assert_eq!(shape, "0000-00-00T00:00:00.000Z");
+        let failed = stderr_line(&Record { level: Level::Error, message: "m".to_string(), fields: Map::new() }, false);
+        assert!(failed.ends_with("Z error ghostd: m"), "{failed}");
+    }
+
+    #[test]
+    fn treats_an_inherited_journal_stream_that_is_not_this_stderr_as_no_journal() {
+        assert!(!stderr_is_journal(Some("1:1")));
+        assert!(!stderr_is_journal(Some("1:1:1")) && !stderr_is_journal(Some(":")) && !stderr_is_journal(Some("")));
+        // The stream systemd names is this stderr only when both numbers are its own.
+        let info = std::fs::metadata("/proc/self/fd/2").unwrap();
+        assert!(stderr_is_journal(Some(&format!("{}:{}", info.dev(), info.ino()))));
+        assert!(!stderr_is_journal(Some(&format!("{}:{}", info.dev(), info.ino() + 1))));
+    }
+
+    #[test]
+    fn levels_are_the_three_the_flag_names() {
+        assert_eq!((Level::parse("info"), Level::parse("warn"), Level::parse("error")), (Some(Level::Info), Some(Level::Warn), Some(Level::Error)));
+        assert_eq!((Level::parse("debug"), Level::parse("WARN"), Level::parse("")), (None, None, None));
     }
 }
