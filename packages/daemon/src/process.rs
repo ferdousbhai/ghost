@@ -103,17 +103,32 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
     let Some((command, args)) = options.argv.split_first() else {
         return ProcessExit { spawn_error: Some("empty command".into()), ..Default::default() };
     };
-    let mut child = match Command::new(command)
+    let mut spawning = Command::new(command);
+    spawning
         .args(args)
         .current_dir(options.cwd)
         .env_clear()
         .envs(options.env)
         .stdin(if options.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-    {
+        .process_group(0);
+    // Merged, stdout and stderr are one pipe, so what the process wrote first
+    // is read first; two pipes would be read in whichever order they woke.
+    let merged = if options.merge_stderr {
+        match std::io::pipe().and_then(|(reader, writer)| Ok((reader, writer.try_clone()?, writer))) {
+            Ok((reader, stdout, stderr)) => {
+                spawning.stdout(stdout).stderr(stderr);
+                Some(reader)
+            }
+            Err(error) => return ProcessExit { spawn_error: Some(error.to_string()), ..Default::default() },
+        }
+    } else {
+        spawning.stdout(Stdio::piped()).stderr(Stdio::piped());
+        None
+    };
+    let spawned = spawning.spawn();
+    // The builder holds this side's copies of the pipe's write end; the pipe ends only once they are closed.
+    drop(spawning);
+    let mut child = match spawned {
         Ok(child) => child,
         Err(error) => return ProcessExit { spawn_error: Some(error.to_string()), ..Default::default() },
     };
@@ -126,8 +141,13 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
         });
     }
     let (sender, receiver) = mpsc::channel();
-    pump(child.stdout.take().expect("piped stdout"), false, sender.clone());
-    pump(child.stderr.take().expect("piped stderr"), true, sender);
+    match merged {
+        Some(reader) => pump(reader, false, sender),
+        None => {
+            pump(child.stdout.take().expect("piped stdout"), false, sender.clone());
+            pump(child.stderr.take().expect("piped stderr"), true, sender);
+        }
+    }
     let _terminate = options.abort.on_abort(move || signal_group(pid, libc::SIGTERM));
 
     let (mut out, mut err) = (Utf8Stream::default(), Utf8Stream::default());
@@ -286,8 +306,14 @@ mod tests {
         let (exit, out) = bash("cat", &Abort::new(), Some("héllo"), false);
         assert_eq!((exit.code, out.as_str()), (Some(0), "héllo"));
         let (exit, out) = bash("echo a; echo b >&2", &Abort::new(), None, true);
-        assert_eq!(exit.stderr, "");
-        assert!(out.contains('a') && out.contains('b'));
+        assert_eq!((exit.stderr.as_str(), out.as_str()), ("", "a\nb\n"));
+    }
+
+    #[test]
+    fn merged_output_is_in_the_order_it_was_written() {
+        let (exit, out) = bash("for i in $(seq 200); do echo o$i; echo e$i >&2; done", &Abort::new(), None, true);
+        let written: String = (1..=200).map(|i| format!("o{i}\ne{i}\n")).collect();
+        assert_eq!((exit.code, out), (Some(0), written));
     }
 
     #[test]
