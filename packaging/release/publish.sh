@@ -83,7 +83,11 @@ bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sh
 cp -- "$out/ghost-$version.tar.gz" "$build/ghost/"
 (
   cd -- "$build/ghost"
-  LC_ALL=C PKGDEST="$build/pkg" PKGEXT=.pkg.tar.zst makepkg --force
+  # --nodeps: pacman's check of the dependency list is the Native packages
+  # workflow's, in clean roots. Here it would refuse a machine whose Bun is
+  # bun-bin, which provides `bun` with no version; the build and check()
+  # still need the real tools.
+  LC_ALL=C PKGDEST="$build/pkg" PKGEXT=.pkg.tar.zst makepkg --force --nodeps
 )
 rm -rf -- "$work"
 
