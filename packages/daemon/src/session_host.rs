@@ -962,17 +962,19 @@ impl TurnAdmission {
     /// then exactly one terminal `done` or `error`.
     pub fn run(self, emit: Emit) {
         let TurnAdmission { host, session_id: id, prompt, command, abort } = self;
-        let outcome = host.run_admitted(&id, &prompt, command.as_ref(), &emit, &abort, crate::random::uuid());
-        let (turn_id, terminal) = match outcome {
-            Ok((turn_id, terminal)) => (Some(turn_id), terminal),
-            Err(error) => (None, error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message)),
-        };
+        let initial_turn_id = crate::random::uuid();
+        let outcome = host.run_admitted(&id, &prompt, command.as_ref(), &emit, &abort, initial_turn_id.clone());
+        // A turn that failed outside its passes (its log could not be written) is still a turn that ended.
+        let (turn_id, terminal) =
+            outcome.unwrap_or_else(|error| (initial_turn_id, error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message)));
         emit(terminal.clone());
         host.inner.state.lock().unwrap().admissions.remove(&id);
         host.announce(&id);
         // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
-        if let Some(turn_id) = turn_id {
-            std::thread::spawn(move || host.turn_end(&id, &terminal, &abort, &turn_id));
-        }
+        std::thread::spawn(move || host.turn_end(&id, &terminal, &abort, &turn_id));
     }
 }
+
+#[cfg(test)]
+#[path = "session_host_tests.rs"]
+mod tests;
