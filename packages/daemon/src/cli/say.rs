@@ -111,6 +111,10 @@ fn tool_name(event: &Value) -> &str {
 }
 
 fn tool_description(event: &Value) -> String {
+    // The question and its answers are the reply itself.
+    if tool_name(event) == "ask" {
+        return "ask".to_string();
+    }
     let arguments = event.get("arguments").filter(|arguments| !arguments.is_null());
     let detail = match arguments.filter(|arguments| arguments.is_object()).and_then(|arguments| arguments.get("command")).and_then(Value::as_str) {
         Some(command) => command.split('\n').next().unwrap_or("").trim().to_string(),

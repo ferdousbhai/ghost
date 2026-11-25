@@ -15,8 +15,10 @@ Done since:
 
 - Google in Connect (`google`, `google-drive`, `google-workspace`) and in the
   sources (`keep`, `google-drive`, `google-photos`).
-- The local model's harness is minimal: the whole persona, one tool (`bash`,
-  unsandboxed, unconfirmed), no cap on rounds, no forced answer, no trimming.
+- The local model's harness is minimal: the whole persona, two tools (`bash`,
+  unsandboxed, unconfirmed, and `ask`, added 2026-11-25 at the owner's
+  request: a question to the owner with 2 to 4 ways forward, the recommended
+  one first, which ends the turn), no cap on rounds, no forced answer, no trimming.
   Its former tools (`search`, `read`, `save_note`, `add_reminder`, `delegate`)
   are gone; a coding agent is run from the shell by its own one-shot command
   (`claude -p`), as the owner chose; `ghost delegate` and its receipts log

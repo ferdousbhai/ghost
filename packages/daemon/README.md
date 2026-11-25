@@ -3,7 +3,7 @@
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
 conversations, the local model and its loop, hooks,
 authenticated HTTP/SSE, and the `ghost` terminal client. Each turn runs on a
-model on this machine, whose one tool is a shell.
+model on this machine, whose tools are a shell and a question to the owner.
 
 The stable storage and API contract is in
 [`CONTRACTS.md`](../../CONTRACTS.md). This README covers local development.

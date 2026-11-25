@@ -33,6 +33,8 @@ pub struct AskPage {
     scroll: gtk::ScrolledWindow,
     composer: gtk::TextView,
     send: gtk::Button,
+    /// The answers the ghost offers to its open question here, one button each.
+    options: gtk::Box,
     status: gtk::Label,
     session: RefCell<String>,
     sessions: RefCell<Vec<Value>>,
@@ -94,6 +96,9 @@ impl AskPage {
         frame.append(&composer_scroll);
         frame.append(&send);
         let status = gtk::Label::builder().css_classes(["meta"]).xalign(0.0).build();
+        let options = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        options.set_visible(false);
+        bar.append(&options);
         bar.append(&frame);
         bar.append(&status);
         main.append(&bar);
@@ -107,6 +112,7 @@ impl AskPage {
             scroll,
             composer,
             send,
+            options,
             status,
             session: RefCell::new(String::new()),
             sessions: RefCell::new(Vec::new()),
@@ -174,7 +180,38 @@ impl AskPage {
         self.syncing.set(true);
         self.chats.unselect_all();
         self.syncing.set(false);
+        self.options.set_visible(false);
         self.composer.grab_focus();
+    }
+
+    /// The ghost's open question in this conversation is the last thing it
+    /// said; its offered answers go above the composer, the recommended one
+    /// first and marked. Any other answer is typed as usual.
+    fn show_options(self: &Rc<Self>) {
+        omui::clear(&self.options);
+        let offered: Vec<String> = if self.live.borrow().is_some() {
+            Vec::new()
+        } else {
+            let sessions = self.sessions.borrow();
+            let open = sessions.iter().find(|session| session["id"].as_str() == Some(self.session.borrow().as_str()));
+            open.and_then(|session| session["question"]["options"].as_array())
+                .map(|options| options.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default()
+        };
+        for (index, option) in offered.iter().enumerate() {
+            let label = gtk::Label::builder().label(option).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).build();
+            let button = gtk::Button::builder().child(&label).halign(gtk::Align::Start).css_classes(["chip"]).build();
+            if index == 0 {
+                button.add_css_class("suggested-action");
+            }
+            let (this, answer) = (self.clone(), option.clone());
+            button.connect_clicked(move |_| {
+                this.composer.buffer().set_text(&answer);
+                this.ask();
+            });
+            self.options.append(&button);
+        }
+        self.options.set_visible(!offered.is_empty());
     }
 
     async fn refresh_chats(self: &Rc<Self>) {
@@ -192,6 +229,7 @@ impl AskPage {
         }
         *self.sessions.borrow_mut() = sessions;
         self.syncing.set(false);
+        self.show_options();
     }
 
     fn open_chat(self: &Rc<Self>, id: String) {
@@ -200,6 +238,7 @@ impl AskPage {
         }
         *self.session.borrow_mut() = id.clone();
         omui::clear(&self.convo);
+        self.show_options();
         let this = self.clone();
         glib::spawn_future_local(async move {
             let reply = this.app.api.get(api_path(&format!("/sessions/{}/transcript", segment(&id)))).await;
@@ -291,6 +330,7 @@ impl AskPage {
         self.to_end();
         self.send.set_label("Stop");
         self.note("");
+        self.options.set_visible(false);
 
         let session = self.session.borrow().clone();
         let first = self.app.api.stream(api_path("/messages"), Some(json!({ "prompt": prompt, "sessionId": session })));
@@ -370,7 +410,8 @@ impl AskPage {
             "tool_execution_start" => {
                 let arguments = &event["arguments"];
                 step(match event["toolName"].as_str().unwrap_or_default() {
-                    // The local model's one tool: the command itself says what it is doing.
+                    "ask" => "Asking you…".to_string(),
+                    // The command itself says what it is doing.
                     "bash" => format!("Running: {}", arguments["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default()),
                     name => format!("Running {name}…"),
                 });

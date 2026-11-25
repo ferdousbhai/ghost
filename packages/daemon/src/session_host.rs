@@ -522,7 +522,10 @@ impl SessionHost {
         let mut env = self.inner.env.clone();
         env.extend(conversation_environment(id));
         let coding_agent_command = (self.inner.coding_agent)().and_then(|agent| coding_agent_command(&agent)).map(str::to_string);
-        let input = PassInput { prompt, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone() };
+        let (host, conversation) = (self.clone(), id.to_string());
+        let ask: crate::local_turn::Ask =
+            Arc::new(move |question, options| host.set_question(&conversation, question, options).map(|_| ()).map_err(|error| error.to_string()));
+        let input = PassInput { prompt, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone(), ask };
         let outcome = answerer.turn(&input, &mut on_event);
         if let Err(failure) = outcome
             && !abort.is_aborted()

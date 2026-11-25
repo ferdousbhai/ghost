@@ -47,6 +47,8 @@ export function toolCall(toolName, args, cwd) {
     return compact("edit " + short(filePath() || (header?.[1] ?? "").trim(), "…"), limit);
   }
   switch (name) {
+    case "ask":
+      return "Asking you";
     case "ls":
     case "list":
     case "list_dir":

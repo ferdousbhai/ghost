@@ -90,7 +90,7 @@ after its idle minutes. Both can be resident at once for up to that long.
 - **Crush** (2026-11-17): the 26B model through the Crush harness got 22,646
   prompt tokens a turn, almost all Crush's own, which took 309 s, and guessed
   the time four hours off rather than check the clock. That is why Ghost runs
-  the model itself with a short prompt and one tool.
+  the model itself with a short prompt and two tools.
 
 ## Running one on Omarchy
 

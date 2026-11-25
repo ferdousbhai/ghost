@@ -83,6 +83,8 @@ struct FakeTurn {
     fail: Option<String>,
     /// Hold the turn until this is released, or the turn is stopped.
     gate: Option<Gate>,
+    /// Put this question and its answers to the owner, as the `ask` tool does.
+    ask: Option<(String, Vec<String>)>,
 }
 
 /// What a pass was given.
@@ -153,6 +155,9 @@ impl Answerer for Fake {
         });
         if let Some(gate) = &turn.gate {
             gate.hold(&input.abort)?;
+        }
+        if let Some((question, options)) = &turn.ask {
+            (input.ask)(question, options)?;
         }
         for event in turn.events {
             on_event(event);
@@ -977,6 +982,22 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     assert_carries(&asked, json!({ "text": "Write this as my character file?", "options": options }));
     turn(&host, "Write it");
     assert_eq!(sessions(&host)[0]["question"], Value::Null);
+}
+
+// The model's `ask` tool reaches the same open question a pass is handed the way to set.
+#[test]
+fn a_pass_puts_its_question_to_the_owner_in_its_own_conversation() {
+    let home = Home::new();
+    let options = vec!["North pier".to_string(), "South pier".to_string()];
+    let asking = FakeTurn { ask: Some(("Which pier?".to_string(), options.clone())), ..says("Which pier?") };
+    let fake = Fake::new([vec![asking], replies(&["booked"])].concat());
+    let host = home.host(&fake);
+    turn(&host, "book the boat");
+    assert_carries(&sessions(&host)[0]["question"], json!({ "text": "Which pier?", "options": options }));
+    turn(&host, "North pier");
+    assert_eq!(sessions(&host)[0]["question"], Value::Null);
+    // The answer's pass is handed the question, as the reply said it.
+    assert!(fake.prompts()[1].contains("Which pier?"));
 }
 
 #[test]

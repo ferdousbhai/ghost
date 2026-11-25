@@ -7,7 +7,7 @@
 //! index in step (prompt_policy's tests check).
 use crate::help_guides::{BROWSER_LINES, products_lines};
 
-pub const HELP_TOPICS: [&str; 7] = ["self", "background", "memory", "dictation", "notifications", "browser", "products"];
+pub const HELP_TOPICS: [&str; 6] = ["self", "background", "memory", "notifications", "browser", "products"];
 
 pub fn is_help_topic(value: &str) -> bool {
     HELP_TOPICS.contains(&value)
@@ -19,7 +19,6 @@ pub fn render_help_topic(topic: &str) -> Option<String> {
         "self" => SELF_LINES.join("\n"),
         "background" => BACKGROUND_LINES.join("\n"),
         "memory" => MEMORY_LINES.join("\n"),
-        "dictation" => DICTATION_LINES.join("\n"),
         "notifications" => NOTIFICATIONS_LINES.join("\n"),
         "browser" => BROWSER_LINES.join("\n"),
         "products" => products_lines().join("\n"),
@@ -65,7 +64,7 @@ const MEMORY_LINES: &[&str] = &[
     r"Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     r"Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
     r"Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the note under `Notes` that covers it, dating what you add; start a note only when none does. A thing to do is one line in `Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD` (indented lines under it are its notes), ticked `- [x]` when done; a new file is a new list.",
-    r#"Tidying, only when the owner asks, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p "$f" "$f~" && gio trash "$f~"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path."#,
+    r#"Tidying: when a folder you are working in has grown cluttered (notes that repeat or contradict each other, stale claims, empty notes), offer to tidy it once the task is done, with the ask tool; the owner may also ask. A tidy is the one time you read a folder whole: one folder per pass, the one offered or named, else the most cluttered. Before changing a note, keep its original restorable: `cp -p "$f" "$f~" && gio trash "$f~"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path."#,
     r"A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to.",
 ];
 
@@ -83,18 +82,6 @@ const NOTIFICATIONS_LINES: &[&str] = &[
     r#"Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array of the current document (`ghost hooks show | jq .document > hooks.json`); preserve existing handlers and apply with `ghost hooks set hooks.json`. Remove that handler to opt out; no restart is needed."#,
     r"Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the conversation's app link (summonghost.com by default) while remote access is on (otherwise null). Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
     r"The link opens the conversation in the app on a device that has added this machine. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
-];
-
-const DICTATION_LINES: &[&str] = &[
-    r"# Dictation and audio files",
-    r"Speech is Omarchy's Voxtype (`command -v voxtype`); Ghost adds no speech stack, voice loop, or text-to-speech. Check `voxtype transcribe --help` before relying on a flag.",
-    r"Transcribe an audio file: `voxtype transcribe` takes 16 kHz mono WAV, so convert anything else first:",
-    r"```sh",
-    r"ffmpeg -i <input> -ar 16000 -ac 1 /tmp/<name>.wav",
-    r"voxtype -q transcribe /tmp/<name>.wav",
-    r"```",
-    r"Read the output before using it: not every line is transcript.",
-    r#"Only when the owner asks, turn spoken "submit" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`."#,
 ];
 
 #[cfg(test)]
@@ -131,7 +118,7 @@ mod tests {
 
     #[test]
     fn knows_its_topics() {
-        assert_eq!(HELP_TOPICS, ["self", "background", "memory", "dictation", "notifications", "browser", "products"]);
+        assert_eq!(HELP_TOPICS, ["self", "background", "memory", "notifications", "browser", "products"]);
         assert!(is_help_topic("self"));
         assert!(!is_help_topic("status"));
         assert_eq!(render_help_topic("status"), None);
@@ -185,7 +172,8 @@ mod tests {
             "keep both claims and tell the owner which is uncertain",
             "dead end (what was tried, why it failed)",
             "dating what you add",
-            "Tidying, only when the owner asks, is the one time you read a folder whole",
+            "offer to tidy it once the task is done, with the ask tool",
+            "A tidy is the one time you read a folder whole",
             "Trash with `gio trash`, never `rm`",
             "keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`",
             "mark a superseded fact with what replaced it and when",
@@ -197,24 +185,6 @@ mod tests {
             assert!(text.contains(kept), "{kept}");
         }
         assert!(!text.contains("SKILL.md"));
-    }
-
-    #[test]
-    fn dictation_transcribes_audio_with_the_installed_voxtype_and_toggles_spoken_submit_only_on_request() {
-        let text = topic("dictation");
-        for kept in [
-            "ffmpeg -i <input> -ar 16000 -ac 1 /tmp/<name>.wav",
-            "voxtype -q transcribe /tmp/<name>.wav",
-            "Read the output before using it",
-            "Only when the owner asks",
-            "`voxtype config set text.smart_auto_submit true`",
-            "`voxtype config set text.smart_auto_submit false`",
-            "`systemctl --user restart voxtype`",
-        ] {
-            assert!(text.contains(kept), "{kept}");
-        }
-        assert!(!text.contains("Processing"));
-        assert!(!text.to_lowercase().contains("video"));
     }
 
     #[test]

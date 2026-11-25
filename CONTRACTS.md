@@ -225,7 +225,7 @@ sections, whose authoritative list and per-section size ceilings are
 the budget test in [`prompt_policy.rs`](packages/daemon/src/prompt_policy.rs). They hold only what a ghost must follow
 before it would look anything up: the owner-context section names the
 Documents directory as where finished work and notes live, and
-the Ghost section has a ghost ask the owner with `ghost ask`, says a
+the Ghost section has a ghost ask the owner with its `ask` tool, says a
 command it starts ends with the turn, and indexes the `ghost help`
 recipes by when to read one, so the CLI is the documentation. Owner documents are read only when
 relevant, from the model's shell, never injected
@@ -254,7 +254,7 @@ A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 --follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation. Nor is one
-asked while the ghost's open question (`ghost ask`) waits on the owner.
+asked while the ghost's open question (the `ask` tool, or `ghost ask`) waits on the owner.
 A turn outlives its client: a dropped stream stops only the listening, and
 `POST /sessions/:id/stop` or daemon shutdown cancels it; an internal runtime
 or replay-storage failure ends it in error.
@@ -450,7 +450,7 @@ the daemon into. Removing it preserves owner data.
   when its items have them, a search of it, and a reader for one item),
   Connect (the [connections](#connections); a first run with none connected
   starts there, and a step runs in Omarchy's floating terminal, else
-  `xdg-terminal-exec`), and Ask, a conversation with the ghost. It finds the daemon as the CLI
+  `xdg-terminal-exec`), and Ask, a conversation with the ghost, with the answers to its open question as buttons above the composer. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
   It is a member of the
@@ -583,8 +583,15 @@ own, streams its text, reasoning, and commands, with a running command's
 latest output (at most every 100 ms). It sends `reasoning_effort`;
 sampling is the model's and llama-server's own default.
 
-It offers one tool ([`local_turn.rs`](packages/daemon/src/local_turn.rs)),
-`bash(command)`: a command line run as the owner in the conversation's
+It offers two tools ([`local_turn.rs`](packages/daemon/src/local_turn.rs)).
+`ask(question, options)` puts a question to the owner: 2 to 4 ways forward
+the model has worked out, the one it recommends first (fewer is refused, said
+to the model). It records the conversation's open question
+(`/sessions/:id/question`), says the question in the reply with its answers
+numbered, so the transcript keeps them and the next turn is handed them, and
+ends the turn; the window and the app also show the answers as buttons, the
+first marked, and any other answer is typed.
+`bash(command)` is a command line run as the owner in the conversation's
 directory, with the conversation's environment, no sandbox and no
 confirmation. The owner's products are command lines with a skill each under
 `~/.agents/skills`, so the shell is how the model searches, reads, writes and

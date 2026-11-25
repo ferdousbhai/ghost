@@ -17,7 +17,7 @@ ghost say "What should I focus on today?"
 ghost say "Continue that thought."
 ```
 
-The model has one tool, a shell. For work on code it runs the coding agent
+The model acts through a shell, and asks you with answers to pick from. For work on code it runs the coding agent
 you already use (Claude Code, Codex, Antigravity) by that agent's own command.
 Notes are Markdown in the owner's Documents directory, never indexed or
 injected. A ghost can maintain its own code

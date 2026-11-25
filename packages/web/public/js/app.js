@@ -406,11 +406,14 @@ function renderChatMeta() {
   const question = owner() && !turnHere() ? row?.question : null;
   $("question").hidden = !question;
   if (question) {
+    // The ask tool says its question in the reply; the panel does not repeat the last bubble.
     $("question-text").textContent = question.text;
+    $("question-text").hidden = !!log.lastElementChild?.textContent.includes(question.text);
     const options = $("question-options");
     options.replaceChildren();
     for (const option of question.options || []) {
-      const button = el("button", "", option);
+      // The ghost lists the answer it recommends first.
+      const button = el("button", options.childElementCount ? "" : "recommended", option);
       button.type = "button";
       button.onclick = () => { prompt.value = option; grow(); submit().catch(show); };
       options.append(button);
@@ -506,6 +509,8 @@ function render(messages, keep = false) {
   if (!log.childElementCount) emptyLog();
   if (rowOf(route.session)?.running) log.append(el("div", "activity elsewhere", "Working…"));
   log.scrollTop = stick ? log.scrollHeight : top;
+  // The question panel leaves out a question the last bubble already says.
+  renderChatMeta();
 }
 
 async function loadTranscript(keep = false) {

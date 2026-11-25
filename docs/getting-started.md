@@ -141,7 +141,8 @@ install, which model fits which machine, and the alternatives are in
 machines is in [local-models.md](local-models.md). Ghost starts the server on
 the first turn and stops it after five idle minutes.
 
-The model has one tool, a shell that runs as you, and Ghost has no other
+The model has two tools, a shell that runs as you and a question to you
+with answers to pick from, and Ghost has no other
 model, model picker, or provider login. For work on code it runs your coding
 agent (Claude Code, Codex, or Antigravity: your Omarchy default agent when it
 is one of them, else the first installed) by that agent's own command, in the
@@ -211,10 +212,8 @@ leaves personas, conversations, tokens, and your documents untouched.
 
 - **Use websites.** Install agent-browser; `ghost help browser` covers signed-in Chromium
   setup, shared-session tab locking, and cleanup.
-- **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
-  Install → AI → Dictation, which sets up Voxtype); it types into the window's
-  composer as into any app. A ghost can also transcribe an audio file with
-  Voxtype (`ghost help dictation`). Ghost adds no speech stack of its own.
+- **Talk instead of typing.** Omarchy's dictation types into the window's
+  composer as into any app. Ghost adds no speech stack of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** `ghost remote`
   turns the opt-in Tailscale Serve address on and off, and prints the

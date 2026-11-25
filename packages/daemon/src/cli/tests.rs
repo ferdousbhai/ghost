@@ -317,7 +317,7 @@ fn show_renders_tool_calls_hook_messages_and_an_empty_conversation() {
         "/api/sessions/conv-mine/transcript" => responder.json(
             200,
             &json!({ "total": 2, "truncated": false, "messages": [
-                { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" } }, { "type": "text", "text": "" }] },
+                { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" } }, { "type": "text", "text": "" }, { "type": "toolCall", "name": "ask", "arguments": { "question": "Which?", "options": ["A", "B"] } }, { "type": "text", "text": "Which?\n\n1. A\n2. B" }] },
                 { "role": "hook", "content": [{ "type": "text", "text": "Not done." }] },
             ] }),
         ),
@@ -325,7 +325,7 @@ fn show_renders_tool_calls_hook_messages_and_an_empty_conversation() {
     }
     });
     let shown = daemon.run_env(&["show"], MINE);
-    assert_eq!(shown.stdout, "**ghost:**\n\nOn it.\n> ⚙ bash({\"command\":\"ls\"})\n\n**Stop hook:**\n\nNot done.\n");
+    assert_eq!(shown.stdout, "**ghost:**\n\nOn it.\n> ⚙ bash({\"command\":\"ls\"})\n> ⚙ ask\nWhich?\n\n1. A\n2. B\n\n**Stop hook:**\n\nNot done.\n");
     let empty = daemon.run(&["show", "-s", "conv-other"]);
     assert_eq!((empty.code, empty.stdout.as_str()), (0, "No messages.\n"));
 }
@@ -838,6 +838,23 @@ fn is_new_cli_id(id: &str) -> bool {
 
 fn json_lines(text: &str) -> Vec<Value> {
     text.trim().split('\n').map(|line| serde_json::from_str(line).unwrap()).collect()
+}
+
+#[test]
+fn say_prints_a_question_and_its_answers_as_the_reply() {
+    let daemon = turn_daemon(
+        vec![
+            json!({ "type": "start" }),
+            json!({ "type": "pass" }),
+            json!({ "type": "tool_execution_start", "id": "1", "toolName": "ask", "arguments": { "question": "Which pier?", "options": ["North", "South"] }, "cwd": "/tmp" }),
+            json!({ "type": "text_delta", "contentIndex": 0, "delta": "Which pier?\n\n1. North\n2. South" }),
+            json!({ "type": "tool_execution_end", "id": "1", "toolName": "ask", "isError": false }),
+            json!({ "type": "done", "usage": {} }),
+        ],
+        vec![],
+    );
+    let result = daemon.run(&["say", "book the boat", "--new"]);
+    assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "Which pier?\n\n1. North\n2. South\n", "⚙ ask\n"));
 }
 
 #[test]

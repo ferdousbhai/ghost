@@ -12,8 +12,9 @@ A ghost answers from the owner's notes, mail, chats, files and photos. A
 model on the owner's machine keeps all of that there, so it is the only thing
 a turn runs on; Ghost has no cloud model, provider, or sign-in of its own.
 
-The model's loop is the smallest that works: the persona, one tool (a shell
-that runs as the owner), and no cap on rounds. The owner's products are
+The model's loop is the smallest that works: the persona, two tools (a shell
+that runs as the owner, and `ask`, a question to the owner with the ways
+forward as answers), and no cap on rounds. The owner's products are
 command lines with a skill each, so the shell reaches all of them. Work on
 code goes to the coding agent the owner already uses, run by its own command
 from that shell: the agent keeps its model, credentials, tools and
@@ -45,7 +46,7 @@ or todo API.
   the owner's signed-in Chromium, with separate tabs for concurrent tasks.
 - There is no screen control. Desktop work goes through Omarchy's commands,
   app CLIs, and config files; what none of them reach, the ghost says so.
-- Dictation uses Omarchy's Voxtype. Ghost adds no speech stack.
+- Dictation is Omarchy's, typing into Ghost as into any app. Ghost adds no speech stack.
 - Background work is a shell command. Ghost has no scheduler, job table, or
   worker manager.
 - Hooks are explicit owner commands. Ghost starts no automatic handoff or

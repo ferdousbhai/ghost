@@ -103,10 +103,15 @@ impl Drop for FakeServer {
     }
 }
 
+/// A question and the answers offered with it.
+type Asked = (String, Vec<String>);
+
 /// An owner's home with one note, and a conversation's directory in it.
 struct Home {
     scratch: Scratch,
     cwd: PathBuf,
+    /// What the `ask` tool put to the owner: each question and its answers.
+    asked: std::sync::Arc<Mutex<Vec<Asked>>>,
 }
 
 impl Home {
@@ -117,7 +122,7 @@ impl Home {
         std::fs::write(notes.join("trip.md"), "The boat leaves at nine from the north pier.").unwrap();
         let cwd = scratch.0.join("ghosts").join("casper").join("sessions").join("c1");
         std::fs::create_dir_all(&cwd).unwrap();
-        Self { scratch, cwd }
+        Self { scratch, cwd, asked: Default::default() }
     }
 
     fn input(&self, prompt: &str, coding_agent: Option<&str>) -> PassInput {
@@ -128,6 +133,16 @@ impl Home {
             cwd: self.cwd.clone(),
             env: Env::from([("HOME".to_string(), self.scratch.0.display().to_string()), ("PATH".to_string(), "/usr/bin:/bin".to_string())]),
             abort: Abort::new(),
+            ask: {
+                let asked = self.asked.clone();
+                std::sync::Arc::new(move |question, options| {
+                    if question.contains("refuse me") {
+                        return Err("A question needs text.".to_string());
+                    }
+                    asked.lock().unwrap().push((question.to_string(), options.to_vec()));
+                    Ok(())
+                })
+            },
         }
     }
 }
@@ -176,10 +191,11 @@ fn answers_a_conversation_running_the_commands_it_asks_for_until_it_answers() {
     assert_eq!(text(&events), "Nine, from the north pier (trip.md).");
     let requests = server.requests();
     assert_eq!(requests.len(), 3);
-    // One tool, the model by its name, and the key the server was started with.
+    // The two tools, the model by its name, and the key the server was started with.
     assert_eq!(requests[0]["tools"], local_tools());
-    assert_eq!(requests[0]["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(requests[0]["tools"].as_array().unwrap().len(), 2);
     assert_eq!(requests[0]["tools"][0]["function"]["name"], "bash");
+    assert_eq!(requests[0]["tools"][1]["function"]["name"], "ask");
     assert_eq!(
         (&requests[0]["reasoning_effort"], &requests[0]["model"], &requests[0]["stream"]),
         (&json!("low"), &json!("gemma-test"), &json!(true))
@@ -305,7 +321,7 @@ fn runs_as_many_rounds_as_the_model_asks_for_and_never_withdraws_the_tool() {
     assert_eq!((result, text(&events).as_str()), (Ok(()), "Done."));
     let requests = server.requests();
     assert_eq!(requests.len(), rounds + 1);
-    assert!(requests.iter().all(|request| request["tools"].as_array().is_some_and(|tools| tools.len() == 1)));
+    assert!(requests.iter().all(|request| request["tools"].as_array().is_some_and(|tools| tools.len() == 2)));
     // Every earlier round is still in the last request, whole and in order: nothing is trimmed or dropped.
     let results = tool_results(&requests[rounds]);
     assert_eq!(results.len(), rounds);
@@ -330,7 +346,7 @@ fn tells_the_model_what_was_wrong_with_a_call_instead_of_running_a_guess() {
     assert_eq!(result, Ok(()));
     let requests = server.requests();
     let results = tool_results(&requests[3]);
-    assert!(results[0].contains("There is no tool named search; the one tool is bash."));
+    assert!(results[0].contains("There is no tool named search; the tools are bash and ask."));
     assert!(results[1].contains("nothing was run"));
     assert!(!never.exists());
     assert!(results[2].contains("out\nerr\n(exit 3)"));
@@ -539,7 +555,7 @@ fn completes_a_prompt_with_no_persona_conversation_or_tools() {
 /// Only a local pass adds it, after the whole persona; it has its own ceiling,
 /// measured with the longest command. The exact rendered size when it was last
 /// set: raising it is a decision, justified in the commit that does.
-const LOCAL_CEILING: usize = 947;
+const LOCAL_CEILING: usize = 1000;
 
 #[test]
 fn the_local_section_stays_at_its_ceiling_and_names_only_the_owners_coding_agent() {
@@ -553,4 +569,42 @@ fn the_local_section_stays_at_its_ceiling_and_names_only_the_owners_coding_agent
         assert!(!none.contains("coding agent"));
         assert!(none.starts_with("## Running locally\n\n"));
     }
+}
+
+#[test]
+fn a_question_through_the_ask_tool_is_put_to_the_owner_said_in_the_reply_and_ends_the_turn() {
+    let home = Home::new();
+    let server = FakeServer::start(vec![
+        Reply::Call("ask", json!({ "question": " Which pier? ", "options": ["North, as the note says", " ", "South"] })),
+        Reply::Text("never said"),
+    ]);
+    let (result, events) = turn(&server, &home.input("book the boat", None));
+    assert_eq!(result, Ok(()));
+    assert_eq!(*home.asked.lock().unwrap(), vec![("Which pier?".to_string(), vec!["North, as the note says".to_string(), "South".to_string()])]);
+    // The question is the reply, so the conversation keeps it; the model is not asked for more.
+    assert_eq!(text(&events), "Which pier?\n\n1. North, as the note says\n2. South");
+    assert!(matches!(events.last(), Some(PassEvent::ToolEnd { is_error: false, .. })));
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[test]
+fn an_open_ended_or_refused_question_is_said_to_the_model_and_the_turn_goes_on() {
+    let home = Home::new();
+    let server = FakeServer::start(vec![
+        Reply::Call("ask", json!({ "question": "What now?" })),
+        Reply::Call("ask", json!({ "question": "What now?", "options": ["Only one way"] })),
+        Reply::Call("ask", json!({ "options": ["a", "b"] })),
+        Reply::Call("ask", json!({ "question": "refuse me", "options": ["a", "b"] })),
+        Reply::Text("I will decide myself."),
+    ]);
+    let (result, events) = turn(&server, &home.input("go", None));
+    assert_eq!(result, Ok(()));
+    assert!(home.asked.lock().unwrap().is_empty());
+    assert_eq!(text(&events), "I will decide myself.");
+    let requests = server.requests();
+    let results = tool_results(&requests[4]);
+    assert!(results[0].contains("Nothing was asked: offer 2 to 4 ways forward in options, your recommendation first."));
+    assert!(results[1].contains("Nothing was asked: offer 2 to 4 ways forward"));
+    assert!(results[2].contains("The arguments were not {\"question\""));
+    assert!(results[3].contains("Nothing was asked: A question needs text."));
 }

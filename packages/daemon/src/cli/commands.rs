@@ -51,7 +51,10 @@ fn transcript_markdown(body: &Value) -> String {
             _ => "ghost",
         };
         let line = |part: &Value| {
-            if part.get("type").and_then(Value::as_str) == Some("toolCall") {
+            if part.get("type").and_then(Value::as_str) == Some("toolCall") && part.get("name").and_then(Value::as_str) == Some("ask") {
+                // The question and its answers are the text that follows.
+                "> ⚙ ask".to_string()
+            } else if part.get("type").and_then(Value::as_str) == Some("toolCall") {
                 let arguments = present(part, "arguments").map_or_else(|| "{}".to_string(), Value::to_string);
                 format!("> ⚙ {}({})", text_of(part.get("name")), truncate(&arguments, 120))
             } else {
