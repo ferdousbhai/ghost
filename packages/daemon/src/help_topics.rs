@@ -53,17 +53,24 @@ const BACKGROUND_LINES: &[&str] = &[
     r"```",
     r"`$GHOST_SESSION` is set in your shell, so `ghost` verbs address this conversation without `-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
     r"The job is its own low-priority unit: it yields the CPU to the owner's apps, survives a daemon restart (so its log is outside your private /tmp), and `systemctl --user stop <unit>` ends it. Nothing else watches it: read its log.",
+    r"Later, not now: your own work for a later time is a timer, the way Omarchy's own reminders are kept, which wakes this conversation with what to do:",
+    r"```sh",
+    r#"systemd-run --user --quiet --on-calendar='YYYY-MM-DD HH:MM' --unit="ghost-later-<name>-$(date +%s)" \"#,
+    r#"  ghost say --follow-up -q -s "$GHOST_SESSION" "<what to do then, with what you will need to know>""#,
+    r"```",
+    r#"`--on-active=2h` counts from now instead. `systemctl --user list-timers 'ghost-later-*'` lists them and `systemctl --user stop <unit>.timer` cancels one. A timer is forgotten by a reboot or a logout, so also write what is planned, and when, in the note that covers it; and the computer must be on at that time. To nudge the owner on this desktop instead, `omarchy reminder <minutes> "<text>"`."#,
 ];
 
 const MEMORY_LINES: &[&str] = &[
     r"# Memory",
-    r"Your durable memory is the `Notes` and `Reminders` folders of the owner's documents directory (Owner context): Markdown notes, and one checklist per list. They are yours to keep whether or not iCloud syncs them. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
+    r"Your durable memory is the `Notes` folder of the owner's documents directory (Owner context): Markdown notes that you and the owner both read and write, so write them for a person to read, and read a note again before changing it. `Reminders` beside it is the owner's to-do list, one checklist per list. They are yours to keep whether or not iCloud syncs them. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
     r"Known names or terms: `rg -n -i '<term>'` in `Notes` and `Reminders`, widening to the whole directory only if that finds nothing.",
     r"Unknown wording or location: search by meaning with Recall through its `recall` skill (`ghost help products` gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
     r"Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     r"Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
-    r"Keeping them current is your job, unasked: notes are your state, not an archive. Before a task, read the note that covers it. In the same turn that the owner tells you something new, a task advances or ends, or you find a note wrong, update that note: rewrite the stale line in place, dating the change (a superseded fact keeps what replaced it and when); record a decision, correction, or dead end (what was tried, why it failed); start a note only when none covers it. A thing to do is one line in `Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD` (indented lines under it are its notes), ticked `- [x]` when done; a new file is a new list. Say which notes you changed.",
-    r#"Tidying as you go, unasked: when the notes on the subject at hand repeat or contradict each other, merge them into the one that covers it, keeping every dated claim and dead end (settle conflicts as above) and cutting repetition without changing meaning. Before merging or rewriting a note, keep its original restorable: `cp -p "$f" "$f~" && gio trash "$f~"`. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. A whole folder is read and tidied only when the owner asks: one folder per pass, the one named, else the most cluttered. Report each changed and trashed path."#,
+    r"Keeping them current is your job, unasked: notes are your state, not an archive. Before a task, read the note that covers it. In the same turn that the owner tells you something new, a task advances or ends, or you find a note wrong, update that note: rewrite the stale line in place, dating the change (a superseded fact keeps what replaced it and when); record a decision, correction, or dead end (what was tried, why it failed); start a note only when none covers it. Say which notes you changed.",
+    r"Reminders are for the owner, not for you: what you need them to do (a decision you are waiting on, a sign-in, a payment, a call) is one line in `Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD` (indented lines under it are its notes); a new file is a new list. Add it in the turn you find you need it, and say so; tick `- [x]` what they tell you is done. You need no reminder yourself: your own pending work goes in the note, and work for a later time is a timer (`ghost help background`).",
+    r#"Tidying as you go, unasked: when the notes on the subject at hand repeat or contradict each other, merge them into the one that covers it, keeping every dated claim and dead end (settle conflicts as above) and cutting repetition without changing meaning. Before merging or rewriting a note, keep its original restorable: `cp -p "$f" "$f~" && gio trash "$f~"`. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. A whole folder is yours to tidy too, unasked: when one you are working in has grown cluttered, tidy it once the task at hand is done, or set a timer for it (`ghost help background`). That is the one time you read a folder whole, one folder per pass. Report each changed and trashed path."#,
     r"A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to.",
 ];
 
@@ -135,6 +142,11 @@ mod tests {
             "ghost say --follow-up",
             "`$GHOST_SESSION` is set",
             "A command you start ends when this turn does.",
+            "--on-calendar='YYYY-MM-DD HH:MM' --unit=\"ghost-later-<name>-$(date +%s)\"",
+            "ghost say --follow-up -q -s \"$GHOST_SESSION\"",
+            "`systemctl --user stop <unit>.timer` cancels one",
+            "A timer is forgotten by a reboot or a logout",
+            "`omarchy reminder <minutes> \"<text>\"`",
         ] {
             assert!(text.contains(kept), "{kept}");
         }
@@ -159,7 +171,8 @@ mod tests {
             "rewrite the stale line in place, dating the change",
             "Say which notes you changed.",
             "Tidying as you go, unasked",
-            "A whole folder is read and tidied only when the owner asks",
+            "A whole folder is yours to tidy too, unasked",
+            "That is the one time you read a folder whole, one folder per pass.",
             "Trash with `gio trash`, never `rm`",
             "keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`",
             "a superseded fact keeps what replaced it and when",

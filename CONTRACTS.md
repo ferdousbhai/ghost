@@ -141,9 +141,12 @@ There is no ghost-private memory store. A ghost's state across
 conversations is two folders of the owner's Documents directory, which it
 keeps current unasked (it reads the note that covers a task before starting,
 updates it in the same turn as a fact arrives or the task advances, and
-merges notes on one subject as it goes; `ghost help memory`), kept
+merges notes on one subject as it goes and tidies a cluttered folder after
+the task; `ghost help memory`). The owner reads and writes the same notes. Kept
 whether or not iCloud is connected: `Notes`, Markdown notes (owner facts,
-decisions, its own reflections), and `Reminders`, one Markdown checklist per
+decisions, its own reflections), and `Reminders`, the owner's to-do list,
+which the ghost adds what it needs the owner to do to and ticks what they
+say is done, one Markdown checklist per
 list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
 notes, `- [x]` done). These are the folders and formats icloud-notes and
 icloud-reminders sync, so connecting iCloud later syncs what is already
