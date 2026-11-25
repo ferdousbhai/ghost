@@ -6,7 +6,7 @@ members = ["packages/daemon", "packages/window"]
 [workspace.package]
 # The release version, in this one place: both crates inherit it, and
 # `ghostd --version`, `ghost --version` and `ghost-window --version` print it.
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/ferdousbhai/ghost"
