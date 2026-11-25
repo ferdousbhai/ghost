@@ -1,4 +1,4 @@
-# Ask on the stand-in model (fake-llama-server.ts): a question by Enter, its answer,
+# Ask on the stand-in model (`stand_in llama-server`): a question by Enter, its answer,
 # New chat, and the asked chat reopened from the list. dev/qa.sh runs it.
 
 {"do":"wait","role":"window","name":"Ask — Ghost","visible":true}

@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # built with feature `qa`, against one scratch ghostd and sample data (stand-in.sh), on a broadway display of its own:
 # private HOME, XDG directories and runtime, no session bus, no Wayland or X display, so no window opens anywhere and
 # nothing of the desktop this is run from is read. Any failed command, GLib warning or critical fails the run.
-# `pnpm --filter @ghost/window test` runs it, so the gate does.
+# The gate (`.githooks/verify`) runs it.
 #
 #   dev/qa.sh [script.jsonl ...]           every script under dev/qa when none is named
 #   GHOST_WINDOW_QA=0                      skip it (the package build's check(), which builds no `qa` window)
@@ -33,7 +33,7 @@ binary=${GHOST_WINDOW_QA_BINARY:-}
 if [[ -z $binary ]]; then
   # A debug build: target/release stays the window the package ships, without `qa`.
   (cd "$here/.." && bash dev/cargo.sh build --locked --features qa --quiet)
-  binary=$here/../target/debug/ghost-window
+  binary=$here/../../../target/debug/ghost-window
 fi
 binary=$(realpath -e -- "$binary")
 

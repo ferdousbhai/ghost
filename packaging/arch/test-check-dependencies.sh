@@ -80,7 +80,7 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
   0000000000000000000000000000000000000000000000000000000000000000
 [[ "$(stat -c '%a' "$work/ghost/.SRCINFO")" == 644 ]]
 # The commands the checks and the turn prompt call are declared: jq here, and
-# in the local model's Claude command (coding-agent.ts).
+# in the local model's Claude command (coding_agent.rs).
 require_srcinfo_entry checkdepends jq "$work/ghost/.SRCINFO"
 require_srcinfo_entry depends jq "$work/ghost/.SRCINFO"
 

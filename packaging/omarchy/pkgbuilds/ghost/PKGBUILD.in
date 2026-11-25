@@ -4,12 +4,11 @@ pkgname=ghost
 pkgver=@@VERSION@@
 pkgrel=1
 pkgdesc="Your own data and your ghost, answered by a model on your machine"
-# The window is native code.
+# The daemon, the ghost command and the window are native code.
 arch=('x86_64' 'aarch64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
 license=('Apache-2.0')
 depends=(
-  'bun'
   'glib2'
   'gtk4>=4.14'
   'hyprland>=0.56'
@@ -18,16 +17,15 @@ depends=(
   'xdg-utils>=1.2'
 )
 makedepends=(
-  'bun'
   'cargo'
   'desktop-file-utils'
-  'pnpm>=10.12.2'
 )
 checkdepends=(
   'jq'
 )
 optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
+  'sqlite: searching the Lastbook library'
 )
 # 0.11.9 and earlier split the daemon out as ghost-runtime.
 conflicts=(ghost-runtime)
@@ -42,29 +40,25 @@ sha256sums=('@@SOURCE_SHA256@@')
 
 prepare() {
   cd -- "$srcdir/ghost-${pkgver}"
-  # Everything the build downloads, it downloads here, from the two lockfiles.
-  pnpm install --frozen-lockfile
-  cargo fetch --locked --manifest-path packages/window/Cargo.toml
+  # Everything the build downloads, it downloads here, from the lockfile.
+  cargo fetch --locked
 }
 
 build() {
   cd -- "$srcdir/ghost-${pkgver}"
-  # The daemon and CLI as Bun bundles, then the window. No build or home
-  # folder in the window's panic messages.
-  pnpm --filter @ghost/daemon build:runtime
+  # The daemon, the ghost command and the window. No build or home folder in
+  # their panic messages.
   RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo" \
-    cargo build --frozen --release --manifest-path packages/window/Cargo.toml
+    cargo build --frozen --release
 }
 
 check() {
   cd -- "$srcdir/ghost-${pkgver}"
   bash packaging/arch/test-check-dependencies.sh
-  cargo test --frozen --release --manifest-path packages/window/Cargo.toml
+  cargo test --frozen --release
 }
 
 package() {
   cd -- "$srcdir/ghost-${pkgver}"
-  bash packaging/release/install-payload.sh \
-    . packages/daemon/dist/runtime "$pkgdir" "$pkgname" \
-    packages/window/target/release/ghost-window
+  bash packaging/release/install-payload.sh . target/release "$pkgdir" "$pkgname"
 }

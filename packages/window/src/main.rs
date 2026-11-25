@@ -15,8 +15,7 @@ pub const APP_ID: &str = "io.github.ferdousbhai.Ghost";
 
 fn main() -> glib::ExitCode {
     if std::env::args().any(|arg| arg == "--version") {
-        let manifest: serde_json::Value = serde_json::from_str(include_str!("../../../package.json")).expect("the workspace manifest");
-        println!("{}", manifest["version"].as_str().expect("its version"));
+        println!("{}", env!("CARGO_PKG_VERSION"));
         return glib::ExitCode::SUCCESS;
     }
     // One window: a second launch activates the first.

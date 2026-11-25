@@ -8,7 +8,7 @@
 #
 #   packaging/release/publish.sh <version> [--dry-run]
 #
-# If the manifests do not say <version> yet, it bumps them, commits
+# If the root Cargo.toml does not say <version> yet, it bumps it, commits
 # `release: <version>` and pushes (the pre-push hook runs the gate).
 #
 # --dry-run bumps the version if needed, then builds, verifies and builds the
@@ -50,7 +50,9 @@ current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
 if [[ "$current" != "$version" ]]; then
   # Refused before any manifest is touched, so a typo leaves a clean tree.
   bash "$script_root/verify-release-version.sh" --valid "$version"
-  sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$source_root/package.json"
+  sed -i "/^\[workspace.package\]$/,/^\[/ s/^version = \"$current\"$/version = \"$version\"/" "$source_root/Cargo.toml"
+  # The lockfile names both crates' version too.
+  cargo update --workspace --offline --quiet
   git commit -q -am "release: $version"
   printf 'bumped %s -> %s\n' "$current" "$version"
 fi
@@ -84,9 +86,9 @@ cp -- "$out/ghost-$version.tar.gz" "$build/ghost/"
 (
   cd -- "$build/ghost"
   # --nodeps: pacman's check of the dependency list is the Native packages
-  # workflow's, in clean roots. Here it would refuse a machine whose Bun is
-  # bun-bin, which provides `bun` with no version; the build and check()
-  # still need the real tools.
+  # workflow's, in clean roots. Here it would refuse a machine whose cargo is
+  # rustup's rather than pacman's; the build and check() still need the real
+  # tools.
   LC_ALL=C PKGDEST="$build/pkg" PKGEXT=.pkg.tar.zst makepkg --force --nodeps
 )
 rm -rf -- "$work"

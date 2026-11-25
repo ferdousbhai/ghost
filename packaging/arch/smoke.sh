@@ -45,8 +45,6 @@ require_unit_directive() {
 
 data_files=(
   /usr/lib/systemd/user/ghostd.service
-  /usr/lib/ghost/runtime/ghostd.js
-  /usr/lib/ghost/runtime/ghost.js
   /usr/share/doc/ghost/docs/hooks.md
   /usr/share/applications/io.github.ferdousbhai.Ghost.desktop
   /usr/share/icons/hicolor/scalable/apps/ghost.svg
@@ -70,10 +68,11 @@ if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q
 fi
 
 desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
-# Runs without a display: the version is the release's, and printing it proves the binary loads its libraries.
-"$root/usr/bin/ghost-window" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
-GHOST_BUN_EXECUTABLE="$(command -v bun)" \
-  "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+# Runs without a display or a daemon: the version is the release's, the same
+# from all three, and printing it proves each binary loads its libraries.
+version="$("$root/usr/bin/ghostd" --version)"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$("$root/usr/bin/ghost" --version)" == "$version" && "$("$root/usr/bin/ghost-window" --version)" == "$version" ]]
 
 for license in LICENSE THIRD_PARTY_NOTICES.md; do
   require_file "$(cd "$root" && printf '/%s' usr/share/licenses/*/"$license")"

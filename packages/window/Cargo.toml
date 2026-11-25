@@ -1,11 +1,10 @@
 [package]
 name = "ghost-window"
-# Never published as a crate: the release version is the workspace package.json's, which `--version` reports.
-version = "0.0.0"
-edition = "2024"
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Ghost's window: the owner's own data and the ghost, in one GTK 4 app"
-repository = "https://github.com/ferdousbhai/ghost"
 publish = false
 
 [[bin]]
@@ -27,8 +26,3 @@ ureq = { version = "2.12", default-features = false, features = ["json"] }
 [features]
 # Scripted QA (dev/qa.sh): omui's `OMUI_QA=1` mode. Off in a release build, which carries none of it.
 qa = ["omui/qa"]
-
-[profile.release]
-lto = "thin"
-codegen-units = 4
-strip = true

@@ -9,7 +9,10 @@
 # it ends.
 stand_in_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 stand_in_repo=$(realpath -e -- "$stand_in_dir/../../..")
-stand_in_bun=$(command -v bun) || { echo "stand-in: bun is required" >&2; exit 1; }
+# The daemon and the stand-in tools (packages/daemon/examples/stand_in.rs), built once, as debug builds.
+(cd "$stand_in_repo" && bash packages/window/dev/cargo.sh build --locked --quiet -p ghostd --bin ghostd --example stand_in)
+stand_in_ghostd_binary=$stand_in_repo/target/debug/ghostd
+stand_in_tool=$stand_in_repo/target/debug/examples/stand_in
 
 stand_in_home() {
   mkdir -p "$root"/{home,config,state,data,cache,ghosts,bin}
@@ -51,32 +54,31 @@ esac"
   info) printf '{\"id\":\"p1\",\"filename\":\"IMG_0001.HEIC\",\"created\":\"2026-11-11T06:40:22Z\",\"kind\":\"photo\",\"width\":4032,\"height\":3024,\"size\":2100000,\"albums\":[{\"id\":\"a1\",\"name\":\"Trip\"}]}' ;;
 esac"
   mkdir -p "$root/pictures"
-  "$stand_in_bun" "$stand_in_dir/sample-picture.ts" "$root/pictures" 8
+  "$stand_in_tool" pictures "$root/pictures" 8
 }
 
 stand_in_ghostd() {
   # The stand-ins, then only what ghostd and its file search need.
   local tools=$root/tools tool path
   mkdir -p "$tools"
-  for tool in rg fd fzf sh bash env cat printf date sed pdftotext; do
+  # By link, not by their directory: /usr/bin would bring the owner's real product CLIs and accounts with it.
+  for tool in rg fd fzf sh bash env cat printf date sed pdftotext sqlite3 gio git; do
     path=$(command -v "$tool" 2>/dev/null) && ln -sf "$path" "$tools/$tool"
   done
-  # bun by link, not by its directory: /usr/bin would bring the owner's real product CLIs and accounts with it.
-  ln -sf "$stand_in_bun" "$tools/bun"
 
   # A spare port, with the stand-in model server.
   local port
-  port=$("$stand_in_bun" -e 'const s = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } }); console.log(s.port); s.stop();')
+  port=$("$stand_in_tool" port)
   [[ $port != 7717 ]] || { echo "stand-in: refusing port 7717" >&2; exit 1; }
   export GHOSTD_PORT=$port
-  printf '#!/bin/sh\nexec %q %q "$@"\n' "$stand_in_bun" "$stand_in_dir/fake-llama-server.ts" > "$root/bin/fake-llama-server"
+  printf '#!/bin/sh\nexec %q llama-server "$@"\n' "$stand_in_tool" > "$root/bin/fake-llama-server"
   chmod 755 "$root/bin/fake-llama-server"
   : > "$root/model.gguf"
   mkdir -p "$XDG_CONFIG_HOME/ghost"
   printf '{"local":{"model":"%s","server":"%s"}}\n' "$root/model.gguf" "$root/bin/fake-llama-server" > "$XDG_CONFIG_HOME/ghost/config.json"
   # No session bus: nothing ghostd might announce reaches the desktop this runs from.
   PATH=$root/bin:$tools DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
-    "$stand_in_bun" "$stand_in_repo/packages/daemon/src/main.ts" > "$root/ghostd.log" 2>&1 &
+    "$stand_in_ghostd_binary" > "$root/ghostd.log" 2>&1 &
   daemon_pid=$!
   local token_file=$XDG_STATE_HOME/ghost/api-token
   for _ in {1..100}; do

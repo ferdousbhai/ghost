@@ -83,7 +83,9 @@ grep -Fxq $'\tconflicts = ghost-runtime' "$srcinfo"
 grep -Fxq $'\treplaces = ghost-runtime' "$srcinfo"
 grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$source_sha" "$srcinfo"
-grep -Fxq $'\tmakedepends = pnpm>=10.12.2' "$srcinfo"
+grep -Fxq $'\tmakedepends = cargo' "$srcinfo"
+# The package needs no runtime: nothing of Bun or pnpm is declared.
+! grep -Eq $'\t(make)?depends = (bun|pnpm)' "$srcinfo"
 
 # Model the only fields sync-upstream rewrites: pkgver, pkgrel, and the
 # checksum.

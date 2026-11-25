@@ -6,24 +6,17 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-payload.XXXXXX")"
 cleanup() { find -P "$work" -depth -delete; }
 trap cleanup EXIT
 
-runtime="$work/runtime"
-mkdir -p "$runtime/bin" "$runtime/lib"
-cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost"
-cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghostd"
-printf 'console.log("0.3.0");\n' > "$runtime/lib/ghostd.js"
-cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost.js"
-
-# The daemon bundles no npm package, so the package ships Ghost's licence and
-# notices alone. A dependency added here needs its licence shipped too.
-! grep -q '"dependencies"' "$source_root/packages/daemon/package.json"
-
-# A stand-in for the built window: the payload check only asks its version.
-printf '#!/bin/sh\necho 0.3.0\n' > "$work/ghost-window"
-chmod 755 "$work/ghost-window"
+# Stand-ins for the built binaries: the payload check only asks their version.
+binaries="$work/release"
+mkdir -p "$binaries"
+for name in ghostd ghost ghost-window; do
+  printf '#!/bin/sh\necho 0.3.0\n' > "$binaries/$name"
+  chmod 755 "$binaries/$name"
+done
 
 # install-payload.sh ends with smoke.sh on the tree it staged.
 fakeroot bash "$source_root/packaging/release/install-payload.sh" \
-  "$source_root" "$runtime" "$work/payload" ghost "$work/ghost-window"
+  "$source_root" "$binaries" "$work/payload" ghost
 for doc in "$source_root"/docs/*.md; do
   cmp "$doc" "$work/payload/usr/share/doc/ghost/docs/${doc##*/}"
 done
@@ -39,10 +32,11 @@ verify_recipe() (
   pkgdir="$work/recipe"
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
   package
-  [[ " ${depends[*]} " == *' bun '* && " ${depends[*]} " == *' gtk4>='* ]]
+  # No runtime to install: the binaries need only their libraries.
+  [[ " ${depends[*]} ${makedepends[*]} " != *' bun'* && " ${depends[*]} " == *' gtk4>='* ]]
   # A machine holding the earlier split takes this one package in its place.
   [[ " ${replaces[*]} " == *" $replaced "* && " ${conflicts[*]} " == *" $replaced "* ]]
-  [[ "$(cat "$work/assembly")" == *'packages/window/target/release/ghost-window' ]]
+  [[ "$(cat "$work/assembly")" == *" . target/release $pkgdir $pkgname" ]]
 )
 bash "$source_root/packaging/release/render-arch-package.sh" "$work/recipe-stable" 0.3.0 \
   "$(printf '%064d' 0)"

@@ -1,4 +1,3 @@
-node_modules/
 dist/
 .cache/
 *.log
@@ -8,8 +7,8 @@ dist/
 packaging/arch/pkg/
 packaging/arch/ghost/
 
-# cargo's build output for the window
-packages/window/target/
+# cargo's build output
+/target/
 
-# cargo build output for the daemon
-packages/daemon/target/
+# agents' worktrees
+.claude/worktrees/

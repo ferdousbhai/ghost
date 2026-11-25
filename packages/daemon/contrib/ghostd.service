@@ -29,7 +29,7 @@ SendSIGKILL=yes
 # user manager imports arrives only after the graphical session is up. The CLIs
 # a ghost runs install into ~/.local/bin and the like, so name the
 # owner's tool directories here rather than depend on start-up order.
-Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:%h/.bun/bin:/usr/local/bin:/usr/bin
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
 
 # Local-only service; nothing here should reach outside the user's own files.
 # %h is ONE writable bind mount, not per-directory carve-outs: ghost deletion
@@ -50,8 +50,9 @@ RestrictSUIDSGID=yes
 # restart ghostd`. `ghost help browser` therefore tells the ghost to start it
 # detached (`systemd-run --user --scope`). A Chromium that does end up here
 # still needs its sandbox's user namespaces, so the unit sets no
-# RestrictNamespaces (smoke.sh enforces that), and Bun's and V8's JITs need
-# writable-executable pages, so MemoryDenyWriteExecute stays off.
+# RestrictNamespaces (smoke.sh enforces that), and the commands a ghost runs
+# (node, a browser) have JITs that need writable-executable pages, so
+# MemoryDenyWriteExecute stays off.
 LockPersonality=yes
 MemoryDenyWriteExecute=no
 # PrivateTmp only isolates /tmp and /var/tmp. The user runtime directory stays

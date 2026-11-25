@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# The whole gate, once: build, typecheck, lint, every package's tests, the
-# owner scripts' tests, and the packaging suites. A green run
-# on a clean tree is remembered by that tree's hash, so the pre-push hook can
-# skip a suite that already passed on exactly what is being pushed.
+# The whole gate, once: format, lints, a release build, every test, the
+# window's scripted QA, and the packaging suites. A green run on a clean tree
+# is remembered by that tree's hash, so the pre-push hook can skip a suite that
+# already passed on exactly what is being pushed.
 #
-#   pnpm verify        run the gate (what CI runs), remember a green clean tree
+#   .githooks/verify   run the gate (what CI runs), remember a green clean tree
 #   .githooks/verify --check [commit]   exit 0 only if that commit's tree
 #                      (default HEAD) is remembered green
 set -euo pipefail
@@ -24,12 +24,15 @@ fi
 # above this line so a probe never truncates the log.
 exec > >(tee "$gitdir/ghost-verify-last.log") 2>&1
 
-# The daemon's tsc output is what a checkout's dev launcher runs; a build
-# break fails the gate here rather than on the owner's machine.
-pnpm build
-pnpm typecheck
-pnpm lint
-pnpm test
+# rustup's own directory when no cargo is on PATH.
+command -v cargo >/dev/null || PATH="$HOME/.cargo/bin:$PATH"
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+# The release build is what the package ships; the tests run on it.
+cargo build --workspace --release --locked
+cargo test --workspace --release --locked
+# The window's main flows, against a scratch ghostd, on a private display.
+bash packages/window/dev/qa.sh
 # What the gate checks beyond the workspace, run as the PKGBUILD's check()
 # runs it: inside the source archive, so a file the archive loses
 # or a link it breaks fails here, not only in the package build. The

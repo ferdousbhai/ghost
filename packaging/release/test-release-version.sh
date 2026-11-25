@@ -16,14 +16,16 @@ for invalid in 1.2.3.alpha 01.2.3 0.0.0; do
     printf 'release version checker accepted invalid requested version %s\n' "$invalid" >&2
     exit 1
   fi
-  printf '{"version": "%s"}\n' "$invalid" > "$work/package.json"
+  printf '[workspace.package]\nversion = "%s"\n' "$invalid" > "$work/Cargo.toml"
   if bash "$checker" "$work" >/dev/null 2>&1; then
     printf 'release version checker accepted invalid manifest version %s\n' "$invalid" >&2
     exit 1
   fi
 done
 
-# The daemon carries no version of its own to fall out of step.
-! grep -q '"version"' "$source_root/packages/daemon/package.json"
+# Neither crate carries a version of its own to fall out of step.
+for crate in daemon window; do
+  grep -Fxq 'version.workspace = true' "$source_root/packages/$crate/Cargo.toml"
+done
 
 printf 'Release version check passed\n'

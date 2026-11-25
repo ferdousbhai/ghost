@@ -1,23 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage='install-payload.sh <source-root> <runtime-root> <pkgdir> <pkgname> <window-binary>'
+usage='install-payload.sh <source-root> <binaries> <pkgdir> <pkgname>'
 source_root="${1:?usage: $usage}"
-runtime_root="${2:?usage: $usage}"
+# Where cargo left the release build: ghostd, ghost and ghost-window.
+binaries="$(realpath -e -- "${2:?usage: $usage}")"
 pkgdir="${3:?usage: $usage}"
 pkgname="${4:?usage: $usage}"
-# The built window (packages/window).
-window="$(realpath -e -- "${5:?usage: $usage}")"
 
 source_root="$(realpath "$source_root")"
-runtime_root="$(realpath "$runtime_root")"
 
-install -Dm755 "$runtime_root/bin/ghostd" "$pkgdir/usr/bin/ghostd"
-install -Dm755 "$runtime_root/bin/ghost" "$pkgdir/usr/bin/ghost"
-install -Dm644 "$runtime_root/lib/ghostd.js" \
-  "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
-install -Dm644 "$runtime_root/lib/ghost.js" \
-  "$pkgdir/usr/lib/ghost/runtime/ghost.js"
+install -Dm755 "$binaries/ghostd" "$pkgdir/usr/bin/ghostd"
+install -Dm755 "$binaries/ghost" "$pkgdir/usr/bin/ghost"
 
 install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
   "$pkgdir/usr/lib/systemd/user/ghostd.service"
@@ -31,7 +25,7 @@ done
 
 # The window is the app the launcher entry opens, named by its app id so
 # the compositor finds the entry's icon for it.
-install -Dm755 "$window" "$pkgdir/usr/bin/ghost-window"
+install -Dm755 "$binaries/ghost-window" "$pkgdir/usr/bin/ghost-window"
 install -Dm644 "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" \
   "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
 install -Dm644 "$source_root/packages/window/contrib/icons/ghost.svg" \
