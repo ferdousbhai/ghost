@@ -33,6 +33,11 @@ mount --bind "$cache/cargo" "$root/cache/cargo"
 mount --bind "$cache/pacman" "$root/var/cache/pacman/pkg"
 if [[ $architecture == x86_64 ]]; then
   printf 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$root/etc/pacman.d/mirrorlist"
+else
+  # One mirror, the bootstrap's: the balanced mirror.archlinuxarm.org can
+  # answer with one mirror's package list and another's files, and a package
+  # the list names is then a 404.
+  printf 'Server = https://ca.us.mirror.archlinuxarm.org/$arch/$repo\n' > "$root/etc/pacman.d/mirrorlist"
 fi
 # arch-chroot otherwise bind-mounts the host /run, including its live buses.
 rm -f "$root/etc/resolv.conf"
