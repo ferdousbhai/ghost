@@ -9,7 +9,7 @@ of — this page.
 
 - **Omarchy**. Ghost depends on that desktop; there is no generic
   Arch/Hyprland support promise.
-- **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
+- **Bun** at runtime (Omarchy's `bun-bin` or Arch's `bun`), plus the rest of the package's dependencies —
   pacman installs them with the package.
 - **A model on this machine.** Every turn runs on a local model, so your
   notes, chats, mail and files stay on the computer: a GGUF file and

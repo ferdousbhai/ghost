@@ -14,9 +14,11 @@ CLI with Bun (minified, with function and class names kept for diagnostics)
 and compiles the window with cargo. One archive, one commit: a package cannot
 mix an old window with a new daemon or client.
 
-Installed launchers use `/usr/bin/bun`, so the package requires system Bun
-1.3.14 or newer. The current
-build/check toolchain requires Bun 1.4.0 or newer.
+Installed launchers use `/usr/bin/bun`, so the package depends on `bun`,
+with no version: Omarchy's own `bun-bin` provides that name without one, and
+a versioned dependency would make pacman swap it for Arch's `bun`. The daemon
+needs Bun 1.3.14 or newer, and the build and tests 1.4.0 or newer; both
+packages are well past that.
 
 ## Cutting a release
 

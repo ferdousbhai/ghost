@@ -39,7 +39,7 @@ verify_recipe() (
   pkgdir="$work/recipe"
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
   package
-  [[ " ${depends[*]} " == *' bun>='* && " ${depends[*]} " == *' gtk4>='* ]]
+  [[ " ${depends[*]} " == *' bun '* && " ${depends[*]} " == *' gtk4>='* ]]
   # A machine holding the earlier split takes this one package in its place.
   [[ " ${replaces[*]} " == *" $replaced "* && " ${conflicts[*]} " == *" $replaced "* ]]
   [[ "$(cat "$work/assembly")" == *'packages/window/target/release/ghost-window' ]]
