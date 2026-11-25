@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<meta charset="utf-8">
+<title>The page's checks</title>
+<!-- Run by check.sh in headless Chromium: every script parses, the service
+     worker caches exactly the shell that exists, and machine names normalize.
+     The verdict is left on the <html> element once the page has loaded. -->
+<body>
+<script>
+const failures = [];
+const check = (ok, message) => ok || failures.push(message);
+const equal = (got, want, what) => check(got === want, `${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+/** A file's text, or null when it does not exist. */
+const read = (path) => {
+  const xhr = new XMLHttpRequest();
+  try {
+    xhr.open("GET", path, false);
+    xhr.send();
+    return xhr.responseText;
+  } catch {
+    return null;
+  }
+};
+let ran = false;
+
+// Outside the app's own page a module may fail when it runs; only a script
+// that does not parse fails here.
+addEventListener("error", (event) => {
+  if (event.error instanceof SyntaxError) failures.push(`${event.filename.split("/").pop()}: ${event.message}`);
+});
+// The modules below are part of the document, so `load` waits for them.
+addEventListener("load", () => {
+  check(ran, "the checks did not run");
+  document.documentElement.dataset.check = failures.length ? "failed" : "passed";
+  document.documentElement.dataset.failures = failures.join("; ");
+});
+
+// check.sh lists public/js, which a page cannot do for itself.
+const scripts = (new URLSearchParams(location.search).get("scripts") || "").split(",").filter(Boolean);
+check(scripts.length > 1, "no scripts listed");
+for (const name of scripts) document.write(`<script type="module" src="public/js/${name}"><\/script>`);
+</script>
+<script type="module">
+import { normalizeHost, shortName, tailnetOf } from "./public/js/net.js";
+
+try {
+  const worker = read("public/sw.js");
+  check(worker !== null, "public/sw.js is missing");
+  new Function(worker);
+  const shell = new Function(`${/const SHELL = \[[\s\S]*?\];/.exec(worker)[0]} return SHELL;`)();
+  for (const path of shell) check(path === "/" || read("public" + path) !== null, `sw.js caches missing ${path}`);
+  for (const name of scripts) check(shell.includes(`/js/${name}`), `sw.js does not cache /js/${name}`);
+
+  equal(normalizeHost("alarm.tail58bdd3.ts.net"), "alarm.tail58bdd3.ts.net", "plain host");
+  equal(normalizeHost(" https://Alarm.tail58bdd3.ts.net:8443/x?y "), "alarm.tail58bdd3.ts.net:8443", "a URL");
+  equal(normalizeHost("alarm.tail58bdd3.ts.net.:443"), "alarm.tail58bdd3.ts.net", "trailing dot and the usual port");
+  equal(normalizeHost("box", "tail58bdd3.ts.net"), "box.tail58bdd3.ts.net", "bare name on a known tailnet");
+  equal(normalizeHost("box"), null, "bare name with no tailnet");
+  equal(normalizeHost("evil.example.com"), null, "a host off the tailnet");
+  equal(normalizeHost("a.ts.net:99999x"), null, "a bad port");
+  equal(tailnetOf("alarm.tail58bdd3.ts.net:8443"), "tail58bdd3.ts.net", "tailnetOf");
+  equal(shortName("alarm.tail58bdd3.ts.net:8443"), "alarm", "shortName");
+} catch (error) {
+  failures.push(`sw.js: ${error.message}`);
+}
+ran = true;
+</script>
+</body>
+</html>

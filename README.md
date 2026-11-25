@@ -22,7 +22,7 @@ you already use (Claude Code, Codex, Antigravity) by that agent's own command.
 Notes are Markdown in the owner's Documents directory, never indexed or
 injected. A ghost can maintain its own code
 ([docs/self-maintenance.md](docs/self-maintenance.md)), and the
-[summonghost.com](https://summonghost.com) app reaches it from a phone over an
+[summonghost.com](https://summonghost.com) app ([`packages/web`](packages/web/README.md)) reaches it from a phone over an
 opt-in Tailscale Serve address.
 
 Install and first conversation:

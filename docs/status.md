@@ -58,7 +58,10 @@ one, and takes 0.12.0 only once the single-package recipe
 (`packaging/omarchy/`) is merged there. Until then
 `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs it.
 0.12.0 and the summonghost.com page changed together: the page no longer
-reaches a machine on 0.11.9. Earlier plans are in Git history.
+reaches a machine on 0.11.9. The page's code moved into this repository on
+2026-11-25 (`packages/web`); it is published by `packages/web/publish.sh`, on
+the owner's go, and the CloudChef project it once lived in only receives
+that. Earlier plans are in Git history.
 
 ## Upgrading from 0.11.9
 

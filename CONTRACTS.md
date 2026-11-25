@@ -32,7 +32,7 @@ app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale
 identity. Whoever controls summonghost.com's code can therefore act as a
 visiting owner on that owner's tailnet; `remote.apps: []` opts out, leaving no
-remote client at all. See [concepts](docs/concepts.md) for rationale.
+remote client at all. The app's code is [`packages/web`](packages/web/README.md). See [concepts](docs/concepts.md) for rationale.
 
 Durable state has three scopes:
 
@@ -463,6 +463,13 @@ the daemon into. Removing it preserves owner data.
   package per-architecture; the launcher entry
   `io.github.ferdousbhai.Ghost.desktop` opens it, and `--version` prints the
   release version.
+- [`packages/web`](packages/web/README.md) is the summonghost.com page, the
+  remote client: static files with no build step, a client of the API that
+  keeps only its machine list, in the browser. It is in no package; the
+  owner publishes it with
+  [`publish.sh`](packages/web/publish.sh), apart from releases, so it keeps
+  working against the last released daemon. The gate runs its checks
+  ([`check.sh`](packages/web/check.sh)) in headless Chromium.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   prints the daemon restart that loads the new build. A release is cut locally

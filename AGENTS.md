@@ -1,8 +1,8 @@
 # ghost
 
-**Work resumed on 2026-11-24, with a narrower aim: Ghost is the hub over the owner's own data. No release without the owner's go. Read `docs/status.md` before starting anything.**
+**Work resumed on 2026-11-24, with a narrower aim: Ghost is the hub over the owner's own data. No release, and no publish of the page, without the owner's go. Read `docs/status.md` before starting anything.**
 
-Local Omarchy-native AI persona with file-backed state, a daemon API, a window, and Bash browser automation.
+Local Omarchy-native AI persona with file-backed state, a daemon API, a window, a page for reaching it from a phone, and Bash browser automation.
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
 
@@ -36,7 +36,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, `ghost` CLI, the window, the local model's tools. A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, `ghost` CLI, the window, the summonghost.com page (`packages/web`, rules in its README), the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help_topics.rs`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in the budget test in `packages/daemon/src/prompt_policy.rs` to its exact new size so growth is always a decision.
@@ -50,8 +50,9 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --release --locked
 bash packages/window/dev/qa.sh
+bash packages/web/check.sh
 ```
 
-Verify with the smallest proof: the tests you touched (`cargo test -p <crate> <name>`; the window's scripted QA is `packages/window/dev/qa.sh`) plus `clippy` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (format, lints, a release build, tests, the window's scripted QA, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by the test in `packages/daemon/src/prompt_policy.rs`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
+Verify with the smallest proof: the tests you touched (`cargo test -p <crate> <name>`; the window's scripted QA is `packages/window/dev/qa.sh`) plus `clippy` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (format, lints, a release build, tests, the window's scripted QA, the page's checks, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by the test in `packages/daemon/src/prompt_policy.rs`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
 
-Both packages are Rust, in one cargo workspace at the repository root. Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.
+The daemon and the window are Rust, in one cargo workspace at the repository root; `packages/web` is the summonghost.com page, plain files published only on the owner's go (`packages/web/publish.sh`). Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.

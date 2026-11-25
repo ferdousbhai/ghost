@@ -1,0 +1,102 @@
+# The summonghost.com page
+
+[summonghost.com](https://summonghost.com) is how an owner reaches Ghost on
+their machines from a phone or any other device on their tailnet. It is
+Ghost's only remote client. The owner's words for it: "myself and every other
+user [can] go to a simple domain (summonghost.com), have a one time setup per
+machine, and then see all their machines and the ghosts in them, and
+converse." A machine has one ghost, so the page lists machines and opens each
+one's conversations directly; the route is `#/<host>/<conversation>`.
+
+Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
+
+## Design
+
+- **No backend.** Cloudflare serves `public/` as static assets (a Worker with
+  assets and no script). The site stores nothing of anyone's and has no
+  accounts, cookies, analytics or server code. Adding any of these is a
+  product decision for the owner, not an implementation detail.
+- **Straight to the machine.** The browser calls
+  `https://<machine>.<tailnet>.ts.net[:port]/api/...` on each machine's
+  `ghostd`, through Tailscale Serve, which stamps the caller's Tailscale
+  login; ghostd admits the owner by it. There is no token, sign-in or
+  pairing, and requests carry no credentials.
+- **Ghost's side is in [`CONTRACTS.md`](../../CONTRACTS.md):** `remote.apps`
+  admits the `https://summonghost.com` origin, only with a Tailscale identity,
+  with CORS and the Private-Network preflight; `GET /api/remote/machines`
+  lists the owner's other machines; the rest is the daemon API and turn wire.
+  Build against that contract, and change both sides in one commit.
+- **Old Ghosts stay reachable.** The page is published when the owner says,
+  and packages reach machines later, so a change here keeps working against
+  the last released ghostd or says "update Ghost on <machine>".
+- **One-time setup per machine:** `ghost remote on`, then the
+  `https://summonghost.com/#add=<host>` link from `ghost remote status`. Hosts
+  are `host[:port]` and must end in `.ts.net`.
+- **Discovery:** after reaching one machine as owner, the page asks it for
+  `/api/remote/machines` and probes each online host's `/api/remote/whoami`;
+  each that answers as owner is listed. A Ghost without that route still works
+  alone (a 404 is ignored).
+- **Machine list:** kept in `localStorage` (`summonghost.machines.v1`),
+  wrapped in try/catch so the page works without it. Removed hosts are
+  remembered, so discovery does not bring them back. An offline machine keeps
+  its ghost's last-known name.
+- **A conversation:** bubbles and the activity line; the newest transcript
+  page; read marking only while the page is visible and focused; the turn wire
+  and its `resume` frames; photos uploaded on send; the follow-up queue (while
+  a turn runs the send button queues, and stops when the composer is empty);
+  stop, which hands queued text back to the composer; answering the ghost's
+  open question; pin, unpin and delete. A guest gets a read-only view.
+- **Errors in plain words** ([`net.js`](public/js/net.js)). A browser hides
+  why a cross-origin fetch failed, so the page finds out by elimination: the
+  `local-network` permission was denied; a `no-cors` request gets an answer,
+  so Ghost is too old or `remote.apps` is off ("update Ghost on <machine>");
+  otherwise the machine cannot be reached. A 401 or `peer_only` means not the
+  owner. When every machine is unreachable, a banner asks whether Tailscale is
+  connected.
+
+## Rules
+
+- No third-party JavaScript, no external fonts, no CDN. Everything is served
+  from `public/`.
+- Keep the strict CSP in [`public/_headers`](public/_headers): `script-src
+  'self'`, `style-src 'self'` (no inline style attributes in markup; setting
+  styles from JS is fine), and `connect-src 'self' https://*.ts.net:*`.
+- Plain HTML, CSS and JS modules, with no build step and no package manager.
+- The service worker caches the app shell (its `SHELL` list) and nothing
+  else, and never touches requests to machines.
+- Light and dark both follow `prefers-color-scheme`. Lay out for phones first
+  (390px), and use two columns from 900px.
+- A test that writes to a real ghost creates its own conversation and deletes
+  it afterwards.
+
+## Check and publish
+
+```sh
+bash packages/web/check.sh             # part of the gate
+bash packages/web/publish.sh --dry-run # what a publish would change
+bash packages/web/publish.sh           # publish HEAD's page, and wait for it
+```
+
+`check.sh` runs [`check.html`](check.html) in headless Chromium: every script
+parses, the service worker's list names exactly the files that exist, and
+machine names normalize.
+
+Publishing is the owner's call, like a release. `publish.sh` replaces the
+contents of the CloudChef project `ferdous/summonghost` with `public/` and
+`wrangler.jsonc` from HEAD; CloudChef publishes a push to its `main`. Nothing
+is edited in that project. summonghost.com and www are custom domains attached
+to its Worker in Cloudflare; a CloudChef deploy cannot attach domains, so
+`wrangler.jsonc` declares no routes.
+
+A machine only admits the `https://summonghost.com` origin, so the page is
+tested against a real ghostd on the live site, in headless Chromium over the
+Chrome DevTools Protocol: grant `local-network` with `Browser.setPermission`
+for that origin, and turn on `Emulation.setFocusEmulationEnabled` so read
+marking runs.
+
+## Not yet verified
+
+- iPhone Safari: it has no Local Network Access prompt, and its behaviour with
+  a public origin calling a tailnet address is unknown.
+- Discovery against a real `ghostd` that serves `/api/remote/machines`.
+- The "update Ghost" message against a real older ghostd over HTTPS.

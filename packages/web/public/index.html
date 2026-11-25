@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#e1e2e7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16161e" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Talk to the ghosts on your own computers from any device on your Tailscale network.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SummonGhost">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="/icons/ghost.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/app.css">
+<script type="module" src="/js/app.js"></script>
+<title>SummonGhost</title>
+</head>
+<body data-view="home">
+<svg hidden>
+  <symbol id="i-ghost" viewBox="0 0 24 24"><path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 3 3 9-3 9 19-9z"/><path d="M6 12h16"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></symbol>
+  <symbol id="i-machine" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+</svg>
+
+<div id="banner" role="status"></div>
+
+<section id="home" class="pane side" aria-label="Machines">
+  <header>
+    <svg class="glyph"><use href="#i-ghost"/></svg>
+    <h1>SummonGhost</h1>
+    <button id="add-toggle" class="round small" type="button" aria-label="Add a machine" title="Add a machine"><svg class="icon"><use href="#i-plus"/></svg></button>
+  </header>
+  <div class="scroll">
+    <div id="first-run" hidden>
+      <svg class="glyph hero"><use href="#i-ghost"/></svg>
+      <h2>Your ghost on each machine, from anywhere on your tailnet</h2>
+      <p>SummonGhost talks straight to Ghost on your own computers over Tailscale. It has no server and no account, and nothing you do here goes anywhere but your machines.</p>
+      <ol>
+        <li>On a computer with Ghost, run <code>ghost remote on</code>.</li>
+        <li>Open the link that <code>ghost remote status</code> prints, or type the machine's name below.</li>
+        <li>The other computers you own on the tailnet are found from there.</li>
+      </ol>
+      <p class="faint">This device needs Tailscale, signed in as you.</p>
+    </div>
+    <form id="add-form" class="add" hidden>
+      <label for="add-host">Machine name</label>
+      <div class="add-row">
+        <input id="add-host" name="host" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url" placeholder="laptop.tail1234.ts.net" required>
+        <button class="pill" type="submit">Add</button>
+      </div>
+      <p id="add-error" class="error" role="status"></p>
+    </form>
+    <div id="machines"></div>
+    <footer class="legal"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer>
+  </div>
+</section>
+
+<section id="ghost-pane" class="pane side" aria-label="Conversations">
+  <header>
+    <a id="ghost-back" class="round small back" href="#/" aria-label="Machines"><svg class="icon"><use href="#i-back"/></svg></a>
+    <div class="titles"><div id="ghost-name" class="ghost-name"></div><div id="ghost-machine" class="sub"></div></div>
+    <button id="ghost-new" class="round small accent" type="button" aria-label="New conversation" title="New conversation"><svg class="icon"><use href="#i-plus"/></svg></button>
+  </header>
+  <div class="scroll"><div id="ghost-note" class="note" role="status"></div><nav id="sessions"></nav></div>
+</section>
+
+<section id="chat" class="pane main" aria-label="Conversation">
+  <header>
+    <a id="chat-back" class="round small back" href="#/" aria-label="Conversations"><svg class="icon"><use href="#i-back"/></svg></a>
+    <div class="titles"><div id="chat-title" class="chat-title"></div><div id="chat-sub" class="sub"></div></div>
+    <details id="chat-tools" class="tools"><summary aria-label="Conversation tools">⋯</summary><div>
+      <button id="chat-pin" type="button">Pin</button>
+      <button id="chat-delete" type="button">Delete</button>
+    </div></details>
+  </header>
+  <main id="log"></main>
+  <div id="question" class="question" hidden><p id="question-text"></p><div id="question-options"></div></div>
+  <div id="queue" class="queue" hidden></div>
+  <div id="status" role="status"></div>
+  <p id="readonly" class="note" hidden></p>
+  <form id="composer" hidden>
+    <div id="tray"></div>
+    <div class="row">
+      <button id="new" class="round" type="button" aria-label="New conversation" title="New conversation"><svg class="icon"><use href="#i-plus"/></svg></button>
+      <div class="box">
+        <textarea id="prompt" placeholder="Message" rows="1"></textarea>
+        <button id="camera" type="button" aria-label="Attach a photo" title="Attach a photo"><svg class="icon"><use href="#i-camera"/></svg></button>
+        <input id="file" type="file" accept="image/*" multiple hidden>
+      </div>
+      <button id="send" class="round" aria-label="Send" disabled><svg class="icon"><use id="send-icon" href="#i-send"/></svg></button>
+    </div>
+  </form>
+</section>
+
+<section id="placeholder" class="pane main" aria-hidden="true">
+  <div class="empty"><svg class="glyph"><use href="#i-ghost"/></svg><span id="placeholder-text">Pick a machine.</span></div>
+</section>
+
+<template id="empty-log"><div class="empty"><svg class="glyph"><use href="#i-ghost"/></svg><span></span></div></template>
+</body>
+</html>
