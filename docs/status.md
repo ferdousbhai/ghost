@@ -49,13 +49,17 @@ Not done:
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
 
-The last release is 0.11.9 (also the version in Omarchy's package
-repository); `master` is far ahead of it and unreleased. Earlier plans are in
-Git history.
+The last release is 0.12.0, the first since the work resumed. Omarchy's
+package repository still carries 0.11.9: its recipe is the old two-package
+one, and takes 0.12.0 only once the single-package recipe
+(`packaging/omarchy/`) is merged there. Until then
+`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs it.
+0.12.0 and the summonghost.com page changed together: the page no longer
+reaches a machine on 0.11.9. Earlier plans are in Git history.
 
 ## Upgrading from 0.11.9
 
-A machine upgraded from 0.11.9 to a build of master has leftovers to remove by
+A machine upgraded from 0.11.9 has leftovers to remove by
 hand: `ghost-timer-*` units in `~/.config/systemd/user/`, the watch scripts in
 `~/.config/ghost/`, `~/.config/ghost/cli.json`, and any Omarchy hook that
 calls `ghost event` (for example `hooks/battery-low.d/ghost-event.sh`),

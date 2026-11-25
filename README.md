@@ -1,6 +1,6 @@
 # Ghost
 
-> **Resumed on 2026-11-24 with a narrower aim; no release since 0.11.9.** See
+> **Resumed on 2026-11-24 with a narrower aim.** See
 > [docs/status.md](docs/status.md).
 
 **Your own data and your ghost, answered by a model on your machine.** Ghost
