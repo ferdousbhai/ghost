@@ -51,10 +51,10 @@ Not done:
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
 
-The last release is 0.12.0, the first since the work resumed and the last
-one in TypeScript. Master is ahead of it with the Rust daemon, unreleased. Omarchy's
+The last release is 0.13.0, the first with the daemon and the `ghost`
+command in Rust; 0.12.0 was the last one in TypeScript. Omarchy's
 package repository still carries 0.11.9: its recipe is the old two-package
-one, and takes 0.12.0 only once the single-package recipe
+one, and takes a newer release only once the single-package recipe
 (`packaging/omarchy/`) is merged there. Until then
 `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs it.
 0.12.0 and the summonghost.com page changed together: the page no longer
