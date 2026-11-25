@@ -10,3 +10,6 @@ packaging/arch/ghost/
 
 # cargo's build output for the window
 packages/window/target/
+
+# cargo build output for the daemon
+packages/daemon/target/
