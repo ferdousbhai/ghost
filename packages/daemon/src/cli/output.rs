@@ -144,8 +144,8 @@ Common flags:
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd runs the machine (tokens, remote access, and conversations, each turn a
-headless run of an installed agent CLI); ghost talks to the ghost.
+ghostd runs the machine (tokens, remote access, and conversations, each turn
+answered by a model on this machine); ghost talks to the ghost.
 ",
         rows.join("\n")
     )

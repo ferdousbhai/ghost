@@ -49,7 +49,23 @@ else
   tar -xzf "$work/recipe.tar.gz" -C "$work"
   # The recipe checks the release archive against its published SHA-256.
   # --nocheck: the release ran these checks when it was published.
-  (cd -- "$work/ghost" && makepkg --syncdeps --install --noconfirm --needed --nocheck)
+  # A cargo that is not pacman's (rustup's, say) builds it as well, and
+  # pacman's Rust is not installed beside it.
+  [[ ! -x $HOME/.cargo/bin/cargo ]] || PATH="$HOME/.cargo/bin:$PATH"
+  cargo="$(command -v cargo || true)"
+  if [[ -n $cargo ]] && ! pacman -Qo "$cargo" >/dev/null 2>&1; then
+    echo "Building with $cargo."
+    mapfile -t needed < <(cd -- "$work/ghost" && makepkg --printsrcinfo \
+      | awk '$1 ~ /^(make)?depends$/ && $3 != "cargo" { print $3 }')
+    (( ${#needed[@]} )) || die "could not read what Ghost needs from its recipe."
+    # Only what is missing, so nothing already installed changes its reason.
+    mapfile -t missing < <(pacman -T "${needed[@]}" || true)
+    (( ! ${#missing[@]} )) || sudo pacman -S --asdeps --noconfirm "${missing[@]}"
+    (cd -- "$work/ghost" && makepkg --nodeps --install --noconfirm --needed --nocheck)
+  else
+    # --rmdeps: what was installed only to build it goes again afterwards.
+    (cd -- "$work/ghost" && makepkg --syncdeps --rmdeps --install --noconfirm --needed --nocheck)
+  fi
 fi
 
 menu="$(mktemp)"

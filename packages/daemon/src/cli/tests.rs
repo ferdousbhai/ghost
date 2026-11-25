@@ -507,7 +507,7 @@ fn prints_the_usage_screen_with_no_verb() {
             .contains(&format!("\n  {:<widest$}  Send a turn, or follow up on one.\n", "say [text] [--new|--follow-up] [-s <id>] [--json] [-q]"))
     );
     assert!(bare.stdout.contains("\n  -v, --version            Show the ghost package version\n"));
-    assert!(bare.stdout.ends_with("headless run of an installed agent CLI); ghost talks to the ghost.\n"));
+    assert!(bare.stdout.ends_with("answered by a model on this machine); ghost talks to the ghost.\n"));
 }
 
 #[test]

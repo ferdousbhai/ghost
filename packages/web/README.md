@@ -92,13 +92,24 @@ to its Worker in Cloudflare; a CloudChef deploy cannot attach domains, so
 
 A machine only admits the `https://summonghost.com` origin, so the page is
 tested against a real ghostd on the live site, in headless Chromium over the
-Chrome DevTools Protocol: grant `local-network` with `Browser.setPermission`
-for that origin, and turn on `Emulation.setFocusEmulationEnabled` so read
-marking runs.
+Chrome DevTools Protocol, on a profile of its own. The page needs the
+`local-network` permission. In Chromium 153 granting it over the protocol
+(`Browser.setPermission`, `Browser.grantPermissions`) left it denied; what
+worked was allowing it in the stopped profile's `Default/Preferences`
+(`profile.content_settings.exceptions.local_network`, key
+`https://summonghost.com:443,*`, `"setting": 1`). Turn on
+`Emulation.setFocusEmulationEnabled` so read marking runs.
+
+Walked this way against ghostd 0.13.0 on 2026-11-25: adding a machine by its
+link, the conversation list, a new conversation with a command run, a
+follow-up queued during the turn, pin, unpin and delete.
 
 ## Not yet verified
 
 - iPhone Safari: it has no Local Network Access prompt, and its behaviour with
   a public origin calling a tailnet address is unknown.
-- Discovery against a real `ghostd` that serves `/api/remote/machines`.
+- Discovery listing a second machine: `/api/remote/machines` answers the
+  page, but no other machine of the owner's ran Ghost when it was tried.
+- Photos, stop, answering the ghost's question, read marking and the guest
+  view, against a real ghostd.
 - The "update Ghost" message against a real older ghostd over HTTPS.
