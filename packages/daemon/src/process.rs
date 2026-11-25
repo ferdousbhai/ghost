@@ -39,6 +39,9 @@ pub struct ProcessOptions<'a> {
     pub stdin: Option<&'a str>,
     /// Hand stderr to `on_output` too, in arrival order with stdout.
     pub merge_stderr: bool,
+    /// Also call `on_output` with an empty chunk about every 50 ms while the
+    /// process is quiet, so a caller can act on time passing.
+    pub tick: bool,
 }
 
 /// A signal's name as a shell user knows it.
@@ -175,7 +178,11 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
                     std::thread::sleep(Duration::from_millis(10));
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if options.tick {
+                    on_output("");
+                }
+            }
         }
     };
     // Cancellation kills surviving members of the group even after its leader exits.
@@ -238,7 +245,7 @@ pub fn run_command(
     argv.extend_from_slice(args);
     let mut stdout = String::new();
     let exit = run_process(
-        ProcessOptions { argv: &argv, cwd: Path::new("/"), env, abort: &own, stdin: Some(stdin.unwrap_or("")), merge_stderr: false },
+        ProcessOptions { argv: &argv, cwd: Path::new("/"), env, abort: &own, stdin: Some(stdin.unwrap_or("")), merge_stderr: false, tick: false },
         |chunk| stdout.push_str(chunk),
     );
     let _ = done.send(());
@@ -266,7 +273,7 @@ mod tests {
     fn bash(script: &str, abort: &Abort, stdin: Option<&str>, merge: bool) -> (ProcessExit, String) {
         let mut out = String::new();
         let exit = run_process(
-            ProcessOptions { argv: &["bash", "-c", script], cwd: Path::new("/"), env: &env(), abort, stdin, merge_stderr: merge },
+            ProcessOptions { argv: &["bash", "-c", script], cwd: Path::new("/"), env: &env(), abort, stdin, merge_stderr: merge, tick: false },
             |chunk| out.push_str(chunk),
         );
         (exit, out)
@@ -293,6 +300,7 @@ mod tests {
                 abort: &Abort::new(),
                 stdin: None,
                 merge_stderr: false,
+                tick: false,
             },
             |_| {},
         );

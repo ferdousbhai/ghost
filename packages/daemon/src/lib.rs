@@ -15,3 +15,7 @@ pub mod xdg;
 
 /// The release version, the one in this crate's manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub mod hooks;
+pub mod local_model;
+pub mod local_turn;
+pub mod remote;
