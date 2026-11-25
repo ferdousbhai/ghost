@@ -6,6 +6,7 @@
  */
 import { renderMarkdown } from "./markdown.js";
 import { api, base, label, MachineError, normalizeHost, request, seg, shortName, tailnetOf } from "./net.js";
+import * as push from "./push.js";
 import { load, save } from "./store.js";
 import { toolCall } from "./tool-call.js";
 
@@ -84,6 +85,8 @@ function refreshMachine(m) {
         m.unread = sessions.filter((s) => s.unread).length;
       } catch {}
       if (m.role === "owner") discover(m).catch(() => {});
+      // A machine reached as owner hears of this device, when alerts are on here.
+      if (m.role === "owner") push.sync(m.host).catch(() => {});
     } catch (error) {
       m.status = error.kind === "unreachable" ? "offline" : "error";
       m.error = error;
@@ -151,6 +154,7 @@ function renderHome() {
   const empty = !machines.length;
   $("first-run").hidden = !empty;
   if (empty) $("add-form").hidden = false;
+  renderAlerts().catch(() => {});
   const list = $("machines");
   list.replaceChildren();
   for (const m of machines) {
@@ -188,6 +192,41 @@ function renderHome() {
     list.append(card);
   }
 }
+
+/** Alerts on this device: one switch for all the owner's machines. */
+const ownedHosts = () => machines.filter((m) => m.role === "owner" && m.status === "online").map((m) => m.host);
+let alertsNote = "";
+async function renderAlerts(note) {
+  if (note !== undefined) alertsNote = note;
+  const state = await push.state();
+  const owned = machines.some((m) => m.role === "owner");
+  $("alerts").hidden = !owned || (state === "unsupported" && !push.needsHomeScreen());
+  $("alerts-toggle").hidden = state === "unsupported" || state === "blocked";
+  $("alerts-toggle").textContent = state === "on" ? "Alerts on this device: on" : "Alert this device when a ghost finishes";
+  $("alerts-toggle").dataset.state = state;
+  $("alerts-note").textContent = alertsNote
+    || (state === "blocked" ? "This browser is blocking alerts from summonghost.com. Allow notifications in its site settings."
+      : state === "unsupported" ? "For alerts on an iPhone, add SummonGhost to the Home Screen and open it from there." : "");
+}
+$("alerts-toggle").onclick = async () => {
+  const button = $("alerts-toggle");
+  button.disabled = true;
+  try {
+    if (button.dataset.state === "on") {
+      await push.disable(ownedHosts());
+      await renderAlerts("Alerts are off for this device.");
+    } else {
+      const { taken, test } = await push.enable(ownedHosts());
+      await renderAlerts(!taken.length ? "No machine took it. Update Ghost on your machines, then try again."
+        : test?.delivered ? `On. ${shortName(taken[0])} just sent a test alert.`
+        : `On, but the test alert from ${shortName(taken[0])} was not delivered${test?.reason ? ": " + test.reason : "."}`);
+    }
+  } catch (error) {
+    await renderAlerts(error.message);
+  } finally {
+    button.disabled = false;
+  }
+};
 
 $("add-toggle").onclick = () => {
   const form = $("add-form");

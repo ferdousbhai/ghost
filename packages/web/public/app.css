@@ -109,6 +109,8 @@ header h1 { margin: 0; flex: 1; font: 600 .95rem var(--mono); letter-spacing: .0
 .state { font-family: var(--mono); font-size: .7rem; color: var(--faint); }
 .forget { font-size: .72rem; color: var(--faint); padding: .2rem .4rem; border-radius: .3rem; }
 .forget.armed { color: var(--rose); }
+.alerts { margin: 1rem .9rem 0; text-align: center; }
+.alerts p { margin: .4rem 0 0; font-size: .8rem; }
 .machine-error { margin: 0; padding: 0 .8rem .65rem; color: var(--rose); font-size: .82rem; }
 .ghost-row { display: flex; align-items: center; gap: .6rem; padding: .7rem .8rem; border-top: 1px solid var(--line); color: var(--fg); text-decoration: none; }
 .ghost-row .glyph { color: var(--amber); font-size: 1.1rem; }

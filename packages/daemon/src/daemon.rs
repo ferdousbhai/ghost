@@ -214,6 +214,7 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
         answerer: None,
         coding_agent: None,
         env: env.clone(),
+        push: Some(crate::push::Push::new(crate::push::Push::default_path(&env, home), logger.child(json!({ "part": "push" })), env.clone())),
     });
     let summary = json!({
         "url": format!("http://127.0.0.1:{}", config.port),

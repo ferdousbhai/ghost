@@ -304,6 +304,20 @@ fn first_turn() -> Value {
     turn_body("conv-1", "Who are you?")
 }
 
+type Pushed = Arc<Mutex<Vec<(String, Value)>>>;
+
+/// Poll until `ready` has a value, or fail after `WAIT`.
+fn wait_for<T>(mut ready: impl FnMut() -> Option<T>) -> T {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        if let Some(value) = ready() {
+            return value;
+        }
+        assert!(std::time::Instant::now() < deadline, "timed out waiting");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
 struct Daemon {
     root: PathBuf,
     ghost_dir: PathBuf,
@@ -316,6 +330,8 @@ struct Daemon {
     /// One message per conversation change the host announces.
     updates: mpsc::Receiver<()>,
     gates: Vec<Gate>,
+    /// Every alert a device would have been sent: its endpoint and the alert.
+    pushed: Pushed,
     /// The conversations a turn was started in, which teardown waits out.
     started: std::cell::RefCell<Vec<String>>,
 }
@@ -347,6 +363,7 @@ impl Daemon {
             ("XDG_CONFIG_HOME".to_string(), scratch(".config")),
         ]);
         let ghost = Ghost { name: "casper".to_string(), dir: ghost_dir.clone() };
+        let pushed: Pushed = Arc::default();
         let hooks_path = root.join(".hooks.json");
         let hooks = Arc::new(HookRunner::from_config(&hooks_path, Logger::silent(), env.clone()).unwrap());
         let gates = turns.iter().filter_map(|turn| turn.gate.clone()).collect();
@@ -362,6 +379,18 @@ impl Daemon {
             answerer: Some(fake.clone()),
             coding_agent: Some(Box::new(|| None)),
             env: env.clone(),
+            // No test reaches a push service: what would be sent is recorded.
+            push: Some(crate::push::Push::with_sender(
+                root.join(".state").join("ghost").join("push.json"),
+                Logger::silent(),
+                Box::new({
+                    let pushed = pushed.clone();
+                    move |subscription, payload| {
+                        pushed.lock().unwrap().push((subscription.endpoint.clone(), payload.clone()));
+                        if subscription.endpoint.ends_with("/gone") { crate::push::Sent::Gone } else { crate::push::Sent::Delivered }
+                    }
+                }),
+            )),
         });
         let (sender, updates) = mpsc::channel();
         let sender = Mutex::new(sender);
@@ -378,7 +407,7 @@ impl Daemon {
         configure(&mut options);
         let listening = start_daemon_server(options).unwrap();
         let session_dir = ghost_paths(&ghost_dir).session_dir;
-        Self { root, ghost_dir, session_dir, hooks_path, env, fake, host, listening, updates, gates, started: Default::default() }
+        Self { root, ghost_dir, session_dir, hooks_path, env, fake, host, listening, updates, gates, pushed, started: Default::default() }
     }
 
     /// Whether `DELETE /api/sessions/:id` can work here; it moves the conversation to the scratch Trash with `gio`.
@@ -2047,4 +2076,58 @@ fn machines_is_a_503_when_tailscale_does_not_answer() {
     // Status still answers, saying why.
     let status = daemon.get_as("/api/remote", &[("authorization", &bearer(&token()))]).json();
     assert_eq!((&status["state"], &status["problem"]["code"]), (&json!("unavailable"), &json!("tailscale_missing")));
+}
+
+// ── PUT|DELETE /api/push/subscription, POST /api/push/test ──────────────
+
+const DEVICE_KEY: &str = "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4";
+
+fn device(name: &str) -> Value {
+    json!({
+        "endpoint": format!("https://fcm.googleapis.com/fcm/send/{name}"),
+        "p256dh": DEVICE_KEY,
+        "auth": "BTBZMqHH6r4Tts7J_aSIgg",
+        "vapidKey": "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
+    })
+}
+
+#[test]
+fn a_subscribed_device_is_alerted_when_a_turn_ends_and_forgotten_when_it_unsubscribes() {
+    let daemon = Daemon::answering(replies(&["The report is done.", "again"]));
+    let subscribed = daemon.put("/api/push/subscription", &device("phone"));
+    assert_eq!((subscribed.status, subscribed.json()), (200, json!({ "ok": true })));
+    // A device its push service has dropped is forgotten at the first alert.
+    daemon.put("/api/push/subscription", &device("gone"));
+
+    daemon.post_turn(&first_turn());
+    let pushed = wait_for(|| Some(daemon.pushed.lock().unwrap().clone()).filter(|pushed| pushed.len() == 2));
+    let (endpoint, alert) = &pushed[0];
+    assert_eq!(endpoint, "https://fcm.googleapis.com/fcm/send/phone");
+    assert_eq!((&alert["body"], &alert["tag"], &alert["ghost"]), (&json!("The report is done."), &json!("conv-1"), &json!("casper")));
+
+    let tested = daemon.post("/api/push/test", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
+    assert_eq!((tested.status, tested.json()), (200, json!({ "ok": true, "delivered": true })));
+    assert_eq!(daemon.pushed.lock().unwrap().last().unwrap().1["tag"], "ghost-test");
+    // The dropped device is no longer known.
+    assert_eq!(daemon.post("/api/push/test", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/gone" })).status, 400);
+
+    let removed = daemon.send_json("DELETE", "/api/push/subscription", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
+    assert_eq!((removed.status, removed.json()), (200, json!({ "ok": true, "removed": true })));
+    let sent = daemon.pushed.lock().unwrap().len();
+    daemon.post_turn(&turn_body("conv-1", "more"));
+    assert_eq!(daemon.pushed.lock().unwrap().len(), sent);
+}
+
+#[test]
+fn refuses_a_subscription_that_is_not_a_browsers_push_service_or_has_bad_keys() {
+    let daemon = Daemon::answering(replies(&["one"]));
+    let mut elsewhere = device("phone");
+    elsewhere["endpoint"] = json!("https://example.com/collect");
+    let mut short = device("phone");
+    short["auth"] = json!("abc");
+    for bad in [elsewhere, short, json!({})] {
+        let refused = daemon.put("/api/push/subscription", &bad);
+        assert_eq!((refused.status, refused.json()["error"]["code"].clone()), (400, json!("invalid_request")), "{bad}");
+    }
+    assert!(!daemon.root.join(".state/ghost/push.json").exists());
 }

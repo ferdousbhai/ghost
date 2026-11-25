@@ -27,3 +27,7 @@ libc = "0.2"
 regex = "1"
 # Request-line and header parsing for the loopback server and client.
 httparse = "1.10"
+p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }
+hkdf = "0.12"
+sha2 = "0.10"
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }

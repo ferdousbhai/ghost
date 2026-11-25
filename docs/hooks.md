@@ -9,8 +9,8 @@ Ghost supports two events. `session_stop` runs after a
 pass ends and before Ghost emits the turn's terminal `done` frame. It
 can accept the pass or return context for a continuation pass. `turn_end` runs once
 after the whole streamed turn succeeds or fails, including queued passes and owner
-commands; cancelled turns are quiet. It delivers optional completion notifications
-and cannot continue or block the turn.
+commands; cancelled turns are quiet. It is for the owner's own delivery of a
+completion, and cannot continue or block the turn.
 
 ## Configuration
 
@@ -197,9 +197,9 @@ when `remote.apps` is `[]`, and with no `turn_end` handler Ghost never looks
 it up. Failed turns use the failure message. Handlers run in order,
 under the existing timeout/output bounds, after the terminal stream frame and
 outside the conversation's busy state, so they never delay the next prompt.
-Their output cannot change the result; failures fail open and are logged. Ghost
-stores no delivery credentials, retries, or push subscription. Removing the
+Their output cannot change the result; failures fail open and are logged. Removing the
 handler through `ghost hooks set` disables delivery at the
-next boundary. `ghost help notifications` gives a curl/ntfy recipe that works
-with the app closed. It sends conversation text to the selected
-service, so configure it only when the owner wants that delivery.
+next boundary. A handler that posts to a service sends it conversation text,
+so configure one only when the owner wants that delivery. Alerts to the
+owner's devices need no hook: the app turns them on
+([mobile.md](mobile.md#completion-alerts)).

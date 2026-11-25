@@ -257,6 +257,7 @@ impl Home {
             answerer: answerer.map(|fake| fake as Arc<dyn Answerer>),
             coding_agent: Some(Box::new(|| None)),
             env: self.env(),
+            push: None,
         }
     }
 

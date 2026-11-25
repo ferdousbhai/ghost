@@ -9,7 +9,7 @@ pub const OMARCHY_COMPUTER_USE_POLICY: &str = "## Computer use\nFor laptop, shel
 
 /// Asking the owner (the model's `ask` tool; its description says how), that a
 /// command dies with the turn, and the index of `ghost help` recipes.
-pub const GHOST_POLICY: &str = "## Ghost\nWhen a choice is the owner's, or you would otherwise guess what they want, ask before acting, with the ask tool. A command you start ends with the turn. Before any of these, read its recipe, `ghost help <topic>`: work outliving this turn (background), reaching the owner away (notifications), notes (memory), a website (browser), getting or fixing one of the owner's products (products), changing or restarting yourself (self). `ghost --help` lists every command.";
+pub const GHOST_POLICY: &str = "## Ghost\nWhen a choice is the owner's, or you would otherwise guess what they want, ask before acting, with the ask tool. A command you start ends with the turn. Before any of these, read its recipe, `ghost help <topic>`: work outliving this turn (background), notes (memory), a website (browser), getting or fixing one of the owner's products (products), changing or restarting yourself (self). `ghost --help` lists every command.";
 
 /// The owner's own directory: deliverables and the ghost's notes.
 pub fn render_owner_context_policy(documents_dir: &Path) -> String {
@@ -77,8 +77,8 @@ mod tests {
 
     /// The exact rendered size of each section when its ceiling was last set.
     const CEILINGS: [(&str, usize); 5] =
-        [("Character file", 560), ("Computer use", 273), ("Ghost", 472), ("Owner context", 670), ("First meeting", 321)];
-    const TOTAL_CEILING: usize = 2296;
+        [("Character file", 560), ("Computer use", 273), ("Ghost", 431), ("Owner context", 670), ("First meeting", 321)];
+    const TOTAL_CEILING: usize = 2255;
 
     /// The character-file section is internal to the prompt builder, so it is
     /// measured where it is shipped: in a prompt built with an unwritten

@@ -49,6 +49,9 @@ Not done:
   about 8 tokens a second, a minute for a one-command answer and six for a
   three-command one at the model's default reasoning effort
   (`docs/local-models.md`). Ghost now sends `low` (`local.reasoningEffort`).
+- Alerts are Web Push, sent by ghostd to the owner's devices (added
+  2026-11-25, replacing the ntfy recipe); see `CONTRACTS.md` "Push alerts".
+  The daemon gained the RustCrypto crates for it and posts with `curl`.
 - Ghost still starts its own `llama-server`. Omarchy's model engine does not
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.

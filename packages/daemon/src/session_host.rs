@@ -66,6 +66,8 @@ pub struct SessionHostOptions {
     pub coding_agent: Option<CodingAgent>,
     /// The environment commands run with.
     pub env: Env,
+    /// The owner's devices that get an alert when a turn ends; None alerts none.
+    pub push: Option<Arc<crate::push::Push>>,
 }
 
 struct LiveTurn {
@@ -103,6 +105,7 @@ struct Inner {
     coding_agent: CodingAgent,
     local_model: Option<LocalModel>,
     env: Env,
+    push: Option<Arc<crate::push::Push>>,
     state: Mutex<State>,
     /// Serializes sidecar rewrites, so two of them cannot interleave a read and a write.
     metadata: Mutex<()>,
@@ -215,6 +218,7 @@ impl SessionHost {
                 coding_agent,
                 local_model: options.local_model,
                 env,
+                push: options.push,
                 state: Mutex::new(State::default()),
                 metadata: Mutex::new(()),
             }),
@@ -560,10 +564,16 @@ impl SessionHost {
         HookEvent { name, payload, cwd, abort: abort.clone() }
     }
 
+    /// The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
+    pub fn push(&self) -> Option<&Arc<crate::push::Push>> {
+        self.inner.push.as_ref()
+    }
+
     fn turn_end(&self, id: &str, terminal: &Value, abort: &Abort, turn_id: &str) {
         let hooks = &self.inner.hooks;
         let failed = terminal["type"] == "error";
-        if !hooks.has_handlers(HookEventName::TurnEnd) || abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
+        let devices = self.inner.push.as_ref().filter(|push| push.count() > 0);
+        if (!hooks.has_handlers(HookEventName::TurnEnd) && devices.is_none()) || abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
             return;
         }
         let delivered = (|| -> Result<()> {
@@ -595,7 +605,14 @@ impl SessionHost {
                 "excerpt": utf16_prefix(&excerpt, 280),
                 "url": url,
             });
-            hooks.emit_turn_end(&self.hook_event(HookEventName::TurnEnd, payload, id, abort, &[]));
+            if let Some(push) = devices {
+                // What the app's service worker shows; `tag` lets a later alert for the conversation replace an earlier one.
+                let body = if failed { format!("Failed: {}", utf16_prefix(&excerpt, 280)) } else { utf16_prefix(&excerpt, 280).to_string() };
+                push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name }));
+            }
+            if hooks.has_handlers(HookEventName::TurnEnd) {
+                hooks.emit_turn_end(&self.hook_event(HookEventName::TurnEnd, payload, id, abort, &[]));
+            }
             Ok(())
         })();
         if delivered.is_err() {

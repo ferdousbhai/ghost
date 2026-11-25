@@ -89,7 +89,14 @@ The daemon and the `ghost` command (`ghostd`, `ghost`):
 
 - MIT or Apache-2.0: equivalent, hashbrown, httparse, indexmap, itoa, libc,
   regex, regex-automata, regex-syntax, serde_core, serde_json
-- MIT: zmij
+- MIT or Apache-2.0, the [RustCrypto](https://github.com/RustCrypto) crates
+  that encrypt and sign push alerts: aead, aes, aes-gcm, base16ct,
+  block-buffer, cipher, const-oid, cpufeatures, crypto-bigint, crypto-common,
+  ctr, der, digest, ecdsa, elliptic-curve, ff, ghash, group, hkdf, hmac,
+  inout, opaque-debug, p256, polyval, primeorder, rand_core, rfc6979, sec1,
+  sha2, signature, typenum, universal-hash, zeroize; and cfg-if
+- BSD-3-Clause: subtle
+- MIT: generic-array, zmij
 - Unlicense or MIT: aho-corasick, memchr
 - Zlib: foldhash
 

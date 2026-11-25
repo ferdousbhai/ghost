@@ -21,20 +21,23 @@ cannot act or reach owner-only routes. See `CONTRACTS.md` for the wire contract.
 
 ## Completion alerts
 
-`ghost help notifications` explains opt-in delivery through a command hook and
-an existing service, with a curl/ntfy example. Follow [ntfy's publishing
-instructions](https://docs.ntfy.sh/publish/) for your server's authentication and
-[phone subscription setup](https://docs.ntfy.sh/subscribe/phone/). No service,
-phone destination, or credentials are preconfigured. The selected service
-receives the conversation title and completion/failure excerpt.
+Turn them on in the app: "Alert this device when a ghost finishes", on the
+machines page. The browser asks to allow notifications, and one of your
+machines sends a test alert. One switch covers every machine you own; a
+machine added later is told when the app next reaches it. On an iPhone, add
+SummonGhost to the Home Screen first and open it from there: Safari only
+allows alerts for a Home Screen app.
 
-Alerts link to the exact conversation in the app,
-`https://summonghost.com/#/<hostname>/<conversation>`, while remote
-access is on; the link opens on a device that has added this
-machine. Removing the hook disables delivery; cancellations stay quiet.
-Delivery failures are logged and do not change the work's outcome. There is no
-retry queue. The subscribed phone app handles notifications with summonghost.com
-closed; platform/server delivery restrictions still apply.
+Each machine sends its own alerts, straight to your browser's push service
+(Apple, Google, Mozilla or Microsoft), encrypted so that only your device can
+read them. summonghost.com is not involved and stores nothing. An alert
+carries the conversation's title and a short excerpt of the reply, and opens
+that conversation, `https://summonghost.com/#/<hostname>/<conversation>`.
+Cancelled turns stay quiet. The machine must be awake and online to send one;
+a device that is offline gets it within a day. A failed delivery is logged
+and is not retried. Turn the switch off to stop them.
+
+A `turn_end` [hook](hooks.md) can still deliver alerts some other way.
 
 The app marks a reply read only after displaying its transcript while visible
 and focused. Opening an unrelated conversation does not acknowledge it.

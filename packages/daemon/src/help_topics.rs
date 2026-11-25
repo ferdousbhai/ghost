@@ -7,7 +7,7 @@
 //! index in step (prompt_policy's tests check).
 use crate::help_guides::{BROWSER_LINES, products_lines};
 
-pub const HELP_TOPICS: [&str; 6] = ["self", "background", "memory", "notifications", "browser", "products"];
+pub const HELP_TOPICS: [&str; 5] = ["self", "background", "memory", "browser", "products"];
 
 pub fn is_help_topic(value: &str) -> bool {
     HELP_TOPICS.contains(&value)
@@ -19,7 +19,6 @@ pub fn render_help_topic(topic: &str) -> Option<String> {
         "self" => SELF_LINES.join("\n"),
         "background" => BACKGROUND_LINES.join("\n"),
         "memory" => MEMORY_LINES.join("\n"),
-        "notifications" => NOTIFICATIONS_LINES.join("\n"),
         "browser" => BROWSER_LINES.join("\n"),
         "products" => products_lines().join("\n"),
         _ => return None,
@@ -68,22 +67,6 @@ const MEMORY_LINES: &[&str] = &[
     r"A workflow you finished and will repeat is a note too: save its steps, commands, and pitfalls as a how-to.",
 ];
 
-const NOTIFICATIONS_LINES: &[&str] = &[
-    r"# Mobile completion notifications",
-    r"Delivery is opt-in: an existing notification service receives a turn_end command hook. Ghost runs locally; host sleep, lost connectivity, or delivery failure can lose an alert. There is no retry queue. The summonghost.com app need not stay open.",
-    r"For ntfy, subscribe the phone app to your chosen private topic on an existing server. Follow https://docs.ntfy.sh/publish/ for authentication. Keep the server's root URL (not the topic URL; the JSON body names the topic) and Authorization header in a mode-600 curl config at ~/.config/ghost/ntfy.curl; keep credentials out of hooks.json. Test the destination deliberately before enabling alerts.",
-    r"Create an executable script at an absolute path, replacing YOUR_PRIVATE_TOPIC:",
-    r"```sh",
-    r"#!/bin/bash",
-    r"set -euo pipefail",
-    r#"jq '{topic: "YOUR_PRIVATE_TOPIC", title: (.ghost_name + ": " + .title), message: (.outcome + ": " + .excerpt), click: (.url // "")}' |"#,
-    r#"  curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --config "$HOME/.config/ghost/ntfy.curl" -H "Content-Type: application/json" --data-binary @-"#,
-    r"```",
-    r#"Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array of the current document (`ghost hooks show | jq .document > hooks.json`); preserve existing handlers and apply with `ghost hooks set hooks.json`. Remove that handler to opt out; no restart is needed."#,
-    r"Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the conversation's app link (summonghost.com by default) while remote access is on (otherwise null). Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
-    r"The link opens the conversation in the app on a device that has added this machine. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,7 +101,7 @@ mod tests {
 
     #[test]
     fn knows_its_topics() {
-        assert_eq!(HELP_TOPICS, ["self", "background", "memory", "notifications", "browser", "products"]);
+        assert_eq!(HELP_TOPICS, ["self", "background", "memory", "browser", "products"]);
         assert!(is_help_topic("self"));
         assert!(!is_help_topic("status"));
         assert_eq!(render_help_topic("status"), None);
@@ -189,15 +172,6 @@ mod tests {
             assert!(text.contains(kept), "{kept}");
         }
         assert!(!text.contains("SKILL.md"));
-    }
-
-    #[test]
-    fn notifications_keeps_the_hook_document_and_the_script_as_written() {
-        let text = topic("notifications");
-        assert!(text.contains(r#"Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array"#));
-        assert!(text.contains(
-            r#"jq '{topic: "YOUR_PRIVATE_TOPIC", title: (.ghost_name + ": " + .title), message: (.outcome + ": " + .excerpt), click: (.url // "")}' |"#
-        ));
     }
 
     /// The browser recipe's shell functions, run for real against a stand-in

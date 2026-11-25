@@ -24,6 +24,7 @@ pub mod persona;
 pub mod private_file;
 pub mod process;
 pub mod prompt_policy;
+pub mod push;
 pub mod random;
 pub mod remote;
 pub mod running_source;

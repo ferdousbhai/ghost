@@ -46,6 +46,12 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   a turn runs the send button queues, and stops when the composer is empty);
   stop, which hands queued text back to the composer; answering the ghost's
   open question; pin, unpin and delete. A guest gets a read-only view.
+- **Alerts** ([`push.js`](public/js/push.js)): Web Push with no server of
+  the site's. The browser makes a signing key, subscribes, and hands both to
+  each machine it reaches as owner; each machine's ghostd encrypts and sends
+  its own alerts (`CONTRACTS.md` "Push alerts"). The key is in `localStorage`
+  (`summonghost.push.v1`). The service worker shows an alert unless its
+  conversation is open and focused, and a tap opens that conversation.
 - **Errors in plain words** ([`net.js`](public/js/net.js)). A browser hides
   why a cross-origin fetch failed, so the page finds out by elimination: the
   `local-network` permission was denied; a `no-cors` request gets an answer,
@@ -112,4 +118,8 @@ follow-up queued during the turn, pin, unpin and delete.
   page, but no other machine of the owner's ran Ghost when it was tried.
 - Photos, stop, answering the ghost's question, read marking and the guest
   view, against a real ghostd.
+- Alerts on a real phone, Apple's push service, and an alert arriving with
+  the app closed. Checked on 2026-11-25 in desktop Chromium only: the page
+  subscribed, and a scratch ghostd's test alert and a real turn's alert went
+  through Google's push service and were shown by the service worker.
 - The "update Ghost" message against a real older ghostd over HTTPS.

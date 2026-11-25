@@ -80,10 +80,26 @@ turn or owner `!command` settles, including failure; cancellation is quiet. It
 cannot continue or block a turn, delay the owner's next prompt, or change the
 conversation's outcome. Its payload, with that app link to the conversation as
 `url`, and how its handlers run are defined in [`docs/hooks.md`](docs/hooks.md).
-No notification transport, credential
-store, retry queue, or push backend is added: `ghost help notifications` gives
-an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
-boundary. No configured handler means no outbound notification.
+Removing a `turn_end` handler opts out at the next boundary.
+
+### Push alerts
+
+At the same boundary ghostd alerts the owner's devices itself
+([`push.rs`](packages/daemon/src/push.rs)): Web Push, since summonghost.com
+has no backend to send one. A device that turns alerts on in the app hands
+this machine its push subscription and a P-256 signing key its browser made
+for it; they are kept in `$XDG_STATE_HOME/ghost/push.json` (private, at most
+20 devices, newest kept). Each alert is `{ title, body, url, tag, ghost }`:
+the conversation's title, a 280-character excerpt of the reply (`Failed: …`
+for a failed turn), the app link, and the conversation id. It is encrypted
+for that browser (RFC 8291), signed with that device's key (RFC 8292), and
+posted with `curl` to the subscription's endpoint, which must be `https` on a
+browser's push service (a host under Google's, Apple's, Mozilla's or
+Microsoft's push domains); the service sees
+only ciphertext. Delivery is not waited for and not retried by ghostd (the
+service holds an alert up to a day for an offline device); a `404` or `410`
+forgets the device. A cancelled turn alerts no one, and no subscribed device
+means no outbound request.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -355,6 +371,8 @@ Rows beginning `/sessions/` are relative to `/api`.
 | `GET /api/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `harness` is what carried the latest stretch (`local`; an agent CLI in an earlier version's log), and `model`, `provider`, and `effort` what it ran on, as far as recorded (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
+| `PUT\|DELETE /api/push/subscription` | Owner-only. PUT `{ endpoint, p256dh, auth, vapidKey }` (base64url: the browser's 65-byte public key, its 16-byte secret, and the 32-byte private scalar of the signing key it made) subscribes a device to [push alerts](#push-alerts), replacing what was kept for that endpoint → `{ ok }`; `400 invalid_request` for an endpoint that is not a browser's push service or keys of the wrong kind. DELETE `{ endpoint }` → `{ ok, removed }`. |
+| `POST /api/push/test` | Owner-only `{ endpoint }` → `{ ok, delivered, reason? }`: one alert to that subscribed device, waited for. |
 | `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |

@@ -176,6 +176,9 @@ enum Route {
     Pin,
     QuestionPut,
     QuestionDelete,
+    PushPut,
+    PushDelete,
+    PushTest,
     Read,
     Title,
     AttachmentSave,
@@ -201,6 +204,9 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("GET", "api/sources/:source/items/:item/picture", Route::SourcePicture),
     ("GET", "api/connections", Route::Connections),
     ("GET", "api/search", Route::Search),
+    ("PUT", "api/push/subscription", Route::PushPut),
+    ("DELETE", "api/push/subscription", Route::PushDelete),
+    ("POST", "api/push/test", Route::PushTest),
     ("GET", "api/ghost", Route::GhostName),
     ("GET", "api/character", Route::CharacterGet),
     ("PUT", "api/character", Route::CharacterPut),
@@ -731,6 +737,32 @@ impl Shared {
             Route::QuestionDelete => {
                 host.dismiss_question(&context.id)?;
                 ok(json!({ "ok": true }))
+            }
+            // The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
+            Route::PushPut | Route::PushDelete | Route::PushTest => {
+                context.owner_only()?;
+                let push = host.push().ok_or_else(|| GhostError::new("push_unavailable", "This ghostd keeps no devices to alert.", 501))?;
+                let body = context.body()?;
+                match route {
+                    Route::PushPut => {
+                        let subscription = crate::push::Subscription::parse(&Value::Object(body)).map_err(GhostError::invalid)?;
+                        push.subscribe(subscription).map_err(GhostError::internal)?;
+                        ok(json!({ "ok": true }))
+                    }
+                    Route::PushDelete => {
+                        let removed = push.unsubscribe(string_field(&body, "endpoint")?).map_err(GhostError::internal)?;
+                        ok(json!({ "ok": true, "removed": removed }))
+                    }
+                    // One alert to one device, now, so the owner sees that alerts reach it.
+                    _ => {
+                        let sent = push.test(string_field(&body, "endpoint")?, &options.ghost.name).map_err(GhostError::invalid)?;
+                        ok(match sent {
+                            crate::push::Sent::Delivered => json!({ "ok": true, "delivered": true }),
+                            crate::push::Sent::Gone => json!({ "ok": true, "delivered": false, "reason": "The device is no longer subscribed." }),
+                            crate::push::Sent::Failed(reason) => json!({ "ok": true, "delivered": false, "reason": reason }),
+                        })
+                    }
+                }
             }
             Route::Read => {
                 let body = context.body()?;
