@@ -83,7 +83,9 @@ machine names normalize.
 
 Publishing is the owner's call, like a release. `publish.sh` replaces the
 contents of the CloudChef project `ferdous/summonghost` with `public/` and
-`wrangler.jsonc` from HEAD; CloudChef publishes a push to its `main`. Nothing
+`wrangler.jsonc` from HEAD, plus a pointer README and the minimal
+`package.json` CloudChef asks of any project; CloudChef publishes a push to
+its `main`. Nothing
 is edited in that project. summonghost.com and www are custom domains attached
 to its Worker in Cloudflare; a CloudChef deploy cannot attach domains, so
 `wrangler.jsonc` declares no routes.

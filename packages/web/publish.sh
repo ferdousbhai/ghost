@@ -28,12 +28,16 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-web-publish.XXXXXX")"
 trap 'rm -rf -- "$work"' EXIT
 git clone --quiet --depth 1 "https://cloudchef.build/$project.git" "$work/site"
 
-# The project holds exactly the served files and their Worker config.
+# The project holds the served files, their Worker config, and the two
+# files written below.
 git -C "$work/site" rm -r --quiet .
 git -C "$root" archive HEAD:packages/web public wrangler.jsonc | tar -x -C "$work/site"
 printf '%s\n' '# summonghost.com' '' \
   'The published copy of `packages/web` in <https://github.com/ferdousbhai/ghost>.' \
   'Change it there; `packages/web/publish.sh` replaces what is here.' > "$work/site/README.md"
+# CloudChef publishes only a project with a package.json; the page needs
+# nothing from one, so it is written here rather than kept beside the page.
+printf '%s\n' '{ "name": "summonghost", "private": true }' > "$work/site/package.json"
 git -C "$work/site" add -A
 
 if git -C "$work/site" diff --cached --quiet; then
