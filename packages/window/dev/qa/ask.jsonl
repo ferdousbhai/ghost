@@ -1,7 +1,7 @@
 # Ask on the stand-in model (`stand_in llama-server`): a question by Enter, its answer,
 # New chat, and the asked chat reopened from the list. dev/qa.sh runs it.
 
-{"do":"wait","role":"window","name":"Ask — Ghost","visible":true}
+{"do":"wait","role":"window","name":"Ghost","visible":true}
 {"do":"wait","role":"label","name":"Ask about your notes, mail, chats, files and photos.","visible":true}
 {"do":"shot","path":"qa-ask-empty.png"}
 # The composer has the keyboard from the start.

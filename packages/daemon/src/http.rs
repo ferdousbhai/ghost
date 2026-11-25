@@ -314,14 +314,6 @@ impl EventStream {
     pub fn write(&mut self, frame: &str) -> io::Result<()> {
         self.stream.write_all(frame.as_bytes())
     }
-
-    /// A handle that ends this stream from another thread (daemon shutdown).
-    pub fn closer(&self) -> io::Result<impl Fn() + Send + Sync + 'static> {
-        let stream = self.stream.try_clone()?;
-        Ok(move || {
-            let _ = stream.shutdown(Shutdown::Both);
-        })
-    }
 }
 
 impl Drop for EventStream {

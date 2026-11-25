@@ -184,23 +184,6 @@ fn reads_ghost_session_in_place_of_s() {
 }
 
 #[test]
-fn ask_asks_in_its_own_conversation_and_clear_withdraws() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/question") => responder.json(200, &json!({ "ok": true })),
-        _ => unexpected(responder),
-    });
-    let asked = daemon.run_env(&["ask", "Ship it tonight?", "yes", "wait for review"], MINE);
-    assert_eq!((asked.code, asked.stdout.as_str()), (0, "Asked in conv-mine; the owner's next message there is the answer.\n"));
-    let put = daemon.seen().into_iter().find(|request| request.line() == "PUT /api/sessions/conv-mine/question").unwrap();
-    assert_eq!(put.body, Some(json!({ "text": "Ship it tonight?", "options": ["yes", "wait for review"] })));
-    let cleared = daemon.run_env(&["ask", "--clear"], MINE);
-    assert_eq!((cleared.code, cleared.stdout.as_str()), (0, "Cleared the question in conv-mine.\n"));
-    assert!(daemon.lines().contains(&"DELETE /api/sessions/conv-mine/question".to_string()));
-    assert_ne!(daemon.run_env(&["ask"], MINE).code, 0);
-}
-
-#[test]
 fn a_change_verb_acknowledges_in_a_sentence_and_q_prints_nothing() {
     let daemon = fake(|request, responder| match request.path.as_str() {
         "/api/sessions" => responder.json(200, &two_sessions()),
@@ -411,7 +394,7 @@ fn keeps_a_lone_dash_positional_and_rejects_unknown_flags() {
     assert_eq!(parsed.flags, [("q".to_string(), Flag::Text("model".into())), ("quiet".into(), Flag::On)]);
 }
 
-/// The sentences `util.parseArgs` gave under Bun, which scripts have seen.
+/// The parser's established sentences, which scripts have seen.
 #[test]
 fn words_every_parse_error_as_the_first_cli_did() {
     let session = &["session", "limit"];
@@ -531,7 +514,6 @@ fn refuses_a_malformed_verb_before_asking_the_daemon_anything() {
     assert!(daemon.seen().is_empty());
     assert_eq!(daemon.run(&["title"]).stderr, "ghost: Usage: ghost title <text> [-s <id>] [--json] [-q]\n");
     assert_eq!(daemon.run(&["say"]).stderr, "ghost: Message text cannot be empty.\n");
-    assert_eq!(daemon.run(&["remote", "maybe"]).stderr, "ghost: ghost remote does not know \"maybe\"; use status, on, or off.\n");
     assert_eq!(daemon.run(&["hooks", "edit"]).stderr, "ghost: ghost hooks does not know \"edit\"; use status, show, or set.\n");
 }
 
@@ -539,8 +521,8 @@ fn refuses_a_malformed_verb_before_asking_the_daemon_anything() {
 fn refuses_s_on_a_verb_whose_usage_does_not_list_it_and_g_everywhere() {
     let daemon = fake(|_, responder| unexpected(responder));
     let stray_session = ["sessions", "character", "status"].map(|verb| vec![verb, "-s", "conv-1"]);
-    let stray_ghost = ["say hi", "sessions", "show", "hooks", "remote", "status", "help memory"]
-        .map(|verb| [verb.split(' ').collect(), vec!["-g", "casper"]].concat());
+    let stray_ghost =
+        ["say hi", "sessions", "show", "hooks", "status", "help memory"].map(|verb| [verb.split(' ').collect(), vec!["-g", "casper"]].concat());
     for args in stray_session.iter().chain(&stray_ghost) {
         let result = daemon.run_env(args, &[("GHOST_SESSION", "conv-1")]);
         assert_eq!(result.code, 2, "{args:?}");
@@ -594,56 +576,6 @@ fn refuses_a_topic_or_a_verb_it_does_not_know() {
 
 fn answering(body: Value) -> Fake {
     fake(move |_, responder| responder.json(200, &body))
-}
-
-#[test]
-fn remote_prints_a_problems_message_not_the_object() {
-    let problem = json!({ "code": "tailscale_stopped", "message": "Tailscale is not running", "action": "sudo tailscale up" });
-    let off = answering(json!({ "state": "off", "hostname": null, "problem": problem }));
-    assert_eq!(off.run(&["remote"]).stdout, "off (Tailscale is not running)\n");
-    assert_eq!(off.run(&["remote", "-q"]).stdout, "off\n");
-    assert_eq!(off.lines(), ["GET /api/remote", "GET /api/remote"]);
-    let unavailable = answering(json!({ "state": "unavailable", "hostname": null, "app": null, "problem": problem }));
-    assert_eq!(unavailable.run(&["remote"]).stdout, "unavailable (Tailscale is not running)\n");
-    let refused = unavailable.run(&["remote", "on"]);
-    assert_eq!(refused.stderr, "ghost: remote access is unavailable: Tailscale is not running (sudo tailscale up)\n");
-}
-
-#[test]
-fn remote_prints_the_app_link_and_says_when_there_is_no_app() {
-    let app = json!({ "origin": "https://summonghost.com", "url": "https://summonghost.com/#add=box.tail.ts.net" });
-    let linked = answering(json!({ "state": "on", "hostname": "box.tail.ts.net", "problem": null, "app": app }));
-    let on = linked.run(&["remote", "on"]);
-    assert_eq!((on.code, on.stdout.as_str()), (0, "Remote access is on at box.tail.ts.net.\napp https://summonghost.com/#add=box.tail.ts.net\n"));
-    let sent = linked.seen().remove(0);
-    assert_eq!((sent.line().as_str(), sent.body), ("POST /api/remote", Some(json!({ "enabled": true }))));
-    assert_eq!(linked.run(&["remote"]).stdout, "on box.tail.ts.net\napp https://summonghost.com/#add=box.tail.ts.net\n");
-    let bare = answering(json!({ "state": "on", "hostname": "box.tail.ts.net", "problem": null, "app": null }));
-    assert_eq!(
-        bare.run(&["remote", "on"]).stdout,
-        "Remote access is on at box.tail.ts.net.\nno app: remote.apps is empty, so nothing can reach Ghost remotely\n"
-    );
-}
-
-#[test]
-fn remote_on_or_off_exits_1_on_stderr_when_the_state_is_not_what_was_asked() {
-    let refused = json!({ "state": "off", "hostname": "box.tail.ts.net", "app": { "origin": "https://summonghost.com", "url": null },
-        "problem": { "code": "https_required", "message": "This tailnet has no HTTPS certificates." } });
-    let daemon = answering(refused.clone());
-    let plain = daemon.run(&["remote", "on"]);
-    assert_eq!(
-        (plain.code, plain.stdout.as_str(), plain.stderr.as_str()),
-        (1, "", "ghost: remote access is off: This tailnet has no HTTPS certificates.\n")
-    );
-    let json = daemon.run(&["remote", "on", "--json"]);
-    assert_eq!(json.code, 1);
-    assert_eq!(serde_json::from_str::<Value>(&json.stdout).unwrap(), refused);
-    // No problem named, but still on after `off`.
-    let still_on = answering(json!({ "state": "on", "hostname": "box.tail.ts.net", "app": null, "problem": null }));
-    let stuck = still_on.run(&["remote", "off"]);
-    assert_eq!((stuck.code, stuck.stdout.as_str(), stuck.stderr.as_str()), (1, "", "ghost: remote access is on: ghostd did not turn it off\n"));
-    let off = answering(json!({ "state": "off", "hostname": "box.tail.ts.net", "app": null, "problem": null })).run(&["remote", "off"]);
-    assert_eq!((off.code, off.stdout.as_str(), off.stderr.as_str()), (0, "Remote access is off.\n", ""));
 }
 
 #[test]
@@ -749,17 +681,37 @@ fn hooks_set_acknowledges_in_words_json_keeps_the_api_body_and_q_prints_nothing(
 }
 
 /// A daemon answering `ghost status`'s three reads, `/api/status` with `daemon`.
+const SERVE_COMMAND: &str = "tailscale serve --bg --https=443 http://127.0.0.1:7717";
+
 fn status_daemon(ghost: Value, daemon: Value) -> Fake {
+    let stopped = json!({ "state": "unavailable", "hostname": null, "guests": "read-only", "owner": null, "app": null, "command": SERVE_COMMAND,
+        "problem": { "code": "tailscale_stopped", "message": "Tailscale is not running." } });
+    status_daemon_with(ghost, daemon, stopped)
+}
+
+fn status_daemon_with(ghost: Value, daemon: Value, remote: Value) -> Fake {
     fake(move |request, responder| match request.path.as_str() {
         "/api/ghost" => responder.json(200, &ghost),
         "/api/status" => responder.json(200, &daemon),
-        "/api/remote" => responder.json(
-            200,
-            &json!({ "state": "off", "hostname": null, "guests": "read-only", "owner": null, "app": null,
-                "problem": { "code": "https_required", "message": "This tailnet has no HTTPS certificates." } }),
-        ),
+        "/api/remote" => responder.json(200, &remote),
         _ => responder.json(404, &json!({ "error": { "code": "not_found", "message": "Not found." } })),
     })
+}
+
+// Remote access is Tailscale Serve, the owner's to turn on: status names the
+// command while it is off, and the app's link to this machine once it is on.
+#[test]
+fn status_names_tailscales_command_while_serve_is_off_and_the_app_link_once_it_is_on() {
+    let running =
+        json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
+    let app = |url: Value| json!({ "origin": "https://summonghost.com", "url": url });
+    let off = json!({ "state": "off", "hostname": "box.tail.ts.net", "app": app(Value::Null), "command": SERVE_COMMAND, "problem": null });
+    let stdout = status_daemon_with(json!({ "name": "casper" }), running.clone(), off).run(&["status"]).stdout;
+    assert!(stdout.ends_with(&format!("\nremote         off; turn on: {SERVE_COMMAND}\n")), "{stdout}");
+    let on = json!({ "state": "on", "hostname": "box.tail.ts.net", "app": app(json!("https://summonghost.com/#add=box.tail.ts.net")),
+        "command": SERVE_COMMAND, "problem": null });
+    let stdout = status_daemon_with(json!({ "name": "casper" }), running, on).run(&["status"]).stdout;
+    assert!(stdout.ends_with("\nremote         on box.tail.ts.net\napp            https://summonghost.com/#add=box.tail.ts.net\n"), "{stdout}");
 }
 
 #[test]
@@ -774,7 +726,7 @@ fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
         format!(
             "daemon         {url}\ntoken file     {token}\nghost          casper\nversion        3.2.1\ndaemon version 1.4.0\n\
              daemon commit  0123456789abcdef0123456789abcdef01234567\ndaemon source  /home/owner/src/ghost\n\
-             daemon started 2026-10-28T12:40:53.000Z\nremote         off (This tailnet has no HTTPS certificates.)\n"
+             daemon started 2026-10-28T12:40:53.000Z\nremote         unavailable (Tailscale is not running.)\n"
         )
     );
     assert_eq!(daemon.run(&["status", "-q"]).stdout, "ok\n");
@@ -786,7 +738,7 @@ fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
         (&json!(url), &json!(token), &json!("casper"), &json!("3.2.1"))
     );
     assert_eq!((&json["daemonVersion"], &json["source"], &json["restartNeeded"]), (&json!("1.4.0"), &source, &json!(false)));
-    assert_eq!(json["remote"]["state"], "off");
+    assert_eq!(json["remote"]["state"], "unavailable");
 }
 
 // An update that was not restarted into still answers under the same
@@ -1117,8 +1069,6 @@ fn reaches_ghost_admin_and_conversation_state_through_named_verbs() {
     let read = daemon.run(&["read", "-s", "conv", "--json"]);
     assert_eq!((read.code, read.stdout.as_str()), (0, "{\"ok\":true}\n"));
     assert!(daemon.lines().contains(&"PUT /api/sessions/conv-1/read".to_string()));
-    let remote = daemon.run(&["remote"]);
-    assert_eq!((remote.code, remote.stdout.as_str()), (0, "off\n"));
     let missing = daemon.run(&["read", "-s", "nope"]);
     assert_eq!((missing.code, missing.stderr.as_str()), (5, "ghost: session \"nope\" was not found\n"));
     let refused = daemon.run(&["title", "x", "-s", "conv-1"]);

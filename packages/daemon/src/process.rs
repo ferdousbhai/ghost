@@ -1,7 +1,7 @@
 //! Child processes: a command in its own process group whose output is handed
 //! on as it arrives and whose whole group ends on abort (an owner's
 //! `!command`, a hook, the model's `bash`), and a short-lived binary whose
-//! output is collected (`tailscale`, a product's CLI). ghostd signals only a
+//! output is collected (`tailscale`, `curl`). ghostd signals only a
 //! group it spawned.
 use crate::abort::Abort;
 use crate::env::Env;
@@ -365,7 +365,7 @@ mod tests {
         assert_eq!((ok.stdout.as_str(), ok.code), ("hi\n", 2));
     }
 
-    // ── process.test.ts ─────────────────────────────────────────────────
+    // ── Processes ───────────────────────────────────────────────────────
 
     struct Scratch(std::path::PathBuf);
 

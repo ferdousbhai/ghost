@@ -1,7 +1,6 @@
 //! The `ghost` command line's argument parser. Its rules and every error
-//! sentence are those of the `util.parseArgs` the CLI was first written on
-//! (strict, positionals allowed), as Bun worded them: scripts and a ghost's
-//! own prompt have seen these messages.
+//! sentence (strict, positionals allowed) are kept as they have always been:
+//! scripts and a ghost's own prompt have seen these messages.
 use super::CliError;
 use std::collections::VecDeque;
 
@@ -164,7 +163,7 @@ pub fn parse_args(argv: &[String], spec: &ArgsSpec) -> Result<ParsedArgs, CliErr
                         (true, true) => (Some(letters[index + 1..].iter().collect()), true),
                         (true, false) => (rest.pop_front().cloned(), false),
                     };
-                    // A letter inside a group is quoted bare, as Bun quoted it.
+                    // A letter inside a group is quoted bare.
                     parser.accept(Token { name, raw: letter.to_string(), value, inline })?;
                     if takes_value {
                         break;

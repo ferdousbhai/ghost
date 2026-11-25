@@ -13,8 +13,12 @@ it must be:
 
 Done since:
 
-- Google in Connect (`google`, `google-drive`, `google-workspace`) and in the
-  sources (`keep`, `google-drive`, `google-photos`).
+- 2026-11-25, a cleanup of what only wrapped something else: the window's
+  Sources and Connect pages and their adapters (each product has its own
+  app, and the ghost reaches data from its shell), `ghost remote` (Serve is
+  Tailscale's own command, which `ghost status` names), `ghost ask` (the
+  model has the tool), and the coding-agent choice beyond Omarchy's default.
+  The window is the conversation.
 - The local model's harness is minimal: the whole persona, two tools (`bash`,
   unsandboxed, unconfirmed, and `ask`, added 2026-11-25 at the owner's
   request: a question to the owner with 2 to 4 ways forward, the recommended
@@ -35,7 +39,7 @@ Done since:
 - The package builds the daemon from the release's source archive; the
   prebuilt runtime archive and its verifiers are deleted.
 - The window is on omui 0.5.7, its composer has the keyboard when Ask shows,
-  and Escape empties a source page's search.
+  (its source pages, since removed, emptied their search on Escape).
 - A running command's output streams into the turn, so a coding agent's
   steps show as the window's status line. Claude prints its steps only as
   streamed JSON, so its command pipes that through `jq`.

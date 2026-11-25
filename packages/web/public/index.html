@@ -44,8 +44,8 @@
       <h2>Your ghost on each machine, from anywhere on your tailnet</h2>
       <p>SummonGhost talks straight to Ghost on your own computers over Tailscale. It has no server and no account, and nothing you do here goes anywhere but your machines.</p>
       <ol>
-        <li>On a computer with Ghost, run <code>ghost remote on</code>.</li>
-        <li>Open the link that <code>ghost remote status</code> prints, or type the machine's name below.</li>
+        <li>On a computer with Ghost, run <code>tailscale serve --bg --https=443 http://127.0.0.1:7717</code>.</li>
+        <li>Open the link that <code>ghost status</code> then prints, or type the machine's name below.</li>
         <li>The other computers you own on the tailnet are found from there.</li>
       </ol>
       <p class="faint">This device needs Tailscale, signed in as you.</p>

@@ -956,7 +956,7 @@ fn the_turn_continues_while_a_session_stop_hook_asks_it_to() {
     );
 }
 
-// `ghost ask` ends the turn on the owner: a stop hook's "keep going" must
+// A question ends the turn on the owner: a stop hook's "keep going" must
 // not carry the ghost past its own question.
 #[test]
 fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
@@ -968,7 +968,7 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     let host = home.host_with_hooks(&fake, hooks);
     let (events, running) = start(&host, "c1", "draft your character");
     fake.wait_for_calls(1);
-    // The ghost runs `ghost ask` during its pass.
+    // The ghost asks during its pass.
     let options = ["Write it".to_string(), "Change something first".to_string()];
     let asked = host.set_question("c1", "Write this as my character file?", &options).unwrap();
     gate.release();
@@ -1138,7 +1138,6 @@ fn a_conversation_that_does_not_exist_takes_no_metadata() {
         host.mark_read("nope", 0).unwrap_err(),
         host.rename_conversation("nope", "A name").unwrap_err(),
         host.set_question("nope", "Well?", &[]).unwrap_err(),
-        host.dismiss_question("nope").unwrap_err(),
         host.delete_session("nope").unwrap_err(),
     ] {
         assert_eq!((refusal.code.as_str(), refusal.status, refusal.message.as_str()), ("not_found", 404, missing));
@@ -1148,11 +1147,9 @@ fn a_conversation_that_does_not_exist_takes_no_metadata() {
         assert_eq!(code(host.rename_conversation("c1", title)), "invalid_request", "{title:?}");
     }
     assert_eq!(code(host.set_question("c1", "  ", &[])), "invalid_request");
-    // A dismissed question is gone without an answer.
+    // A question is trimmed, and its answers deduplicated.
     host.set_question("c1", " Shall I? ", &[" Yes ".to_string(), "Yes".to_string(), String::new()]).unwrap();
     assert_carries(&sessions(&host)[0]["question"], json!({ "text": "Shall I?", "options": ["Yes"] }));
-    host.dismiss_question("c1").unwrap();
-    assert_eq!(sessions(&host)[0]["question"], Value::Null);
 }
 
 #[test]

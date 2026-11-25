@@ -4,7 +4,6 @@
 use crate::abort::Abort;
 use crate::attachments::MAX_ATTACHMENT_BYTES;
 use crate::config::RemoteConfig;
-use crate::connections::list_connections;
 use crate::conversation_log::require_conversation_id;
 use crate::env::Env;
 use crate::error::{GhostError, Result};
@@ -17,7 +16,6 @@ use crate::persona::MAX_CHARACTER_BODY_LENGTH;
 use crate::remote::{RemoteAccess, RemoteServe, Role, TailscaleIdentity};
 use crate::running_source::{RunningSource, replaced_since_start};
 use crate::session_host::{Emit, SessionHost};
-use crate::sources::{SOURCE_IDS, SourceContext, list_source, list_sources, picture_of, read_source, search_sources};
 use crate::token::{api_token_path, ensure_api_token, token_matches};
 use crate::turn_buffer::{DEFAULT_MEMORY_LIMIT, TurnBuffer, spill_dir};
 use serde_json::{Map, Value, json};
@@ -64,7 +62,7 @@ pub struct ServerOptions {
     /// Web app origins (`remote.apps`) admitted past the Origin check, with a
     /// tailnet identity only, never the bearer token.
     pub remote_apps: Vec<String>,
-    /// Owns the Tailscale Serve exposure.
+    /// Reads what Tailscale Serve exposes of this daemon.
     pub remote_serve: Arc<RemoteServe>,
     /// Response size for turn continuation and invalidation reconnects; about 1 MB by default.
     pub stream_cut_bytes: Option<usize>,
@@ -156,15 +154,8 @@ enum Route {
     Whoami,
     Machines,
     RemoteGet,
-    RemotePost,
     HooksConfig,
     Status,
-    Sources,
-    SourceItems,
-    SourceItem,
-    SourcePicture,
-    Connections,
-    Search,
     GhostName,
     CharacterGet,
     CharacterPut,
@@ -174,8 +165,6 @@ enum Route {
     Sessions,
     SessionDelete,
     Pin,
-    QuestionPut,
-    QuestionDelete,
     PushPut,
     PushDelete,
     PushTest,
@@ -195,15 +184,8 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("GET", "api/remote/whoami", Route::Whoami),
     ("GET", "api/remote/machines", Route::Machines),
     ("GET", "api/remote", Route::RemoteGet),
-    ("POST", "api/remote", Route::RemotePost),
     ("GET PUT", "api/hooks/config", Route::HooksConfig),
     ("GET", "api/status", Route::Status),
-    ("GET", "api/sources", Route::Sources),
-    ("GET", "api/sources/:source/items", Route::SourceItems),
-    ("GET", "api/sources/:source/items/:item", Route::SourceItem),
-    ("GET", "api/sources/:source/items/:item/picture", Route::SourcePicture),
-    ("GET", "api/connections", Route::Connections),
-    ("GET", "api/search", Route::Search),
     ("PUT", "api/push/subscription", Route::PushPut),
     ("DELETE", "api/push/subscription", Route::PushDelete),
     ("POST", "api/push/test", Route::PushTest),
@@ -216,8 +198,6 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("GET", "api/sessions", Route::Sessions),
     ("DELETE", "api/sessions/:id", Route::SessionDelete),
     ("PUT", "api/sessions/:id/pin", Route::Pin),
-    ("PUT", "api/sessions/:id/question", Route::QuestionPut),
-    ("DELETE", "api/sessions/:id/question", Route::QuestionDelete),
     ("PUT", "api/sessions/:id/read", Route::Read),
     ("PUT", "api/sessions/:id/title", Route::Title),
     ("POST", "api/sessions/:id/attachments", Route::AttachmentSave),
@@ -294,19 +274,6 @@ fn number_param(request: &Request, key: &str) -> Result<Option<f64>> {
     let trimmed = raw.trim();
     let value = if trimmed.is_empty() { Some(0.0) } else { trimmed.parse::<f64>().ok().filter(|value| value.is_finite()) };
     value.map(Some).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a number.")))
-}
-
-/// `?limit=`, 1 to `max`, else `fallback`.
-fn bounded_limit(request: &Request, fallback: usize, max: usize) -> Result<usize> {
-    match number_param(request, "limit")? {
-        None => Ok(fallback),
-        Some(limit) if limit.fract() == 0.0 && limit >= 1.0 && limit <= max as f64 => Ok(limit as usize),
-        Some(_) => Err(GhostError::invalid(format!("\"limit\" must be an integer from 1 to {max}."))),
-    }
-}
-
-fn positive_integer(value: f64, key: &str) -> Result<u64> {
-    if value.fract() == 0.0 && value >= 1.0 { Ok(value as u64) } else { Err(GhostError::invalid(format!("\"{key}\" must be a positive integer."))) }
 }
 
 fn string_field<'a>(body: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
@@ -584,7 +551,7 @@ impl Shared {
         let options = &self.options;
         let host = self.host();
         // What a request's own work stops with: its caller going away.
-        let source_abort = |responder: &Responder| responder.peer_gone().unwrap_or_default();
+        let caller_gone = |responder: &Responder| responder.peer_gone().unwrap_or_default();
         match route {
             Route::Whoami => ok(json!({ "role": context.identity.as_ref().map_or("owner", |identity| identity.role.as_str()) })),
             Route::Machines => {
@@ -592,10 +559,6 @@ impl Shared {
                 ok(json!({ "machines": options.remote_serve.machines()? }))
             }
             Route::RemoteGet => ok(options.remote_serve.status().to_json()),
-            Route::RemotePost => {
-                let enabled = boolean_field(&context.body()?, "enabled")?;
-                ok(if enabled { options.remote_serve.enable() } else { options.remote_serve.disable() }.to_json())
-            }
             // The owner's `hooks.json`, read and replaced whole. Whole-document
             // replacement keeps "groups run in file order" honest: there are no
             // per-hook ids to invent for a file that has none.
@@ -619,66 +582,6 @@ impl Shared {
                     "restartNeeded": replaced_since_start(running),
                 }))
             }
-            // The owner's own data (CONTRACTS.md "Sources"); a guest sees none of it.
-            Route::Sources => {
-                context.owner_only()?;
-                ok(json!({ "sources": list_sources(SourceContext { home: host.owner_home(), env: host.env(), abort: &Abort::new() }) }))
-            }
-            Route::SourceItems => {
-                context.owner_only()?;
-                let limit = bounded_limit(&context.request, 50, 200)?;
-                let abort = source_abort(responder);
-                ok(list_source(
-                    context.param("source"),
-                    SourceContext { home: host.owner_home(), env: host.env(), abort: &abort },
-                    limit,
-                    context.request.query("cursor"),
-                )?)
-            }
-            Route::SourceItem => {
-                context.owner_only()?;
-                let item = context.param("item");
-                if item.is_empty() || crate::js_text::utf16_len(item) > 4096 {
-                    return Err(GhostError::invalid("An item id is 1 to 4096 characters."));
-                }
-                let page = number_param(&context.request, "page")?;
-                let line = number_param(&context.request, "line")?;
-                let source = context.param("source");
-                if !SOURCE_IDS.contains(&source) {
-                    return Err(GhostError::not_found(format!("There is no source \"{source}\".")));
-                }
-                let page = page.map(|page| positive_integer(page, "page")).transpose()?;
-                let line = line.map(|line| positive_integer(line, "line")).transpose()?;
-                let abort = source_abort(responder);
-                ok(read_source(source, item, page, line, SourceContext { home: host.owner_home(), env: host.env(), abort: &abort })?)
-            }
-            Route::SourcePicture => {
-                context.owner_only()?;
-                let abort = source_abort(responder);
-                let (content_type, body) = picture_of(
-                    context.param("source"),
-                    context.param("item"),
-                    SourceContext { home: host.owner_home(), env: host.env(), abort: &abort },
-                )?;
-                Ok(Reply::Bytes { content_type: content_type.to_string(), cache: "no-store", nosniff: false, body })
-            }
-            Route::Connections => {
-                context.owner_only()?;
-                let abort = source_abort(responder);
-                ok(json!({ "connections": list_connections(SourceContext { home: host.owner_home(), env: host.env(), abort: &abort }) }))
-            }
-            Route::Search => {
-                context.owner_only()?;
-                let limit = bounded_limit(&context.request, 8, 50)?;
-                let sources: Option<Vec<String>> = context
-                    .request
-                    .query("sources")
-                    .filter(|sources| !sources.is_empty())
-                    .map(|sources| sources.split(',').map(|id| id.trim().to_string()).filter(|id| !id.is_empty()).collect());
-                let abort = source_abort(responder);
-                let query = context.request.query("q").unwrap_or("");
-                ok(search_sources(query, SourceContext { home: host.owner_home(), env: host.env(), abort: &abort }, sources.as_deref(), limit)?)
-            }
             Route::GhostName => ok(json!({ "name": options.ghost.name })),
             Route::CharacterGet => {
                 let character = read_character(&options.ghost.dir, false)?;
@@ -692,7 +595,7 @@ impl Shared {
             Route::Complete => {
                 let body = context.body()?;
                 let prompt = string_field(&body, "prompt")?;
-                let abort = source_abort(responder);
+                let abort = caller_gone(responder);
                 ok(json!({ "text": host.complete(prompt, &abort)? }))
             }
             // Fail before any byte of the stream, so the client sees a real status
@@ -724,20 +627,6 @@ impl Shared {
             }
             // A ghost asking the owner something (`ghost ask`); the owner's next
             // message to the conversation answers it, DELETE withdraws it unanswered.
-            Route::QuestionPut => {
-                let body = context.body()?;
-                let answers: Option<Vec<String>> = match body.get("options") {
-                    None => Some(Vec::new()),
-                    Some(Value::Array(options)) => options.iter().map(|option| option.as_str().map(str::to_string)).collect(),
-                    Some(_) => None,
-                };
-                let answers = answers.ok_or_else(|| GhostError::invalid("\"options\" must be an array of strings."))?;
-                ok(json!({ "ok": true, "question": host.set_question(&context.id, string_field(&body, "text")?, &answers)? }))
-            }
-            Route::QuestionDelete => {
-                host.dismiss_question(&context.id)?;
-                ok(json!({ "ok": true }))
-            }
             // The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
             Route::PushPut | Route::PushDelete | Route::PushTest => {
                 context.owner_only()?;

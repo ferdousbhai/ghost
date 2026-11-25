@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Ghost's window: the owner's own data and the ghost, in one GTK 4 app"
+description = "Ghost's window: the conversation with the ghost, in a GTK 4 app"
 publish = false
 
 [[bin]]

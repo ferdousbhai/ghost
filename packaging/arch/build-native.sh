@@ -10,9 +10,8 @@ git config --global --add safe.directory /source/.git
 git clone --no-hardlinks /source /build
 commit=$(git -C /source rev-parse HEAD)
 [[ $(git -C /build rev-parse HEAD) == "$commit" ]]
-# Every depends/makedepends/checkdepends entry the recipe declares, and what
-# the workspace's own tests call when it is there.
-mapfile -t constraints < <(bash -c 'source /build/packaging/omarchy/pkgbuilds/ghost/PKGBUILD.in; printf "%s\n" "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}" ripgrep sqlite' | sort -u)
+# Every depends/makedepends/checkdepends entry the recipe declares.
+mapfile -t constraints < <(bash -c 'source /build/packaging/omarchy/pkgbuilds/ghost/PKGBUILD.in; printf "%s\n" "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"' | sort -u)
 pacman -S --needed --noconfirm "${constraints[@]%%[<>=]*}"
 pacman -T "${constraints[@]}"
 cargo --version

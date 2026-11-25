@@ -41,11 +41,6 @@ pub fn iso(ms: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z", rest / 3_600_000, rest / 60_000 % 60, rest / 1_000 % 60, rest % 1_000)
 }
 
-/// `YYYY-MM-DD` of a time, in UTC.
-pub fn iso_day(ms: i64) -> String {
-    iso(ms)[..10].to_string()
-}
-
 /// Milliseconds of an ISO 8601 time: a date alone (UTC midnight), or a date
 /// and time with optional fraction and `Z` or `±hh:mm` (UTC without either,
 /// as every time Ghost wrote carries `Z`).

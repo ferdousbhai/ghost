@@ -229,15 +229,6 @@ impl SessionHost {
         ghost_paths(&self.inner.ghost.dir).session_dir
     }
 
-    /// The home and environment the owner's sources are read with (CONTRACTS.md "Sources"): the ones turns see.
-    pub fn owner_home(&self) -> &Path {
-        &self.inner.owner_home
-    }
-
-    pub fn env(&self) -> &Env {
-        &self.inner.env
-    }
-
     // ── Conversation events ────────────────────────────────────────────
 
     /// Hear every conversation change until `unsubscribe`; `close` is called at shutdown.
@@ -376,7 +367,7 @@ impl SessionHost {
             }
             // The owner's own queued message is the next instruction: a stop hook
             // is not asked while one waits, and loses to one sent while it ran.
-            // Nor while the ghost's own question waits (`ghost ask`): the turn is
+            // Nor while the ghost's own question waits (its `ask` tool): the turn is
             // waiting on the owner, and a hook's "keep going" is not their answer.
             let continued = if failed || self.queued(id) > 0 || self.has_question(id) {
                 None
@@ -819,15 +810,6 @@ impl SessionHost {
         })?;
         self.announce(&id);
         Ok(question.to_json())
-    }
-
-    /// Withdraw a conversation's open question without answering it.
-    pub fn dismiss_question(&self, session_id: &str) -> Result<()> {
-        let id = self.require_conversation(session_id)?;
-        if self.drop_question(&id)? {
-            self.announce(&id);
-        }
-        Ok(())
     }
 
     /// The ghost has asked the owner something in this conversation that is still open.

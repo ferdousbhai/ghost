@@ -1,7 +1,5 @@
-/* Ghost's own styles, over omui's stylesheet: the chat, an answer's Markdown, the composer and the picture grid.
+/* Ghost's own styles, over omui's stylesheet: the chat, an answer's Markdown and the composer.
    Colours are omui's @om_* tokens, tinted with alpha(); no hex. */
-
-button.sidebar-toggle { color: @om_accent; }
 
 /* --------------------------------------------------------------------------------------------------------- chat -- */
 .question {
@@ -35,10 +33,3 @@ button.sidebar-toggle { color: @om_accent; }
   border-radius: 6px;
 }
 .composer-frame:focus-within { border-color: @om_accent; }
-
-/* ------------------------------------------------------------------------------------------------------ pictures -- */
-/* A grid of pictures (Photos): each tile is square, its picture cropped to fill it. */
-flowbox.tiles > flowboxchild { border-radius: 6px; padding: 3px; transition: background-color 160ms ease-out; }
-flowbox.tiles > flowboxchild:hover { background: alpha(@om_accent, 0.18); }
-flowbox.tiles overlay { border-radius: 4px; }
-box.tile { background: alpha(@om_text, 0.06); }

@@ -2,10 +2,9 @@
  * SummonGhost: every machine the owner has added, each with its one ghost and
  * that ghost's conversations, talked to straight over Tailscale. The route
  * lives in the hash, `#/<host>/<conversation>`, so the back button walks out.
- * The conversation itself behaves as Ghost's own remote viewer does.
  */
 import { renderMarkdown } from "./markdown.js";
-import { api, base, label, MachineError, normalizeHost, request, seg, shortName, tailnetOf } from "./net.js";
+import { api, base, label, normalizeHost, request, seg, shortName, tailnetOf } from "./net.js";
 import * as push from "./push.js";
 import { load, save } from "./store.js";
 import { toolCall } from "./tool-call.js";
@@ -73,7 +72,6 @@ function refreshMachine(m) {
     renderHome();
     try {
       const who = await api(m.host, "/remote/whoami");
-      if (who.role === "peer") throw new MachineError("not-owner", `${shortName(m.host)} only answers its owner. This device is signed in to Tailscale as someone else.`);
       m.role = who.role;
       m.ghost = (await api(m.host, "/ghost")).name;
       m.seen = Date.now();
@@ -240,7 +238,7 @@ $("add-form").onsubmit = (event) => {
   if (!host) {
     $("add-error").textContent = typed.includes(".")
       ? "That isn't a Tailscale name. It ends in .ts.net, like laptop.tail1234.ts.net."
-      : "Type the full name, like laptop.tail1234.ts.net. ghost remote status prints it.";
+      : "Type the full name, like laptop.tail1234.ts.net. ghost status prints it.";
     return;
   }
   $("add-error").textContent = "";
@@ -367,14 +365,7 @@ function renderSessions() {
     if (s.unread) a.append(el("span", "unread-dot"));
     return a;
   };
-  // As the HUD folds them: what intake started, unless the owner must see it, under one group.
-  const folds = (s) => s.id.startsWith("event-") && !s.pinned && !s.question;
-  for (const s of list.filter((s) => !folds(s))) nav.append(item(s));
-  const folded = list.filter(folds);
-  if (folded.length) {
-    nav.append(el("h3", "", "Events"));
-    for (const s of folded) nav.append(item(s));
-  }
+  for (const s of list) nav.append(item(s));
 }
 
 function newConversation() {
@@ -515,10 +506,7 @@ function assistantBubble(value) {
   bubble.replaceChildren(renderMarkdown(value, document));
   return bubble;
 }
-// A peer's words are another person's text: shown as written, never rendered.
-const peerBubble = (value) => el("div", "msg assistant", value);
-
-/** A message's texts as the bubbles they show as: text after a tool call is the next message (the HUD's TurnBlocks rule). */
+/** A message's texts as the bubbles they show as: text after a tool call is the next message. */
 function bubbles(parts) {
   const out = [];
   let tooled = true;
@@ -543,7 +531,7 @@ function render(messages, keep = false) {
     else if (m.role === "assistant") {
       for (const text of texts) log.append(assistantBubble(text));
       if (m.errorMessage) log.append(el("div", "failed", "Failed: " + m.errorMessage.slice(0, 600)));
-    } else if (m.role === "peer") for (const text of texts) log.append(peerBubble(text));
+    }
   }
   if (!log.childElementCount) emptyLog();
   if (rowOf(route.session)?.running) log.append(el("div", "activity elsewhere", "Working…"));
@@ -747,7 +735,7 @@ async function readQueue() {
   return followUp || [];
 }
 
-/** Stops the running turn; what was queued and never ran comes back to the composer, as the HUD does. */
+/** Stops the running turn; what was queued and never ran comes back to the composer. */
 async function stop() {
   const { host, session } = route;
   const left = await readQueue().catch(() => []);
@@ -809,7 +797,7 @@ async function send() {
   // A reply bubble waiting for its text; text after a tool call opens the next.
   const replyBubble = () => { const b = assistantBubble(""); b.classList.add("pending"); if (turn.live) log.append(b); return b; };
   const replies = [replyBubble()];
-  // Only the call running now, the way the HUD's activity line shows it.
+  // Only the call running now.
   const activity = el("div", "activity");
   let call = "", callStarted = 0, clock = 0;
   const tick = () => {
@@ -853,7 +841,7 @@ async function send() {
         if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
       } else if (ev.type === "tool_execution_start") {
         parts.push({ type: "toolCall" });
-        call = toolCall(ev.toolName, ev.arguments, ev.cwd);
+        call = toolCall(ev.toolName, ev.arguments);
         callStarted = Date.now();
         tick();
         clearInterval(clock);
@@ -894,7 +882,7 @@ $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file
 
 // ── Start ───────────────────────────────────────────────────────────────────
 
-/** `#add=<host>`, from `ghost remote status`: add it, then open it. */
+/** `#add=<host>`, the link `ghost status` prints: add it, then open it. */
 function takeAddLink() {
   const match = /^#add=(.+)$/.exec(location.hash);
   if (!match) return false;

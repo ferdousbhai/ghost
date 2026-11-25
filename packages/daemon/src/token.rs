@@ -156,7 +156,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    // ── token-store.test.ts ─────────────────────────────────────────────
+    // ── The API token ───────────────────────────────────────────────────
 
     fn env(pairs: &[(&str, &str)]) -> Env {
         pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()

@@ -209,16 +209,6 @@ fn commands() -> Vec<Command> {
             none,
             commands::title_command,
         ),
-        command(
-            "ask",
-            "ask <question> [<answer>...] [--clear] [-s <id>] [--json] [-q]",
-            "Ask the owner; their next message in the conversation answers.",
-            "ghost ask \"Ship it tonight?\" yes \"wait for review\"",
-            (0, 7),
-            &["clear"],
-            none,
-            commands::ask_command,
-        ),
         command("pin", "pin [-s <id>] [--json] [-q]", "Pin a conversation.", "ghost pin -s cli-abc", (0, 0), none, none, commands::pin_command),
         command(
             "unpin",
@@ -259,16 +249,6 @@ fn commands() -> Vec<Command> {
             none,
             none,
             commands::read_command,
-        ),
-        command(
-            "remote",
-            "remote [status|on|off] [--json] [-q]",
-            "Show or toggle Tailscale Serve for the summonghost.com app.",
-            "ghost remote on",
-            (0, 1),
-            none,
-            none,
-            commands::remote_command,
         ),
         command(
             "status",

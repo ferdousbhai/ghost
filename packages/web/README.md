@@ -29,8 +29,9 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
 - **Old Ghosts stay reachable.** The page is published when the owner says,
   and packages reach machines later, so a change here keeps working against
   the last released ghostd or says "update Ghost on <machine>".
-- **One-time setup per machine:** `ghost remote on`, then the
-  `https://summonghost.com/#add=<host>` link from `ghost remote status`. Hosts
+- **One-time setup per machine:** Tailscale's own `tailscale serve --bg
+  --https=443 http://127.0.0.1:7717`, then the
+  `https://summonghost.com/#add=<host>` link `ghost status` prints. Hosts
   are `host[:port]` and must end in `.ts.net`.
 - **Discovery:** after reaching one machine as owner, the page asks it for
   `/api/remote/machines` and probes each online host's `/api/remote/whoami`;
@@ -56,8 +57,7 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   why a cross-origin fetch failed, so the page finds out by elimination: the
   `local-network` permission was denied; a `no-cors` request gets an answer,
   so Ghost is too old or `remote.apps` is off ("update Ghost on <machine>");
-  otherwise the machine cannot be reached. A 401 or `peer_only` means not the
-  owner. When every machine is unreachable, a banner asks whether Tailscale is
+  otherwise the machine cannot be reached. A 401 means not the owner. When every machine is unreachable, a banner asks whether Tailscale is
   connected.
 
 ## Rules

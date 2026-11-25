@@ -301,7 +301,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    // ── config.test.ts ──────────────────────────────────────────────────
+    // ── Configuration ───────────────────────────────────────────────────
 
     fn rewrite(dir: &Path, config: Value) {
         std::fs::write(dir.join(".config/ghost/config.json"), config.to_string()).unwrap();

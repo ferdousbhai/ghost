@@ -19,9 +19,10 @@ machinery rather than adding a parallel backend. Weigh dependencies by
 installed size as well as code saved; Omarchy-shipped facilities are available
 to reuse. Ask the owner before breaking these rules.
 
-Ghost owns persona, history, and one view over the
-owner's own data ([Sources](#sources)), read through the products that hold
-it. A [local model](#local-model), which ghostd runs and loops over itself,
+Ghost owns persona and history. The owner's data stays in the products that
+hold it, each with its own app; the ghost reaches it from its shell, through
+each product's command line and skill, and Ghost keeps no second view of it.
+A [local model](#local-model), which ghostd runs and loops over itself,
 answers every turn, so the owner's data stays on the machine; Ghost runs no
 turn on a cloud model. A coding agent the owner has (Claude Code, Codex,
 Antigravity) is a command the model runs from its shell, with that agent's
@@ -39,8 +40,8 @@ Durable state has three scopes:
 - **Ghost-private:** character, conversations, and their
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
-  folder of the owner's XDG Documents directory, and tasks in its `Reminders`
-  folder, which the ghost reads and writes ([Character and
+  folder of the owner's XDG Documents directory, and the owner's to-do list
+  in its `Reminders` folder; the ghost reads and writes both ([Character and
   notes](#character-and-notes)).
 - **External:** browser downloads, screenshots, and
   each coding agent's credentials, settings, and session store stay in the
@@ -138,25 +139,25 @@ is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
 There is no ghost-private memory store. A ghost's state across
-conversations is two folders of the owner's Documents directory, which it
+conversations is the `Notes` folder of the owner's Documents directory, which it
 keeps current unasked (it reads the note that covers a task before starting,
 updates it in the same turn as a fact arrives or the task advances, and
 merges notes on one subject as it goes and tidies a cluttered folder after
-the task; `ghost help memory`). The owner reads and writes the same notes. Kept
-whether or not iCloud is connected: `Notes`, Markdown notes (owner facts,
-decisions, its own reflections), and `Reminders`, the owner's to-do list,
-which the ghost adds what it needs the owner to do to and ticks what they
-say is done, one Markdown checklist per
+the task; `ghost help memory`). The owner reads and writes the same notes:
+Markdown (owner facts, decisions, the ghost's reflections). Beside it is
+`Reminders`, the owner's to-do list, to which the ghost adds what now waits
+on the owner and where it ticks what they say is done, one Markdown checklist per
 list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
-notes, `- [x]` done). These are the folders and formats icloud-notes and
-icloud-reminders sync, so connecting iCloud later syncs what is already
-there. The model writes them with its
+notes, `- [x]` done). Both are kept whether or not iCloud is connected, and
+are the folders and formats icloud-notes and icloud-reminders sync, so
+connecting iCloud later syncs what is already there. The ghost's own later
+work is a systemd user timer (`ghost help background`), never a reminder. The model writes them with its
 shell ([Local model](#local-model)). They are
 readable by the owner
 ([Product boundary](#product-boundary) says what may index them).
-Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
-owner asks for, following `ghost help memory`; Ghost
-runs no memory maintenance of its own.
+Cleanup (merging, rewriting, and trashing stale notes) is the ghost's own,
+unasked, as `ghost help memory` says; ghostd itself runs no memory
+maintenance.
 
 ### Ghost-home resources
 
@@ -192,7 +193,8 @@ names it; each row carries `preview`, the first owner text, and `title`,
 the owner's name for it or else one extracted from that text without a model
 (`derivedTitle`), null when nothing substantive is left. Pins, read
 timestamps, and open owner questions are bounded sidecars beside the
-directories. A row's `question` is what the ghost asked the owner there
+directories. A row's `question` is what the ghost asked the owner there with
+its `ask` tool
 (`{ text, options, askedAt }`, at most 2000 characters and six suggested
 answers of 120) or null; the owner's next message to the conversation
 answers it, and its deletion drops it. Deletion moves the
@@ -276,7 +278,7 @@ A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 --follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation. Nor is one
-asked while the ghost's open question (the `ask` tool, or `ghost ask`) waits on the owner.
+asked while the ghost's open question (its `ask` tool) waits on the owner.
 A turn outlives its client: a dropped stream stops only the listening, and
 `POST /sessions/:id/stop` or daemon shutdown cancels it; an internal runtime
 or replay-storage failure ends it in error.
@@ -334,7 +336,7 @@ boundary. The configured owner has full access; any other login is refused
 unless `remote.guests` in the config is `"read-only"` (the default is
 `"none"`). Admitted guests are read-only,
 are refused the reads marked owner-only, which show file paths, hook
-commands, or the owner's own data, and see no path in the ghost list;
+commands, or the owner's own data;
 conversations, tool calls included, are shown to them as recorded. Every
 guest write is `403 read_only`.
 Remote access never broadens a ghost's local tool authority.
@@ -359,12 +361,6 @@ Rows beginning `/sessions/` are relative to `/api`.
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
-| `GET /api/sources` | Owner-only `{ sources: [{ id, label, available, list, read, search, pictures }] }`: the [sources](#sources); `pictures` says its items have one each. |
-| `GET /api/sources/:source/items?limit=&cursor=` | Owner-only. One page, `{ items, next }`; `limit` 1–200 (50); `next` is the next page's `cursor`, null on the last. A source with no list is `405 not_listable`. |
-| `GET /api/sources/:source/items/:item?page=&line=` | Owner-only `{ title, text, part, path? }` for one item, its id percent-encoded as one segment; `part` says which part (`whole`, `passage`, `start`, `lines a-b`, `page n`, `latest`). A source with no read is `405 not_readable`. |
-| `GET /api/sources/:source/items/:item/picture` | Owner-only. The item's small picture as `image/jpeg` or `image/png` bytes (Photos: iCloud's thumbnail, fetched into icloud-photos' cache on first use). Whatever file the product names, only a JPEG or PNG of at most 4 MiB is sent; anything else is `404 not_found`, and a source without pictures `405 no_pictures`. |
-| `GET /api/connections` | Owner-only `{ connections: [{ id, label, brings, state, detail, actions: [{ label, command }] }] }`: the [connections](#connections). |
-| `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev2)). |
 | `GET\|PUT /api/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
@@ -372,11 +368,10 @@ Rows beginning `/sessions/` are relative to `/api`.
 | `POST /api/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
-| `GET /api/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `harness` is what carried the latest stretch (`local`; an agent CLI in an earlier version's log), and `model`, `provider`, and `effort` what it ran on, as far as recorded (null otherwise); `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there (`/sessions/:id/question`), or null. |
+| `GET /api/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there, or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `PUT\|DELETE /api/push/subscription` | Owner-only. PUT `{ endpoint, p256dh, auth, vapidKey }` (base64url: the browser's 65-byte public key, its 16-byte secret, and the 32-byte private scalar of the signing key it made) subscribes a device to [push alerts](#push-alerts), replacing what was kept for that endpoint → `{ ok }`; `400 invalid_request` for an endpoint that is not a browser's push service or keys of the wrong kind. DELETE `{ endpoint }` → `{ ok, removed }`. |
 | `POST /api/push/test` | Owner-only `{ endpoint }` → `{ ok, delivered, reason? }`: one alert to that subscribed device, waited for. |
-| `PUT\|DELETE /sessions/:id/question` | Ask the owner `{ text, options? }` → `{ ok, question }`, replacing an open question there; DELETE withdraws it unanswered. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
@@ -384,7 +379,7 @@ Rows beginning `/sessions/` are relative to `/api`.
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. A running turn refuses it with `409 session_busy`. |
 | `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
-| `GET\|POST /api/remote` | Tailscale Serve status/control (`{ state, hostname, guests, owner, app, problem }`; `state` is `unavailable` only while Tailscale is missing, stopped, or logged out, and `problem` is `{ code, message, action? }`), with the app link (`app: { origin, url } \| null`). Serve is HTTPS only (port 443), since the app is an HTTPS page: on a tailnet without HTTPS certificates `POST { enabled: true }` writes nothing and returns `problem.code` `https_required`, saying where to turn them on. Enabling and disabling also clear a plain-HTTP (port 80) entry an earlier version wrote. |
+| `GET /api/remote` | What Tailscale Serve exposes of this daemon, read from Tailscale on each call: `{ state, hostname, guests, owner, app, command, problem }`. `state` is `on` while Serve proxies HTTPS on 443 to the daemon, `off` otherwise, and `unavailable` while Tailscale is missing, stopped, or logged out, when `problem` is `{ code, message, action? }`. `command` is Tailscale's own command that turns Serve on (`tailscale serve --bg --https=443 http://127.0.0.1:<port>`); `tailscale serve --https=443 off` turns it off. The owner or the ghost runs them: no route or `ghost` verb changes Serve. `app` is `{ origin, url }`, the first of `remote.apps` and its link adding this machine, `url` null while Serve is off. |
 | `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
@@ -420,8 +415,7 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/mod.rs`](packages/daemon/src/cli/mod.rs). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
 named verb there (character, sessions
-and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
-the owner, hooks, remote, and status), so a
+and their title/pin/read/delete/stop, hooks, and status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
 a verb's primary output: what a read prints (a transcript without its paging
 note, a character, ids or names, `ok` for status), and nothing for a change.
@@ -449,8 +443,7 @@ its own configuration exactly as when the owner runs it by hand, and its
 environment is the daemon's own, unscrubbed. Credential values never enter
 logs or API responses.
 
-Ghosts run unthrottled: Ghost adds no turn, hosted-session, concurrency, or
-spend cap.
+The ghost runs unthrottled: Ghost adds no turn, concurrency, or spend cap.
 
 ## Package boundaries
 
@@ -469,19 +462,15 @@ the daemon into. Removing it preserves owner data.
   widgets are [omui](https://github.com/ferdousbhai/omui)'s;
   [`style.css`](packages/window/src/style.css) holds only Ghost's own rules,
   on omui's `@om_*` colours. It is a client of the
-  API and keeps no data: a sidebar of Ask and each available
-  [source](#sources), a page per source (its list, or a grid of pictures
-  when its items have them, a search of it, and a reader for one item),
-  Connect (the [connections](#connections); a first run with none connected
-  starts there, and a step runs in Omarchy's floating terminal, else
-  `xdg-terminal-exec`), and Ask, a conversation with the ghost, with the answers to its open question as buttons above the composer. It finds the daemon as the CLI
+  API and keeps no data: the conversations, and the one open, with the
+  answers to the ghost's open question as buttons above the composer. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
   It is a member of the
   cargo workspace at the repository root, built, linted (rustfmt and clippy)
   and tested with the daemon, and the gate also walks its main flows with omui's scripted QA
   ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
-  feature, against the same scratch ghostd and sample data, on a private
+  feature, against a scratch ghostd and a stand-in model, on a private
   broadway display); the package build's `check()`
   skips the QA, and no release build has the feature. It makes the `ghost`
   package per-architecture; the launcher entry
@@ -523,66 +512,6 @@ from selection and snapshot through action without reselecting. Tabs and CLI
 state survive Ghost restarts; explicitly close a task's tabs when finished, never the owner's
 browser. Setup and recovery are in `ghost help browser`.
 
-### Sources
-
-The owner's own data reaches Ghost through the products that already hold
-it, never a copy: each product keeps its sign-in, sync, local copy, CLI, and
-skill, and its standalone app stays an alternative.
-[`sources.rs`](packages/daemon/src/sources.rs) adapts each one to the same
-three operations, `list` (newest first, paged by an opaque `cursor`), `read`
-(one item), and `search`, returning items
-`{ source, id, title, snippet, at, path?, page?, line? }` (`at` in
-milliseconds or null; `id` is what `read` takes). The API below
-is this one layer; a source whose product is missing is
-`available: false`, and using it is `409 source_unavailable`.
-
-| Source | Product and what Ghost uses | list | read | search |
-|---|---|---|---|---|
-| `files` | Recall plus ripgrep and fd+fzf over Recall's folders minus its exclusions (the home folder without Recall) | | a file inside those folders only | yes |
-| `notes` | `Documents/Notes/**/*.md`, by last change, without icloud-notes' id header; always available | yes | yes | Recall, that folder |
-| `reminders` | `Documents/Reminders/*.md`, one item per list; always available | yes | yes | Recall, that folder |
-| `whatsapp` | wacli's chat folders, `~/WhatsApp/<account>/WhatsApp Chat - <name>/_chat.txt`, by last change; a read is the chat's latest 256 KiB | yes | yes | Recall, that folder |
-| `drive` | icloud-drive's `~/iCloud Drive` | | yes | Recall, that folder |
-| `keep` | google-keep's `Documents/Keep/**/*.md`, a note per file, by last change | yes | yes | Recall, that folder |
-| `google-drive` | `~/Google Drive`, which the owner keeps in sync with `rclone bisync` | | yes | Recall, that folder |
-| `mail` | cloudmail: `inbox --before`, `thread read`, `search` (live) | yes | yes | yes |
-| `contacts` | cloud-contacts (iCloud and Google) from its last fetch (`--cached`), by name | yes | yes | yes |
-| `calendar` | cloud-calendar `agenda`, 14 days a page from today (live) | yes | | |
-| `photos` | icloud-photos' catalog: `list`, `info`, and `thumb` for an item's picture | yes | yes | |
-| `google-photos` | google-photos' catalog: `list` and `info`; it keeps originals only, so no pictures | yes | yes | |
-| `lastbook` | Lastbook's library index, read-only | | a page inside its library | yes |
-
-A file hit is labelled with the source whose folder holds it (the Notes
-vault and Reminders under the owner's Documents folder, `~/WhatsApp`,
-`~/iCloud Drive`, `Documents/Keep`, `~/Google Drive`), so one meaning index, Recall's, serves every file-backed
-source and nothing is indexed twice. A search across sources names each one
-that failed rather than failing whole. Reads are cut at 256 KiB.
-
-### Connections
-
-Onboarding is the products' own. [`connections.rs`](packages/daemon/src/connections.rs)
-lists what the owner can connect (`search`: Recall, `icloud`, `mail`,
-`calendar`, `contacts`, `google`: google-session's sign-in for Keep and
-Photos, `google-drive`: an rclone remote of type `drive`, `google-workspace`:
-gws for Docs, Sheets and Tasks, `whatsapp`, `lastbook`), each with a `state` and
-the next steps as `actions`, a label and a shell command line:
-
-- `missing`: the product's command is not installed. The one action is its
-  published installer (`curl … install.sh | sudo bash`, which adds the
-  product's signed package repository), the package manager's command for
-  rclone and gws, or, for `google`, which has no package yet, its README.
-- `disconnected`: installed, with no sign-in or account (its own status
-  command says so; one that does not answer reads as this).
-- `connected`: `detail` names the accounts. Actions that add another
-  account stay.
-
-Ghost runs none of these commands. Each asks the owner something (a
-password, a sign-in window, a code to scan, and for mail on the owner's own
-domain `cloudmail init` asks before it moves a domain to Cloudflare), so the
-window runs the chosen one in a terminal on the owner's desktop and reads
-the list again when the window is next focused. The commands are constants
-of this table, never text from a product or a model.
-
 ### Local model
 
 `local` in `~/.config/ghost/config.json` is
@@ -611,7 +540,7 @@ It offers two tools ([`local_turn.rs`](packages/daemon/src/local_turn.rs)).
 `ask(question, options)` puts a question to the owner: 2 to 4 ways forward
 the model has worked out, the one it recommends first (fewer is refused, said
 to the model). It records the conversation's open question
-(`/sessions/:id/question`), says the question in the reply with its answers
+(`question` in `GET /api/sessions`), says the question in the reply with its answers
 numbered, so the transcript keeps them and the next turn is handed them, and
 ends the turn; the window and the app also show the answers as buttons, the
 first marked, and any other answer is typed.

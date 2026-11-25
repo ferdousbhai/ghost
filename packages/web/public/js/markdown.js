@@ -1,7 +1,6 @@
 /**
  * A reply's markdown, built as DOM nodes so model text never reaches
- * `innerHTML`. Copied from Ghost's remote viewer
- * (ghost/packages/daemon/src/remote-markdown.ts); keep the two in step.
+ * `innerHTML`.
  */
 export function renderMarkdown(source, doc = document) {
   const out = doc.createDocumentFragment();

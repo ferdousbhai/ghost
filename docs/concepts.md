@@ -1,7 +1,7 @@
 # Concepts
 
-Ghost gives the owner a persistent persona, one conversation history, and a
-window on their own data. The daemon owns that
+Ghost gives the owner a persistent persona and one conversation history. The
+daemon owns that
 state; the window and terminal are clients of the same authenticated API.
 [Getting started](getting-started.md) covers use;
 [CONTRACTS.md](../CONTRACTS.md) defines storage, wire, and lifecycle guarantees.
@@ -25,8 +25,8 @@ machine.
 
 A ghost home keeps its character, conversations, and configuration together
 in one directory the owner can move or trash. Notes and plans live in the `Notes`
-folder of the owner's Documents directory, and tasks as checklists in its
-`Reminders` folder: Markdown editable with ordinary
+folder of the owner's Documents directory, shared by the owner and the ghost,
+and the owner's to-do list as checklists in its `Reminders` folder: Markdown editable with ordinary
 file tools, and synced by iCloud only if you connect it. Ghost names that
 directory in the prompt but neither indexes it nor injects its contents; a
 ghost searches it when a task needs it. Recall, an optional separate product,

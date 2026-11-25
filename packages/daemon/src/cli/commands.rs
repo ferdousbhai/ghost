@@ -1,8 +1,8 @@
 //! Every verb but `say`: each asks the daemon one thing and prints the answer
 //! as a table, a transcript, or one acknowledging sentence.
-use super::client::{EXIT_FAILURE, EXIT_SUCCESS};
+use super::client::EXIT_SUCCESS;
 use super::common::{id_of, list_sessions, read_argument_file, read_argument_json, resolve_target};
-use super::output::{Rendered, present, primary, relative_time, table, text_of, truncate, truthy, write_json};
+use super::output::{Rendered, present, primary, relative_time, table, text_of, truncate, truthy};
 use super::{CliError, Context};
 use serde_json::{Map, Value, json};
 
@@ -168,24 +168,6 @@ pub fn unpin_command(ctx: &mut Context) -> Result<i32, CliError> {
     session_action(ctx, "PUT", "/pin", Some(json!({ "pinned": false })), |id, _| format!("Unpinned {id}.\n"))
 }
 
-/// `ghost ask`: ask the owner something in a conversation and wait for their
-/// next message there: the question, then up to six suggested answers.
-/// `--clear` withdraws an open question unanswered. In a ghost's own shell
-/// `$GHOST_SESSION` names the conversation.
-pub fn ask_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let clear = ctx.parsed.boolean("clear");
-    let question = ctx.parsed.positionals.first().cloned();
-    match (clear, question) {
-        (true, Some(_)) => Err(CliError::usage("ask --clear takes no question.")),
-        (false, None) => Err(CliError::usage("ask needs a question.")),
-        (true, None) => session_action(ctx, "DELETE", "/question", None, |id, _| format!("Cleared the question in {id}.\n")),
-        (false, Some(text)) => {
-            let body = json!({ "text": text, "options": ctx.parsed.positionals[1..] });
-            session_action(ctx, "PUT", "/question", Some(body), |id, _| format!("Asked in {id}; the owner's next message there is the answer.\n"))
-        }
-    }
-}
-
 /// `ghost rm -s <id> --yes`: move one conversation to recoverable Trash.
 pub fn remove_command(ctx: &mut Context) -> Result<i32, CliError> {
     if !ctx.parsed.boolean("yes") {
@@ -222,54 +204,6 @@ pub fn character_command(ctx: &mut Context) -> Result<i32, CliError> {
         }
         _ => Err(CliError::usage("ghost character takes `show` or `set <file>`")),
     }
-}
-
-/// `ghost remote [status|on|off]`: a change that leaves the state other than asked exits 1, saying why.
-pub fn remote_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let action = ctx.parsed.positionals.first().cloned().unwrap_or_else(|| "status".to_string());
-    if !["status", "on", "off"].contains(&action.as_str()) {
-        return Err(CliError::usage(format!("ghost remote does not know \"{action}\"; use status, on, or off.")));
-    }
-    let status = if action == "status" {
-        ctx.request("GET", "/api/remote", None)?
-    } else {
-        ctx.request("POST", "/api/remote", Some(&json!({ "enabled": action == "on" })))?
-    };
-    let state = text_of(status.get("state"));
-    let hostname = text_of(status.get("hostname"));
-    let problem = present(&status, "problem");
-    let problem_message = problem.map(|problem| text_of(problem.get("message")));
-    let app_lines = match (state == "on", present(&status, "app")) {
-        (false, _) => String::new(),
-        (true, None) => "no app: remote.apps is empty, so nothing can reach Ghost remotely\n".to_string(),
-        (true, Some(app)) if truthy(app.get("url")) => format!("app {}\n", text_of(app.get("url"))),
-        (true, Some(_)) => String::new(),
-    };
-    if action == "status" {
-        ctx.emit(&status, || {
-            let shown = if state == "on" { format!("on {hostname}") } else { state.clone() };
-            let why = problem_message.map_or_else(String::new, |message| format!(" ({message})"));
-            Rendered::Both { human: format!("{shown}{why}\n{app_lines}"), quiet: format!("{state}\n") }
-        });
-        return Ok(EXIT_SUCCESS);
-    }
-    if problem.is_some() || state != action {
-        if ctx.parsed.boolean("json") {
-            write_json(ctx.runtime.stdout, &status);
-        }
-        let why = match (problem, problem_message) {
-            (Some(problem), Some(message)) if truthy(problem.get("action")) => format!("{message} ({})", text_of(problem.get("action"))),
-            (_, Some(message)) => message,
-            _ => format!("ghostd did not turn it {action}"),
-        };
-        ctx.err(&format!("ghost: remote access is {state}: {why}\n"));
-        return Ok(EXIT_FAILURE);
-    }
-    ctx.emit(&status, || {
-        let now = if action == "on" { format!("on at {hostname}") } else { "off".to_string() };
-        Rendered::Secondary(format!("Remote access is {now}.\n{app_lines}"))
-    });
-    Ok(EXIT_SUCCESS)
 }
 
 /// `ghost status`: that the daemon answers and accepts the token, what it
@@ -316,10 +250,17 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         if truthy(daemon.get("restartNeeded")) {
             lines.push("restart needed code on disk is newer than this daemon (ghost help self)".to_string());
         }
+        // Remote access is Tailscale Serve, the owner's to turn on: off names the command, on the app's link to this machine.
         let state = text_of(remote.get("state"));
         let url = if state == "on" && truthy(remote.get("hostname")) { format!(" {}", text_of(remote.get("hostname"))) } else { String::new() };
         let problem = present(&remote, "problem").map_or_else(String::new, |problem| format!(" ({})", text_of(problem.get("message"))));
-        lines.push(format!("remote         {state}{url}{problem}"));
+        let turn_on = if state == "off" && problem.is_empty() { format!("; turn on: {}", text_of(remote.get("command"))) } else { String::new() };
+        lines.push(format!("remote         {state}{url}{problem}{turn_on}"));
+        if state == "on"
+            && let Some(app) = present(&remote, "app").filter(|app| truthy(app.get("url")))
+        {
+            lines.push(format!("app            {}", text_of(app.get("url"))));
+        }
         Rendered::Both { human: format!("{}\n", lines.join("\n")), quiet: "ok\n".to_string() }
     });
     Ok(EXIT_SUCCESS)

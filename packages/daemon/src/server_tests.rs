@@ -1117,72 +1117,37 @@ fn drops_the_pin_when_the_conversation_is_deleted() {
     assert_eq!(read_json(&daemon.ghost_dir.join("sessions/pins.json")), json!({ "version": 2, "pinned": [] }));
 }
 
-// ── PUT|DELETE /api/sessions/:id/question ───────────────────────────────
-
-fn ask(daemon: &Daemon, id: &str, body: &Value) -> Reply {
-    daemon.put(&format!("/api/sessions/{id}/question"), body)
-}
+// ── A ghost's open question ─────────────────────────────────────────────
 
 fn question_of(daemon: &Daemon, id: &str) -> Value {
     daemon.sessions().iter().find(|row| row["id"] == id).expect("a listed conversation")["question"].clone()
 }
 
+// A pass sets it (the model's `ask` tool); the API only lists it.
 #[test]
-fn lists_the_question_until_the_owners_next_message_answers_it() {
+fn lists_the_question_until_the_owners_next_message_answers_it_or_its_conversation_goes() {
     let daemon = Daemon::answering(replies(&["first", "second"]));
     daemon.post_turn(&first_turn());
     assert_eq!(question_of(&daemon, "conv-1"), Value::Null);
     // Turns that ask nothing write nothing.
     assert!(!daemon.ghost_dir.join("sessions/questions.json").exists());
 
-    let asked = ask(&daemon, "conv-1", &json!({ "text": "  Ship it tonight? ", "options": ["yes", " yes", "wait", ""] }));
-    assert_eq!(asked.status, 200);
-    let reply = asked.json();
-    assert_eq!(reply["ok"], true);
-    assert_eq!((&reply["question"]["text"], &reply["question"]["options"]), (&json!("Ship it tonight?"), &json!(["yes", "wait"])));
-    assert!(crate::clock::parse_iso(reply["question"]["askedAt"].as_str().unwrap()).is_some(), "{reply}");
-    assert_eq!(question_of(&daemon, "conv-1"), reply["question"]);
+    let asked = daemon.host.set_question("conv-1", "  Ship it tonight? ", &["yes".to_string(), " yes".to_string(), "wait".to_string()]).unwrap();
+    assert_eq!((&asked["text"], &asked["options"]), (&json!("Ship it tonight?"), &json!(["yes", "wait"])));
+    assert!(crate::clock::parse_iso(asked["askedAt"].as_str().unwrap()).is_some(), "{asked}");
+    assert_eq!(question_of(&daemon, "conv-1"), asked);
+    // No route sets or withdraws one.
+    assert_eq!(daemon.put("/api/sessions/conv-1/question", &json!({ "text": "hi" })).status, 404);
 
     daemon.post_turn(&turn_body("conv-1", "yes"));
-    assert_eq!(question_of(&daemon, "conv-1"), Value::Null);
-}
-
-#[test]
-fn withdraws_a_question_unanswered_and_with_its_conversation() {
-    let daemon = Daemon::answering(replies(&["one", "two"]));
-    daemon.post_turn(&first_turn());
-    assert_eq!(ask(&daemon, "conv-1", &json!({ "text": "Which one?" })).json()["question"]["options"], json!([]));
-    let dismissed = daemon.delete("/api/sessions/conv-1/question");
-    assert_eq!((dismissed.status, dismissed.json()), (200, json!({ "ok": true })));
     assert_eq!(question_of(&daemon, "conv-1"), Value::Null);
 
     if !daemon.can_trash() {
         return;
     }
-    ask(&daemon, "conv-1", &json!({ "text": "Still there?" }));
+    daemon.host.set_question("conv-1", "Still there?", &[]).unwrap();
     daemon.delete("/api/sessions/conv-1");
     assert_eq!(read_json(&daemon.ghost_dir.join("sessions/questions.json")), json!({ "version": 2, "questions": {} }));
-}
-
-#[test]
-fn refuses_an_empty_oversized_or_malformed_question() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    for body in [
-        json!({}),
-        json!({ "text": "   " }),
-        json!({ "text": "x".repeat(2_001) }),
-        json!({ "text": "ok", "options": "yes" }),
-        json!({ "text": "ok", "options": [1] }),
-        json!({ "text": "ok", "options": ["a", "b", "c", "d", "e", "f", "g"] }),
-        json!({ "text": "ok", "options": ["x".repeat(121)] }),
-    ] {
-        let response = ask(&daemon, "conv-1", &body);
-        assert_eq!(response.status, 400, "{:.60}", body.to_string());
-        assert_eq!(response.code(), "invalid_request", "{:.60}", body.to_string());
-    }
-    assert_eq!(ask(&daemon, "nope", &json!({ "text": "hi" })).status, 404);
-    assert_eq!(daemon.delete("/api/sessions/nope/question").status, 404);
 }
 
 // ── PUT /api/sessions/:id/title ─────────────────────────────────────────
@@ -1477,30 +1442,6 @@ fn a_completion_stops_when_its_caller_goes_away() {
 }
 
 #[test]
-fn validates_a_source_request_before_any_source_is_read() {
-    let daemon = Daemon::start();
-    let refusals = [
-        ("/api/search?q=x&limit=0", 400, "\"limit\" must be an integer from 1 to 50."),
-        ("/api/search?q=x&limit=51", 400, "\"limit\" must be an integer from 1 to 50."),
-        ("/api/search?q=x&limit=2.5", 400, "\"limit\" must be an integer from 1 to 50."),
-        ("/api/sources/notes/items?limit=201", 400, "\"limit\" must be an integer from 1 to 200."),
-        ("/api/sources/notes/items?limit=many", 400, "\"limit\" must be a number."),
-        ("/api/sources/nope/items/x", 404, "There is no source \"nope\"."),
-        ("/api/sources/files/items/x?page=0", 400, "\"page\" must be a positive integer."),
-        ("/api/sources/files/items/x?line=1.5", 400, "\"line\" must be a positive integer."),
-        ("/api/sources/files/items/x?page=one", 400, "\"page\" must be a number."),
-    ];
-    for (target, status, message) in refusals {
-        let response = daemon.get(target);
-        assert_eq!(response.status, status, "{target}");
-        let code = if status == 404 { "not_found" } else { "invalid_request" };
-        assert_eq!(response.json(), json!({ "error": { "message": message, "code": code } }), "{target}");
-    }
-    let long = daemon.get(&format!("/api/sources/files/items/{}", "x".repeat(4097)));
-    assert_eq!(long.json(), json!({ "error": { "message": "An item id is 1 to 4096 characters.", "code": "invalid_request" } }));
-}
-
-#[test]
 fn an_unexpected_failure_is_a_500_that_says_nothing_of_its_cause_and_is_logged() {
     let (logger, records) = Logger::recording();
     let daemon = Daemon::with(replies(&["hello there"]), |options| options.logger = logger);
@@ -1523,7 +1464,7 @@ fn an_unexpected_failure_is_a_500_that_says_nothing_of_its_cause_and_is_logged()
 #[test]
 fn stores_an_image_in_the_conversation_directory_before_its_first_turn_and_serves_it_back() {
     let daemon = Daemon::start();
-    let route = "/api/sessions/hud-new/attachments";
+    let route = "/api/sessions/app-new/attachments";
     let saved = daemon.call("POST", route, &[("content-type", "image/png")], Some(PNG));
     assert_eq!(saved.status, 201);
     let body = saved.json();
@@ -1534,7 +1475,7 @@ fn stores_an_image_in_the_conversation_directory_before_its_first_turn_and_serve
     assert_eq!(extension, "png");
     assert!(!time.is_empty() && time.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()), "{name}");
     assert!(random.len() == 8 && random.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{name}");
-    assert_eq!(std::fs::read(conversation_dir(&daemon.session_dir, "hud-new").join(path)).unwrap(), PNG);
+    assert_eq!(std::fs::read(conversation_dir(&daemon.session_dir, "app-new").join(path)).unwrap(), PNG);
     // A directory holding only attachments is not a conversation yet.
     assert_eq!(daemon.get("/api/sessions").json(), json!({ "sessions": [] }));
 
@@ -1815,19 +1756,9 @@ fn shows_the_owner_what_runs_the_daemon_and_refuses_a_guest_the_source_path() {
 }
 
 #[test]
-fn refuses_guests_the_hook_commands_the_owners_sources_and_hook_completions() {
+fn refuses_guests_the_hook_commands_the_owners_machines_and_hook_completions() {
     let daemon = remote(|_| {});
-    for path in [
-        "/api/hooks/config",
-        "/api/sources",
-        "/api/connections",
-        "/api/sources/notes/items",
-        "/api/sources/files/items/x",
-        "/api/sources/photos/items/x/picture",
-        "/api/search?q=x",
-        "/api/remote/machines",
-        "/api/status",
-    ] {
+    for path in ["/api/hooks/config", "/api/remote/machines", "/api/status"] {
         let guest = daemon.get_as(path, &[GUEST]);
         assert_eq!((guest.status, guest.code().as_str()), (403, "owner_only"), "{path}");
     }
@@ -1873,7 +1804,7 @@ fn refuses_a_page_on_the_tailnet_host_itself_since_only_remote_apps_are_origins(
     assert_eq!((response.status, response.code().as_str()), (403, "forbidden_origin"));
 }
 
-// ── Remote management ───────────────────────────────────────────────────
+// ── Remote status ───────────────────────────────────────────────────────
 
 fn remote_status(enabled: bool) -> Value {
     json!({
@@ -1882,6 +1813,7 @@ fn remote_status(enabled: bool) -> Value {
         "guests": "read-only",
         "owner": "owner@example.com",
         "app": null,
+        "command": format!("tailscale serve --bg --https=443 {FAKE_TARGET}"),
         "problem": null,
     })
 }
@@ -1892,40 +1824,17 @@ fn remote_over_tailscale() -> (Daemon, Arc<Tailscale>) {
     (remote(|options| options.remote_serve = serve_over(runner)), fake)
 }
 
+// Serve is the owner's to turn on with Tailscale's own command: ghostd reads its state and changes nothing.
 #[test]
-fn gets_remote_status_and_applies_owner_post_changes() {
+fn reports_remote_status_to_owner_and_guest_and_has_no_route_that_changes_it() {
     let (daemon, tailscale) = remote_over_tailscale();
     let authorization = bearer(&token());
     let headers = [("authorization", authorization.as_str()), JSON];
-
     assert_eq!(daemon.get_as("/api/remote", &headers[..1]).json(), remote_status(false));
-    assert_eq!(tailscale.changes(), Vec::<String>::new());
-    let enabled = daemon.call("POST", "/api/remote", &headers, Some(json!({ "enabled": true }).to_string().as_bytes()));
-    assert_eq!(enabled.status, 200);
-    assert_eq!(enabled.json(), remote_status(true));
-    assert_eq!(tailscale.changes(), [format!("serve --bg --https=443 {FAKE_TARGET}")]);
-    assert_eq!(daemon.get_as("/api/remote", &headers[..1]).json(), remote_status(true));
-
-    // And the way back.
-    let disabled = daemon.call("POST", "/api/remote", &headers, Some(json!({ "enabled": false }).to_string().as_bytes()));
-    assert_eq!((disabled.status, disabled.json()), (200, remote_status(false)));
-    assert_eq!(tailscale.changes().last().map(String::as_str), Some("serve --https=443 off"));
-}
-
-#[test]
-fn rejects_malformed_remote_changes_and_guest_writes() {
-    let (daemon, tailscale) = remote_over_tailscale();
-    let authorization = bearer(&token());
-    let invalid =
-        daemon.call("POST", "/api/remote", &[("authorization", &authorization), JSON], Some(json!({ "enabled": "yes" }).to_string().as_bytes()));
-    assert_eq!(invalid.status, 400);
-    assert_eq!(invalid.json(), json!({ "error": { "message": "\"enabled\" must be a boolean.", "code": "invalid_request" } }));
-
-    let guest = daemon.call("POST", "/api/remote", &[GUEST, JSON], Some(json!({ "enabled": true }).to_string().as_bytes()));
-    assert_eq!((guest.status, guest.code().as_str()), (403, "read_only"));
-    assert_eq!(tailscale.changes(), Vec::<String>::new());
-    // A guest may see whether remote access is on.
     assert_eq!(daemon.get_as("/api/remote", &[GUEST]).json(), remote_status(false));
+    let posted = daemon.call("POST", "/api/remote", &headers, Some(json!({ "enabled": true }).to_string().as_bytes()));
+    assert_eq!(posted.status, 405);
+    assert_eq!(tailscale.changes(), Vec::<String>::new());
 }
 
 // ── A web app in remote.apps ────────────────────────────────────────────

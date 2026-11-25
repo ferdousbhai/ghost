@@ -158,7 +158,7 @@ mod tests {
         assert!(!stderr_is_journal(Some("nonsense")));
     }
 
-    // ── log.test.ts ─────────────────────────────────────────────────────
+    // ── Logging ─────────────────────────────────────────────────────────
 
     #[test]
     fn merges_bound_fields_below_call_site_fields() {

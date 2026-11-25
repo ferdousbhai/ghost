@@ -32,8 +32,8 @@ SendSIGKILL=yes
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/bin:/usr/bin
 
 # Local-only service; nothing here should reach outside the user's own files.
-# %h is ONE writable bind mount, not per-directory carve-outs: ghost deletion
-# renames a default ghost home into %h/.local/share/Trash, and rename(2) across
+# %h is ONE writable bind mount, not per-directory carve-outs: deleting a
+# conversation renames its directory into %h/.local/share/Trash, and rename(2) across
 # two bind mounts fails EXDEV even on the same filesystem. (ProtectHome has no
 # "read-write" value — systemd ignores it with a warning; system directories
 # stay read-only via ProtectSystem=strict.)

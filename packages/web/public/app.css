@@ -1,7 +1,6 @@
 /*
- * Ghost's remote viewer look (ghost/packages/daemon/src/remote-viewer.ts):
- * Tokyo Night under the ghost's amber, in a messaging app's shape. Dark is
- * the viewer's palette; light is Tokyo Night Day with a deeper amber.
+ * Tokyo Night under the ghost's amber, in a messaging app's shape. Light is
+ * Tokyo Night Day with a deeper amber.
  */
 :root {
   color-scheme: light dark;
@@ -124,7 +123,6 @@ header h1 { margin: 0; flex: 1; font: 600 .95rem var(--mono); letter-spacing: .0
 .note { color: var(--faint); font-family: var(--mono); font-size: .78rem; text-align: center; margin: 0; padding: .3rem 1rem; }
 .note:empty { display: none; }
 #sessions { display: flex; flex-direction: column; }
-#sessions h3 { font: 600 .7rem var(--mono); color: var(--faint); letter-spacing: .08em; text-transform: uppercase; margin: 1rem .2rem .3rem; }
 .session { display: flex; align-items: center; gap: .55rem; padding: .7rem .6rem; border-radius: .6rem; color: var(--fg); text-decoration: none; min-width: 0; }
 .session:hover { background: var(--surface); }
 .session[aria-current="page"] { background: var(--amber-soft); }
@@ -134,7 +132,7 @@ header h1 { margin: 0; flex: 1; font: 600 .95rem var(--mono); letter-spacing: .0
 .session .icon { color: var(--faint); font-size: .85rem; }
 .tag { font-family: var(--mono); font-size: .65rem; color: var(--amber); border: 1px solid var(--amber-line); border-radius: .3rem; padding: 0 .3rem; flex: none; }
 
-/* The conversation, as the viewer draws it. */
+/* The conversation. */
 main {
   flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
   padding: 1rem max(.9rem, env(safe-area-inset-right)) 1.25rem max(.9rem, env(safe-area-inset-left));

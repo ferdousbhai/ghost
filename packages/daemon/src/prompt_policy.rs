@@ -19,7 +19,7 @@ pub fn render_owner_context_policy(documents_dir: &Path) -> String {
     )
 }
 
-/// The policy sections every persona carries after its character, in prompt
+/// The policy sections the ghost carries after its character, in prompt
 /// order; the budget test below measures exactly this list.
 pub fn stable_policy_sections(documents: &Path, first_meeting: bool) -> Vec<String> {
     let mut sections = vec![OMARCHY_COMPUTER_USE_POLICY.to_string(), GHOST_POLICY.to_string(), render_owner_context_policy(documents)];
@@ -77,8 +77,8 @@ mod tests {
 
     /// The exact rendered size of each section when its ceiling was last set.
     const CEILINGS: [(&str, usize); 5] =
-        [("Character file", 560), ("Computer use", 273), ("Ghost", 444), ("Owner context", 773), ("First meeting", 321)];
-    const TOTAL_CEILING: usize = 2371;
+        [("Character file", 555), ("Computer use", 273), ("Ghost", 444), ("Owner context", 773), ("First meeting", 321)];
+    const TOTAL_CEILING: usize = 2366;
 
     /// The character-file section is internal to the prompt builder, so it is
     /// measured where it is shipped: in a prompt built with an unwritten

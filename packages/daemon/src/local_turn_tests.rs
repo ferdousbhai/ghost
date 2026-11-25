@@ -176,7 +176,7 @@ fn tool_results(request: &Value) -> Vec<&str> {
         .collect()
 }
 
-// ── local-turn.test.ts ──────────────────────────────────────────────────
+// ── A turn ──────────────────────────────────────────────────────────────
 
 #[test]
 fn answers_a_conversation_running_the_commands_it_asks_for_until_it_answers() {
@@ -550,9 +550,9 @@ fn completes_a_prompt_with_no_persona_conversation_or_tools() {
     assert!(refusing.answerer().complete("x", &Abort::new()).unwrap_err().contains("(503)"));
 }
 
-// ── prompt-budget.test.ts: the local model's section ────────────────────
+// ── The local model's section ───────────────────────────────────────────
 
-/// Only a local pass adds it, after the whole persona; it has its own ceiling,
+/// Every pass adds it, after the whole persona; it has its own ceiling,
 /// measured with the longest command. The exact rendered size when it was last
 /// set: raising it is a decision, justified in the commit that does.
 const LOCAL_CEILING: usize = 1000;

@@ -8,14 +8,12 @@
 //! the header could already read the API token file, so the header is exactly
 //! as trustworthy as Tailscale documents it to be.
 //!
-//! And Ghost's own Serve exposure: `tailscale serve --bg --https=443`
-//! proxying to the daemon, so an app in `remote.apps` reaches its API at the
-//! node's tailnet name. The app is an https page, which cannot call an http
-//! address, so a tailnet without HTTPS certificates gets no Serve entry at
-//! all. Status is read from Tailscale on every call; the one thing remembered
-//! is an operator refusal, because only a write attempt can reveal it.
-//! Tailscale keeps a `--bg` Serve entry across restarts, so Ghost stores no
-//! on/off of its own.
+//! And what the owner serves. Turning Serve on and off is Tailscale's own
+//! command, which the owner or the ghost runs (`tailscale serve --bg
+//! --https=443 http://127.0.0.1:<port>`); Ghost writes no Serve entry. It
+//! only reads whether one proxies to this daemon over HTTPS, since the app is
+//! an https page and cannot call an http address: that is what links the app
+//! to this machine and names the machine in an alert's link.
 use crate::abort::Abort;
 use crate::config::{Guests, RemoteConfig};
 use crate::env::Env;
@@ -215,6 +213,8 @@ pub struct RemoteStatus {
     /// The first of `remote.apps`, and its link adding this machine
     /// (`<origin>/#add=<hostname>`), None while Serve is off.
     pub app: Option<(String, Option<String>)>,
+    /// Tailscale's command that turns Serve on for this daemon.
+    pub command: String,
     pub problem: Option<RemoteProblem>,
 }
 
@@ -226,26 +226,14 @@ impl RemoteStatus {
             "guests": self.guests.as_str(),
             "owner": self.owner,
             "app": self.app.as_ref().map(|(origin, url)| json!({ "origin": origin, "url": url })),
+            "command": self.command,
             "problem": self.problem.as_ref().map(RemoteProblem::to_json),
         })
     }
 }
 
-/// The listeners Ghost writes: HTTPS, and plain HTTP, which earlier versions used without certificates and are now only cleared.
-const HTTPS: &str = "--https=443";
-const HTTP: &str = "--http=80";
-const OPERATOR_ACTION: &str = "sudo tailscale set --operator=$USER";
-
 fn tailscale_missing() -> RemoteProblem {
     RemoteProblem::new("tailscale_missing", "Tailscale is not installed.", Some("omarchy-install-service-tailscale"))
-}
-
-fn https_required() -> RemoteProblem {
-    RemoteProblem::new(
-        "https_required",
-        "This tailnet has no HTTPS certificates, which the app needs: turn on HTTPS Certificates on the DNS page of the Tailscale admin console (https://login.tailscale.com/admin/dns), then turn remote access on again.",
-        None,
-    )
 }
 
 fn first_line(text: &str) -> String {
@@ -263,41 +251,24 @@ fn serve_failed(message: impl Into<String>) -> RemoteProblem {
     RemoteProblem::new("serve_failed", message, None)
 }
 
-/// Ghost's own Serve listeners, from `tailscale serve status --json`: the `Web`
-/// map is keyed by `host:port`, and Ghost only ever writes ports 443 and 80.
-fn served_listeners(config: &Value, target: &str) -> (bool, bool) {
-    let (mut https, mut http) = (false, false);
-    for (host_port, server) in config["Web"].as_object().into_iter().flatten() {
-        let proxied = server["Handlers"].as_object().is_some_and(|handlers| {
-            handlers.values().any(|handler| handler["Proxy"].as_str().is_some_and(|proxy| proxy.strip_suffix('/').unwrap_or(proxy) == target))
-        });
-        if !proxied {
-            continue;
-        }
-        if host_port.ends_with(":443") {
-            https = true;
-        } else if host_port.ends_with(":80") {
-            http = true;
-        }
-    }
-    (https, http)
+/// Whether Serve proxies HTTPS on port 443 to `target`, from `tailscale serve
+/// status --json`, whose `Web` map is keyed by `host:port`.
+fn served_over_https(config: &Value, target: &str) -> bool {
+    config["Web"].as_object().into_iter().flatten().any(|(host_port, server)| {
+        host_port.ends_with(":443")
+            && server["Handlers"].as_object().is_some_and(|handlers| {
+                handlers.values().any(|handler| handler["Proxy"].as_str().is_some_and(|proxy| proxy.strip_suffix('/').unwrap_or(proxy) == target))
+            })
+    })
 }
 
-/// Status plus what only enable and disable need: certificates, and a leftover HTTP entry.
-struct Inspection {
-    status: RemoteStatus,
-    certs: bool,
-    http: bool,
-}
-
+/// What Tailscale Serve exposes of this daemon, read from Tailscale on every call.
 pub struct RemoteServe {
     target: String,
     run: TailscaleRunner,
     owner: Option<String>,
     guests: Guests,
     app: Option<String>,
-    /// The last Serve refusal for lack of the operator right; cleared by the next accepted write.
-    operator_problem: Mutex<Option<RemoteProblem>>,
 }
 
 impl RemoteServe {
@@ -309,48 +280,12 @@ impl RemoteServe {
             owner: config.owner.as_deref().map(|owner| owner.trim().to_lowercase()).filter(|owner| !owner.is_empty()),
             guests: config.guests,
             app: config.apps.first().cloned(),
-            operator_problem: Mutex::new(None),
         }
     }
 
-    pub fn status(&self) -> RemoteStatus {
-        self.inspect().status
-    }
-
-    /// Turn the exposure on over HTTPS, clearing a plain-HTTP entry an earlier
-    /// version left. Without certificates nothing is written and the problem
-    /// says how to get them.
-    pub fn enable(&self) -> RemoteStatus {
-        let Inspection { status, certs, http } = self.inspect();
-        if status.state == "unavailable" {
-            return status;
-        }
-        if http && let Some(problem) = self.change(&["serve", HTTP, "off"]) {
-            return RemoteStatus { problem: Some(problem), ..status };
-        }
-        if !certs {
-            let problem = self.operator_problem.lock().unwrap().clone().unwrap_or_else(https_required);
-            return RemoteStatus { problem: Some(problem), ..self.status() };
-        }
-        match self.change(&["serve", "--bg", HTTPS, &self.target]) {
-            Some(problem) => RemoteStatus { problem: Some(problem), ..status },
-            None => self.status(),
-        }
-    }
-
-    /// Turn off each listener Ghost has on, the plain-HTTP one an earlier version wrote included.
-    pub fn disable(&self) -> RemoteStatus {
-        let Inspection { status, http, .. } = self.inspect();
-        let listeners: Vec<&str> = [(status.state == "on").then_some(HTTPS), http.then_some(HTTP)].into_iter().flatten().collect();
-        if listeners.is_empty() {
-            return status;
-        }
-        for listener in listeners {
-            if let Some(problem) = self.change(&["serve", listener, "off"]) {
-                return RemoteStatus { problem: Some(problem), ..status };
-            }
-        }
-        self.status()
+    /// Tailscale's own command that serves this daemon to the tailnet over HTTPS.
+    pub fn command(&self) -> String {
+        format!("tailscale serve --bg --https=443 {}", self.target)
     }
 
     /// The owner's other tailnet machines: nodes signed in as the owner's
@@ -379,20 +314,17 @@ impl RemoteServe {
         Some(format!("{origin}/#/{}/{}", percent_encode(&status.hostname?), percent_encode(id)))
     }
 
-    fn inspect(&self) -> Inspection {
+    pub fn status(&self) -> RemoteStatus {
         let off = RemoteStatus {
             state: "off",
             hostname: None,
             guests: self.guests,
             owner: self.owner.clone(),
             app: self.app.clone().map(|origin| (origin, None)),
+            command: self.command(),
             problem: None,
         };
-        let unavailable = |status: RemoteStatus, problem: RemoteProblem| Inspection {
-            status: RemoteStatus { state: "unavailable", problem: Some(problem), ..status },
-            certs: false,
-            http: false,
-        };
+        let unavailable = |status: RemoteStatus, problem: RemoteProblem| RemoteStatus { state: "unavailable", problem: Some(problem), ..status };
         let node = match read_tailscale_node(&self.run) {
             Ok(node) => node,
             Err(CommandFailure::Missing) => return unavailable(off, tailscale_missing()),
@@ -409,11 +341,7 @@ impl RemoteServe {
         if node.backend_state != "Running" {
             return unavailable(known, RemoteProblem::new("tailscale_stopped", "Tailscale is not running.", None));
         }
-        let failed = |status: RemoteStatus, message: String| Inspection {
-            status: RemoteStatus { problem: Some(serve_failed(message)), ..status },
-            certs: node.certs,
-            http: false,
-        };
+        let failed = |status: RemoteStatus, message: String| RemoteStatus { problem: Some(serve_failed(message)), ..status };
         let result = match (self.run)(&["serve", "status", "--json"]) {
             Ok(result) => result,
             Err(error) => return failed(known, first_line(&error.to_string())),
@@ -421,39 +349,12 @@ impl RemoteServe {
         if result.code != 0 {
             return failed(known, detail(&result));
         }
-        let (https, http) = match serde_json::from_str::<Value>(&result.stdout) {
-            Ok(config) => served_listeners(&config, &self.target),
+        let https = match serde_json::from_str::<Value>(&result.stdout) {
+            Ok(config) => served_over_https(&config, &self.target),
             Err(error) => return failed(known, format!("tailscale serve status returned invalid JSON: {error}")),
         };
         let link = https.then(|| format!("{}/#add={}", self.app.clone().unwrap_or_default(), node.hostname.clone().unwrap_or_default()));
-        Inspection {
-            status: RemoteStatus {
-                state: if https { "on" } else { "off" },
-                app: known.app.clone().map(|(origin, _)| (origin, link)),
-                problem: self.operator_problem.lock().unwrap().clone(),
-                ..known
-            },
-            certs: node.certs,
-            http,
-        }
-    }
-
-    /// Ask Tailscale for one Serve change; a refusal is returned, and remembered when it is the operator right.
-    fn change(&self, args: &[&str]) -> Option<RemoteProblem> {
-        let result = match (self.run)(args) {
-            Ok(result) => result,
-            Err(CommandFailure::Missing) => return Some(tailscale_missing()),
-            Err(error) => return Some(serve_failed(first_line(&error.to_string()))),
-        };
-        let mut remembered = self.operator_problem.lock().unwrap();
-        if result.code != 0 {
-            let message = detail(&result);
-            let operator = format!("{}\n{}", result.stderr, result.stdout).to_lowercase().contains("operator");
-            *remembered = operator.then(|| RemoteProblem::new("operator_required", message.clone(), Some(OPERATOR_ACTION)));
-            return Some(remembered.clone().unwrap_or_else(|| serve_failed(message)));
-        }
-        *remembered = None;
-        None
+        RemoteStatus { state: if https { "on" } else { "off" }, app: known.app.clone().map(|(origin, _)| (origin, link)), ..known }
     }
 }
 

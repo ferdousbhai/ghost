@@ -9,8 +9,8 @@ Any part of Ghost's code is a ghost's to change, to fit its owner: its
 persona, its window, its daemon, its recipes. On Omarchy, Ghost is a packaged
 install whose files pacman owns and a ghost cannot write; a ghost changes
 itself by running from its own clone instead, as below, which needs no sudo beyond
-installing `cargo` and is undone in a few commands. That clone powers every
-ghost on the machine, so the ghost tells the owner before it switches over
+installing `cargo` and is undone in a few commands. That clone runs the
+machine's ghost, so the ghost tells the owner before it switches over
 and before it restarts. Read `ghost help self` for the edit, test, commit,
 build, and restart recipe. Preserve peer edits and follow the owner's
 branch/push instructions.
@@ -81,11 +81,10 @@ The window is one binary, `ghost-window`, and a client of the daemon's API.
 The same build compiles a clone's to `target/release/ghost-window`;
 run that file to use it, and close the window to go back
 to the packaged one. `packages/window/dev/qa.sh` walks a change's flows, with
-screenshots, against a scratch ghostd and sample data.
+screenshots, against a scratch ghostd and a stand-in model.
 
-The ghost's prompt carries only what runs it and which clone is its checkout;
-the loop, the restart unit, and the undo list are `ghost help self`, read on
-the turn that needs them.
+The ghost's prompt carries none of this: the loop, the restart unit, and the
+undo list are `ghost help self`, read on the turn that needs them.
 
 ## Restarting yourself
 

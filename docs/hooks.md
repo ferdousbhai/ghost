@@ -138,15 +138,14 @@ Handlers are cancelled when the turn is stopped.
 The owner's queued follow-up outranks a hook: Ghost skips `session_stop` for a
 pass while a follow-up waits, and drops a continuation when one arrives while
 the hook runs, so a hook never needs to watch for the owner typing. Nor is
-`session_stop` asked while the ghost's own question (`ghost ask`) is open: the
+`session_stop` asked while the ghost's own question (its `ask` tool) is open: the
 turn is waiting on the owner, and a continuation is not their answer. Ghost sets
 `stop_hook_active: true` on continuation passes. The hook owns its
 continuation policy, the same way Codex Stop hooks do: Ghost will keep honoring
 a blocking result until the hook accepts, the turn is stopped, or the hook fails
 open. Use `stop_hook_active` to avoid a loop that will never resolve. The
 continuation reason is a Codex-style user-role prompt (`Stop hook feedback:`)
-and Ghost shows it in the transcript as a dim "Stop hook" row. An
-informational notification alone is not.
+and Ghost shows it in the transcript as a dim "Stop hook" row.
 
 Trusted command hooks that need a classifier can invoke
 `ghostd hook-complete`. It reads
@@ -185,7 +184,7 @@ An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
   "outcome": "done",
   "title": "Prepare the report",
   "excerpt": "The report is ready.",
-  "url": "https://summonghost.com/#/ghostbox.example.ts.net/casper/c1"
+  "url": "https://summonghost.com/#/ghostbox.example.ts.net/c1"
 }
 ```
 

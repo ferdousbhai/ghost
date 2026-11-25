@@ -3,7 +3,7 @@
 pkgname=ghost
 pkgver=@@VERSION@@
 pkgrel=1
-pkgdesc="Your own data and your ghost, answered by a model on your machine"
+pkgdesc="Your own ghost, answered by a model on your machine"
 # The daemon, the ghost command and the window are native code.
 arch=('x86_64' 'aarch64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
@@ -12,10 +12,8 @@ depends=(
   'curl'
   'glib2'
   'gtk4>=4.14'
-  'hyprland>=0.56'
   'jq'
   'systemd'
-  'xdg-utils>=1.2'
 )
 makedepends=(
   'cargo'
@@ -26,7 +24,6 @@ checkdepends=(
 )
 optdepends=(
   'chromium: optional signed-in browser automation with agent-browser'
-  'sqlite: searching the Lastbook library'
 )
 # 0.11.9 and earlier split the daemon out as ghost-runtime.
 conflicts=(ghost-runtime)

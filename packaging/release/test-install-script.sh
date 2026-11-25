@@ -51,7 +51,7 @@ printf '#!/usr/bin/env bash\n"$@"\n' > "$work/bin/sudo"
 cat > "$work/bin/makepkg" <<'STUB'
 #!/usr/bin/env bash
 if [[ $1 == --printsrcinfo ]]; then
-  printf '\tdepends = gtk4>=4.14\n\tmakedepends = cargo\n\tmakedepends = desktop-file-utils\n\toptdepends = sqlite: search\n'
+  printf '\tdepends = gtk4>=4.14\n\tmakedepends = cargo\n\tmakedepends = desktop-file-utils\n\toptdepends = chromium: browser\n'
 else
   echo "makepkg $*" >> "$TEST_STATE/actions"
 fi

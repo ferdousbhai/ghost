@@ -158,7 +158,7 @@ fn policy_config() -> Value {
     })
 }
 
-// ── hook-policy.test.ts ─────────────────────────────────────────────────
+// ── Hook policy ─────────────────────────────────────────────────────────
 
 #[test]
 fn keeps_local_admission_defaults_source_order_and_public_status() {
@@ -363,7 +363,7 @@ fn reads_every_shape_of_a_clean_answer() {
     assert_eq!(*warnings.lock().unwrap(), [("session_stop hook failed open".to_string(), json!({ "source": stop.source, "exitCode": null }))]);
 }
 
-// ── hooks.test.ts ───────────────────────────────────────────────────────
+// ── Hooks ───────────────────────────────────────────────────────────────
 
 #[test]
 fn runs_session_stop_hooks_in_order_and_returns_the_first_continuation() {
@@ -729,7 +729,7 @@ fn delivers_turn_completion_to_a_local_notification_endpoint_and_honors_live_opt
         scratch.config("hooks.json", &json!({ "hooks": { "turn_end": group(json!([{ "type": "command", "command": line, "timeout": 20 }])) } }));
     let (logger, records) = Logger::recording();
     let runner = HookRunner::from_config(&config, logger, crate::env::current()).unwrap();
-    let url = "https://summonghost.com/#/ghost.example.ts.net/casper/c1";
+    let url = "https://summonghost.com/#/ghost.example.ts.net/c1";
     let notification = turn_end_event(&scratch.0, json!(url));
     runner.emit_turn_end(&notification);
     assert_eq!(warnings(&records), Vec::<String>::new());

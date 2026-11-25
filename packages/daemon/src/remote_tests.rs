@@ -1,6 +1,6 @@
 use super::*;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FAKE_TARGET: &str = "http://127.0.0.1:7717";
 const FAKE_HOSTNAME: &str = "ghostbox.example.ts.net";
@@ -97,16 +97,9 @@ impl FakeTailscale {
         RemoteServe::new(7717, &remote(owner, Guests::None, apps), self.runner())
     }
 
-    fn listeners(&self) -> (bool, bool) {
-        let fake = self.0.lock().unwrap();
-        (fake.https, fake.http)
-    }
     /// The Serve writes asked for: every `serve` call but `serve status`.
     fn writes(&self) -> Vec<String> {
         self.0.lock().unwrap().calls.iter().filter(|args| args[0] == "serve" && args[1] != "status").map(|args| args.join(" ")).collect()
-    }
-    fn forget_calls(&self) {
-        self.0.lock().unwrap().calls.clear();
     }
 }
 
@@ -120,14 +113,14 @@ fn missing_binary() -> TailscaleRunner {
 
 const APP: &str = "https://summonghost.com";
 
-// ── remote-serve.test.ts: status ────────────────────────────────────────
+// ── Serve status ────────────────────────────────────────────────────────
 
 #[test]
 fn derives_an_https_url_owner_and_guest_policy_from_tailscale_json() {
     let status = FakeTailscale::new().https().serve().status();
     assert_eq!(
         status.to_json(),
-        json!({ "state": "on", "hostname": "ghostbox.example.ts.net", "guests": "none", "owner": "owner@example.com", "app": null, "problem": null })
+        json!({ "state": "on", "hostname": "ghostbox.example.ts.net", "guests": "none", "owner": "owner@example.com", "app": null, "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717", "problem": null })
     );
     // The policy and the owner reported are the ones configured, the owner as it is compared.
     let configured = RemoteServe::new(7717, &remote(Some(" Partner@Example.com "), Guests::ReadOnly, &[]), FakeTailscale::new().runner()).status();
@@ -178,6 +171,7 @@ fn reports_a_stopped_daemon_as_unavailable() {
         logged_out.to_json(),
         json!({
             "state": "unavailable", "hostname": "ghostbox.example.ts.net", "guests": "none", "owner": "owner@example.com", "app": null,
+            "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717",
             "problem": { "code": "not_logged_in", "message": "This machine is not logged in to Tailscale.", "action": "tailscale up" },
         })
     );
@@ -196,6 +190,7 @@ fn reports_a_missing_tailscale_binary_with_its_install_action() {
         status.to_json(),
         json!({
             "state": "unavailable", "hostname": null, "guests": "none", "owner": null, "app": { "origin": APP, "url": null },
+            "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717",
             "problem": { "code": "tailscale_missing", "message": "Tailscale is not installed.", "action": "omarchy-install-service-tailscale" },
         })
     );
@@ -223,29 +218,29 @@ fn a_serve_status_that_fails_or_is_not_json_is_a_problem_not_a_state() {
 }
 
 #[test]
-fn only_a_proxy_to_this_daemon_on_443_or_80_is_ghosts_own_listener() {
-    let served = |web: Value| -> (&'static str, Vec<String>) {
+fn only_an_https_proxy_to_this_daemon_is_remote_access_and_ghost_writes_nothing() {
+    let served = |web: Value| -> &'static str {
         let fake = FakeTailscale::new();
         let inner = fake.clone();
         let runner: TailscaleRunner =
             Arc::new(move |args| if args == ["serve", "status", "--json"] { ok(json!({ "Web": web }).to_string()) } else { inner.answer(args) });
         let serve = RemoteServe::new(7717, &remote(None, Guests::None, &[]), runner);
-        let state = serve.status().state;
-        // What disable would turn off shows which listeners were taken for Ghost's.
-        fake.forget_calls();
-        serve.disable();
-        (state, fake.writes())
+        let status = serve.status();
+        // Turning Serve on is Tailscale's command, which the status names; Ghost only reads.
+        assert_eq!(status.command, "tailscale serve --bg --https=443 http://127.0.0.1:7717");
+        assert!(fake.writes().is_empty());
+        status.state
     };
     let proxy = |target: &str| json!({ "Handlers": { "/": { "Proxy": target } } });
-    // A trailing slash is the same target; another port's proxy, or another target, is someone else's.
-    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": proxy("http://127.0.0.1:7717/") })).0, "on");
-    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": proxy("http://127.0.0.1:3000") })), ("off", vec![]));
-    assert_eq!(served(json!({ "ghostbox.example.ts.net:8443": proxy(FAKE_TARGET) })), ("off", vec![]));
-    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": { "Handlers": { "/": { "Path": "/srv" } } } })), ("off", vec![]));
-    assert_eq!(served(json!({ "ghostbox.example.ts.net:80": proxy(FAKE_TARGET) })), ("off", vec!["serve --http=80 off".to_string()]));
+    // A trailing slash is the same target; another port's proxy, another target, or plain HTTP is not it.
+    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": proxy("http://127.0.0.1:7717/") })), "on");
+    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": proxy("http://127.0.0.1:3000") })), "off");
+    assert_eq!(served(json!({ "ghostbox.example.ts.net:8443": proxy(FAKE_TARGET) })), "off");
+    assert_eq!(served(json!({ "ghostbox.example.ts.net:443": { "Handlers": { "/": { "Path": "/srv" } } } })), "off");
+    assert_eq!(served(json!({ "ghostbox.example.ts.net:80": proxy(FAKE_TARGET) })), "off");
 }
 
-// ── remote-serve.test.ts: machines ──────────────────────────────────────
+// ── Machines ────────────────────────────────────────────────────────────
 
 #[test]
 fn lists_the_owners_other_untagged_nodes_online_or_not() {
@@ -266,107 +261,7 @@ fn machines_is_a_503_when_tailscale_does_not_answer() {
     assert!(error.message.starts_with("Tailscale did not answer: "), "{}", error.message);
 }
 
-// ── remote-serve.test.ts: mutations ─────────────────────────────────────
-
-#[test]
-fn serves_over_https_and_without_certificates_writes_nothing_and_says_how_to_get_them() {
-    let served = FakeTailscale::new();
-    let status = served.serve().enable();
-    assert_eq!((status.state, status.problem), ("on", None));
-    assert!(served.writes().contains(&format!("serve --bg --https=443 {FAKE_TARGET}")));
-
-    let refused = FakeTailscale::new().no_certs();
-    let status = refused.serve().enable();
-    let problem = status.problem.unwrap();
-    assert_eq!((status.state, problem.code.as_str()), ("off", "https_required"));
-    assert!(problem.message.contains("HTTPS Certificates"));
-    assert_eq!(refused.writes(), Vec::<String>::new());
-}
-
-#[test]
-fn clears_a_plain_http_entry_an_earlier_version_wrote_on_enable_and_on_disable() {
-    for certs in [true, false] {
-        let fake = FakeTailscale::new().http().with(|fake| fake.certs = certs);
-        fake.serve().enable();
-        let mut expected = vec!["serve --http=80 off".to_string()];
-        if certs {
-            expected.push(format!("serve --bg --https=443 {FAKE_TARGET}"));
-        }
-        assert_eq!(fake.writes(), expected);
-    }
-    let fake = FakeTailscale::new().no_certs().http();
-    let status = fake.serve().disable();
-    assert_eq!((status.state, status.problem), ("off", None));
-    assert_eq!(fake.writes(), ["serve --http=80 off"]);
-    assert_eq!(fake.listeners(), (false, false));
-}
-
-#[test]
-fn turns_off_both_listeners_when_an_https_one_and_an_earlier_versions_http_one_are_on() {
-    let fake = FakeTailscale::new().https().http();
-    let remote = fake.serve();
-    assert_eq!(remote.status().state, "on");
-    let status = remote.disable();
-    assert_eq!((status.state, status.problem), ("off", None));
-    assert_eq!(fake.writes(), ["serve --https=443 off", "serve --http=80 off"]);
-    assert_eq!(fake.listeners(), (false, false));
-}
-
-#[test]
-fn turns_off_only_the_listener_that_is_on_and_nothing_when_none_is() {
-    let fake = FakeTailscale::new().https();
-    let remote = fake.serve();
-    let status = remote.disable();
-    assert_eq!((status.state, status.problem), ("off", None));
-    assert_eq!(fake.writes(), ["serve --https=443 off"]);
-    fake.forget_calls();
-    remote.disable();
-    assert_eq!(fake.writes(), Vec::<String>::new());
-}
-
-#[test]
-fn turns_an_operator_failure_into_the_stable_problem_and_remembers_it_until_a_write_is_accepted() {
-    let fake = FakeTailscale::new();
-    let denied = Arc::new(AtomicBool::new(true));
-    let (inner, refusing) = (fake.clone(), denied.clone());
-    let runner: TailscaleRunner = Arc::new(move |args| {
-        if args.get(1) == Some(&"--bg") && refusing.load(Ordering::SeqCst) {
-            return Ok(CommandResult { stdout: String::new(), stderr: "Access denied.\nUse 'sudo tailscale set --operator=$USER'.".into(), code: 1 });
-        }
-        inner.answer(args)
-    });
-    let remote = RemoteServe::new(7717, &remote(None, Guests::None, &[]), runner);
-    let operator = json!({ "code": "operator_required", "message": "Access denied.", "action": "sudo tailscale set --operator=$USER" });
-    assert_eq!(remote.enable().problem.unwrap().to_json(), operator);
-    let status = remote.status();
-    assert_eq!((status.state, status.problem.unwrap().to_json()), ("off", operator));
-    denied.store(false, Ordering::SeqCst);
-    let status = remote.enable();
-    assert_eq!((status.state, status.problem), ("on", None));
-    assert_eq!(remote.status().problem, None);
-}
-
-#[test]
-fn a_refusal_that_is_not_the_operator_right_is_reported_once_and_not_remembered() {
-    let fake = FakeTailscale::new().https();
-    let inner = fake.clone();
-    let runner: TailscaleRunner = Arc::new(move |args| {
-        if args == ["serve", "--https=443", "off"] {
-            return Ok(CommandResult { stdout: "busy\n".into(), stderr: String::new(), code: 1 });
-        }
-        inner.answer(args)
-    });
-    let remote = RemoteServe::new(7717, &remote(None, Guests::None, &[]), runner);
-    let status = remote.disable();
-    assert_eq!((status.state, status.problem.unwrap().to_json()), ("on", json!({ "code": "serve_failed", "message": "busy" })));
-    assert_eq!(remote.status().problem, None);
-    // Nothing is written while Tailscale is unavailable.
-    let stopped = FakeTailscale::new().with(|fake| fake.backend_state = "Stopped".into());
-    assert_eq!(stopped.serve().enable().state, "unavailable");
-    assert_eq!(stopped.writes(), Vec::<String>::new());
-}
-
-// ── tailscale-identity.ts, by RemoteAccess::identify ────────────────────
+// ── Who is calling: RemoteAccess::identify ──────────────────────────────
 
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 

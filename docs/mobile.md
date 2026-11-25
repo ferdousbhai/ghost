@@ -1,16 +1,19 @@
 # Work from a phone
 
-The phone client is the [summonghost.com](https://summonghost.com) app. Turn on
-remote access with `ghost remote on`, then open the `app` link
-`ghost remote status` prints, `https://summonghost.com/#add=<hostname>`, on a phone signed into the
+The phone client is the [summonghost.com](https://summonghost.com) app. Serve
+Ghost to your tailnet with Tailscale's own command,
+`tailscale serve --bg --https=443 http://127.0.0.1:7717` (your ghost can run it for you),
+then open the `app` link `ghost status` prints,
+`https://summonghost.com/#add=<hostname>`, on a phone signed into the
 tailnet: the app adds this machine, then finds your other machines running
 Ghost, all in one page. The host must remain awake, logged in, and connected. A
 missing host cannot run work or deliver alerts.
 
-Remote access is served over HTTPS only, since the app is an HTTPS page: without
-the tailnet's HTTPS certificates `ghost remote on` serves nothing and says to
-turn them on (Tailscale admin console → DNS → HTTPS Certificates, then
-`ghost remote on` again). Chrome asks once to allow
+Remote access is HTTPS only, since the app is an HTTPS page: `ghost status`
+says `remote on` only for an HTTPS Serve entry. Tailscale refuses one until
+the tailnet has HTTPS certificates (Tailscale admin console → DNS → HTTPS
+Certificates), and may ask for the operator right (`sudo tailscale set
+--operator=$USER`). `tailscale serve --https=443 off` turns it off. Chrome asks once to allow
 local network access. The app has no server; its page calls each machine's
 Tailscale Serve address directly, admitted by your Tailscale identity. Ghost
 itself serves no page there. Set `remote.apps` to `[]` in the config to refuse

@@ -74,14 +74,14 @@ export async function diagnose(host) {
   }
   return new MachineError(
     "unreachable",
-    `Can't reach ${name}. Check that Tailscale is connected on this device. If it is, ${name} may be off or asleep, or remote access is off there (run ghost remote on).`,
+    `Can't reach ${name}. Check that Tailscale is connected on this device. If it is, ${name} may be off or asleep, or it is not served to your tailnet (ghost status on that machine says how).`,
   );
 }
 
 function refusal(host, status, error) {
   const name = shortName(host);
   const code = error?.code || "";
-  if (status === 401 || code === "peer_only") {
+  if (status === 401) {
     return new MachineError(
       "not-owner",
       `${name} only answers its owner. This device is signed in to Tailscale as someone else.`,

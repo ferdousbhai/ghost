@@ -256,12 +256,12 @@ fn derives_titles() {
         ("hey what is the latest on tsla", "What is the latest on tsla"),
         ("let's try setting up whatsapp", "Try setting up whatsapp"),
         ("Create a doc called \"Tool Approval Test Feb 26\" with some placeholder content", "Tool Approval Test Feb 26"),
-        ("Weekly delegation check. Run `bun scripts/handoff-report.ts`.", "Weekly delegation check"),
+        ("Weekly backup check. Run `omacloud status` and tell me.", "Weekly backup check"),
         ("[Attachment: profile_picture.jpg]\nwhat do you see", "What do you see"),
         ("what is in this picture?\n\n![image](attachments/k1-0123abcd.jpg)", "What is in this picture"),
         ("Find the latest Grok 4.5 release notes online and summarize them", "Find the latest Grok 4.5 release notes"),
         // Each way a first clause ends, and each opener that is dropped; the
-        // answers are the ones the earlier (TypeScript) daemon gave.
+        // answers are the ones the earlier daemon gave.
         ("Could you please help me to book the dentist; then lunch", "Book the dentist"),
         ("help me fix the printer — it jams", "Fix the printer"),
         ("tell me, please, what time it is", "Tell me, please, what time it"),

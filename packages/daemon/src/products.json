@@ -2,7 +2,7 @@
   "products": [
     {
       "id": "ghost",
-      "need": "An orchestration layer for all your agent harnesses on Omarchy",
+      "need": "Your own persona on Omarchy, answered by a model on your machine",
       "name": "Ghost",
       "source": "https://github.com/ferdousbhai/ghost",
       "site": "/ghost",

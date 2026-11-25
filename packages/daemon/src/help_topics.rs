@@ -1,6 +1,6 @@
 //! The long recipes a ghost needs only when it does one particular thing:
-//! editing or restarting itself, handing work to a coding
-//! agent, finding a note, transcribing audio. The prompt's Ghost section
+//! editing or restarting itself, work that outlives a turn, its notes, a
+//! website, the owner's products. The prompt's Ghost section
 //! indexes them by name and `ghost help <topic>` prints them, so their cost
 //! lands on the turn that needs them and not on every turn. The
 //! text is still contract text the ghost acts on: keep it exact, and keep the
@@ -63,7 +63,7 @@ const BACKGROUND_LINES: &[&str] = &[
 
 const MEMORY_LINES: &[&str] = &[
     r"# Memory",
-    r"Your durable memory is the `Notes` folder of the owner's documents directory (Owner context): Markdown notes that you and the owner both read and write, so write them for a person to read, and read a note again before changing it. `Reminders` beside it is the owner's to-do list, one checklist per list. They are yours to keep whether or not iCloud syncs them. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
+    r"Your durable memory is the `Notes` folder of the owner's documents directory (Owner context): Markdown notes that you and the owner both read and write, so write them for a person to read, and read a note again before changing it. `Reminders` beside it is the owner's to-do list, one checklist per list. Both are kept whether or not iCloud syncs them. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
     r"Known names or terms: `rg -n -i '<term>'` in `Notes` and `Reminders`, widening to the whole directory only if that finds nothing.",
     r"Unknown wording or location: search by meaning with Recall through its `recall` skill (`ghost help products` gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
     r"Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
@@ -158,7 +158,7 @@ mod tests {
         let text = topic("memory");
         for kept in [
             "`rg -n -i '<term>'` in `Notes` and `Reminders`",
-            "They are yours to keep whether or not iCloud syncs them",
+            "Both are kept whether or not iCloud syncs them",
             "`Reminders/<List>.md`, `- [ ] text 📅 YYYY-MM-DD`",
             "Recall through its `recall` skill",
             "without it, use filenames and `rg`",

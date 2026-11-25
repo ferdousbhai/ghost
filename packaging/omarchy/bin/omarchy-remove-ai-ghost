@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# omarchy:summary=Remove Ghost, keeping every ghost home in place.
+# omarchy:summary=Remove Ghost, keeping your ghost home in place.
 # omarchy:requires-sudo=true
 
 set -euo pipefail
@@ -9,4 +9,4 @@ systemctl --user disable --now ghostd.service 2>/dev/null || true
 omarchy-pkg-drop ghost
 
 echo ""
-echo "Ghost has been removed. Your ghosts, settings, and state remain, and installing it again picks them up."
+echo "Ghost has been removed. Your ghost, settings, and state remain, and installing it again picks them up."

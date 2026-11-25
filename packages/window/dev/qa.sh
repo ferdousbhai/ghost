@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # The window's QA scripts (dev/qa/*.jsonl, omui's scripted QA: README "Scripted QA" in omui), each in a fresh window
-# built with feature `qa`, against one scratch ghostd and sample data (stand-in.sh), on a broadway display of its own:
+# built with feature `qa`, against one scratch ghostd and a stand-in model (stand-in.sh), on a broadway display of its own:
 # private HOME, XDG directories and runtime, no session bus, no Wayland or X display, so no window opens anywhere and
 # nothing of the desktop this is run from is read. Any failed command, GLib warning or critical fails the run.
 # The gate (`.githooks/verify`) runs it.

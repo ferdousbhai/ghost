@@ -100,7 +100,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    // ── xdg-user-dirs.test.ts ───────────────────────────────────────────
+    // ── XDG user directories ────────────────────────────────────────────
 
     #[test]
     fn resolves_the_owners_documents_directory_the_way_the_desktop_does() {

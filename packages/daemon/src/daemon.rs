@@ -290,7 +290,7 @@ mod tests {
         assert!(parse_args(&args(&["--port"])).unwrap_err().contains("argument missing"));
     }
 
-    // ── main.test.ts ────────────────────────────────────────────────────
+    // ── Start-up ────────────────────────────────────────────────────────
 
     #[test]
     fn defaults_to_no_overrides() {

@@ -1,12 +1,9 @@
-//! Ghost's window: the owner's own data (CONTRACTS.md "Sources") and the ghost that answers from it, in one
-//! GTK 4 app. It is a client of ghostd's API, like the `ghost` CLI; it keeps no data of its own.
+//! Ghost's window: the conversation with the ghost, in a GTK 4 app. It is a client of ghostd's API, like the `ghost` CLI; it keeps no data of its own.
 //! The look, the icons and the shared widgets are omui's; `style.css` holds only what is Ghost's own.
 
 mod api;
 mod ask;
-mod connect;
 mod md;
-mod source;
 mod ui;
 
 use gtk::{glib, prelude::*};

@@ -1,6 +1,6 @@
 # Getting started
 
-Install Ghost, create a persona, and talk in its window or the terminal.
+Install Ghost and talk to it in its window or the terminal.
 
 For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
 of — this page.
@@ -13,8 +13,7 @@ of — this page.
   pacman installs them with the package.
 - **A model on this machine.** Every turn runs on a local model, so your
   notes, chats, mail and files stay on the computer: a GGUF file and
-  `llama-server` ([section 5](#5-the-local-model)). Without one Ghost shows
-  your data but answers nothing.
+  `llama-server` ([section 5](#5-the-local-model)). Without one Ghost answers nothing.
 
 ## 1. Install the package
 
@@ -75,9 +74,10 @@ never loaded into a conversation automatically. No daemon restart is needed.
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: the ghost reads and writes
-it from its shell. A ghost's own memory is two folders
-there, with or without iCloud: `Notes` (Markdown notes) and `Reminders` (one
-checklist per list). Ghost does not index the directory
+it from its shell. Two folders there matter to a ghost, with or without
+iCloud: `Notes` (Markdown notes, yours and its own: its memory, which it
+keeps current) and `Reminders` (your to-do list, one checklist per list, to
+which it adds what it needs you to do). Ghost does not index the directory
 or read any of it until a request calls for it. For search by meaning, a
 ghost can offer to install Recall, which indexes only the folders you choose.
 
@@ -92,8 +92,8 @@ systemctl --user enable --now ghostd.service
 
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
-launcher opens the window (`ghost-window`): your notes, reminders, mail, and
-other connected data in one place, with the ghost answering from them.
+launcher opens the window (`ghost-window`): your conversations with the
+ghost.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -101,8 +101,8 @@ Confirm the client can reach and authenticate to the daemon:
 ghost status
 ```
 
-It prints the daemon URL, the token file path, the ghost, and
-remote-access state; that it prints at all means the daemon answered and
+It prints the daemon URL, the token file path, the ghost, and whether it is
+served to your tailnet; that it prints at all means the daemon answered and
 accepted the token (otherwise it exits 3 or 4). The bearer token is minted on
 first run at `~/.local/state/ghost/api-token` (mode 0600); the window and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
@@ -156,13 +156,13 @@ type, and `Enter` sends (`Shift+Enter` is a newline). The answer streams in
 with a line saying what the ghost is doing; `Esc` or **Stop** ends a running
 turn. Your conversations are listed beside it, and **New chat** starts one.
 
-The sidebar's other pages are your own data, one per connected product
-(notes, reminders, mail, and so on), each with its list, a search, and a
-reader. **Connect** lists what you can connect and runs each product's own
-setup step in a terminal.
+Your notes, mail, photos and the rest stay in their own apps. The ghost
+reaches them through each app's command line, and installs or connects one
+when you ask it to (`ghost help products` is its guide).
 
-When the ghost needs a decision it asks with `ghost ask` instead of guessing;
-your next message in that conversation is the answer.
+When the ghost needs a decision it asks instead of guessing, with the ways
+forward as answers to pick from, the one it recommends first; your next
+message in that conversation is the answer.
 
 ## 7. The same ghost from the terminal
 
@@ -206,7 +206,7 @@ codes.
 window dial (7717 by default).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
-leaves personas, conversations, tokens, and your documents untouched.
+leaves the ghost home, conversations, tokens, and your documents untouched.
 
 ## 9. Optional, once you are talking
 
@@ -215,10 +215,10 @@ leaves personas, conversations, tokens, and your documents untouched.
 - **Talk instead of typing.** Omarchy's dictation types into the window's
   composer as into any app. Ghost adds no speech stack of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
-- **Remote access.** `ghost remote`
-  turns the opt-in Tailscale Serve address on and off, and prints the
-  summonghost.com link that adds this machine to the app, the phone client
-  ([mobile](mobile.md)).
+- **Remote access.** Tailscale Serve is the opt-in: `tailscale serve --bg --https=443 http://127.0.0.1:7717`
+  turns it on and `tailscale serve --https=443 off` turns it off. `ghost
+  status` then prints the summonghost.com link that adds this machine to the
+  app, the phone client ([mobile](mobile.md)).
   Only your own login gets in;
   to let other tailnet members read along, set `remote.guests` to
   `"read-only"` in the config. On a
