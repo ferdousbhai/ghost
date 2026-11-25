@@ -500,7 +500,8 @@ impl Shared {
                     let mut frames = Vec::new();
                     let mut size = 0usize;
                     let mut at = next;
-                    while at < state.frames.len() && size < 256 * 1024 {
+                    // A failed store closed the buffer: its frames are gone, and the failure is all there is to send.
+                    while state.failure.is_none() && at < state.frames.len() && size < 256 * 1024 {
                         let frame = state.frames.at(at)?;
                         size += frame.len();
                         frames.push(frame);
@@ -897,3 +898,7 @@ pub fn start_daemon_server(options: ServerOptions) -> std::result::Result<Listen
     let server = Server::start(address, move |request, responder| serving.serve(request, responder)).map_err(|error| error.to_string())?;
     Ok(ListeningServer { port: server.address.port(), server, shared })
 }
+
+#[cfg(test)]
+#[path = "server_tests.rs"]
+mod tests;
