@@ -16,11 +16,11 @@ their GitHub identity; an existing instruction to push is sufficient.
 
 1. Preserve concurrent edits. Never stash, restore, or discard a peer's work.
 2. Update contracts and all affected consumers together. Add a focused test
-   for behavior changes; run the affected tests and package typecheck.
+   for behavior changes; run the affected tests and `clippy` for the package.
 3. Commit the problem, change, and reason. Justify any prompt-budget increase
    in the message. A ghost-authored change can identify its model in a trailer.
 4. Push only within the authorized scope. Master pushes require the full
-   `pnpm verify` gate after the final commit; never bypass the hook.
+   `.githooks/verify` gate after the final commit; never bypass the hook.
 5. If using a PR, describe the resulting behavior and validation, then remove
    its worktree and branches after merge.
 

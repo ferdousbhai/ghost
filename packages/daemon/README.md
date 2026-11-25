@@ -1,4 +1,4 @@
-# `@ghost/daemon`
+# `ghostd`
 
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
 conversations, the local model and its loop, hooks,
@@ -10,15 +10,14 @@ The stable storage and API contract is in
 
 ## Local development
 
-Install workspace dependencies from the repository root, then run focused
-checks from this package:
+Run focused checks from the repository root:
 
 ```sh
-pnpm --filter @ghost/daemon typecheck
-pnpm --filter @ghost/daemon test
+cargo clippy -p ghostd --all-targets --locked -- -D warnings
+cargo test -p ghostd --locked
 ```
 
-The daemon runs on Bun. Tests must use a scratch ghosts root and ephemeral port.
+The daemon is a native Rust binary. Tests must use a scratch ghosts root and ephemeral port.
 Never point a development daemon at `~/ghosts`, never contact the live port
 7717, and never restart the owner's `ghostd.service` from a test. Deployment follows
 [the maintenance runbook](../../docs/self-maintenance.md).

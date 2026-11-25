@@ -112,7 +112,7 @@ A blocking result is injected the way Codex and Claude Code inject Stop feedback
 user-role prompt whose text is `Stop hook feedback:` plus the reason, so the
 latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 `transcript_path` is the conversation log on disk
-([`conversation-log.ts`](../packages/daemon/src/conversation-log.ts)), one JSON
+([`conversation_log.rs`](../packages/daemon/src/conversation_log.rs)), one JSON
 object per line, so a hook can review the whole owner turn, not just the
 current pass: an owner message is `{"type":"user","text"}` with no `origin`; a
 follow-up or hook continuation carries `origin` `"follow_up"` or `"hook"`.

@@ -9,7 +9,7 @@ of — this page.
 
 - **Omarchy**. Ghost depends on that desktop; there is no generic
   Arch/Hyprland support promise.
-- **Bun** at runtime (Omarchy's `bun-bin` or Arch's `bun`), plus the rest of the package's dependencies —
+- **The package's dependencies** —
   pacman installs them with the package.
 - **A model on this machine.** Every turn runs on a local model, so your
   notes, chats, mail and files stay on the computer: a GGUF file and
@@ -234,7 +234,7 @@ leaves personas, conversations, tokens, and your documents untouched.
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the window and CLI read `~/.local/state/ghost/api-token` |
 | A turn fails at once | Is `local.model` set in `~/.config/ghost/config.json`, and does `llama-server` start? `journalctl --user -u ghostd -e` has its error |
 
-After an upgrade, restart the daemon to load the new bundle:
+After an upgrade, restart the daemon to load the new build:
 
 ```sh
 systemctl --user restart ghostd.service

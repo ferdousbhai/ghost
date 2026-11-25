@@ -98,7 +98,7 @@ ghost home, and its directory name is the ghost's name:
 
 A machine has one ghost: the one ghost home under the root. A daemon start
 that finds none makes `<root>/ghost/` with a seeded `character.md`
-([`ghosts.ts`](packages/daemon/src/ghosts.ts)); that is the only way Ghost
+([`ghosts.rs`](packages/daemon/src/ghosts.rs)); that is the only way Ghost
 makes one, and it never renames, moves, or removes a home. A root holding more
 than one is refused at start with an error naming them. No route, command or
 URL carries the ghost's name; `GET /api/ghost` reports it. Another machine's
@@ -117,7 +117,7 @@ version kept in a ghost home is not read.
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
 with a heading naming the persona. Its complete body, bounded by
-`MAX_CHARACTER_BODY_LENGTH` in [`persona.ts`](packages/daemon/src/persona.ts),
+`MAX_CHARACTER_BODY_LENGTH` in [`persona.rs`](packages/daemon/src/persona.rs),
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
@@ -158,7 +158,7 @@ A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
 (`pins.json`, `reads.json`, `questions.json`); clients mint ids (the window `app-…`,
 the CLI `cli-…`). The directory is
 the directory the model's commands run in and holds Ghost's log, `.conversation.jsonl`
-([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
+([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)): one JSON
 object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, and title
@@ -222,7 +222,7 @@ backup: Trash and snapper are undo, not retention.
 
 Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
-[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). They hold only what a ghost must follow
+the budget test in [`prompt_policy.rs`](packages/daemon/src/prompt_policy.rs). They hold only what a ghost must follow
 before it would look anything up: the owner-context section names the
 Documents directory as where finished work and notes live, and
 the Ghost section has a ghost ask the owner with `ghost ask`, says a
@@ -274,7 +274,7 @@ turn. `GHOST_SESSION` is in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
 table, no jobs API, and cannot cancel what it did not start;
 the Ghost section (`GHOST_POLICY` in
-[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)) points at the recipe,
+[`prompt_policy.rs`](packages/daemon/src/prompt_policy.rs)) points at the recipe,
 `ghost help background`.
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
@@ -329,8 +329,8 @@ cookies. The first app's `<origin>/#add=<hostname>` link (`app` in
 `GET /api/remote`) exists only while Serve is on.
 
 Route parsing, validation, status codes, and reverse states are executable in
-[`server.ts`](packages/daemon/src/server.ts) and
-[`server.test.ts`](packages/daemon/test/server.test.ts). Stable route families:
+[`server.rs`](packages/daemon/src/server.rs) and
+[`server_tests.rs`](packages/daemon/src/server_tests.rs). Stable route families:
 
 Rows beginning `/sessions/` are relative to `/api`.
 
@@ -343,7 +343,7 @@ Rows beginning `/sessions/` are relative to `/api`.
 | `GET /api/sources/:source/items/:item/picture` | Owner-only. The item's small picture as `image/jpeg` or `image/png` bytes (Photos: iCloud's thumbnail, fetched into icloud-photos' cache on first use). Whatever file the product names, only a JPEG or PNG of at most 4 MiB is sent; anything else is `404 not_found`, and a source without pictures `405 no_pictures`. |
 | `GET /api/connections` | Owner-only `{ connections: [{ id, label, brings, state, detail, actions: [{ label, command }] }] }`: the [connections](#connections). |
 | `GET /api/search?q=&sources=&limit=` | Owner-only `{ items, failed: [{ source, message }] }` across the comma-separated `sources` (default `files,lastbook,mail,contacts`), up to `limit` (1–50, 8) from each. |
-| `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the entry script after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
+| `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev2)). |
 | `GET\|PUT /api/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `POST /api/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the local model, with no persona, conversation, or tools (`409 no_local_model` with none configured; `502 completion_failed` for an empty answer). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. |
@@ -370,7 +370,7 @@ remote access is the summonghost.com app.
 ### Turn wire
 
 The event union is the contract; clients must ignore unknown future event
-types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
+types. See [`session_host.rs`](packages/daemon/src/session_host.rs), which builds the events, and [`server.rs`](packages/daemon/src/server.rs), which encodes them. A turn
 emits `start`, then ordered `pass` (the model starting on a prompt), `text_*`, `thinking` (the model's reasoning, as
 far as it shows it; never logged), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or model command has printed), `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
@@ -394,7 +394,7 @@ period (once attached readers finish) or server shutdown, and are not history.
 
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
-[`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
+[`cli/mod.rs`](packages/daemon/src/cli/mod.rs). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
 named verb there (character, sessions
 and their title/pin/read/delete/stop, `ghost ask` for a ghost's question to
 the owner, hooks, remote, and status), so a
@@ -405,7 +405,7 @@ A change acknowledges in one capitalised sentence ending in a full stop; an
 empty list prints a sentence saying so (`No conversations.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
-([`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+([`help_topics.rs`](packages/daemon/src/help_topics.rs)),
 needing no daemon; they
 are prompt-visible contract text like the policy sections. Addressing is
 `-s`, then
@@ -436,9 +436,9 @@ CLI, user unit, docs and licenses, and the window with its launcher entry and
 icons. It replaces the `ghost-runtime` package that 0.11.9 and earlier split
 the daemon into. Removing it preserves owner data.
 
-- [`packages/daemon`](packages/daemon/src/main.ts) owns ghost homes and the
+- [`packages/daemon`](packages/daemon/src/daemon.rs) owns ghost homes and the
   persona prompt, configuration, authentication, conversations, the local model and its loop, hooks, lifecycle,
-  HTTP, and the `ghost` CLI. Bun is the production runtime.
+  HTTP, and the `ghost` CLI. It is a native Rust binary.
 - [`packages/window`](packages/window/src/main.rs) is Ghost's window
   (`ghost-window`, app id `io.github.ferdousbhai.Ghost`): a Rust and GTK 4
   app whose look (Omarchy's current theme, followed live), icons, and shared
@@ -453,19 +453,19 @@ the daemon into. Removing it preserves owner data.
   `xdg-terminal-exec`), and Ask, a conversation with the ghost. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
   file). One instance: a second launch presents the first.
-  It is a workspace
-  package whose scripts are cargo's (`build`, `lint`: rustfmt and clippy,
-  `test`), and `test` also walks its main flows with omui's scripted QA
+  It is a member of the
+  cargo workspace at the repository root, built, linted (rustfmt and clippy)
+  and tested with the daemon, and the gate also walks its main flows with omui's scripted QA
   ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
   feature, against the same scratch ghostd and sample data, on a private
-  broadway display), so the gate covers it; the package build's `check()`
+  broadway display); the package build's `check()`
   skips the QA, and no release build has the feature. It makes the `ghost`
   package per-architecture; the launcher entry
   `io.github.ferdousbhai.Ghost.desktop` opens it, and `--version` prints the
   release version.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
-  prints the daemon restart that loads the new bundle. A release is cut locally
+  prints the daemon restart that loads the new build. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
   archive and `SHA256SUMS`; Omarchy's sync reads GitHub's
@@ -497,7 +497,7 @@ browser. Setup and recovery are in `ghost help browser`.
 The owner's own data reaches Ghost through the products that already hold
 it, never a copy: each product keeps its sign-in, sync, local copy, CLI, and
 skill, and its standalone app stays an alternative.
-[`sources.ts`](packages/daemon/src/sources.ts) adapts each one to the same
+[`sources.rs`](packages/daemon/src/sources.rs) adapts each one to the same
 three operations, `list` (newest first, paged by an opaque `cursor`), `read`
 (one item), and `search`, returning items
 `{ source, id, title, snippet, at, path?, page?, line? }` (`at` in
@@ -529,7 +529,7 @@ that failed rather than failing whole. Reads are cut at 256 KiB.
 
 ### Connections
 
-Onboarding is the products' own. [`connections.ts`](packages/daemon/src/connections.ts)
+Onboarding is the products' own. [`connections.rs`](packages/daemon/src/connections.rs)
 lists what the owner can connect (`search`: Recall, `icloud`, `mail`,
 `calendar`, `contacts`, `google`: google-session's sign-in for Keep and
 Photos, `google-drive`: an rclone remote of type `drive`, `google-workspace`:
@@ -561,14 +561,14 @@ the context in tokens (32768), the idle minutes before it stops (5), and how
 deeply the model reasons, as its chat template names the depths (`low`).
 It is what every turn runs on ([Turns](#turns)); nothing else can be chosen.
 
-[`local-model.ts`](packages/daemon/src/local-model.ts) spawns one
+[`local_model.rs`](packages/daemon/src/local_model.rs) spawns one
 `llama-server` on the first turn, on a loopback port picked at spawn
 with a key minted at spawn, every layer on the GPU, and stops it once unused
 for the idle minutes, on daemon stop, or after a failed load. ghostd kills
 only that process. Another program loading the same file (Lastbook) holds its
 own copy; Ghost does not stop it, and frees its own when idle.
 
-A pass ([`local-turn.ts`](packages/daemon/src/local-turn.ts)) is the
+A pass ([`local_turn.rs`](packages/daemon/src/local_turn.rs)) is the
 smallest loop that works: it sends the ghost's whole persona, plus the "Running locally" section and the current time, and, as the
 user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
 prompt. Nothing is searched ahead of the model. It keeps no session of its
@@ -576,7 +576,7 @@ own, streams its text, reasoning, and commands, with a running command's
 latest output (at most every 100 ms). It sends `reasoning_effort`;
 sampling is the model's and llama-server's own default.
 
-It offers one tool ([`local-tools.ts`](packages/daemon/src/local-tools.ts)),
+It offers one tool ([`local_turn.rs`](packages/daemon/src/local_turn.rs)),
 `bash(command)`: a command line run as the owner in the conversation's
 directory, with the conversation's environment, no sandbox and no
 confirmation. The owner's products are command lines with a skill each under
@@ -587,7 +587,7 @@ reads. The section names one command only, the owner's
 choice among `claude -p` (streaming JSON through `jq`, since it otherwise
 prints nothing until it ends), `codex exec` and `agy -p`: Omarchy's default agent
 (`omarchy default agent`) when it is one of them and installed, else the
-first installed ([`coding-agent.ts`](packages/daemon/src/coding-agent.ts)). With none of the three installed it names none. Ghost teaches the
+first installed ([`coding_agent.rs`](packages/daemon/src/coding_agent.rs)). With none of the three installed it names none. Ghost teaches the
 model no command of its own for this. The section asks
 it to say what a command will do, and wait for the owner's yes, before one
 that sends something to another person, spends money, or deletes what cannot
@@ -640,7 +640,7 @@ is answered with what was wrong, and nothing runs.
 - Any part of Ghost's code is a ghost's to change to fit its owner. A
   packaged install's files are pacman's and never edited: a ghost changes itself by running
   from its own clone under the owner's home (an `ExecStart` drop-in for
-  ghostd, a `~/.local/bin/ghost` launcher), each step undone
+  ghostd, a `~/.local/bin/ghost` link), each step undone
   by removing it.
 
 Focused tests beside the implementation are part of these contracts. GitHub

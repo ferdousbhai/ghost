@@ -79,3 +79,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Rust crates
+
+Ghost's binaries are built from the Rust crates below, each under the licence
+named. `Cargo.lock` holds the exact versions.
+
+The daemon and the `ghost` command (`ghostd`, `ghost`):
+
+- MIT or Apache-2.0: equivalent, hashbrown, httparse, indexmap, itoa, libc,
+  regex, regex-automata, regex-syntax, serde_core, serde_json
+- MIT: zmij
+- Unlicense or MIT: aho-corasick, memchr
+- Zlib: foldhash
+
+The window (`ghost-window`):
+
+- MIT and ISC: omui (its Lucide icons and Strata theme code are above)
+- MIT, the [gtk-rs](https://gtk-rs.org) crates: cairo-rs, cairo-sys-rs,
+  gdk-pixbuf, gdk-pixbuf-sys, gdk4, gdk4-sys, gio, gio-sys, glib, glib-sys,
+  gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
+  pango, pango-sys
+- MIT: memoffset, pulldown-cmark, slab, urlencoding, zmij
+- MIT or Apache-2.0: async-channel, base64, bitflags, concurrent-queue,
+  crossbeam-utils, equivalent, event-listener, event-listener-strategy,
+  field-offset, form_urlencoded, futures-channel, futures-core,
+  futures-executor, futures-io, futures-task, futures-util, hashbrown, idna,
+  idna_adapter, indexmap, itoa, libc, log, once_cell, parking,
+  percent-encoding, pin-project-lite, serde, serde_core, serde_json,
+  smallvec, stable_deref_trait, unicase, ureq, url, utf8_iter, utf_types
+- Unlicense or MIT: memchr
+- Zlib: foldhash
+- Unicode-3.0: icu_collections, icu_locale_core, icu_normalizer,
+  icu_normalizer_data, icu_properties, icu_properties_data, icu_provider,
+  litemap, potential_utf, tinystr, writeable, yoke, zerofrom, zerotrie,
+  zerovec

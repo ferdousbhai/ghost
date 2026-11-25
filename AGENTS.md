@@ -39,18 +39,19 @@ The common defect here is a change that works on the path you tested and is miss
 - **Surfaces.** Daemon API, `ghost` CLI, the window, the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
-- **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help-topics.ts`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
+- **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help_topics.rs`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in the budget test in `packages/daemon/src/prompt_policy.rs` to its exact new size so growth is always a decision.
 - **Docs.** Protocol changes land in `docs/hooks.md`.
 
 ## Commands
 
 ```sh
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build --release --locked
+bash packages/window/dev/qa.sh
 ```
 
-Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test <file>`; the window suite always runs whole) plus `typecheck` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (installed by `pnpm install`) refuses a master push until `pnpm verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (workspace build, typecheck, lint, tests, and the packaging checks) has passed on that tree; run `pnpm verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Never run biome's `--write --unsafe`: its fix for an unused function is to rename it with a leading underscore, which silences the lint forever, so a `function _name` in a `src/` tree is dead code to delete, not a convention. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by `packages/daemon/test/prompt-budget.test.ts`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
+Verify with the smallest proof: the tests you touched (`cargo test -p <crate> <name>`; the window's scripted QA is `packages/window/dev/qa.sh`) plus `clippy` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (format, lints, a release build, tests, the window's scripted QA, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by the test in `packages/daemon/src/prompt_policy.rs`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
 
-The daemon runs on Bun (`engines.bun`), not Node. Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.
+Both packages are Rust, in one cargo workspace at the repository root. Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.

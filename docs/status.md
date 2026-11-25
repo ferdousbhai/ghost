@@ -38,6 +38,8 @@ Done since:
   steps show as the window's status line. Claude prints its steps only as
   streamed JSON, so its command pipes that through `jq`.
 - `ghost smoke` is deleted.
+- The daemon and the `ghost` command are Rust, built with the window from
+  one cargo workspace. The package needs no Bun.
 
 Not done:
 
@@ -49,7 +51,8 @@ Not done:
   run on this machine yet; when it does, Ghost and Lastbook should both use
   its endpoint.
 
-The last release is 0.12.0, the first since the work resumed. Omarchy's
+The last release is 0.12.0, the first since the work resumed and the last
+one in TypeScript. Master is ahead of it with the Rust daemon, unreleased. Omarchy's
 package repository still carries 0.11.9: its recipe is the old two-package
 one, and takes 0.12.0 only once the single-package recipe
 (`packaging/omarchy/`) is merged there. Until then

@@ -9,7 +9,7 @@ Any part of Ghost's code is a ghost's to change, to fit its owner: its
 persona, its window, its daemon, its recipes. On Omarchy, Ghost is a packaged
 install whose files pacman owns and a ghost cannot write; a ghost changes
 itself by running from its own clone instead, as below, which needs no sudo beyond
-installing `pnpm` and is undone in a few commands. That clone powers every
+installing `cargo` and is undone in a few commands. That clone powers every
 ghost on the machine, so the ghost tells the owner before it switches over
 and before it restarts. Read `ghost help self` for the edit, test, commit,
 build, and restart recipe. Preserve peer edits and follow the owner's
@@ -31,38 +31,24 @@ override, not a second package distribution channel.
 
 ## Run ghostd from a clone
 
-The package installs `/usr/bin/ghostd`, a shell launcher that execs Bun against
-`/usr/lib/ghost/runtime/ghostd.js`. That bundle is read-only and root-owned; a
-ghost cannot change it. To run your own build instead, keep the packaged unit
-and override its `ExecStart` with a launcher of the same shape.
+The package installs `/usr/bin/ghostd`, a native binary. It is read-only and
+root-owned; a ghost cannot change it. To run your own build instead, keep the
+packaged unit and override its `ExecStart` with the clone's binary.
 
-Clone and build first. The build needs `git` and `bun` (both installed with
-Ghost) and `pnpm` (`omarchy-pkg-add pnpm`, which asks for the owner's
-password):
+Clone and build first. The build needs `git`, GTK 4 (installed with Ghost) and
+`cargo` (`omarchy-pkg-add rust`, which asks for the owner's password):
 
 ```sh
 git clone https://github.com/ferdousbhai/ghost ~/src/ghost
-cd ~/src/ghost && pnpm install && pnpm build
+cd ~/src/ghost && cargo build --release --locked
 ```
 
-Write the launchers, one for the daemon and one for the `ghost` command, so
-`ghost help` and the CLI match the code that runs (`~/.local/bin` comes first
-on the unit's `PATH`):
+Link the `ghost` command to the clone's build, so `ghost help` and the CLI
+match the code that runs (`~/.local/bin` comes first on the unit's `PATH`):
 
 ```sh
 mkdir -p ~/.local/bin
-cat > ~/.local/bin/ghostd-dev <<'EOF'
-#!/usr/bin/env bash
-exec /usr/bin/bun \
-  /home/<owner>/src/ghost/packages/daemon/dist/main.js "$@"
-EOF
-chmod 755 ~/.local/bin/ghostd-dev
-cat > ~/.local/bin/ghost <<'EOF'
-#!/usr/bin/env bash
-exec /usr/bin/bun \
-  /home/<owner>/src/ghost/packages/daemon/dist/cli/main.js "$@"
-EOF
-chmod 755 ~/.local/bin/ghost
+ln -sf ~/src/ghost/target/release/ghost ~/.local/bin/ghost
 ```
 
 Then override the unit with a drop-in, the file `systemctl --user edit`
@@ -73,7 +59,7 @@ mkdir -p ~/.config/systemd/user/ghostd.service.d
 cat > ~/.config/systemd/user/ghostd.service.d/clone.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=%h/.local/bin/ghostd-dev
+ExecStart=%h/src/ghost/target/release/ghostd
 EOF
 systemctl --user daemon-reload
 ```
@@ -86,14 +72,14 @@ unit, so the restart survives the daemon it stops.
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is
 invisible to the daemon's writes even when the file permissions allow them.
 
-The daemon runs on Bun, not Node, and it runs the *built* bundle. Source edits
-reach the running daemon only after `pnpm build` and a restart.
+The daemon runs the *built* binary. Source edits reach the running daemon
+only after `cargo build --release --locked` and a restart.
 
 ### The window
 
 The window is one binary, `ghost-window`, and a client of the daemon's API.
-`pnpm build` compiles a clone's to `packages/window/target/release/ghost-window`
-(it needs `cargo`); run that file to use it, and close the window to go back
+The same build compiles a clone's to `target/release/ghost-window`;
+run that file to use it, and close the window to go back
 to the packaged one. `packages/window/dev/qa.sh` walks a change's flows, with
 screenshots, against a scratch ghostd and sample data.
 
@@ -144,7 +130,7 @@ GHOSTS_ROOT="$task_canary_dir/ghosts" \
 GHOSTD_CONFIG="$task_canary_dir/config.json" \
 GHOSTD_HOOKS="$task_canary_dir/hooks.json" \
 XDG_STATE_HOME="$task_canary_dir/state" \
-  bun packages/daemon/dist/main.js --port 7799
+  target/release/ghostd --port 7799
 ```
 
 Run that command from the built checkout. Point the client at the canary
@@ -158,7 +144,7 @@ owner hooks from running. Every canary must use its own ghost root.
 
 ## Rollback
 
-- **Code.** `git revert <sha>` in the checkout, `pnpm build`, restart. The
+- **Code.** `git revert <sha>` in the checkout, `cargo build --release --locked`, restart. The
   commit that broke it and the revert that fixed it are both in `git log`, and
   the reason for each restart is in `journalctl --user -u 'ghost-restart-*'`.
 - **A ghost home.** Deletion moves the whole directory to the freedesktop trash
@@ -179,8 +165,7 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 ## Back to the package
 
 ```sh
-rm -f ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghostd-dev \
-  ~/.local/bin/ghost
+rm -f ~/.config/systemd/user/ghostd.service.d/clone.conf ~/.local/bin/ghost
 systemctl --user daemon-reload
 ```
 
