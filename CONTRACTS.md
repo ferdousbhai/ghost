@@ -121,8 +121,11 @@ with a heading naming the persona. Its complete body, bounded by
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
-There is no ghost-private memory store. A ghost's memory across
-conversations is two folders of the owner's Documents directory, kept
+There is no ghost-private memory store. A ghost's state across
+conversations is two folders of the owner's Documents directory, which it
+keeps current unasked (it reads the note that covers a task before starting,
+updates it in the same turn as a fact arrives or the task advances, and
+merges notes on one subject as it goes; `ghost help memory`), kept
 whether or not iCloud is connected: `Notes`, Markdown notes (owner facts,
 decisions, its own reflections), and `Reminders`, one Markdown checklist per
 list (`Reminders/<List>.md`: `- [ ] text 📅 YYYY-MM-DD`, indented lines its
