@@ -135,7 +135,7 @@ fn writes_each_entry_with_the_keys_and_key_order_every_version_has_written() {
     let root = Scratch::new();
     for (entry, line) in &written {
         assert_eq!(entry.to_json().to_string(), *line);
-        // A line an earlier version wrote reads back as the same entry.
+        // Each line reads back as the same entry.
         assert_eq!(parse_entry(line.as_bytes()).as_ref(), Some(entry), "{line}");
     }
     let entries: Vec<LogEntry> = written.iter().map(|(entry, _)| entry.clone()).collect();
@@ -403,7 +403,7 @@ fn a_text_holding_a_unicode_line_separator_is_one_entry_to_the_log_and_the_index
 }
 
 #[test]
-fn skips_records_it_does_not_write_retired_ones_or_a_later_versions() {
+fn skips_records_it_does_not_write() {
     let _turn = index_tests();
     let root = Scratch::new();
     let owner = user_at("2026-10-15T00:00:00Z", "hello");

@@ -8,10 +8,8 @@ const FAKE_HOSTNAME: &str = "ghostbox.example.ts.net";
 /// What the fake `tailscale` reports and what Ghost asked of it.
 struct FakeState {
     calls: Vec<Vec<String>>,
-    /// The listeners `tailscale serve status` reports; `serve --bg` turns HTTPS on and `serve ... off` either off.
+    /// Whether `tailscale serve status` reports this daemon served on HTTPS.
     https: bool,
-    /// A plain-HTTP (port 80) entry only an earlier version wrote; Ghost now only clears it.
-    http: bool,
     certs: bool,
     backend_state: String,
 }
@@ -26,7 +24,7 @@ fn ok(stdout: impl Into<String>) -> Result<CommandResult, CommandFailure> {
 impl FakeTailscale {
     /// A `tailscale` that answers `status`, `serve status`, `serve --bg`, and `serve ... off` from its fields.
     fn new() -> Self {
-        Self(Arc::new(Mutex::new(FakeState { calls: Vec::new(), https: false, http: false, certs: true, backend_state: "Running".into() })))
+        Self(Arc::new(Mutex::new(FakeState { calls: Vec::new(), https: false, certs: true, backend_state: "Running".into() })))
     }
     fn with(self, change: impl FnOnce(&mut FakeState)) -> Self {
         change(&mut self.0.lock().unwrap());
@@ -34,9 +32,6 @@ impl FakeTailscale {
     }
     fn https(self) -> Self {
         self.with(|fake| fake.https = true)
-    }
-    fn http(self) -> Self {
-        self.with(|fake| fake.http = true)
     }
     fn no_certs(self) -> Self {
         self.with(|fake| fake.certs = false)
@@ -63,22 +58,10 @@ impl FakeTailscale {
             .to_string()),
             "serve status --json" => {
                 let mut web = serde_json::Map::new();
-                for port in [fake.https.then_some("443"), fake.http.then_some("80")].into_iter().flatten() {
-                    web.insert(format!("{FAKE_HOSTNAME}:{port}"), json!({ "Handlers": { "/": { "Proxy": FAKE_TARGET } } }));
+                if fake.https {
+                    web.insert(format!("{FAKE_HOSTNAME}:443"), json!({ "Handlers": { "/": { "Proxy": FAKE_TARGET } } }));
                 }
                 ok(if web.is_empty() { json!({}) } else { json!({ "Web": web }) }.to_string())
-            }
-            "serve --bg --https=443 http://127.0.0.1:7717" => {
-                fake.https = true;
-                ok("")
-            }
-            "serve --https=443 off" => {
-                fake.https = false;
-                ok("")
-            }
-            "serve --http=80 off" => {
-                fake.http = false;
-                ok("")
             }
             _ => Err(CommandFailure::Other(format!("Unexpected command: {line}"))),
         }
@@ -134,7 +117,7 @@ fn links_the_first_app_to_this_machine_only_once_serve_is_on_https() {
         FakeTailscale::new().https().serve_with(None, &apps).status().to_json()["app"],
         json!({ "origin": APP, "url": "https://summonghost.com/#add=ghostbox.example.ts.net" })
     );
-    for fake in [FakeTailscale::new().http().no_certs(), FakeTailscale::new()] {
+    for fake in [FakeTailscale::new().no_certs(), FakeTailscale::new()] {
         assert_eq!(fake.serve_with(None, &apps).status().to_json()["app"], json!({ "origin": APP, "url": null }));
     }
 }
@@ -145,17 +128,11 @@ fn links_a_conversation_in_the_first_app_only_while_there_is_an_app_link() {
     assert_eq!(linked.conversation_url("c 1").as_deref(), Some("https://summonghost.com/#/ghostbox.example.ts.net/c%201"));
     for serve in [
         FakeTailscale::new().https().serve_with(None, &[]),
-        FakeTailscale::new().no_certs().http().serve_with(None, &[APP]),
+        FakeTailscale::new().no_certs().serve_with(None, &[APP]),
         FakeTailscale::new().serve_with(None, &[APP]),
     ] {
         assert_eq!(serve.conversation_url("c1"), None);
     }
-}
-
-#[test]
-fn reports_a_plain_http_entry_an_earlier_version_wrote_as_off_since_no_app_can_use_it() {
-    let status = FakeTailscale::new().no_certs().http().serve().status();
-    assert_eq!((status.state, status.problem), ("off", None));
 }
 
 #[test]
