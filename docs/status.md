@@ -9,14 +9,20 @@ interface and can be easily found by the user". The ghost answers from that
 data and works with it through each app's command line; the apps show it.
 What they said it must be:
 
-- A local model answers, always. Its tools stay minimal: search, and running
-  shell commands.
+- A local model answers, always. Its tools stay minimal: a shell, and a
+  question to the owner.
 - Coding agents run in the background, with their work visible in Ghost as a
   sub-agent's is in a coding agent.
 - No release without the owner's go.
 
 Done since:
 
+- 2026-11-26, a second cleanup, agreed with the owner: the turn_end hook
+  (push alerts replaced its one use), the read-only guest role (only the
+  owner reaches Ghost), the ghosts root (the home is
+  `~/.local/share/ghost`, the ghost named by its persona's title, and an
+  earlier `~/ghosts/<name>` is moved there once). The model's state is now
+  saved at each stop and restored at the next start.
 - 2026-11-25, a cleanup of what only wrapped something else: the window's
   Sources and Connect pages and their adapters (each product has its own
   app, and the ghost reaches data from its shell), `ghost remote` (Serve is
