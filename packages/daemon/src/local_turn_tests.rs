@@ -555,7 +555,7 @@ fn completes_a_prompt_with_no_persona_conversation_or_tools() {
 /// Every pass adds it, after the whole persona; it has its own ceiling,
 /// measured with the longest command. The exact rendered size when it was last
 /// set: raising it is a decision, justified in the commit that does.
-const LOCAL_CEILING: usize = 1000;
+const LOCAL_CEILING: usize = 874;
 
 #[test]
 fn the_local_section_stays_at_its_ceiling_and_names_only_the_owners_coding_agent() {
