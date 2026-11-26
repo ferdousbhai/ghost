@@ -58,6 +58,10 @@ fn transcript_markdown(body: &Value) -> String {
             let command = part.get("arguments").and_then(|arguments| arguments.get("command")).and_then(Value::as_str);
             match (kind, name, command) {
                 (Some("thinking"), _, _) => text.trim().lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"),
+                // The note that stands for the conversation before it, in later turns.
+                (Some("handoff"), _, _) => {
+                    format!("> Handoff note\n>\n{}", text.trim().lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"))
+                }
                 // The question and its answers are the text that follows.
                 (Some("toolCall"), Some("ask"), _) => "> ⚙ ask".to_string(),
                 (Some("toolCall"), Some("bash"), Some(command)) => {

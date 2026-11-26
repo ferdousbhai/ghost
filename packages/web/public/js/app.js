@@ -546,6 +546,8 @@ function render(messages, keep = false) {
       const flush = () => { if (said.length) log.append(assistantBubble(said.join("\n\n"))); said = []; };
       for (const p of m.content || []) {
         if (p.type === "thinking") { flush(); if (p.text?.trim()) log.append(thinkingBlock(p.text.trim())); }
+        // The note that stands for the conversation before it, in later turns.
+        else if (p.type === "handoff") { flush(); log.append(thinkingBlock("Handoff note\n\n" + (p.text || "").trim())); }
         else if (p.type === "toolCall") { flush(); log.append(toolBlock(p.name, p.arguments, p.output || "", p.failed === true)); }
         else if (p.text?.trim()) said.push(p.text);
       }

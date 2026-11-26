@@ -93,6 +93,11 @@ struct State {
     listeners: Vec<Listener>,
     next_listener: u64,
     shutting_down: bool,
+    /// How much of the model's context each conversation filled at its last
+    /// round, in tokens as the server counted them, and in characters.
+    context: HashMap<String, (u64, usize)>,
+    /// Conversations whose last turn was sent only its newest part, for want of room: they are due a handoff note.
+    outgrown: HashSet<String>,
 }
 
 struct Inner {
@@ -349,6 +354,8 @@ impl SessionHost {
                 *turn_id = crate::random::uuid();
                 owner_prompt = text.clone();
             }
+            // Before the message is logged, so the note stands for everything before it.
+            self.hand_off_if_full(id, abort, emit)?;
             append_log(&session_dir, id, &[LogEntry::user(text.clone(), origin)])?;
             // The owner's message answers what the ghost was waiting on.
             if !from_hook {
@@ -396,11 +403,75 @@ impl SessionHost {
         Ok(terminal)
     }
 
-    /// How much earlier conversation a turn is handed: as many characters as
-    /// the model's context has tokens, about a third of it, which leaves the
-    /// rest for the prompt, this turn's commands and the answer.
-    fn history_chars(&self) -> usize {
-        self.inner.local_model.as_ref().map_or(crate::config::DEFAULT_LOCAL_CONTEXT, LocalModel::context_size) as usize
+    /// The model's context, in tokens.
+    fn context_size(&self) -> u64 {
+        self.inner.local_model.as_ref().map_or(crate::config::DEFAULT_LOCAL_CONTEXT, LocalModel::context_size)
+    }
+
+    /// How much of the context the conversation fills: what the server
+    /// counted at its last round, else a third of its characters, a guess
+    /// that the first count replaces.
+    fn context_used(&self, id: &str, messages: &[Value]) -> u64 {
+        let counted = self.inner.state.lock().unwrap().context.get(id).map(|(tokens, _)| *tokens);
+        counted.unwrap_or((crate::local_turn::characters(messages) / 3) as u64)
+    }
+
+    /// The newest of `messages` that fit in half the context, by how many
+    /// characters a token has been in this conversation.
+    fn fitting(&self, id: &str, messages: Vec<Value>) -> Vec<Value> {
+        let per_token = match self.inner.state.lock().unwrap().context.get(id) {
+            Some((tokens, characters)) if *tokens > 0 => (*characters as f64 / *tokens as f64).max(1.0),
+            _ => 2.0,
+        };
+        crate::local_turn::newest(messages, (self.context_size() as f64 / 2.0 * per_token) as usize)
+    }
+
+    /// A conversation grows as long as the model's context permits. Past three
+    /// quarters of it the ghost writes a handoff note, asked as the
+    /// conversation's own next message, and later turns are handed the note in
+    /// place of everything before it. The log keeps all of it. A note that
+    /// could not be written changes nothing: the turn goes on as it would have.
+    fn hand_off_if_full(&self, id: &str, abort: &Abort, emit: &Emit) -> Result<()> {
+        let Some(answerer) = self.inner.answerer.clone() else { return Ok(()) };
+        let session_dir = self.session_dir();
+        let entries = read_log(&session_dir, id)?.unwrap_or_default();
+        let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
+        let used = self.context_used(id, &history);
+        let outgrown = self.inner.state.lock().unwrap().outgrown.contains(id);
+        if history.is_empty() || (!outgrown && used < self.context_size() * 3 / 4) {
+            return Ok(());
+        }
+        // Already too long for the note's own request to fit: the note is written from the newest of it that does.
+        if outgrown || used >= self.context_size() * 9 / 10 {
+            history = self.fitting(id, history);
+        }
+        emit(json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+        let quiet: Emit = Arc::new(|_| {});
+        let written = self.run_pass(id, answerer.as_ref(), crate::local_turn::HANDOFF_PROMPT.to_string(), history, &quiet, &mut 0, abort)?;
+        let note: Vec<&str> =
+            written.content.iter().filter_map(|part| if let AssistantPart::Text { text } = part { Some(text.as_str()) } else { None }).collect();
+        let note = note.join("\n\n");
+        if written.error.is_some() || crate::js_text::trim(&note).is_empty() {
+            self.inner.logger.warn("no handoff note was written", json!({ "conversation": id, "reason": written.error }));
+            // Counted as full, so the turn itself is handed only the newest of the conversation.
+            let full = self.context_size();
+            let mut state = self.inner.state.lock().unwrap();
+            let characters = state.context.get(id).map_or(full as usize * 2, |(_, characters)| *characters);
+            state.context.insert(id.to_string(), (full, characters));
+            return Ok(());
+        }
+        append_log(
+            &session_dir,
+            id,
+            &[LogEntry::Assistant { at: clock::now_iso(), content: vec![AssistantPart::Handoff { text: note }], error: None }],
+        )?;
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            state.context.remove(id);
+            state.outgrown.remove(id);
+        }
+        self.announce(id);
+        Ok(())
     }
 
     /// Run one prompt on the local model, handed the conversation so far as
@@ -410,16 +481,32 @@ impl SessionHost {
         let session_dir = self.session_dir();
         // Every pass's prompt is already the log's last entry: the owner's message, a follow-up, or a hook's feedback.
         let entries = read_log(&session_dir, id)?.unwrap_or_default();
-        let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX, self.history_chars());
-        let pass_prompt = match history.pop() {
-            Some(last) if last["role"] == "user" => last["content"].as_str().unwrap_or(prompt).to_string(),
-            other => {
-                history.extend(other);
-                prompt.to_string()
-            }
-        };
+        let whole = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
         emit(json!({ "type": "pass" }));
-        let result = self.run_pass(id, answerer.as_ref(), pass_prompt, history, emit, blocks, abort)?;
+        let mut attempt = 0;
+        let result = loop {
+            // No note could be written and the context is full, or the server has just
+            // said so: the newest of it that fits is sent, rather than the turn failing.
+            let trimmed = attempt > 0 || self.context_used(id, &whole) >= self.context_size();
+            if trimmed {
+                self.inner.state.lock().unwrap().outgrown.insert(id.to_string());
+            }
+            let mut history = if trimmed { self.fitting(id, whole.clone()) } else { whole.clone() };
+            let pass_prompt = match history.pop() {
+                Some(last) if last["role"] == "user" => last["content"].as_str().unwrap_or(prompt).to_string(),
+                other => {
+                    history.extend(other);
+                    prompt.to_string()
+                }
+            };
+            let result = self.run_pass(id, answerer.as_ref(), pass_prompt, history, emit, blocks, abort)?;
+            // Refused for length before anything was said or done: once more, with what fits.
+            let refused = result.content.is_empty() && result.error.as_deref().is_some_and(|error| error.starts_with(crate::local_turn::NO_FIT));
+            if !refused || attempt > 0 {
+                break result;
+            }
+            attempt += 1;
+        };
         append_log(&session_dir, id, &[LogEntry::Assistant { at: clock::now_iso(), content: result.content, error: result.error.clone() }])?;
         Ok(result.error.map(|message| error_event(if result.aborted { "aborted" } else { "error" }, &message)))
     }
@@ -552,6 +639,9 @@ impl SessionHost {
                 emit(event);
             }
             PassEvent::Error { message } => error = Some(message),
+            PassEvent::Context { tokens, characters } => {
+                self.inner.state.lock().unwrap().context.insert(id.to_string(), (tokens, characters));
+            }
         };
 
         let mut env = self.inner.env.clone();

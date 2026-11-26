@@ -184,7 +184,8 @@ the directory the model's commands run in and holds Ghost's log, `.conversation.
 ([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)): one JSON
 object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's parts in the order they happened (`thinking`, its
-reasoning; `text`; `toolCall` with its `arguments`, `output`, the whole of
+reasoning; `handoff`, the note that stands for the conversation before it;
+`text`; `toolCall` with its `arguments`, `output`, the whole of
 what it returned as the model was given it, and `failed` on one that
 failed; a failed turn carries `error`), the owner's `!` commands, and title
 records. A torn last line is skipped, and so is any record ghostd does not write (an earlier version's `harness`, `compacted`, `resources` or `handoff`); logs are never rewritten. ghostd is the log's
@@ -537,13 +538,21 @@ A pass ([`local_turn.rs`](packages/daemon/src/local_turn.rs)) is the
 smallest loop that works: it sends the ghost's whole persona and the "Running
 locally" section as the system message, the same bytes every turn; then the
 conversation so far as the messages it was (`conversation_messages`: what
-each side said, and each earlier call with what it returned, an output over
-`REPLAY_OUTPUT_CHARS` keeping its start and end; reasoning is not handed on);
+each side said, and each earlier call with what it returned, whole;
+reasoning is not handed on);
 then the prompt. Nothing in it changes between turns, the time included (the
 model runs `date`), so llama-server reuses what it has already read and only
-the new message costs time. Past as many characters as the context has
-tokens, the oldest turns go, a stretch at once. Nothing is searched ahead of
-the model. It keeps no session of its
+the new message costs time. Nothing is searched ahead of the model.
+
+A conversation grows as long as the context permits, by the server's own
+count of each request. Past three quarters of the context, the next turn
+starts with a handoff: the ghost is asked, as the conversation's own next
+message, to write a note of it (`HANDOFF_PROMPT`), the note is logged as a
+`handoff` part, and from then on a turn is handed the note in place of
+everything before it. The log and every client still hold the whole
+conversation. A request the server refuses for length is retried once with
+the newest of the conversation that fits, and the turn after it starts with
+the handoff, written from that same newest part. It keeps no session of its
 own, streams its text, reasoning, and commands, with a running command's
 latest output (at most every 100 ms). It sends `reasoning_effort`;
 sampling is the model's and llama-server's own default.

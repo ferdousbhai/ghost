@@ -991,6 +991,80 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     assert_eq!(sessions(&host)[0]["question"], Value::Null);
 }
 
+// A conversation grows as long as the model's context permits; near it, the
+// ghost writes a note that stands for everything before it.
+#[test]
+fn a_conversation_near_the_models_context_is_handed_off_in_a_note_before_the_next_turn() {
+    let home = Home::new();
+    // Past three quarters of the default context, at three characters to a token.
+    let long = "x".repeat(80_000);
+    let fake = Fake::new(replies(&[&long, "The owner said hello; I answered at length.", "Still here."]));
+    let host = home.host(&fake);
+    turn(&host, "hello");
+    assert_eq!(fake.calls().len(), 1);
+
+    let events = turn(&host, "are you there?");
+    assert_has(&events, json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 3);
+    // The note is asked for as the conversation's own next message, so the server has read all before it.
+    assert_eq!(calls[1].prompt, crate::local_turn::HANDOFF_PROMPT);
+    assert_eq!(calls[1].history, vec![json!({ "role": "user", "content": "hello" }), json!({ "role": "assistant", "content": long })]);
+    // The turn itself is handed the note in place of the conversation, with the owner's words.
+    assert_eq!(calls[2].history, Vec::<Value>::new());
+    assert_eq!(
+        calls[2].prompt,
+        "The conversation before this was handed off. Its note:\n\nThe owner said hello; I answered at length.\n\nare you there?"
+    );
+    // The log keeps everything, the note among it, and the owner reads it all.
+    let logged = messages(&host, "c1");
+    let contents: Vec<&Value> = logged.iter().map(|message| &message["content"][0]).collect();
+    assert_eq!(contents[2], &json!({ "type": "handoff", "text": "The owner said hello; I answered at length." }));
+    assert_eq!(contents[3], &json!({ "type": "text", "text": "are you there?" }));
+    assert_eq!(contents[4], &json!({ "type": "text", "text": "Still here." }));
+
+    // Short again, the next turn hands off nothing.
+    turn(&host, "good");
+    assert_eq!(fake.calls().len(), 4);
+    assert_eq!(fake.calls()[3].prompt, "good");
+}
+
+// What the server counted is what decides, when it has said.
+#[test]
+fn the_servers_own_count_of_the_context_decides_when_it_is_known() {
+    let home = Home::new();
+    let counted = FakeTurn { events: vec![PassEvent::Context { tokens: 30_000, characters: 90_000 }, said("a", "short")], ..Default::default() };
+    let fake = Fake::new([vec![counted], replies(&["a note", "after"])].concat());
+    let host = home.host(&fake);
+    turn(&host, "hello");
+    turn(&host, "again");
+    assert_eq!(fake.calls()[1].prompt, crate::local_turn::HANDOFF_PROMPT);
+    assert!(fake.calls()[2].prompt.ends_with("a note\n\nagain"));
+}
+
+// One long output can overflow the context inside a turn. The turn fails saying
+// so, and the next one is not stuck: the note is written from what still fits.
+#[test]
+fn a_conversation_that_outgrew_the_context_mid_turn_is_handed_off_from_what_still_fits() {
+    let home = Home::new();
+    let outgrown = FakeTurn {
+        events: vec![said("a", &"y".repeat(30_000)), PassEvent::Context { tokens: 40_000, characters: 90_000 }],
+        fail: Some("The conversation no longer fits the model's context (40000 of 32768 tokens).".to_string()),
+        ..Default::default()
+    };
+    let fake = Fake::new([vec![says(&"x".repeat(60_000)), outgrown], replies(&["a note of what fits", "carrying on"])].concat());
+    let host = home.host(&fake);
+    turn(&host, "first");
+    turn(&host, "second");
+    turn(&host, "third");
+    let calls = fake.calls();
+    assert_eq!(calls[2].prompt, crate::local_turn::HANDOFF_PROMPT);
+    // Not the whole conversation, which no longer fits, but its newest turn, from the owner's message on.
+    assert_eq!(calls[2].history.len(), 2);
+    assert_eq!(calls[2].history[0], json!({ "role": "user", "content": "second" }));
+    assert!(calls[3].prompt.ends_with("a note of what fits\n\nthird"), "{}", &calls[3].prompt[..80]);
+}
+
 // The model's `ask` tool reaches the same open question a pass is handed the way to set.
 #[test]
 fn a_pass_puts_its_question_to_the_owner_in_its_own_conversation() {

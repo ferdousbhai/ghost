@@ -43,6 +43,11 @@ pub enum AssistantPart {
         /// that never ended, or one an earlier version logged.
         output: Option<String>,
     },
+    /// The note the ghost wrote when the conversation neared the model's
+    /// context: later turns are handed it in place of everything before it.
+    Handoff {
+        text: String,
+    },
     /// A part in a shape this version does not write, kept as it was read so a client is served it unchanged.
     Other(Value),
 }
@@ -57,6 +62,7 @@ impl AssistantPart {
         match self {
             Self::Text { text } => json!({ "type": "text", "text": text }),
             Self::Thinking { text } => json!({ "type": "thinking", "text": text }),
+            Self::Handoff { text } => json!({ "type": "handoff", "text": text }),
             Self::ToolCall { id, name, arguments, failed, output } => {
                 let mut part = json!({ "type": "toolCall", "id": id, "name": name, "arguments": arguments });
                 if *failed {
@@ -76,6 +82,7 @@ impl AssistantPart {
         let typed = match value.get("type").and_then(Value::as_str) {
             Some("text") => text("text").map(|text| Self::Text { text }),
             Some("thinking") => text("text").map(|text| Self::Thinking { text }),
+            Some("handoff") => text("text").map(|text| Self::Handoff { text }),
             Some("toolCall") => match (text("id"), text("name"), value.get("arguments")) {
                 (Some(id), Some(name), Some(arguments)) => Some(Self::ToolCall {
                     id,

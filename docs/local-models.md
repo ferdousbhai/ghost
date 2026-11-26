@@ -63,9 +63,15 @@ lists Intel GPUs only, so Ghost starts the server itself.
   follow-up, each after a warm-up turn: 39 s and 30 s before; 28 s and 10 s,
   then 33 s and 8 s, after. The server log shows why: the follow-up reads
   only the new message. One run each.
+- The handoff, tried the same day with `contextSize` 6000: after outputs
+  that filled it, the next turn wrote a 1,700-character note in 143 s, and
+  the turn after took 8 s and answered from the note. Columns of numbers ran
+  at about 1.3 characters to a token, so nothing here estimates tokens from
+  characters where the server's count is known.
 - The same day the time left the prompt. Asked the time or the weekday, the
   model ran `date` unprompted, twice of twice. Writing a note, it once dated
-  a change with the note's old date rather than look the date up.
+  a change with the note's old date rather than look the date up; the recipe no
+  longer asks for dates.
 
 ## Gemma 4 26B A4B (2026-11-17)
 

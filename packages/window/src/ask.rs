@@ -337,6 +337,12 @@ impl AskPage {
                                 for (index, part) in parts.iter().enumerate() {
                                     match part["type"].as_str() {
                                         Some("thinking") => answer.think(part["text"].as_str().unwrap_or_default()),
+                                        // The note that stands for the conversation before it, in later turns.
+                                        Some("handoff") => {
+                                            *answer.thinking.borrow_mut() = None;
+                                            answer.think(&format!("Handoff note\n\n{}", part["text"].as_str().unwrap_or_default().trim()));
+                                            *answer.thinking.borrow_mut() = None;
+                                        }
                                         Some("toolCall") => {
                                             let id = index.to_string();
                                             answer.call(&id, part["name"].as_str().unwrap_or_default(), &part["arguments"]);
