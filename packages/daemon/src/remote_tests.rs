@@ -89,12 +89,12 @@ impl FakeTailscale {
         Arc::new(move |args| fake.answer(args))
     }
 
-    /// A RemoteServe over this fake, as the earlier daemon built one by default: no guests, no apps.
+    /// A RemoteServe over this fake, with no apps.
     fn serve(&self) -> RemoteServe {
         self.serve_with(None, &[])
     }
     fn serve_with(&self, owner: Option<&str>, apps: &[&str]) -> RemoteServe {
-        RemoteServe::new(7717, &remote(owner, Guests::None, apps), self.runner())
+        RemoteServe::new(7717, &remote(owner, apps), self.runner())
     }
 
     /// The Serve writes asked for: every `serve` call but `serve status`.
@@ -103,8 +103,8 @@ impl FakeTailscale {
     }
 }
 
-fn remote(owner: Option<&str>, guests: Guests, apps: &[&str]) -> RemoteConfig {
-    RemoteConfig { owner: owner.map(str::to_string), guests, apps: apps.iter().map(|app| app.to_string()).collect() }
+fn remote(owner: Option<&str>, apps: &[&str]) -> RemoteConfig {
+    RemoteConfig { owner: owner.map(str::to_string), apps: apps.iter().map(|app| app.to_string()).collect() }
 }
 
 fn missing_binary() -> TailscaleRunner {
@@ -120,11 +120,11 @@ fn derives_an_https_url_owner_and_guest_policy_from_tailscale_json() {
     let status = FakeTailscale::new().https().serve().status();
     assert_eq!(
         status.to_json(),
-        json!({ "state": "on", "hostname": "ghostbox.example.ts.net", "guests": "none", "owner": "owner@example.com", "app": null, "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717", "problem": null })
+        json!({ "state": "on", "hostname": "ghostbox.example.ts.net", "owner": "owner@example.com", "app": null, "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717", "problem": null })
     );
-    // The policy and the owner reported are the ones configured, the owner as it is compared.
-    let configured = RemoteServe::new(7717, &remote(Some(" Partner@Example.com "), Guests::ReadOnly, &[]), FakeTailscale::new().runner()).status();
-    assert_eq!((configured.guests.as_str(), configured.owner.as_deref(), configured.state), ("read-only", Some("partner@example.com"), "off"));
+    // The owner reported is the one configured, as it is compared.
+    let configured = RemoteServe::new(7717, &remote(Some(" Partner@Example.com "), &[]), FakeTailscale::new().runner()).status();
+    assert_eq!((configured.owner.as_deref(), configured.state), (Some("partner@example.com"), "off"));
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn reports_a_stopped_daemon_as_unavailable() {
     assert_eq!(
         logged_out.to_json(),
         json!({
-            "state": "unavailable", "hostname": "ghostbox.example.ts.net", "guests": "none", "owner": "owner@example.com", "app": null,
+            "state": "unavailable", "hostname": "ghostbox.example.ts.net", "owner": "owner@example.com", "app": null,
             "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717",
             "problem": { "code": "not_logged_in", "message": "This machine is not logged in to Tailscale.", "action": "tailscale up" },
         })
@@ -179,17 +179,17 @@ fn reports_a_stopped_daemon_as_unavailable() {
     let silent: TailscaleRunner = Arc::new(|_| {
         Ok(CommandResult { stdout: String::new(), stderr: "failed to connect to local tailscaled\n(is it running?)\n".into(), code: 1 })
     });
-    let problem = RemoteServe::new(7717, &remote(None, Guests::None, &[]), silent).status().problem.unwrap();
+    let problem = RemoteServe::new(7717, &remote(None, &[]), silent).status().problem.unwrap();
     assert_eq!(problem.to_json(), json!({ "code": "tailscale_stopped", "message": "failed to connect to local tailscaled" }));
 }
 
 #[test]
 fn reports_a_missing_tailscale_binary_with_its_install_action() {
-    let status = RemoteServe::new(7717, &remote(None, Guests::None, &[APP]), missing_binary()).status();
+    let status = RemoteServe::new(7717, &remote(None, &[APP]), missing_binary()).status();
     assert_eq!(
         status.to_json(),
         json!({
-            "state": "unavailable", "hostname": null, "guests": "none", "owner": null, "app": { "origin": APP, "url": null },
+            "state": "unavailable", "hostname": null, "owner": null, "app": { "origin": APP, "url": null },
             "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717",
             "problem": { "code": "tailscale_missing", "message": "Tailscale is not installed.", "action": "omarchy-install-service-tailscale" },
         })
@@ -204,7 +204,7 @@ fn a_serve_status_that_fails_or_is_not_json_is_a_problem_not_a_state() {
         Arc::new(move |args| if args == ["serve", "status", "--json"] { serve_status.clone() } else { fake.answer(args) })
     };
     let problem = |runner: TailscaleRunner| {
-        let status = RemoteServe::new(7717, &remote(None, Guests::None, &[]), runner).status();
+        let status = RemoteServe::new(7717, &remote(None, &[]), runner).status();
         assert_eq!((status.state, status.hostname.as_deref()), ("off", Some(FAKE_HOSTNAME)));
         status.problem.unwrap().to_json()
     };
@@ -224,7 +224,7 @@ fn only_an_https_proxy_to_this_daemon_is_remote_access_and_ghost_writes_nothing(
         let inner = fake.clone();
         let runner: TailscaleRunner =
             Arc::new(move |args| if args == ["serve", "status", "--json"] { ok(json!({ "Web": web }).to_string()) } else { inner.answer(args) });
-        let serve = RemoteServe::new(7717, &remote(None, Guests::None, &[]), runner);
+        let serve = RemoteServe::new(7717, &remote(None, &[]), runner);
         let status = serve.status();
         // Turning Serve on is Tailscale's command, which the status names; Ghost only reads.
         assert_eq!(status.command, "tailscale serve --bg --https=443 http://127.0.0.1:7717");
@@ -256,7 +256,7 @@ fn lists_the_owners_other_untagged_nodes_online_or_not() {
 
 #[test]
 fn machines_is_a_503_when_tailscale_does_not_answer() {
-    let error = RemoteServe::new(7717, &remote(None, Guests::None, &[]), missing_binary()).machines().unwrap_err();
+    let error = RemoteServe::new(7717, &remote(None, &[]), missing_binary()).machines().unwrap_err();
     assert_eq!((error.code.as_str(), error.status), ("tailscale_unavailable", 503));
     assert!(error.message.starts_with("Tailscale did not answer: "), "{}", error.message);
 }
@@ -265,58 +265,50 @@ fn machines_is_a_503_when_tailscale_does_not_answer() {
 
 const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 
-fn access(owner: Option<&str>, guests: Guests) -> RemoteAccess {
-    RemoteAccess::with_self_login(&remote(owner, guests, &[]), Box::new(|| Some("Owner@Example.com".to_string())))
+fn access(owner: Option<&str>) -> RemoteAccess {
+    RemoteAccess::with_self_login(&remote(owner, &[]), Box::new(|| Some("Owner@Example.com".to_string())))
 }
 
-fn role(access: &RemoteAccess, login: &str) -> Option<Role> {
-    access.identify(Some(login), LOOPBACK).map(|identity| identity.role)
+/// Whether `login` is admitted: only the owner is.
+fn admitted(access: &RemoteAccess, login: &str) -> bool {
+    access.identify(Some(login), LOOPBACK).is_some()
 }
 
 #[test]
-fn admits_the_owner_fully_and_guests_read_only() {
-    let access = access(None, Guests::ReadOnly);
-    assert_eq!(
-        access.identify(Some("guest@example.com"), LOOPBACK),
-        Some(TailscaleIdentity { login: "guest@example.com".into(), role: Role::Guest })
-    );
-    assert_eq!(
-        access.identify(Some("owner@example.com"), LOOPBACK),
-        Some(TailscaleIdentity { login: "owner@example.com".into(), role: Role::Owner })
-    );
+fn admits_the_owner_and_no_one_else() {
+    let access = access(None);
+    assert_eq!(access.identify(Some("owner@example.com"), LOOPBACK), Some(TailscaleIdentity { login: "owner@example.com".into() }));
     // A login is compared without its case or the space around it, and reported that way.
-    assert_eq!(
-        access.identify(Some(" OWNER@example.com "), LOOPBACK),
-        Some(TailscaleIdentity { login: "owner@example.com".into(), role: Role::Owner })
-    );
-    assert_eq!((Role::Owner.as_str(), Role::Guest.as_str()), ("owner", "guest"));
+    assert_eq!(access.identify(Some(" OWNER@example.com "), LOOPBACK), Some(TailscaleIdentity { login: "owner@example.com".into() }));
+    // Anyone else on the tailnet is no one.
+    assert_eq!(access.identify(Some("guest@example.com"), LOOPBACK), None);
     // No header, or an empty one, is no identity.
     assert_eq!(access.identify(None, LOOPBACK), None);
     assert_eq!(access.identify(Some("  "), LOOPBACK), None);
 }
 
 #[test]
-fn honours_guests_none_and_a_configured_owner_login() {
-    let access = access(Some(" Guest@Example.com "), Guests::None);
-    assert_eq!(role(&access, "owner@example.com"), None);
-    assert_eq!(role(&access, "guest@example.com"), Some(Role::Owner));
-    assert_eq!(access.owner_login().as_deref(), Some("guest@example.com"));
+fn honours_a_configured_owner_login() {
+    let access = access(Some(" Partner@Example.com "));
+    assert!(!admitted(&access, "owner@example.com"));
+    assert!(admitted(&access, "partner@example.com"));
+    assert_eq!(access.owner_login().as_deref(), Some("partner@example.com"));
     // An empty configured owner is none: the node's own login owns.
-    let unset = self::access(Some("  "), Guests::None);
-    assert_eq!(role(&unset, "owner@example.com"), Some(Role::Owner));
-    assert_eq!(role(&unset, "guest@example.com"), None);
+    let unset = self::access(Some("  "));
+    assert!(admitted(&unset, "owner@example.com"));
+    assert!(!admitted(&unset, "partner@example.com"));
 }
 
 #[test]
 fn accepts_the_identity_only_on_a_loopback_connection() {
-    let access = access(None, Guests::ReadOnly);
-    let from = |peer: &str| access.identify(Some("owner@example.com"), peer.parse().unwrap()).map(|identity| identity.role);
+    let access = access(None);
+    let from = |peer: &str| access.identify(Some("owner@example.com"), peer.parse().unwrap()).is_some();
     for loopback in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
-        assert_eq!(from(loopback), Some(Role::Owner), "{loopback}");
+        assert!(from(loopback), "{loopback}");
     }
     // The tailnet address itself, a LAN address, and the rest of 127.0.0.0/8 are not where Serve calls from.
     for elsewhere in ["100.101.102.103", "192.168.1.20", "127.0.0.2", "::ffff:192.168.1.20", "fd7a:115c:a1e0::1"] {
-        assert_eq!(from(elsewhere), None, "{elsewhere}");
+        assert!(!from(elsewhere), "{elsewhere}");
     }
     assert_eq!(access.identify(Some("owner@example.com"), IpAddr::V6(Ipv6Addr::UNSPECIFIED)), None);
 }
@@ -327,32 +319,32 @@ fn resolves_the_owner_once_it_is_known_and_asks_again_until_then() {
     let count = asked.clone();
     // Tailscale does not answer the first time.
     let access = RemoteAccess::with_self_login(
-        &remote(None, Guests::ReadOnly, &[]),
+        &remote(None, &[]),
         Box::new(move || (count.fetch_add(1, Ordering::SeqCst) > 0).then(|| "Owner@Example.com".to_string())),
     );
-    assert_eq!(role(&access, "owner@example.com"), Some(Role::Guest));
-    assert_eq!(role(&access, "owner@example.com"), Some(Role::Owner));
-    assert_eq!(role(&access, "owner@example.com"), Some(Role::Owner));
+    assert!(!admitted(&access, "owner@example.com"));
+    assert!(admitted(&access, "owner@example.com"));
+    assert!(admitted(&access, "owner@example.com"));
     assert_eq!(asked.load(Ordering::SeqCst), 2);
 
-    // With guests refused, an owner nobody can name admits no one.
-    let unknown = RemoteAccess::with_self_login(&remote(None, Guests::None, &[]), Box::new(|| None));
-    assert_eq!(role(&unknown, "owner@example.com"), None);
+    // An owner nobody can name admits no one.
+    let unknown = RemoteAccess::with_self_login(&remote(None, &[]), Box::new(|| None));
+    assert!(!admitted(&unknown, "owner@example.com"));
     // A configured owner never asks Tailscale.
-    let configured = RemoteAccess::with_self_login(&remote(Some("me@example.com"), Guests::None, &[]), Box::new(|| panic!("tailscale was asked")));
-    assert_eq!(role(&configured, "me@example.com"), Some(Role::Owner));
+    let configured = RemoteAccess::with_self_login(&remote(Some("me@example.com"), &[]), Box::new(|| panic!("tailscale was asked")));
+    assert!(admitted(&configured, "me@example.com"));
 }
 
 #[test]
 fn reads_the_owner_from_tailscale_status_itself() {
     let fake = FakeTailscale::new();
-    let access = RemoteAccess::new(&remote(None, Guests::ReadOnly, &[]), fake.runner());
-    assert_eq!(role(&access, "Owner@example.com"), Some(Role::Owner));
-    assert_eq!(role(&access, "partner@example.com"), Some(Role::Guest));
+    let access = RemoteAccess::new(&remote(None, &[]), fake.runner());
+    assert!(admitted(&access, "Owner@example.com"));
+    assert!(!admitted(&access, "partner@example.com"));
     assert_eq!(fake.0.lock().unwrap().calls, [["status", "--json"]]);
-    // Without Tailscale there is no owner, so everyone is at most a guest.
-    let missing = RemoteAccess::new(&remote(None, Guests::ReadOnly, &[]), missing_binary());
-    assert_eq!(role(&missing, "owner@example.com"), Some(Role::Guest));
+    // Without Tailscale there is no owner, so no one is admitted.
+    let missing = RemoteAccess::new(&remote(None, &[]), missing_binary());
+    assert!(!admitted(&missing, "owner@example.com"));
 }
 
 #[test]

@@ -162,7 +162,7 @@ function renderHome() {
     const name = el("span", "machine-name", label(m.host));
     name.title = m.host;
     const state = el("span", "state", {
-      online: m.role === "guest" ? "guest" : "",
+      online: "",
       checking: "checking…",
       offline: "offline · " + ago(m.seen),
       error: m.error?.kind === "outdated" ? "update Ghost" : m.error?.kind === "not-owner" ? "not yours" : "error",
@@ -418,11 +418,11 @@ function openChat() {
 function applyRole() {
   const m = machineOf(route.host);
   if (!m) return;
-  $("ghost-machine").textContent = label(route.host) + (m.role === "guest" ? " · guest" : "");
+  $("ghost-machine").textContent = label(route.host);
   $("ghost-new").hidden = m.role !== "owner";
   $("composer").hidden = m.role !== "owner";
   $("readonly").hidden = m.role === "owner";
-  $("readonly").textContent = m.role === "guest" ? `Read-only: you're a guest on ${shortName(route.host)}.` : m.role ? "" : "Checking who you are…";
+  $("readonly").textContent = m.role ? "" : "Checking who you are…";
 }
 
 function renderChatMeta() {

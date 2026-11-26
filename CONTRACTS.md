@@ -71,7 +71,7 @@ The summonghost.com app keeps the selected conversation in its URL,
 responses carry a server-side `readThrough` timestamp, accepted by
 `PUT …/read` to cap acknowledgement at the read start; read timestamps never
 regress. A client marks a displayed owner's reply read only while the page is
-visible and focused. Guests never change owner read state. Failed
+visible and focused. Failed
 navigation keeps the requested URL and shows an error instead of silently
 opening a different conversation. A completed turn does not imply its result
 was read; reopening the right conversation does.
@@ -327,13 +327,10 @@ client methods and headers. Errors are
 status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
-boundary. The configured owner has full access; any other login is refused
-unless `remote.guests` in the config is `"read-only"` (the default is
-`"none"`). Admitted guests are read-only,
-are refused the reads marked owner-only, which show file paths, hook
-commands, or the owner's own data;
-conversations, tool calls included, are shown to them as recorded. Every
-guest write is `403 read_only`.
+boundary, and only the owner's: the configured owner, else the login this
+node belongs to. Anyone else on the tailnet is refused (`401`), as is a
+request without a token or that identity. A `remote.guests` key an earlier
+config carries is ignored.
 Remote access never broadens a ghost's local tool authority.
 
 `remote.apps` lists `https://` web app origins admitted past the Origin check
@@ -355,8 +352,8 @@ Rows beginning `/sessions/` are relative to `/api`.
 
 | Route | Contract |
 |---|---|
-| `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
-| `GET /api/status` | Owner-only `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
+| `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
+| `GET /api/status` | `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install; row rather than shown a filesystem path. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev2)). |
 | `GET\|PUT /api/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `POST /api/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the local model, with no persona, conversation, or tools (`409 no_local_model` with none configured; `502 completion_failed` for an empty answer). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. |
@@ -365,17 +362,17 @@ Rows beginning `/sessions/` are relative to `/api`.
 | `GET /api/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there, or null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `PUT\|DELETE /api/push/subscription` | Owner-only. PUT `{ endpoint, p256dh, auth, vapidKey }` (base64url: the browser's 65-byte public key, its 16-byte secret, and the 32-byte private scalar of the signing key it made) subscribes a device to [push alerts](#push-alerts), replacing what was kept for that endpoint → `{ ok }`; `400 invalid_request` for an endpoint that is not a browser's push service or keys of the wrong kind. DELETE `{ endpoint }` → `{ ok, removed }`. |
-| `POST /api/push/test` | Owner-only `{ endpoint }` → `{ ok, delivered, reason? }`: one alert to that subscribed device, waited for. |
+| `PUT\|DELETE /api/push/subscription` | PUT `{ endpoint, p256dh, auth, vapidKey }` (base64url: the browser's 65-byte public key, its 16-byte secret, and the 32-byte private scalar of the signing key it made) subscribes a device to [push alerts](#push-alerts), replacing what was kept for that endpoint → `{ ok }`; `400 invalid_request` for an endpoint that is not a browser's push service or keys of the wrong kind. DELETE `{ endpoint }` → `{ ok, removed }`. |
+| `POST /api/push/test` | `{ endpoint }` → `{ ok, delivered, reason? }`: one alert to that subscribed device, waited for. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. A running turn refuses it with `409 session_busy`. |
-| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
-| `GET /api/remote` | What Tailscale Serve exposes of this daemon, read from Tailscale on each call: `{ state, hostname, guests, owner, app, command, problem }`. `state` is `on` while Serve proxies HTTPS on 443 to the daemon, `off` otherwise, and `unavailable` while Tailscale is missing, stopped, or logged out, when `problem` is `{ code, message, action? }`. `command` is Tailscale's own command that turns Serve on (`tailscale serve --bg --https=443 http://127.0.0.1:<port>`); `tailscale serve --https=443 off` turns it off. The owner or the ghost runs them: no route or `ghost` verb changes Serve. `app` is `{ origin, url }`, the first of `remote.apps` and its link adding this machine, `url` null while Serve is off. |
-| `GET /api/remote/machines` | Owner-only `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
+| `GET /api/remote/whoami` | `{ role: "owner" }`: anyone admitted is the owner. |
+| `GET /api/remote` | What Tailscale Serve exposes of this daemon, read from Tailscale on each call: `{ state, hostname, owner, app, command, problem }`. `state` is `on` while Serve proxies HTTPS on 443 to the daemon, `off` otherwise, and `unavailable` while Tailscale is missing, stopped, or logged out, when `problem` is `{ code, message, action? }`. `command` is Tailscale's own command that turns Serve on (`tailscale serve --bg --https=443 http://127.0.0.1:<port>`); `tailscale serve --https=443 off` turns it off. The owner or the ghost runs them: no route or `ghost` verb changes Serve. `app` is `{ origin, url }`, the first of `remote.apps` and its link adding this machine, `url` null while Serve is off. |
+| `GET /api/remote/machines` | `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 
 There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and

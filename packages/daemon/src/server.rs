@@ -13,7 +13,7 @@ use crate::hooks::HookRunner;
 use crate::http::{Request, Responder, Server, percent_decode};
 use crate::log::Logger;
 use crate::persona::MAX_CHARACTER_BODY_LENGTH;
-use crate::remote::{RemoteAccess, RemoteServe, Role, TailscaleIdentity};
+use crate::remote::{RemoteAccess, RemoteServe};
 use crate::running_source::{RunningSource, replaced_since_start};
 use crate::session_host::{Emit, SessionHost};
 use crate::token::{api_token_path, ensure_api_token, token_matches};
@@ -287,7 +287,6 @@ fn boolean_field(body: &Map<String, Value>, key: &str) -> Result<bool> {
 struct Context<'a> {
     shared: &'a Arc<Shared>,
     request: Request,
-    identity: Option<TailscaleIdentity>,
     params: HashMap<&'static str, String>,
     /// The route's `:id`, validated; empty where it has none.
     id: String,
@@ -310,16 +309,6 @@ impl Context<'_> {
             _ => Err(GhostError::invalid("Request body must be a JSON object.")),
         }
     }
-
-    /// A read a tailnet guest is refused: it shows file paths, hook commands,
-    /// or the owner's own data. Every guest write is already refused
-    /// `read_only` at the gate.
-    fn owner_only(&self) -> Result<()> {
-        if self.identity.as_ref().is_some_and(|identity| identity.role == Role::Guest) {
-            return Err(GhostError::new("owner_only", "Only the owner may see this.", 403));
-        }
-        Ok(())
-    }
 }
 
 impl Shared {
@@ -327,13 +316,13 @@ impl Shared {
         &self.options.host
     }
 
-    /// The gate every `/api` request passes before it is routed: the refusal,
-    /// or who was admitted (a tailnet identity, or None for the bearer token
-    /// and for paths outside `/api`, all 404).
-    fn authenticate(&self, request: &Request, responder: &mut Responder) -> Result<Option<TailscaleIdentity>> {
-        let Some(api_token) = &self.api_token else { return Ok(None) };
+    /// The gate every `/api` request passes before it is routed: the owner,
+    /// by the bearer token or their own tailnet login, or a refusal. Paths
+    /// outside `/api` pass, to be 404s.
+    fn authenticate(&self, request: &Request, responder: &mut Responder) -> Result<()> {
+        let Some(api_token) = &self.api_token else { return Ok(()) };
         if request.segments().first() != Some(&"api") {
-            return Ok(None);
+            return Ok(());
         }
         // A local UI sends no Origin; an app in `remote.apps` is admitted by
         // tailnet identity alone; anything else is a cross-site page.
@@ -347,22 +336,17 @@ impl Shared {
         }
         let presented = bearer_token(request.header("authorization"));
         let token_ok = !presented.is_empty() && token_matches(api_token, presented);
-        let identity = if token_ok {
-            None
-        } else {
-            self.options.remote.as_ref().and_then(|remote| remote.identify(request.header("tailscale-user-login"), request.peer.ip()))
+        let owner_by_tailnet = || {
+            self.options.remote.as_ref().is_some_and(|remote| remote.identify(request.header("tailscale-user-login"), request.peer.ip()).is_some())
         };
-        if !token_ok && identity.is_none() {
+        if !token_ok && !owner_by_tailnet() {
             responder.set_header("www-authenticate", "Bearer");
             return Err(GhostError::new("unauthorized", "This API needs the machine-local bearer token. Run `ghostd api-token`.", 401));
-        }
-        if identity.as_ref().is_some_and(|identity| identity.role == Role::Guest) && request.method != "GET" {
-            return Err(GhostError::new("read_only", "Tailnet guests can watch this ghost but not act for it.", 403));
         }
         if matches!(request.method.as_str(), "POST" | "PUT") && !is_preflighted_content_type(request.header("content-type")) {
             return Err(GhostError::new("unsupported_media_type", "Mutating requests must be application/json, or an image for an attachment.", 415));
         }
-        Ok(identity)
+        Ok(())
     }
 
     /// The daemon serves no web page. Only a `remote.apps` origin is answered,
@@ -553,17 +537,14 @@ impl Shared {
         // What a request's own work stops with: its caller going away.
         let caller_gone = |responder: &Responder| responder.peer_gone().unwrap_or_default();
         match route {
-            Route::Whoami => ok(json!({ "role": context.identity.as_ref().map_or("owner", |identity| identity.role.as_str()) })),
-            Route::Machines => {
-                context.owner_only()?;
-                ok(json!({ "machines": options.remote_serve.machines()? }))
-            }
+            // Anyone admitted is the owner: through the token on this machine, or their own Tailscale login.
+            Route::Whoami => ok(json!({ "role": "owner" })),
+            Route::Machines => ok(json!({ "machines": options.remote_serve.machines()? })),
             Route::RemoteGet => ok(options.remote_serve.status().to_json()),
             // The owner's `hooks.json`, read and replaced whole. Whole-document
             // replacement keeps "groups run in file order" honest: there are no
             // per-hook ids to invent for a file that has none.
             Route::HooksConfig => {
-                context.owner_only()?;
                 let (path, document) = if context.request.method == "GET" {
                     options.hooks.config().ok_or_else(|| GhostError::internal("A configured hook runner has no hooks.json."))?
                 } else {
@@ -573,7 +554,6 @@ impl Shared {
                 ok(json!({ "path": path.to_string_lossy(), "document": document }))
             }
             Route::Status => {
-                context.owner_only()?;
                 let running = &options.running_source;
                 ok(json!({
                     "version": running.version,
@@ -629,7 +609,6 @@ impl Shared {
             // message to the conversation answers it, DELETE withdraws it unanswered.
             // The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
             Route::PushPut | Route::PushDelete | Route::PushTest => {
-                context.owner_only()?;
                 let push = host.push().ok_or_else(|| GhostError::new("push_unavailable", "This ghostd keeps no devices to alert.", 501))?;
                 let body = context.body()?;
                 match route {
@@ -714,7 +693,7 @@ impl Shared {
         }
     }
 
-    fn route(self: &Arc<Self>, request: Request, identity: Option<TailscaleIdentity>, responder: &Responder) -> Result<Reply> {
+    fn route(self: &Arc<Self>, request: Request, responder: &Responder) -> Result<Reply> {
         let method = request.method.clone();
         let (route, raw) = match match_route(&request.segments(), &method) {
             Matched::Found(route, params) => (route, params),
@@ -730,7 +709,7 @@ impl Shared {
             Some(id) => require_conversation_id(id)?.to_string(),
             None => String::new(),
         };
-        self.handle(route, Context { shared: self, request, identity, params, id }, responder)
+        self.handle(route, Context { shared: self, request, params, id }, responder)
     }
 
     /// Nothing a request carries may take the process down: every failure is
@@ -743,7 +722,7 @@ impl Shared {
             return responder.empty(204);
         }
         let path = request.path.clone();
-        let outcome = self.authenticate(&request, &mut responder).and_then(|identity| self.route(request, identity, &responder));
+        let outcome = self.authenticate(&request, &mut responder).and_then(|()| self.route(request, &responder));
         match outcome {
             Ok(Reply::Json(status, body)) => responder.json(status, &body),
             Ok(Reply::Bytes { content_type, cache, nosniff, body }) => {

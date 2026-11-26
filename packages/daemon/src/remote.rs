@@ -15,7 +15,7 @@
 //! an https page and cannot call an http address: that is what links the app
 //! to this machine and names the machine in an alert's link.
 use crate::abort::Abort;
-use crate::config::{Guests, RemoteConfig};
+use crate::config::RemoteConfig;
 use crate::env::Env;
 use crate::error::GhostError;
 use crate::http::percent_encode;
@@ -108,32 +108,16 @@ pub fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, Comma
     })
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
-    Owner,
-    Guest,
-}
-
-impl Role {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Owner => "owner",
-            Self::Guest => "guest",
-        }
-    }
-}
-
+/// The owner, calling through Tailscale Serve: no one else is admitted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TailscaleIdentity {
     pub login: String,
-    pub role: Role,
 }
 
 type SelfLogin = Box<dyn Fn() -> Option<String> + Send + Sync>;
 
 pub struct RemoteAccess {
     self_login: SelfLogin,
-    guests: Guests,
     configured_owner: Option<String>,
     /// Resolved once it is known; an unanswered `tailscale status` is asked again next time.
     owner: Mutex<Option<String>>,
@@ -147,10 +131,10 @@ impl RemoteAccess {
     /// Test seam over `tailscale status`.
     pub fn with_self_login(config: &RemoteConfig, self_login: SelfLogin) -> Self {
         let configured_owner = config.owner.as_deref().map(|owner| owner.trim().to_lowercase()).filter(|owner| !owner.is_empty());
-        Self { self_login, guests: config.guests, configured_owner, owner: Mutex::new(None) }
+        Self { self_login, configured_owner, owner: Mutex::new(None) }
     }
 
-    /// The tailnet identity a proxied request carries, or None when it carries none Ghost admits.
+    /// The owner's tailnet identity, when a proxied request carries it; None for anyone else.
     pub fn identify(&self, login_header: Option<&str>, peer: IpAddr) -> Option<TailscaleIdentity> {
         let login = login_header.map(|login| login.trim().to_lowercase()).filter(|login| !login.is_empty())?;
         // The addresses a connection to the daemon's own 127.0.0.1 or ::1 arrives from, and no other in 127.0.0.0/8.
@@ -161,11 +145,7 @@ impl RemoteAccess {
         if !loopback {
             return None;
         }
-        let role = if self.owner_login().as_deref() == Some(login.as_str()) { Role::Owner } else { Role::Guest };
-        if role == Role::Guest && self.guests == Guests::None {
-            return None;
-        }
-        Some(TailscaleIdentity { login, role })
+        (self.owner_login().as_deref() == Some(login.as_str())).then_some(TailscaleIdentity { login })
     }
 
     pub fn owner_login(&self) -> Option<String> {
@@ -208,7 +188,6 @@ pub struct RemoteStatus {
     /// `on`, `off`, or `unavailable` while Tailscale is missing, stopped, or logged out.
     pub state: &'static str,
     pub hostname: Option<String>,
-    pub guests: Guests,
     pub owner: Option<String>,
     /// The first of `remote.apps`, and its link adding this machine
     /// (`<origin>/#add=<hostname>`), None while Serve is off.
@@ -223,7 +202,6 @@ impl RemoteStatus {
         json!({
             "state": self.state,
             "hostname": self.hostname,
-            "guests": self.guests.as_str(),
             "owner": self.owner,
             "app": self.app.as_ref().map(|(origin, url)| json!({ "origin": origin, "url": url })),
             "command": self.command,
@@ -267,7 +245,6 @@ pub struct RemoteServe {
     target: String,
     run: TailscaleRunner,
     owner: Option<String>,
-    guests: Guests,
     app: Option<String>,
 }
 
@@ -278,7 +255,6 @@ impl RemoteServe {
             run,
             // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
             owner: config.owner.as_deref().map(|owner| owner.trim().to_lowercase()).filter(|owner| !owner.is_empty()),
-            guests: config.guests,
             app: config.apps.first().cloned(),
         }
     }
@@ -318,7 +294,6 @@ impl RemoteServe {
         let off = RemoteStatus {
             state: "off",
             hostname: None,
-            guests: self.guests,
             owner: self.owner.clone(),
             app: self.app.clone().map(|origin| (origin, None)),
             command: self.command(),

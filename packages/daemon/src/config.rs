@@ -13,36 +13,19 @@ pub const DEFAULT_LOCAL_IDLE_MINUTES: u64 = 5;
 /// A model's own default can be its deepest: Inkling 2 Mini's took six minutes over three commands.
 pub const DEFAULT_LOCAL_REASONING_EFFORT: &str = "low";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Guests {
-    #[default]
-    None,
-    ReadOnly,
-}
-
-impl Guests {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::ReadOnly => "read-only",
-        }
-    }
-}
-
 /// Who may reach the daemon through `tailscale serve`: `owner` is the login
-/// that owns the ghost (default: the login this node belongs to), `guests`
-/// says what other tailnet members may do, `apps` the web app origins
+/// that owns the ghost (default: the login this node belongs to), the only
+/// one admitted; `apps` the web app origins
 /// admitted with a tailnet identity (`[]` admits none).
 #[derive(Clone, Debug, PartialEq)]
 pub struct RemoteConfig {
     pub owner: Option<String>,
-    pub guests: Guests,
     pub apps: Vec<String>,
 }
 
 impl Default for RemoteConfig {
     fn default() -> Self {
-        Self { owner: None, guests: Guests::None, apps: DEFAULT_REMOTE_APPS.iter().map(|app| app.to_string()).collect() }
+        Self { owner: None, apps: DEFAULT_REMOTE_APPS.iter().map(|app| app.to_string()).collect() }
     }
 }
 
@@ -141,7 +124,6 @@ struct ConfigFile {
     port: Option<u16>,
     ghosts_root: Option<String>,
     owner: Option<String>,
-    guests: Option<Guests>,
     apps: Option<Vec<String>>,
     local: Option<LocalModelConfig>,
 }
@@ -169,13 +151,6 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
             let owner =
                 owner.as_str().filter(|owner| !owner.trim().is_empty()).ok_or_else(|| format!("{shown}: \"remote.owner\" must be a login."))?;
             config.owner = Some(owner.to_string());
-        }
-        if let Some(guests) = remote.get("guests") {
-            config.guests = Some(match guests.as_str() {
-                Some("read-only") => Guests::ReadOnly,
-                Some("none") => Guests::None,
-                _ => return Err(format!("{shown}: \"remote.guests\" must be \"read-only\" or \"none\".")),
-            });
         }
         if let Some(apps) = remote.get("apps") {
             let origins: Option<Vec<String>> = apps.as_array().and_then(|apps| apps.iter().map(app_origin).collect());
@@ -209,11 +184,7 @@ pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<Daem
     Ok(DaemonConfig {
         port,
         ghosts_root: resolve(&cwd, &expand_home(&raw_root, home)),
-        remote: RemoteConfig {
-            owner: file.owner,
-            guests: file.guests.unwrap_or_default(),
-            apps: file.apps.unwrap_or_else(|| RemoteConfig::default().apps),
-        },
+        remote: RemoteConfig { owner: file.owner, apps: file.apps.unwrap_or_else(|| RemoteConfig::default().apps) },
         hooks_path: resolve(&cwd, &hooks),
         config_path,
         local: file.local,
@@ -270,11 +241,10 @@ mod tests {
     #[test]
     fn remote_and_local_are_validated() {
         let (dir, env) = scratch(Some(json!({
-            "remote": { "owner": "Me@Example.com", "guests": "read-only", "apps": ["https://a.example", "https://b.example:8443"] },
+            "remote": { "owner": "Me@Example.com", "apps": ["https://a.example", "https://b.example:8443"] },
             "local": { "model": "~/m.gguf", "idleMinutes": 2 },
         })));
         let config = load(&dir, &env).unwrap();
-        assert_eq!(config.remote.guests, Guests::ReadOnly);
         assert_eq!(config.remote.apps, ["https://a.example", "https://b.example:8443"]);
         let local = config.local.unwrap();
         assert_eq!(
@@ -285,7 +255,6 @@ mod tests {
             (json!({ "remote": { "apps": ["http://a.example"] } }), "remote.apps"),
             (json!({ "remote": { "apps": ["https://a.example/"] } }), "remote.apps"),
             (json!({ "remote": { "apps": "https://a.example" } }), "remote.apps"),
-            (json!({ "remote": { "guests": "all" } }), "remote.guests"),
             (json!({ "remote": { "owner": " " } }), "remote.owner"),
             (json!({ "local": {} }), "local.model"),
             (json!({ "local": { "model": "m", "contextSize": 0 } }), "local.contextSize"),
@@ -373,11 +342,11 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_remote_owner_guests_and_apps() {
-        let (dir, env) = scratch(Some(json!({ "remote": { "owner": "Owner@example.com", "guests": "none" } })));
+    fn reads_the_remote_owner_and_apps() {
+        let (dir, env) = scratch(Some(json!({ "remote": { "owner": "Owner@example.com" } })));
         assert_eq!(
             load(&dir, &env).unwrap().remote,
-            RemoteConfig { owner: Some("Owner@example.com".into()), guests: Guests::None, apps: vec!["https://summonghost.com".into()] }
+            RemoteConfig { owner: Some("Owner@example.com".into()), apps: vec!["https://summonghost.com".into()] }
         );
         // `[]` admits none.
         rewrite(&dir, json!({ "remote": { "apps": [] } }));
@@ -450,12 +419,12 @@ mod tests {
     }
 
     #[test]
-    fn ignores_keys_it_does_not_read_such_as_the_retired_host_and_remote_peers() {
+    fn ignores_keys_it_does_not_read_such_as_the_retired_host_guests_and_peers() {
         let (dir, env) = scratch(Some(
-            json!({ "host": "0.0.0.0", "someday": true, "remote": { "guests": "none", "peers": [{ "login": "wife@example.com" }], "later": 1 } }),
+            json!({ "host": "0.0.0.0", "someday": true, "remote": { "guests": "read-only", "peers": [{ "login": "wife@example.com" }], "later": 1 } }),
         ));
         let config = load(&dir, &env).unwrap();
-        assert_eq!(config.remote, RemoteConfig { owner: None, guests: Guests::None, apps: vec!["https://summonghost.com".into()] });
+        assert_eq!(config.remote, RemoteConfig { owner: None, apps: vec!["https://summonghost.com".into()] });
         assert_eq!((config.port, config.local), (DEFAULT_PORT, None));
         rewrite(&dir, json!({ "ghostsRoot": 7 }));
         assert!(load(&dir, &env).unwrap_err().contains("\"ghostsRoot\" must be a string"));

@@ -19,8 +19,7 @@ Tailscale Serve address directly, admitted by your Tailscale identity. Ghost
 itself serves no page there. Set `remote.apps` to `[]` in the config to refuse
 the app, which leaves no remote client.
 
-Guests, only when `remote.guests` is `"read-only"`, can read conversations and
-cannot act or reach owner-only routes. See `CONTRACTS.md` for the wire contract.
+Only your own Tailscale login gets in. See `CONTRACTS.md` for the wire contract.
 
 ## Completion alerts
 

@@ -4,7 +4,6 @@
 //! home, and the XDG directories `gio trash`, the token file and the turn
 //! spill files resolve from.
 use super::*;
-use crate::config::Guests;
 use crate::conversation_log::{LOG_FILENAME, conversation_dir};
 use crate::ghosts::ghost_paths;
 use crate::http::{ClientRequest, ClientResponse, EventReader, percent_encode, send};
@@ -224,13 +223,13 @@ fn fake_tailscale() -> (Arc<Tailscale>, TailscaleRunner) {
 }
 
 fn serve_over(runner: TailscaleRunner) -> Arc<RemoteServe> {
-    Arc::new(RemoteServe::new(7717, &RemoteConfig { owner: None, guests: Guests::ReadOnly, apps: Vec::new() }, runner))
+    Arc::new(RemoteServe::new(7717, &RemoteConfig { owner: None, apps: Vec::new() }, runner))
 }
 
 /// Tailnet callers as the remote tests admit them: this node belongs to
-/// `Owner@Example.com`, and everyone else is a read-only guest.
-fn tailnet(owner: Option<&str>, guests: Guests) -> Option<Arc<RemoteAccess>> {
-    let config = RemoteConfig { owner: owner.map(str::to_string), guests, apps: Vec::new() };
+/// `Owner@Example.com`, and no one else is admitted.
+fn tailnet(owner: Option<&str>) -> Option<Arc<RemoteAccess>> {
+    let config = RemoteConfig { owner: owner.map(str::to_string), apps: Vec::new() };
     Some(Arc::new(RemoteAccess::with_self_login(&config, Box::new(|| Some("Owner@Example.com".to_string())))))
 }
 
@@ -1681,34 +1680,30 @@ fn a_replaced_token_is_not_honored_until_the_daemon_restarts() {
 
 // ── Tailnet identity ────────────────────────────────────────────────────
 
-const GUEST: (&str, &str) = ("tailscale-user-login", "guest@example.com");
+/// Someone else on the owner's tailnet.
+const OTHER: (&str, &str) = ("tailscale-user-login", "guest@example.com");
 const OWNER: (&str, &str) = ("tailscale-user-login", "owner@example.com");
 
-/// A token-guarded daemon that admits tailnet callers: the owner, and read-only guests.
+/// A token-guarded daemon that admits the owner calling over the tailnet.
 fn remote(configure: impl FnOnce(&mut ServerOptions)) -> Daemon {
     Daemon::with(replies(&["hello"]), |options| {
         options.api_token = ApiToken::Fixed(token());
-        options.remote = tailnet(None, Guests::ReadOnly);
+        options.remote = tailnet(None);
         configure(options);
     })
 }
 
 #[test]
-fn admits_the_owner_fully_and_guests_read_only() {
+fn admits_the_owner_and_no_one_else_on_the_tailnet() {
     let daemon = remote(|_| {});
     assert_eq!(daemon.get("/api/ghost").status, 401);
 
-    assert_eq!(daemon.get_as("/api/remote/whoami", &[GUEST]).json(), json!({ "role": "guest" }));
-    let guest_ghost = daemon.get_as("/api/ghost", &[GUEST]);
-    assert_eq!(guest_ghost.status, 200);
-    // The name, never the ghost home's path.
-    assert_eq!(guest_ghost.json(), json!({ "name": "casper" }));
-    let write = daemon.call("PUT", "/api/character", &[GUEST, JSON], Some(json!({ "body": "# Intruder\n" }).to_string().as_bytes()));
-    assert_eq!((write.status, write.code().as_str()), (403, "read_only"));
-    let attach = daemon.call("POST", "/api/sessions/remote-1/attachments", &[GUEST, ("content-type", "image/png")], Some(&PNG[..4]));
-    assert_eq!((attach.status, attach.code().as_str()), (403, "read_only"));
-    assert_eq!(daemon.call("DELETE", "/api/sessions/remote-1", &[GUEST], None).code(), "read_only");
-    assert!(!daemon.session_dir.join("remote-1").exists());
+    // Anyone else on the tailnet is not admitted at all.
+    for (method, path) in [("GET", "/api/remote/whoami"), ("GET", "/api/ghost"), ("GET", "/api/sessions"), ("DELETE", "/api/sessions/remote-1")] {
+        assert_eq!(daemon.call(method, path, &[OTHER], None).status, 401, "{method} {path}");
+    }
+    let write = daemon.call("PUT", "/api/character", &[OTHER, JSON], Some(json!({ "body": "# Intruder\n" }).to_string().as_bytes()));
+    assert_eq!(write.status, 401);
 
     assert_eq!(daemon.get_as("/api/remote/whoami", &[OWNER]).json(), json!({ "role": "owner" }));
     let owner_write = daemon.call(
@@ -1725,7 +1720,7 @@ fn admits_the_owner_fully_and_guests_read_only() {
 }
 
 #[test]
-fn shows_the_owner_what_runs_the_daemon_and_refuses_a_guest_the_source_path() {
+fn shows_the_owner_what_runs_the_daemon() {
     let started_at = crate::clock::now_ms();
     let commit = "0123456789abcdef0123456789abcdef01234567";
     let daemon = remote(|options| {
@@ -1749,34 +1744,14 @@ fn shows_the_owner_what_runs_the_daemon_and_refuses_a_guest_the_source_path() {
             "restartNeeded": false,
         })
     );
-
-    let guest = daemon.get_as("/api/status", &[GUEST]);
-    assert_eq!((guest.status, guest.code().as_str()), (403, "owner_only"));
 }
 
 #[test]
-fn refuses_guests_the_hook_commands_the_owners_machines_and_hook_completions() {
-    let daemon = remote(|_| {});
-    for path in ["/api/hooks/config", "/api/remote/machines", "/api/status"] {
-        let guest = daemon.get_as(path, &[GUEST]);
-        assert_eq!((guest.status, guest.code().as_str()), (403, "owner_only"), "{path}");
-    }
-    // Owner-only writes need no route guard: every guest write is refused first.
-    let body = json!({ "prompt": "Spend the owner's subscription." }).to_string();
-    for path in ["/api/complete", "/api/messages", "/api/hooks/config"] {
-        let method = if path == "/api/hooks/config" { "PUT" } else { "POST" };
-        let guest = daemon.call(method, path, &[GUEST, JSON], Some(body.as_bytes()));
-        assert_eq!((guest.status, guest.code().as_str()), (403, "read_only"), "{path}");
-    }
-    assert!(daemon.fake.calls().is_empty());
-}
-
-#[test]
-fn honours_guests_none_and_a_configured_owner_login() {
-    let daemon = remote(|options| options.remote = tailnet(Some("guest@example.com"), Guests::None));
+fn honours_a_configured_owner_login() {
+    let daemon = remote(|options| options.remote = tailnet(Some("guest@example.com")));
     let refused = daemon.get_as("/api/ghost", &[OWNER]);
     assert_eq!((refused.status, refused.header("www-authenticate")), (401, Some("Bearer")));
-    assert_eq!(daemon.get_as("/api/remote/whoami", &[GUEST]).json(), json!({ "role": "owner" }));
+    assert_eq!(daemon.get_as("/api/remote/whoami", &[OTHER]).json(), json!({ "role": "owner" }));
 }
 
 #[test]
@@ -1809,7 +1784,6 @@ fn remote_status(enabled: bool) -> Value {
     json!({
         "state": if enabled { "on" } else { "off" },
         "hostname": FAKE_HOSTNAME,
-        "guests": "read-only",
         "owner": "owner@example.com",
         "app": null,
         "command": format!("tailscale serve --bg --https=443 {FAKE_TARGET}"),
@@ -1825,12 +1799,12 @@ fn remote_over_tailscale() -> (Daemon, Arc<Tailscale>) {
 
 // Serve is the owner's to turn on with Tailscale's own command: ghostd reads its state and changes nothing.
 #[test]
-fn reports_remote_status_to_owner_and_guest_and_has_no_route_that_changes_it() {
+fn reports_remote_status_and_has_no_route_that_changes_it() {
     let (daemon, tailscale) = remote_over_tailscale();
     let authorization = bearer(&token());
     let headers = [("authorization", authorization.as_str()), JSON];
     assert_eq!(daemon.get_as("/api/remote", &headers[..1]).json(), remote_status(false));
-    assert_eq!(daemon.get_as("/api/remote", &[GUEST]).json(), remote_status(false));
+    assert_eq!(daemon.get_as("/api/remote", &[OWNER]).json(), remote_status(false));
     let posted = daemon.call("POST", "/api/remote", &headers, Some(json!({ "enabled": true }).to_string().as_bytes()));
     assert_eq!(posted.status, 405);
     assert_eq!(tailscale.changes(), Vec::<String>::new());
@@ -1893,14 +1867,6 @@ fn answers_the_preflight_with_the_apps_methods_and_headers_and_private_network_w
 }
 
 #[test]
-fn keeps_a_guest_calling_through_the_app_read_only() {
-    let daemon = with_app();
-    assert_eq!(daemon.get_as("/api/ghost", &[FROM_APP, GUEST]).status, 200);
-    let write = daemon.call("POST", "/api/ghost", &[FROM_APP, GUEST, JSON], Some(json!({ "name": "wraith" }).to_string().as_bytes()));
-    assert_eq!((write.status, write.code().as_str()), (403, "read_only"));
-}
-
-#[test]
 fn an_app_is_an_ordinary_foreign_origin_when_not_listed_or_when_remote_apps_is_empty() {
     for apps in [vec!["https://lab.summonghost.com".to_string()], Vec::new()] {
         let daemon = remote(|options| options.remote_apps = apps.clone());
@@ -1914,7 +1880,7 @@ fn an_app_is_an_ordinary_foreign_origin_when_not_listed_or_when_remote_apps_is_e
 fn answers_each_route_the_app_calls_admitted_by_tailnet_identity_alone() {
     let daemon = Daemon::with(replies(&["hello"]), |options| {
         options.api_token = ApiToken::Fixed(token());
-        let config = RemoteConfig { owner: None, guests: Guests::None, apps: Vec::new() };
+        let config = RemoteConfig { owner: None, apps: Vec::new() };
         options.remote = Some(Arc::new(RemoteAccess::with_self_login(&config, Box::new(|| Some("owner@example.com".to_string())))));
         options.remote_apps = vec![APP.to_string()];
     });
@@ -1963,7 +1929,7 @@ fn answers_each_route_the_app_calls_admitted_by_tailnet_identity_alone() {
 // ── GET /api/remote/machines ────────────────────────────────────────────
 
 #[test]
-fn lists_the_owners_other_machines_to_the_owner_and_to_no_guest() {
+fn lists_the_owners_other_machines_to_the_owner() {
     let daemon = with_app();
     let response = daemon.get_as("/api/remote/machines", &[FROM_APP, OWNER]);
     assert_eq!(response.status, 200);
@@ -1972,7 +1938,7 @@ fn lists_the_owners_other_machines_to_the_owner_and_to_no_guest() {
         json!({ "machines": [{ "hostname": "laptop.example.ts.net", "online": true }, { "hostname": "phone.example.ts.net", "online": false }] })
     );
     assert_eq!(daemon.get_as("/api/remote/machines", &[("authorization", &bearer(&token()))]).status, 200);
-    assert_eq!(daemon.get_as("/api/remote/machines", &[GUEST]).code(), "owner_only");
+    assert_eq!(daemon.get_as("/api/remote/machines", &[OTHER]).status, 401);
 }
 
 #[test]

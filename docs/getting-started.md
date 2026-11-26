@@ -195,7 +195,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/ghosts/<name>/` | the ghost home: `character.md` and `sessions/<id>/`, one directory per conversation |
-| `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner, guests, and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
+| `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | XDG Pictures | browser screenshots, unless you name another destination |
@@ -219,9 +219,7 @@ leaves the ghost home, conversations, tokens, and your documents untouched.
   turns it on and `tailscale serve --https=443 off` turns it off. `ghost
   status` then prints the summonghost.com link that adds this machine to the
   app, the phone client ([mobile](mobile.md)).
-  Only your own login gets in;
-  to let other tailnet members read along, set `remote.guests` to
-  `"read-only"` in the config. On a
+  Only your own login gets in. On a
   phone, `+` starts a conversation and the camera attaches photos; dictate
   with the keyboard's own mic.
 

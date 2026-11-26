@@ -48,7 +48,7 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   and its `resume` frames; photos uploaded on send; the follow-up queue (while
   a turn runs the send button queues, and stops when the composer is empty);
   stop, which hands queued text back to the composer; answering the ghost's
-  open question; pin, unpin and delete. A guest gets a read-only view.
+  open question; pin, unpin and delete.
 - **Alerts** ([`push.js`](public/js/push.js)): Web Push with no server of
   the site's. The browser makes a signing key, subscribes, and hands both to
   each machine it reaches as owner; each machine's ghostd encrypts and sends
@@ -118,8 +118,8 @@ follow-up queued during the turn, pin, unpin and delete.
   a public origin calling a tailnet address is unknown.
 - Discovery listing a second machine: `/api/remote/machines` answers the
   page, but no other machine of the owner's ran Ghost when it was tried.
-- Photos, stop, answering the ghost's question, read marking and the guest
-  view, against a real ghostd.
+- Photos, stop, answering the ghost's question and read marking, against a
+  real ghostd.
 - Alerts on a real phone, Apple's push service, and an alert arriving with
   the app closed. Checked on 2026-11-25 in desktop Chromium only: the page
   subscribed, and a scratch ghostd's test alert and a real turn's alert went
