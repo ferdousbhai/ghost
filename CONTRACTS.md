@@ -523,6 +523,16 @@ for the idle minutes, on daemon stop, or after a failed load. ghostd kills
 only that process. Another program loading the same file (Lastbook) holds its
 own copy; Ghost does not stop it, and frees its own when idle.
 
+What the server has read is kept across a stop. It runs with
+`--slot-save-path $XDG_CACHE_HOME/ghost/slot` (a 0700 directory); before
+every stop ghostd saves its one slot there (`slot.bin`, made 0600, about
+150 KB a token, so up to some 5 GB at a full 32K context), with `slot.json`
+naming the model and context it was saved from, and after the next start
+restores it when those match. One file, replaced at each stop. The
+conversation the slot held is then not read again: on Inkling 2 Mini, 0.2 s
+to restore against 68 s to read 5,700 tokens. A save that fails leaves no
+file.
+
 A pass ([`local_turn.rs`](packages/daemon/src/local_turn.rs)) is the
 smallest loop that works: it sends the ghost's whole persona and the "Running
 locally" section as the system message, the same bytes every turn; then the

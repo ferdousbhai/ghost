@@ -2,11 +2,16 @@
 //! llama-server child on a loopback port chosen at spawn, with a fresh API key,
 //! started by the first local turn and stopped after it has gone unused.
 //! ghostd kills only the process it spawned.
+//!
+//! What the server has read is kept across a stop: before stopping it, ghostd
+//! saves its one slot to disk, and after the next start restores it, so the
+//! conversation it was in is not read again (68 s for 5,700 tokens, against
+//! 0.2 s to restore). One file, replaced at each stop, and private.
 use crate::config::LocalModelConfig;
 use crate::env::Env;
 use crate::http::{ClientRequest, send};
 use crate::log::Logger;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener};
 use std::process::{Child, Command, Stdio};
@@ -43,6 +48,12 @@ pub fn free_port() -> Result<u16, String> {
     Err(format!("no free loopback port found in {}-{}", PORT_RANGE.start(), PORT_RANGE.end()))
 }
 
+/// The slot's saved state, and what it was saved from, in `$XDG_CACHE_HOME/ghost/slot`.
+const SLOT_FILE: &str = "slot.bin";
+const SLOT_FROM: &str = "slot.json";
+/// Saving or restoring a full context's state (about 5 GB) takes seconds, not minutes.
+const SLOT_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[derive(Default)]
 struct State {
     child: Option<Child>,
@@ -57,6 +68,8 @@ struct Inner {
     config: LocalModelConfig,
     logger: Logger,
     env: Env,
+    /// Where the slot is saved: private to the owner, since it holds the conversation.
+    slot_dir: std::path::PathBuf,
     state: Mutex<State>,
     changed: Condvar,
 }
@@ -73,7 +86,57 @@ fn url_safe_key() -> String {
 
 impl LocalModel {
     pub fn new(config: LocalModelConfig, logger: Logger, env: Env) -> Self {
-        Self { inner: Arc::new(Inner { config, logger, env, state: Mutex::new(State::default()), changed: Condvar::new() }) }
+        let home = std::path::PathBuf::from(crate::env::var(&env, "HOME").unwrap_or("/"));
+        let slot_dir = crate::xdg::base_dir(&env, crate::xdg::Base::Cache, &home).join("ghost").join("slot");
+        Self { inner: Arc::new(Inner { config, logger, env, slot_dir, state: Mutex::new(State::default()), changed: Condvar::new() }) }
+    }
+
+    /// What a saved slot must have been saved from to be restored: this model, at this context.
+    fn slot_origin(&self) -> Value {
+        json!({ "model": self.inner.config.model.to_string_lossy(), "contextSize": self.inner.config.context_size })
+    }
+
+    /// Ask the server to save or restore its slot; false when it did not.
+    fn slot(&self, endpoint: &Endpoint, action: &str) -> bool {
+        let authorization = format!("Bearer {}", endpoint.key);
+        let body = json!({ "filename": SLOT_FILE }).to_string();
+        let target = format!("/slots/0?action={action}");
+        let answered = send(ClientRequest {
+            address: endpoint.address,
+            method: "POST",
+            target: &target,
+            headers: &[("content-type", "application/json"), ("authorization", &authorization)],
+            body: Some(body.as_bytes()),
+            timeout: Some(SLOT_TIMEOUT),
+            abort: None,
+        });
+        answered.is_ok_and(|response| response.status == 200)
+    }
+
+    /// Save the slot before a stop, and say what it was saved from.
+    fn save_slot(&self, endpoint: &Endpoint) {
+        let dir = &self.inner.slot_dir;
+        // The record first: a save that fails half-way is then never restored.
+        let _ = std::fs::remove_file(dir.join(SLOT_FROM));
+        if self.slot(endpoint, "save") {
+            use std::os::unix::fs::PermissionsExt;
+            // llama-server writes it world-readable; it holds the conversation.
+            let _ = std::fs::set_permissions(dir.join(SLOT_FILE), std::fs::Permissions::from_mode(0o600));
+            let _ = crate::private_file::write_json_atomic(&dir.join(SLOT_FROM), &self.slot_origin());
+            self.inner.logger.info("local model state saved", json!({}));
+        } else {
+            let _ = std::fs::remove_file(dir.join(SLOT_FILE));
+        }
+    }
+
+    /// Restore what the server had read before its last stop, when it was this model at this context.
+    fn restore_slot(&self, endpoint: &Endpoint) {
+        let dir = &self.inner.slot_dir;
+        let saved = crate::private_file::read_text(&dir.join(SLOT_FROM)).ok().flatten();
+        let from: Value = saved.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+        if from == self.slot_origin() && self.slot(endpoint, "restore") {
+            self.inner.logger.info("local model state restored", json!({}));
+        }
     }
 
     /// Test seam: a model whose server already answers at `endpoint`. Nothing
@@ -175,6 +238,15 @@ impl LocalModel {
         let port = free_port()?;
         let key = url_safe_key();
         let endpoint = Endpoint { address: SocketAddr::from(([127, 0, 0, 1], port)), key: key.clone() };
+        {
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&inner.slot_dir)
+                .map_err(|error| format!("The local model could not start: {error}"))?;
+            let _ = std::fs::set_permissions(&inner.slot_dir, std::fs::Permissions::from_mode(0o700));
+        }
         let mut child = Command::new(&inner.config.server)
             .args([
                 "--model",
@@ -192,6 +264,8 @@ impl LocalModel {
             // It is why a turn waits for a handoff note being written (CONTRACTS.md "Local model").
             .args(["--n-gpu-layers", "99", "--ctx-size", &inner.config.context_size.to_string(), "--parallel", "1"])
             .args(["--batch-size", "2048", "--ubatch-size", "2048", "--jinja", "--no-webui"])
+            .arg("--slot-save-path")
+            .arg(format!("{}/", inner.slot_dir.display()))
             .env_clear()
             .envs(&inner.env)
             .stdin(Stdio::null())
@@ -260,6 +334,7 @@ impl LocalModel {
                 abort: None,
             });
             if health.is_ok_and(|response| response.status == 200) {
+                self.restore_slot(&endpoint);
                 inner.logger.info("local model ready", json!({ "seconds": started.elapsed().as_secs() }));
                 return Ok(endpoint);
             }
@@ -269,14 +344,17 @@ impl LocalModel {
         Err("The local model took too long to load.".to_string())
     }
 
-    /// Stop the server now; the next local turn starts it again.
+    /// Stop the server now, saving its slot first; the next local turn starts it again and restores it.
     pub fn stop(&self, why: &str) {
-        let child = {
+        let endpoint = {
             let mut state = self.inner.state.lock().unwrap();
             state.idle_generation += 1;
-            state.endpoint = None;
-            state.child.take()
+            state.endpoint.take()
         };
+        if let Some(endpoint) = &endpoint {
+            self.save_slot(endpoint);
+        }
+        let child = self.inner.state.lock().unwrap().child.take();
         let Some(mut child) = child else { return };
         if !matches!(child.try_wait(), Ok(None)) {
             return;
@@ -381,6 +459,43 @@ mod tests {
         let (first, second) = (url_safe_key(), url_safe_key());
         assert!(first != second && first.len() == 32);
         assert!(first.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+    }
+
+    #[test]
+    fn saves_its_slot_before_a_stop_and_restores_it_only_for_the_same_model_and_context() {
+        let directory = scratch();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let kept = seen.clone();
+        let server = crate::http::Server::start("127.0.0.1:0".parse().unwrap(), move |mut request, responder| {
+            let body = request.read_body(4096).unwrap_or_default();
+            kept.lock().unwrap().push((
+                request.path.clone(),
+                request.query("action").unwrap_or("").to_string(),
+                String::from_utf8_lossy(&body).into_owned(),
+            ));
+            responder.json(200, &json!({ "ok": true }));
+        })
+        .unwrap();
+        let endpoint = Endpoint { address: server.address, key: "k".to_string() };
+        let env = Env::from([("HOME".to_string(), directory.display().to_string())]);
+        let config = model(&directory, "llama-server").config().clone();
+        let held = LocalModel::with_endpoint(config.clone(), Logger::silent(), env.clone(), endpoint.clone());
+        std::fs::create_dir_all(&held.inner.slot_dir).unwrap();
+        held.stop("idle");
+        assert_eq!(*seen.lock().unwrap(), [("/slots/0".to_string(), "save".to_string(), r#"{"filename":"slot.bin"}"#.to_string())]);
+        let from = held.inner.slot_dir.join(SLOT_FROM);
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&from).unwrap()).unwrap(), held.slot_origin());
+        assert_eq!(std::fs::metadata(&from).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(held.inner.slot_dir, directory.join(".cache/ghost/slot"));
+
+        // The same model at the same context restores it; another context does not ask.
+        held.restore_slot(&endpoint);
+        assert_eq!(seen.lock().unwrap().last().unwrap().1, "restore");
+        let other = LocalModel::with_endpoint(LocalModelConfig { context_size: 2048, ..config }, Logger::silent(), env, endpoint.clone());
+        other.restore_slot(&endpoint);
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        server.close();
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

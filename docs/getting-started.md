@@ -198,6 +198,8 @@ codes.
 | `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
+| `~/.local/state/ghost/push.json` | the devices that get alerts, with their keys |
+| `~/.cache/ghost/slot/` | what the model had read when it last stopped (up to some 5 GB), so a conversation is not read again; safe to delete |
 | XDG Pictures | browser screenshots, unless you name another destination |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and

@@ -1571,5 +1571,12 @@ fn complete_runs_on_the_daemons_own_local_model_with_no_persona_or_tools() {
     host.dispose_all();
     assert_eq!(answer.map_err(|error| error.message), Ok("APPROVE".to_string()));
     let asked: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    assert_eq!(asked, vec![json!({ "path": "/v1/chat/completions", "messages": [{ "role": "user", "content": "Review this." }], "tools": false })]);
+    // One completion, then, as the server stops, its slot saved for the next start.
+    assert_eq!(
+        asked,
+        vec![
+            json!({ "path": "/v1/chat/completions", "messages": [{ "role": "user", "content": "Review this." }], "tools": false }),
+            json!({ "path": "/slots/0", "messages": null, "tools": false }),
+        ]
+    );
 }

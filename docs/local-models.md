@@ -72,6 +72,11 @@ lists Intel GPUs only, so Ghost starts the server itself.
   minutes, so the server keeps one slot and the turn waits. Columns of numbers ran
   at about 1.3 characters to a token, so nothing here estimates tokens from
   characters where the server's count is known.
+- 2026-11-26, the slot saved at each stop and restored at the next start. With
+  `idleMinutes` 1: the server stopped for idleness after a turn, saving 1.1 GB;
+  the next turn in that conversation took 49 s, 25 s of it the load, and did
+  not read the conversation again. By hand, on a 5,739-token prompt: 68.5 s to
+  read it, 0.2 s to save, 0.2 s to restore after a restart, then 0.4 s.
 - The same day the time left the prompt. Asked the time or the weekday, the
   model ran `date` unprompted, twice of twice. Writing a note, it once dated
   a change with the note's old date rather than look the date up; the recipe no
