@@ -1,6 +1,5 @@
 //! What the CLI prints: the `--json` and `-q` shapes, tables, relative times,
-//! and the usage and help texts. Widths are counted as the first CLI counted
-//! them (UTF-16 units), so columns and cut-offs land where they always did.
+//! and the usage and help texts. Widths are counted in characters.
 use serde_json::Value;
 use std::io::Write;
 
@@ -16,7 +15,7 @@ pub fn write_json(stream: &mut dyn Write, value: &Value) {
 }
 
 fn width(text: &str) -> usize {
-    text.encode_utf16().count()
+    text.chars().count()
 }
 
 /// A JSON value as a template would print it: a string bare, anything else as JSON.
@@ -80,7 +79,7 @@ pub fn truncate(value: &str, limit: usize) -> String {
     let mut kept = String::new();
     let mut units = 0;
     for letter in value.chars() {
-        units += letter.len_utf16();
+        units += 1;
         if units > limit.saturating_sub(1) {
             break;
         }

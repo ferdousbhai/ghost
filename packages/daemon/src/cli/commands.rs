@@ -289,7 +289,7 @@ const HOOK_EVENTS: &[(&str, &str, &str)] = &[("session_stop", "Session-stop comm
 fn display_text(value: Option<&Value>, fallback: &str, label: &str, maximum: usize) -> Result<String, CliError> {
     match value {
         None => Ok(fallback.to_string()),
-        Some(Value::String(text)) if !text.trim().is_empty() && text.trim().encode_utf16().count() <= maximum => Ok(text.trim().to_string()),
+        Some(Value::String(text)) if !text.trim().is_empty() && text.trim().chars().count() <= maximum => Ok(text.trim().to_string()),
         Some(_) => Err(CliError::failure(format!("{label} must be a non-empty string of at most {maximum} characters."))),
     }
 }

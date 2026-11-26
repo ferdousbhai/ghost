@@ -1,8 +1,8 @@
 //! A ghost home's persona file, read whole and replaced by one rename.
 use crate::error::{GhostError, Result};
-use crate::js_text::utf16_len;
 use crate::persona::{CHARACTER_FILENAME, CharacterFile, MAX_CHARACTER_BODY_LENGTH, character_body_too_long};
 use crate::private_file::write_text_atomic;
+use crate::text;
 use std::path::Path;
 
 /// The persona in the ghost home `dir`, or None when it has none.
@@ -20,7 +20,7 @@ pub fn read_character(dir: &Path, enforce_limit: bool) -> Result<Option<Characte
             "limit_exceeded",
             format!(
                 "{CHARACTER_FILENAME} may be at most {MAX_CHARACTER_BODY_LENGTH} characters; it contains {}. Shorten the file before starting a session.",
-                utf16_len(&body)
+                text::len(&body)
             ),
             400,
         ));
@@ -36,7 +36,7 @@ pub fn write_character(dir: &Path, body: &str) -> Result<()> {
             "limit_exceeded",
             format!(
                 "{CHARACTER_FILENAME} may be at most {MAX_CHARACTER_BODY_LENGTH} characters; that body is {}. Nothing was written.",
-                utf16_len(body)
+                text::len(body)
             ),
             400,
         ));
@@ -111,10 +111,10 @@ You are Casper, the ghost of a working typographer and letterpress printer.
     }
 
     #[test]
-    fn refuses_an_oversized_owner_edit_before_writing_counting_utf16_code_units() {
+    fn refuses_an_oversized_owner_edit_before_writing_counting_characters() {
         let fixture = Fixture::new();
         let original = read_character(&fixture.dir, true).unwrap().unwrap().body;
-        let allowed = "🙂".repeat(MAX_CHARACTER_BODY_LENGTH / 2);
+        let allowed = "🙂".repeat(MAX_CHARACTER_BODY_LENGTH);
         write_character(&fixture.dir, &allowed).unwrap();
         assert_eq!(read_character(&fixture.dir, true).unwrap().unwrap().body, allowed);
         let refusal = write_character(&fixture.dir, &format!("{allowed}x")).unwrap_err();

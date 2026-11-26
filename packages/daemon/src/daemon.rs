@@ -193,7 +193,7 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
     };
     // What is running: the source checkout behind this process, if it has one.
     let running_source = resolve_running_source(crate::VERSION, &running_executable(), &env);
-    let ghost = match the_ghost(&config.home, &home.join("ghosts")) {
+    let ghost = match the_ghost(&config.home) {
         Ok(ghost) => ghost,
         Err(error) => {
             logger.error("no ghost home", json!({ "error": error.message }));

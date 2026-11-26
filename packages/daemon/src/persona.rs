@@ -1,7 +1,7 @@
 //! The ghost's system prompt: its character (the home's `character.md`), the
 //! section that tells it how to keep that file, and the policy sections the
 //! caller appends.
-use crate::js_text::{trim, utf16_len};
+use crate::text;
 use std::path::Path;
 
 pub const CHARACTER_FILENAME: &str = "character.md";
@@ -12,10 +12,9 @@ pub struct CharacterFile {
     pub body: String,
 }
 
-/// The limit counts UTF-16 code units, as every writer of the file has
-/// counted it (an emoji is two).
+/// The limit counts characters.
 pub fn character_body_too_long(body: &str) -> bool {
-    utf16_len(body) > MAX_CHARACTER_BODY_LENGTH
+    text::len(body) > MAX_CHARACTER_BODY_LENGTH
 }
 
 /// The character a new ghost home starts with.
@@ -39,18 +38,10 @@ owner can read it. This file is only who you are.
     )
 }
 
-/// The text is a seed the daemon wrote, untouched: today's, or the one before
-/// its "## Voice" heading became "## How you write", which ghosts created
-/// earlier still carry until they shape their character.
-fn is_seed_text(name: &str, text: &str) -> bool {
-    let seed = seeded_character(name);
-    text == seed || text == seed.replacen("\n## How you write\n", "\n## Voice\n", 1)
-}
-
 /// No character yet: nothing written, or the seed untouched.
 pub fn is_seeded_character(name: &str, text: Option<&str>) -> bool {
     match text {
-        Some(text) => trim(text).is_empty() || is_seed_text(name, text),
+        Some(text) => text.trim().is_empty() || text == seeded_character(name),
         None => true,
     }
 }
@@ -68,7 +59,7 @@ pub struct GhostSystemPromptInput<'a> {
 /// The character alone, or its unwritten stand-in.
 pub fn character_section(ghost_name: &str, character: Option<&CharacterFile>) -> String {
     match character {
-        Some(character) if !trim(&character.body).is_empty() => character.body.clone(),
+        Some(character) if !character.body.trim().is_empty() => character.body.clone(),
         _ => format!("You are {ghost_name}.\n\nYour character is unwritten."),
     }
 }
@@ -110,11 +101,9 @@ mod tests {
     // A ghost seeded before "## Voice" became "## How you write" is still
     // unshaped: it keeps its first meeting.
     #[test]
-    fn still_knows_a_seed_written_before_the_heading_changed() {
-        let legacy = seeded_character("mina").replace("\n## How you write\n", "\n## Voice\n");
-        assert_ne!(legacy, seeded_character("mina"));
-        assert!(is_seeded_character("mina", Some(&legacy)));
-        assert!(!is_seeded_character("mina", Some(&legacy.replace("You are mina.", "You are Mina, a printer."))));
+    fn knows_its_own_seed_and_nothing_else() {
+        let seed = seeded_character("mina");
+        assert!(!is_seeded_character("mina", Some(&seed.replace("You are mina.", "You are Mina, a printer."))));
         assert!(is_seeded_character("mina", None));
         assert!(is_seeded_character("mina", Some(" \n")));
         assert!(is_seeded_character("mina", Some(&seeded_character("mina"))));

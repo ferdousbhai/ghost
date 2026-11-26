@@ -26,17 +26,17 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   with CORS and the Private-Network preflight; `GET /api/remote/machines`
   lists the owner's other machines; the rest is the daemon API and turn wire.
   Build against that contract, and change both sides in one commit.
-- **Old Ghosts stay reachable.** The page is published when the owner says,
-  and packages reach machines later, so a change here keeps working against
-  the last released ghostd or says "update Ghost on <machine>".
+- **The current release only.** The page is published when the owner says
+  and packages reach machines later, so it can be ahead of a machine's Ghost;
+  until 1.0 it is written for the current release, and a machine it cannot
+  talk to is told to update Ghost.
 - **One-time setup per machine:** Tailscale's own `tailscale serve --bg
   --https=443 http://127.0.0.1:7717`, then the
   `https://summonghost.com/#add=<host>` link `ghost status` prints. Hosts
   are `host[:port]` and must end in `.ts.net`.
 - **Discovery:** after reaching one machine as owner, the page asks it for
   `/api/remote/machines` and probes each online host's `/api/remote/whoami`;
-  each that answers as owner is listed. A Ghost without that route still works
-  alone (a 404 is ignored).
+  each that answers as owner is listed.
 - **Machine list:** kept in `localStorage` (`summonghost.machines.v1`),
   wrapped in try/catch so the page works without it. Removed hosts are
   remembered, so discovery does not bring them back. An offline machine keeps
@@ -124,4 +124,3 @@ follow-up queued during the turn, pin, unpin and delete.
   the app closed. Checked on 2026-11-25 in desktop Chromium only: the page
   subscribed, and a scratch ghostd's test alert and a real turn's alert went
   through Google's push service and were shown by the service worker.
-- The "update Ghost" message against a real older ghostd over HTTPS.

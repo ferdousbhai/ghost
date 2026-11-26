@@ -268,11 +268,10 @@ fn is_preflighted_content_type(header: Option<&str>) -> bool {
     kind == "application/json" || kind.starts_with("image/")
 }
 
-/// A query parameter as a number, as JavaScript's `Number` reads it; None when absent.
+/// A query parameter as a number; None when absent.
 fn number_param(request: &Request, key: &str) -> Result<Option<f64>> {
     let Some(raw) = request.query(key) else { return Ok(None) };
-    let trimmed = raw.trim();
-    let value = if trimmed.is_empty() { Some(0.0) } else { trimmed.parse::<f64>().ok().filter(|value| value.is_finite()) };
+    let value = raw.trim().parse::<f64>().ok().filter(|value| value.is_finite());
     value.map(Some).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a number.")))
 }
 
@@ -582,7 +581,7 @@ impl Shared {
             // code rather than an SSE error event it has to unwrap.
             Route::Messages => {
                 let body = context.body()?;
-                let prompt = body.get("prompt").and_then(Value::as_str).map(crate::js_text::trim).filter(|prompt| !prompt.is_empty());
+                let prompt = body.get("prompt").and_then(Value::as_str).map(str::trim).filter(|prompt| !prompt.is_empty());
                 let prompt = prompt.ok_or_else(|| GhostError::invalid("\"prompt\" must be non-empty text."))?;
                 let session = body.get("sessionId").and_then(Value::as_str).filter(|id| !id.is_empty());
                 let admission = host.admit_turn(session, prompt)?;
@@ -686,7 +685,7 @@ impl Shared {
             Route::QueueGet => ok(host.queued_messages(&context.id)?),
             Route::QueuePost => {
                 let body = context.body()?;
-                let text = body.get("text").and_then(Value::as_str).map(crate::js_text::trim).filter(|text| !text.is_empty());
+                let text = body.get("text").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
                 let text = text.ok_or_else(|| GhostError::invalid("\"text\" must be a non-empty string."))?;
                 ok(host.queue_message(&context.id, text)?)
             }

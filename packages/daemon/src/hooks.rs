@@ -80,9 +80,8 @@ pub fn continuation(result: Option<&StopResult>) -> Option<String> {
 
 fn display_text(value: Option<&Value>, fallback: &str, label: &str, maximum: usize) -> Result<String, String> {
     let Some(value) = value else { return Ok(fallback.to_string()) };
-    // Trimmed and measured as the earlier daemon did, so a stored name keeps the limit it was admitted under.
-    match value.as_str().map(crate::js_text::trim) {
-        Some(text) if !text.is_empty() && crate::js_text::utf16_len(text) <= maximum => Ok(text.to_string()),
+    match value.as_str().map(str::trim) {
+        Some(text) if !text.is_empty() && crate::text::len(text) <= maximum => Ok(text.to_string()),
         _ => Err(format!("{label} must be a non-empty string of at most {maximum} characters.")),
     }
 }
@@ -116,8 +115,7 @@ pub fn parse_hooks_document(parsed: &Value, path: &str) -> Result<Vec<CommandHoo
             let handlers = handlers.ok_or_else(|| format!("{path}: hooks.{name}[{group_index}].hooks must be an array."))?;
             for (handler_index, raw) in handlers.iter().enumerate() {
                 let label = format!("hooks.{name}[{group_index}].hooks[{handler_index}]");
-                let command =
-                    raw.get("command").and_then(Value::as_str).filter(|command| !crate::js_text::trim(command).is_empty() && !command.contains('\0'));
+                let command = raw.get("command").and_then(Value::as_str).filter(|command| !command.trim().is_empty() && !command.contains('\0'));
                 let command = match command {
                     Some(command) if raw.is_object() && raw.get("type").and_then(Value::as_str) == Some("command") => command,
                     _ => return Err(format!("{path}: {label} must be a command hook with a non-empty NUL-free command.")),
@@ -175,7 +173,7 @@ pub fn parse_command_result(hook: &CommandHook, result: &HookCommandResult, warn
         return None;
     }
     if result.exit_code == Some(2) {
-        let reason = crate::js_text::trim(&result.stderr);
+        let reason = result.stderr.trim();
         return Some(StopResult {
             block: true,
             reason: Some(if reason.is_empty() { "A Ghost hook blocked the stop." } else { reason }.to_string()),
@@ -186,7 +184,7 @@ pub fn parse_command_result(hook: &CommandHook, result: &HookCommandResult, warn
         warn(&format!("{event} hook failed open"), json!({ "source": hook.source, "exitCode": result.exit_code }));
         return None;
     }
-    let output = crate::js_text::trim(&result.stdout);
+    let output = result.stdout.trim();
     if output.is_empty() {
         return None;
     }

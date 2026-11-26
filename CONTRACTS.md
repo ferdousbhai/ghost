@@ -27,7 +27,7 @@ answers every turn, so the owner's data stays on the machine; Ghost runs no
 turn on a cloud model. A coding agent the owner has (Claude Code, Codex,
 Antigravity) is a command the model runs from its shell, with that agent's
 own sign-in, tools, and limits.
-`ghostd` owns sessions and state transitions; the window and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it; a `host` key an earlier config carries is ignored, like any key Ghost does not read) and serves no web page; remote
+`ghostd` owns sessions and state transitions; the window and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no web page; remote
 access is the summonghost.com app over an explicit Tailscale Serve address. The
 app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale
@@ -109,10 +109,8 @@ A machine has one ghost, and its home is one fixed directory,
 ```
 
 A daemon start that finds no `character.md` there makes one, seeded
-([`ghosts.rs`](packages/daemon/src/ghosts.rs)), unless an earlier version left
-the ghost under `~/ghosts/<name>/`: that home, when it is the only one there,
-is moved here once, and several are refused at start with an error naming
-them. Ghost never otherwise moves or removes a home. The ghost's name is its
+([`ghosts.rs`](packages/daemon/src/ghosts.rs)). Ghost never moves or removes a
+home. The ghost's name is its
 persona's title, the leading `# ` heading of `character.md`, read when it is
 needed, else `ghost`; to rename the ghost, retitle its persona. No route,
 command or URL carries the name; `GET /api/ghost` reports it. Another
@@ -124,8 +122,7 @@ Machine credentials, owner documents, screenshots, and downloads are not in it.
 The checkout a ghost may edit is the clone the daemon was built from
 (`GET /api/status` `source.root`). A packaged install has no checkout. No setting
 names one; the checkout's own rules, MCP, and skills never enter a session.
-Every conversation runs in its own directory. A `settings.yml` an earlier
-version kept in a ghost home is not read.
+Every conversation runs in its own directory.
 
 ### Character and notes
 
@@ -166,10 +163,9 @@ and task-tab locking recipe to agent-browser's own skills), and the model
 reads the owner's skills under `~/.agents/skills`. Ghost connects no MCP
 servers. A ghost home carries no executable extension code; the only hooks
 are the owner's `hooks.json` commands. A conversation directory holds Ghost's
-log and whatever the model's commands write there; the `AGENTS.md`,
-`CLAUDE.md`, and `GEMINI.md` an earlier version wrote the persona into are
-left as they are and no longer written, so a coding agent run in a project's
-directory reads that project's instructions and nothing of Ghost's.
+log and whatever the model's commands write there; Ghost writes no
+instruction file there, so a coding agent run in a project's directory reads
+that project's instructions and nothing of Ghost's.
 
 ### Conversations
 
@@ -185,7 +181,7 @@ reasoning; `handoff`, the note that stands for the conversation before it;
 `text`; `toolCall` with its `arguments`, `output`, the whole of
 what it returned as the model was given it, and `failed` on one that
 failed; a failed turn carries `error`), the owner's `!` commands, and title
-records. A torn last line is skipped, and so is any record ghostd does not write (an earlier version's `harness`, `compacted`, `resources` or `handoff`); logs are never rewritten. ghostd is the log's
+records. A torn last line is skipped, and so is any record or part ghostd does not write; logs are never rewritten. Until 1.0 the log's shape may change without a way to read an earlier one. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
 every client reads. A conversation is listed once a message lands or the owner
@@ -332,8 +328,7 @@ status. Request bodies and control files are bounded before allocation.
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary, and only the owner's: the configured owner, else the login this
 node belongs to. Anyone else on the tailnet is refused (`401`), as is a
-request without a token or that identity. A `remote.guests` key an earlier
-config carries is ignored.
+request without a token or that identity.
 Remote access never broadens a ghost's local tool authority.
 
 `remote.apps` lists `https://` web app origins admitted past the Origin check

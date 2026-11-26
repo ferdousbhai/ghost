@@ -29,7 +29,7 @@ pub fn coding_agent_command(id: &str) -> Option<&'static str> {
 /// Omarchy's default agent (`omarchy default agent`), or None when none is chosen.
 fn omarchy_default_agent(env: &Env) -> Option<String> {
     let chosen = run_command("omarchy-default-agent", &[], env, None, Duration::from_secs(5), &Abort::new()).ok()?;
-    let name = crate::js_text::trim(&chosen.stdout);
+    let name = chosen.stdout.trim();
     (chosen.code == 0 && !name.is_empty()).then(|| name.to_string())
 }
 

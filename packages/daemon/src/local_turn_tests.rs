@@ -561,7 +561,7 @@ const LOCAL_CEILING: usize = 847;
 #[test]
 fn the_local_section_stays_at_its_ceiling_and_names_only_the_owners_coding_agent() {
     let section = |agent: &str| local_section(coding_agent_command(agent));
-    let longest = CODING_AGENT_COMMANDS.iter().map(|(agent, _)| crate::js_text::utf16_len(&section(agent))).max().unwrap();
+    let longest = CODING_AGENT_COMMANDS.iter().map(|(agent, _)| crate::text::len(&section(agent))).max().unwrap();
     assert_eq!(longest, LOCAL_CEILING);
     assert!(section("codex").contains("`codex exec \"<task>\"`"));
     assert!(!section("codex").contains("claude"));

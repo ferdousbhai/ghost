@@ -15,7 +15,7 @@ pub fn trash_path(path: &Path, env: &Env) -> Result<()> {
     let shown = path.to_string_lossy();
     let reason = match run_command("gio", &["trash", "--", &shown], env, None, TRASH_TIMEOUT, &Abort::new()) {
         Ok(result) if result.code == 0 => return Ok(()),
-        Ok(result) => match crate::js_text::trim(&result.stderr).rsplit('\n').next() {
+        Ok(result) => match result.stderr.trim().rsplit('\n').next() {
             Some(line) if !line.is_empty() => line.to_string(),
             _ => format!("Command failed: gio trash -- {shown}"),
         },

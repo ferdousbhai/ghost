@@ -211,7 +211,7 @@ fn every_refusal_names_the_offending_field() {
 }
 
 #[test]
-fn names_are_trimmed_and_measured_as_the_earlier_daemon_did() {
+fn names_are_trimmed_and_measured_in_characters() {
     let named = |name: &str| {
         parse_hooks_document(
             &json!({ "hooks": { "session_stop": group(json!([{ "type": "command", "command": "x", "name": name }])) } }),
@@ -219,15 +219,14 @@ fn names_are_trimmed_and_measured_as_the_earlier_daemon_did() {
         )
         .map(|commands| commands[0].name.clone())
     };
-    assert_eq!(named("  Reviewer\u{feff}\n").as_deref(), Ok("Reviewer"));
+    assert_eq!(named("  Reviewer\n").as_deref(), Ok("Reviewer"));
     assert_eq!(named(&"n".repeat(80)).map(|name| name.len()), Ok(80));
     assert!(named(&"n".repeat(81)).is_err());
-    // The limit is in UTF-16 units: 40 of these are 80 units, 41 are 82.
-    assert!(named(&"🙂".repeat(40)).is_ok());
-    assert!(named(&"🙂".repeat(41)).is_err());
-    // What JavaScript trims away leaves no command, and no name.
-    assert!(parse_hooks_document(&json!({ "hooks": { "session_stop": group(json!([command("\u{feff}\u{2028}")])) } }), POLICY_PATH).is_err());
-    assert!(named("\u{feff}").is_err());
+    assert!(named(&"🙂".repeat(80)).is_ok());
+    assert!(named(&"🙂".repeat(81)).is_err());
+    // White space alone is no command, and no name.
+    assert!(parse_hooks_document(&json!({ "hooks": { "session_stop": group(json!([command(" \u{2028}")])) } }), POLICY_PATH).is_err());
+    assert!(named(" \t").is_err());
     // A timeout is whole milliseconds, rounded down.
     let timed =
         parse_hooks_document(&json!({ "hooks": { "session_stop": group(json!([{ "type": "command", "command": "x", "timeout": 0.0015 }])) } }), "p");
@@ -318,7 +317,7 @@ fn reads_every_shape_of_a_clean_answer() {
     // Only `true` continues, and only strings are text.
     let loose = answered(stop, r#"{"continue":"yes","additionalContext":7,"reason":["x"]}"#);
     assert_eq!(loose, Some(StopResult::default()));
-    let both = answered(stop, "\u{feff}{\"continue\":true,\"additionalContext\":\"More.\",\"reason\":\"Why.\"}\n").unwrap();
+    let both = answered(stop, " {\"continue\":true,\"additionalContext\":\"More.\",\"reason\":\"Why.\"}\n").unwrap();
     assert_eq!(both, StopResult { continue_turn: true, additional_context: Some("More.".into()), block: false, reason: Some("Why.".into()) });
     // `continue` prefers the context, a block its reason; an empty one falls back to the other.
     assert_eq!(continuation(Some(&both)).as_deref(), Some("More."));

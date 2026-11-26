@@ -220,7 +220,7 @@ pub fn conversation_messages(entries: &[LogEntry], hook_prefix: &str) -> Vec<Val
                             text.push_str(said);
                         }
                         AssistantPart::ToolCall { id, name, arguments, output, .. } => calls.push((id, name, arguments, output.as_deref())),
-                        AssistantPart::Thinking { .. } | AssistantPart::Handoff { .. } | AssistantPart::Other(_) => {}
+                        AssistantPart::Thinking { .. } | AssistantPart::Handoff { .. } => {}
                     }
                 }
                 flush(&mut messages, &mut text, &mut calls);

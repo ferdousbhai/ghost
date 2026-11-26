@@ -20,8 +20,7 @@ Done since:
 - 2026-11-26, a second cleanup, agreed with the owner: the turn_end hook
   (push alerts replaced its one use), the read-only guest role (only the
   owner reaches Ghost), the ghosts root (the home is
-  `~/.local/share/ghost`, the ghost named by its persona's title, and an
-  earlier `~/ghosts/<name>` is moved there once). The model's state is now
+  `~/.local/share/ghost`, the ghost named by its persona's title). The model's state is now
   saved at each stop and restored at the next start.
 - 2026-11-25, a cleanup of what only wrapped something else: the window's
   Sources and Connect pages and their adapters (each product has its own
@@ -86,15 +85,15 @@ reaches a machine on 0.11.9. The page's code moved into this repository on
 the owner's go, and the CloudChef project it once lived in only receives
 that. Earlier plans are in Git history.
 
-## Upgrading from 0.11.9
+## Compatibility
 
-A machine upgraded from 0.11.9 has leftovers to remove by
-hand: `ghost-timer-*` units in `~/.config/systemd/user/`, the watch scripts in
-`~/.config/ghost/`, `~/.config/ghost/cli.json`, and any Omarchy hook that
-calls `ghost event` (for example `hooks/battery-low.d/ghost-event.sh`),
-and the HUD's plugin link, `~/.config/omarchy/plugins/ferdousbhai.ghost`
-(`omarchy plugin remove ferdousbhai.ghost --yes`), with any Hyprland line
-that sources its `ghost.conf` or `ghost.lua`.
+Until 1.0 nothing is kept for an earlier version: not its config keys, its
+log records or parts, its home layout, nor the TypeScript daemon's text
+semantics (lengths are now characters). The owner decided this on
+2026-11-26. A machine upgraded across a break is set right by hand. The one
+exception is packaging: the recipe still `replaces` and `conflicts` with
+`ghost-runtime`, because without it `omarchy update` would stop on a file
+conflict for anyone who installed 0.11.9 from Omarchy's repository.
 
 ## Open issues worth keeping
 

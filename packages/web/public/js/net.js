@@ -35,14 +35,13 @@ export const tailnetOf = (host) => host.split(":")[0].split(".").slice(1).join("
 
 export const base = (host) => "https://" + host;
 
-/** Chrome's permission for a public site to reach private addresses, such as tailnet ones; older Chrome named it differently. */
+/** Chrome's permission for a public site to reach private addresses, such as tailnet ones. */
 async function localNetworkPermission() {
-  for (const name of ["local-network", "local-network-access"]) {
-    try {
-      return (await navigator.permissions.query({ name })).state;
-    } catch {}
+  try {
+    return (await navigator.permissions.query({ name: "local-network" })).state;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
@@ -92,7 +91,6 @@ function refusal(host, status, error) {
   if (code === "forbidden_origin") {
     return new MachineError("outdated", `Ghost on ${name} has this app turned off (remote.apps).`, status, code);
   }
-  if (code === "read_only") return new MachineError("read-only", "You can watch here, but only the owner can act.", status, code);
   return new MachineError("http", error?.message || `${name} answered ${status}.`, status, code);
 }
 

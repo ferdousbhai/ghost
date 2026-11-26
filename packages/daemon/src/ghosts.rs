@@ -1,5 +1,5 @@
 //! The machine's one ghost and where its home keeps things.
-use crate::error::{GhostError, Result};
+use crate::error::Result;
 use crate::persona::{CHARACTER_FILENAME, seeded_character};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -48,48 +48,16 @@ pub fn ghost_paths(dir: &Path) -> GhostPaths {
     GhostPaths { session_dir: home.join(GHOST_SESSIONS_DIRNAME), character_file: home.join(CHARACTER_FILENAME) }
 }
 
-/// The machine's one ghost, whose home is `dir`. A home earlier versions kept
-/// as the one directory with a `character.md` under `earlier_root` (they
-/// allowed several, under `~/ghosts`) is moved here once, when `dir` is not
-/// yet a home. With neither, the home is made with a seeded persona.
-pub fn the_ghost(dir: &Path, earlier_root: &Path) -> Result<Ghost> {
+/// The machine's one ghost, whose home is `dir`: made with a seeded persona
+/// when it holds none.
+pub fn the_ghost(dir: &Path) -> Result<Ghost> {
     let dir = absolute(dir);
-    if is_ghost_home(&dir) {
-        return Ok(Ghost { dir });
+    if !is_ghost_home(&dir) {
+        std::fs::create_dir_all(&dir)?;
+        // Fail rather than clobber a character.md that appeared since the check.
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(CHARACTER_FILENAME))?;
+        file.write_all(seeded_character(FIRST_GHOST_NAME).as_bytes())?;
     }
-    let earlier: Vec<PathBuf> = std::fs::read_dir(earlier_root)
-        .map(|entries| {
-            entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('.')) && is_ghost_home(path))
-                .collect()
-        })
-        .unwrap_or_default();
-    if let [earlier] = earlier.as_slice() {
-        if let Some(parent) = dir.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        // An empty directory in the way is not a home; anything in it is kept by refusing.
-        let _ = std::fs::remove_dir(&dir);
-        std::fs::rename(earlier, &dir).map_err(|error| {
-            GhostError::internal(format!("Could not move the ghost home {} to {}: {error}. Move it there by hand.", earlier.display(), dir.display()))
-        })?;
-        let _ = std::fs::remove_dir(earlier_root);
-        return Ok(Ghost { dir });
-    }
-    if earlier.len() > 1 {
-        let names: Vec<String> = earlier.iter().map(|path| path.display().to_string()).collect();
-        return Err(GhostError::internal(format!(
-            "A machine has one ghost, and earlier homes are {}: move the one to keep to {} and the rest away.",
-            names.join(", "),
-            dir.display()
-        )));
-    }
-    std::fs::create_dir_all(&dir)?;
-    // Fail rather than clobber a character.md that appeared since the check.
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(CHARACTER_FILENAME))?;
-    file.write_all(seeded_character(FIRST_GHOST_NAME).as_bytes())?;
     Ok(Ghost { dir })
 }
 
@@ -113,7 +81,7 @@ mod tests {
     fn is_the_home_there_named_by_its_personas_title() {
         let root = scratch();
         seed(&root.join("home"), "Casper");
-        let ghost = the_ghost(&root.join("home"), &root.join("ghosts")).unwrap();
+        let ghost = the_ghost(&root.join("home")).unwrap();
         assert_eq!((ghost.dir.clone(), ghost.name()), (root.join("home"), "Casper".to_string()));
         // A rewritten persona renames it; one without a title is `ghost`.
         std::fs::write(root.join("home/character.md"), "\n# Wraith \n\nYou are Wraith.\n").unwrap();
@@ -128,39 +96,11 @@ mod tests {
     #[test]
     fn is_made_with_a_seeded_persona_where_there_is_none() {
         let root = scratch();
-        let ghost = the_ghost(&root.join("fresh"), &root.join("ghosts")).unwrap();
+        let ghost = the_ghost(&root.join("fresh")).unwrap();
         assert_eq!(ghost.name(), "ghost");
         assert!(is_ghost_home(&ghost.dir));
         let character = std::fs::read_to_string(ghost_paths(&ghost.dir).character_file).unwrap();
         assert!(crate::persona::is_seeded_character("ghost", Some(&character)));
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn moves_the_one_home_an_earlier_version_kept_and_refuses_to_choose_between_several() {
-        let root = scratch();
-        let earlier = root.join("ghosts");
-        seed(&earlier.join("casper"), "Casper");
-        // Not homes: a directory with no character.md, a dot-directory, a plain file.
-        std::fs::create_dir_all(earlier.join("scratch")).unwrap();
-        seed(&earlier.join(".hidden"), "Nope");
-        std::fs::write(earlier.join("README.md"), "hi\n").unwrap();
-        let home = root.join(".local/share/ghost");
-        std::fs::create_dir_all(&home).unwrap();
-        let ghost = the_ghost(&home, &earlier).unwrap();
-        assert_eq!((ghost.dir.clone(), ghost.name()), (home.clone(), "Casper".to_string()));
-        assert!(home.join("sessions/c1").is_dir() && !earlier.join("casper").exists());
-        // Once moved it is found where it is, and nothing is moved again.
-        seed(&earlier.join("later"), "Later");
-        assert_eq!(the_ghost(&home, &earlier).unwrap().name(), "Casper");
-
-        let several = scratch();
-        seed(&several.join("ghosts/a"), "A");
-        seed(&several.join("ghosts/b"), "B");
-        let refused = the_ghost(&several.join("home"), &several.join("ghosts")).unwrap_err().message;
-        assert!(refused.contains("A machine has one ghost"), "{refused}");
-        assert!(!several.join("home").exists());
-        std::fs::remove_dir_all(root).unwrap();
-        std::fs::remove_dir_all(several).unwrap();
     }
 }

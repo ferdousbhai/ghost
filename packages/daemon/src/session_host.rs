@@ -17,7 +17,6 @@ use crate::error::{GhostError, Result};
 use crate::ghosts::{Ghost, ghost_paths};
 use crate::home::read_character;
 use crate::hooks::{HookEvent, HookEventName, HookRunner, continuation};
-use crate::js_text::{utf16_len, utf16_prefix, utf16_suffix};
 use crate::local_model::LocalModel;
 use crate::local_turn::{Answerer, LocalAnswerer, PassEvent, PassInput, conversation_messages};
 use crate::log::Logger;
@@ -25,6 +24,7 @@ use crate::persona::{GhostSystemPromptInput, build_ghost_system_prompt, is_seede
 use crate::process::{ProcessOptions, run_process, signal_name};
 use crate::prompt_policy::stable_policy_sections;
 use crate::sidecars::{OwnerQuestion, read_pins, read_questions, read_reads, write_pins, write_questions, write_reads};
+use crate::text;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -150,18 +150,18 @@ struct PassResult {
 }
 
 fn tail(text: &str) -> Option<String> {
-    let trimmed = crate::js_text::trim(text);
+    let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
     }
-    Some(if utf16_len(trimmed) > TOOL_SUMMARY_MAX { format!("…{}", utf16_suffix(trimmed, TOOL_SUMMARY_MAX)) } else { trimmed.to_string() })
+    Some(if text::len(trimmed) > TOOL_SUMMARY_MAX { format!("…{}", text::suffix(trimmed, TOOL_SUMMARY_MAX)) } else { trimmed.to_string() })
 }
 
 /// An owner `!command` (`!!` keeps it out of the ghost's context), or None for
 /// a prompt. A message that opens with an attached photo, `![image](…)`, is a
 /// prompt.
 fn owner_command(prompt: &str) -> Option<OwnerCommand> {
-    let trimmed = crate::js_text::trim(prompt);
+    let trimmed = prompt.trim();
     if trimmed.starts_with("![") {
         return None;
     }
@@ -169,7 +169,7 @@ fn owner_command(prompt: &str) -> Option<OwnerCommand> {
         Some(rest) => (rest, true),
         None => (trimmed.strip_prefix('!')?, false),
     };
-    Some(OwnerCommand { command: rest.trim_start_matches(crate::js_text::is_space).to_string(), excluded })
+    Some(OwnerCommand { command: rest.trim_start().to_string(), excluded })
 }
 
 fn error_event(reason: &str, message: &str) -> Value {
@@ -182,15 +182,15 @@ fn internal(error: impl std::fmt::Display) -> GhostError {
 
 /// A question as asked: trimmed, bounded, options deduplicated in order.
 fn valid_question(text: &str, options: &[String]) -> Result<OwnerQuestion> {
-    let trimmed = crate::js_text::trim(text);
+    let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err(GhostError::invalid("A question needs text."));
     }
-    if utf16_len(trimmed) > MAX_QUESTION_LENGTH {
+    if text::len(trimmed) > MAX_QUESTION_LENGTH {
         return Err(GhostError::invalid(format!("A question must be at most {MAX_QUESTION_LENGTH} characters.")));
     }
     let mut kept: Vec<String> = Vec::new();
-    for option in options.iter().map(|option| crate::js_text::trim(option)).filter(|option| !option.is_empty()) {
+    for option in options.iter().map(|option| option.trim()).filter(|option| !option.is_empty()) {
         if !kept.iter().any(|seen| seen == option) {
             kept.push(option.to_string());
         }
@@ -198,7 +198,7 @@ fn valid_question(text: &str, options: &[String]) -> Result<OwnerQuestion> {
     if kept.len() > MAX_QUESTION_OPTIONS {
         return Err(GhostError::invalid(format!("A question takes at most {MAX_QUESTION_OPTIONS} options.")));
     }
-    if kept.iter().any(|option| utf16_len(option) > MAX_QUESTION_OPTION_LENGTH) {
+    if kept.iter().any(|option| text::len(option) > MAX_QUESTION_OPTION_LENGTH) {
         return Err(GhostError::invalid(format!("Each option must be at most {MAX_QUESTION_OPTION_LENGTH} characters.")));
     }
     Ok(OwnerQuestion { text: trimmed.to_string(), options: kept, asked_at: clock::now_iso() })
@@ -479,7 +479,7 @@ impl SessionHost {
         if abort.is_aborted() {
             return;
         }
-        if written.error.is_some() || crate::js_text::trim(&note).is_empty() {
+        if written.error.is_some() || note.trim().is_empty() {
             self.inner.logger.warn("no handoff note was written", json!({ "conversation": id, "reason": written.error }));
             return;
         }
@@ -559,12 +559,12 @@ impl SessionHost {
     /// admission or conversation lock: the turn awaiting the `session_stop` hook
     /// that asks holds its own, and waiting for it would deadlock.
     pub fn complete(&self, prompt: &str, abort: &Abort) -> Result<String> {
-        if crate::js_text::trim(prompt).is_empty() {
+        if prompt.trim().is_empty() {
             return Err(GhostError::invalid("prompt must be a non-empty string."));
         }
         let Some(answerer) = &self.inner.answerer else { return Err(GhostError::new("no_local_model", NO_LOCAL_MODEL, 409)) };
         let text = answerer.complete(prompt, abort).map_err(internal)?;
-        let text = crate::js_text::trim(&text);
+        let text = text.trim();
         if text.is_empty() {
             return Err(GhostError::new("completion_failed", "The local model returned no text for the prompt.", 502));
         }
@@ -756,10 +756,10 @@ impl SessionHost {
         };
         let url = self.inner.conversation_url.as_ref().and_then(|link| link(id));
         let title = log_state(&entries).title.unwrap_or_else(|| self.inner.ghost.name());
-        let excerpt = text.split(crate::js_text::is_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
+        let excerpt = text.split_whitespace().collect::<Vec<_>>().join(" ");
         // What the app's service worker shows; `tag` lets a later alert for the conversation replace an earlier one.
-        let body = if failed { format!("Failed: {}", utf16_prefix(&excerpt, 280)) } else { utf16_prefix(&excerpt, 280).to_string() };
-        push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name() }));
+        let body = if failed { format!("Failed: {}", text::prefix(&excerpt, 280)) } else { text::prefix(&excerpt, 280).to_string() };
+        push.notify(json!({ "title": text::prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name() }));
     }
 
     fn session_stop(&self, id: &str, owner_prompt: &str, turn_id: &str, active: bool, abort: &Abort, emit: &Emit) -> Result<Option<String>> {
@@ -807,21 +807,21 @@ impl SessionHost {
                 if !chunk.is_empty() {
                     output.push_str(chunk);
                     if output.len() > 200_000 {
-                        output = utf16_suffix(&output, 100_000).to_string();
+                        output = text::suffix(&output, 100_000).to_string();
                     }
                     due.get_or_insert_with(|| Instant::now() + Duration::from_millis(100));
                 }
                 if due.is_some_and(|at| Instant::now() >= at) {
                     due = None;
                     let mut update = json!({ "type": "tool_execution_update", "id": tool_id });
-                    if let Some(summary) = tail(utf16_suffix(&output, 4 * TOOL_SUMMARY_MAX)) {
+                    if let Some(summary) = tail(text::suffix(&output, 4 * TOOL_SUMMARY_MAX)) {
                         update["summary"] = json!(summary);
                     }
                     emit(update);
                 }
             },
         );
-        output = utf16_suffix(&output, 100_000).to_string();
+        output = text::suffix(&output, 100_000).to_string();
         output.push_str(&exit.stderr);
         if let Some(error) = &exit.spawn_error {
             output.push_str(error);
@@ -1016,11 +1016,11 @@ impl SessionHost {
     }
 
     pub fn rename_conversation(&self, session_id: &str, title: &str) -> Result<String> {
-        let trimmed = crate::js_text::trim(title);
+        let trimmed = title.trim();
         if trimmed.is_empty() {
             return Err(GhostError::invalid("\"title\" must not be empty."));
         }
-        if utf16_len(trimmed) > MAX_CONVERSATION_TITLE_LENGTH {
+        if text::len(trimmed) > MAX_CONVERSATION_TITLE_LENGTH {
             return Err(GhostError::invalid(format!("\"title\" must be at most {MAX_CONVERSATION_TITLE_LENGTH} characters.")));
         }
         if !regex::Regex::new(r"\P{C}").expect("a literal pattern").is_match(trimmed) {

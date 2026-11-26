@@ -822,7 +822,7 @@ fn a_newline_free_commands_output_is_bounded_and_keeps_its_actual_trailing_bytes
     let Some(LogEntry::Command { output, .. }) = entries.iter().find(|entry| matches!(entry, LogEntry::Command { .. })) else {
         panic!("Owner command was not logged.");
     };
-    assert_eq!(utf16_len(output), 100_000);
+    assert_eq!(text::len(output), 100_000);
     assert!(output.ends_with("tail"));
     assert!(!output.contains('\n'));
 }
@@ -1383,7 +1383,7 @@ fn a_turn_that_ends_alerts_the_owners_devices_once_with_a_bounded_excerpt_and_it
         json!({ "title": "Make the report", "url": "https://summonghost.com/#/ghost.example.ts.net/c1", "tag": "c1", "ghost": "Casper" }),
     );
     let body = sent[0]["body"].as_str().unwrap();
-    assert_eq!(utf16_len(body), 280);
+    assert_eq!(text::len(body), 280);
     assert!(body.starts_with("Finished. aaaa"), "{body}");
     assert_eq!(events.last().unwrap()["type"], "done");
 }

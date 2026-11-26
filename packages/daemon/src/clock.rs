@@ -1,6 +1,5 @@
-//! Time as the API and the log write it: UTC ISO 8601 with milliseconds, as
-//! JavaScript's `toISOString` does, so logs written by earlier versions and
-//! by this one sort together as text.
+//! Time as the API and the log write it: UTC ISO 8601 with milliseconds, which
+//! sorts as text.
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now_ms() -> i64 {

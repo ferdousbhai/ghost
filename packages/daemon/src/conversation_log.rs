@@ -5,11 +5,10 @@
 //! own.
 //!
 //! The file is one JSON object per line, appended only. Lengths and limits
-//! are in UTF-16 code units, as the logs written before this version counted
-//! them; a cut never lands inside a character.
+//! are in characters, and a cut never lands inside one.
 use crate::error::{GhostError, Result};
-use crate::js_text::{is_space, trim, trim_end, utf16_len, utf16_prefix};
 use crate::sidecars::SIDECAR_FILENAMES;
+use crate::text;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::fs::File;
@@ -40,7 +39,7 @@ pub enum AssistantPart {
         arguments: Value,
         failed: bool,
         /// What the call returned, as the model was given it; None for a call
-        /// that never ended, or one an earlier version logged.
+        /// that never ended.
         output: Option<String>,
     },
     /// The note the ghost wrote when the conversation neared the model's
@@ -51,8 +50,6 @@ pub enum AssistantPart {
         text: String,
         covers: usize,
     },
-    /// A part in a shape this version does not write, kept as it was read so a client is served it unchanged.
-    Other(Value),
 }
 
 impl AssistantPart {
@@ -76,13 +73,13 @@ impl AssistantPart {
                 }
                 part
             }
-            Self::Other(value) => value.clone(),
         }
     }
 
-    pub fn from_json(value: &Value) -> Self {
+    /// The part a logged value holds, or None for a shape this version does not write.
+    pub fn from_json(value: &Value) -> Option<Self> {
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
-        let typed = match value.get("type").and_then(Value::as_str) {
+        match value.get("type").and_then(Value::as_str) {
             Some("text") => text("text").map(|text| Self::Text { text }),
             Some("thinking") => text("text").map(|text| Self::Thinking { text }),
             Some("handoff") => match (text("text"), value.get("covers").and_then(Value::as_u64)) {
@@ -100,9 +97,7 @@ impl AssistantPart {
                 _ => None,
             },
             _ => None,
-        };
-        // Only a part that would be written back exactly as it was read is typed.
-        typed.filter(|part| part.to_json() == *value).unwrap_or_else(|| Self::Other(value.clone()))
+        }
     }
 }
 
@@ -195,9 +190,7 @@ impl LogEntry {
     }
 
     /// The entry a parsed line holds, or None for a line this version does not
-    /// read: a retired record of an earlier version (`harness`, `compacted`,
-    /// `resources`, a `handoff`, or a user message with `origin: "auto"` or
-    /// `"peer"`) or one from a later one. A known entry is never refused for a missing field (it reads as
+    /// write. A known entry is never refused for a missing field (it reads as
     /// empty): every entry read keeps its place in the count that names them.
     pub fn from_json(value: &Value) -> Option<Self> {
         let entry: &Map<String, Value> = value.as_object()?;
@@ -221,7 +214,7 @@ impl LogEntry {
                 content: entry
                     .get("content")
                     .and_then(Value::as_array)
-                    .map(|parts| parts.iter().map(AssistantPart::from_json).collect())
+                    .map(|parts| parts.iter().filter_map(AssistantPart::from_json).collect())
                     .unwrap_or_default(),
                 error: entry.get("error").and_then(Value::as_str).filter(|error| !error.is_empty()).map(str::to_string),
             },
@@ -272,11 +265,7 @@ pub fn log_path(session_dir: &Path, id: &str) -> PathBuf {
 /// `text` within the stored limit. A cut that would split a character ends in
 /// U+FFFD instead, so a cut text is always exactly the limit long.
 fn bounded(text: &str) -> String {
-    if text.len() <= MAX_LOG_TEXT || utf16_len(text) <= MAX_LOG_TEXT {
-        return text.to_string();
-    }
-    let kept = utf16_prefix(text, MAX_LOG_TEXT);
-    if utf16_len(kept) < MAX_LOG_TEXT { format!("{kept}\u{fffd}") } else { kept.to_string() }
+    text::prefix(text, MAX_LOG_TEXT).to_string()
 }
 
 fn bounded_entry(entry: &LogEntry) -> LogEntry {
@@ -340,12 +329,12 @@ fn pattern(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
 fn owner_words(text: &str) -> String {
     static MARKERS: OnceLock<Regex> = OnceLock::new();
     let markers = pattern(&MARKERS, r"(?mR)\[Attachment:[^\]]*\]|^!\[[^\]]*\]\(attachments/[^)\s\x{feff}]+\)$");
-    trim(&markers.replace_all(text, " ")).to_string()
+    markers.replace_all(text, " ").trim().to_string()
 }
 
 fn first_line(text: &str) -> Option<String> {
-    let line = text.split('\n').map(trim).find(|part| !part.is_empty())?;
-    Some(if utf16_len(line) > PREVIEW_MAX { trim_end(utf16_prefix(line, PREVIEW_MAX)).to_string() } else { line.to_string() })
+    let line = text.split('\n').map(str::trim).find(|part| !part.is_empty())?;
+    Some(if text::len(line) > PREVIEW_MAX { text::prefix(line, PREVIEW_MAX).trim_end().to_string() } else { line.to_string() })
 }
 
 /// Words a title does not end on.
@@ -365,7 +354,7 @@ fn first_clause(plain: &str) -> &str {
     let mut end = breaks.find(plain).map_or(plain.len(), |found| found.start());
     let mut previous = '\0';
     for (at, character) in plain[..end].char_indices() {
-        if is_space(character) && matches!(previous, '.' | '?' | '!') {
+        if character.is_whitespace() && matches!(previous, '.' | '?' | '!') {
             end = at;
             break;
         }
@@ -385,7 +374,7 @@ pub fn derived_title(text: &str) -> Option<String> {
     let plain = owner_words(text);
     let named = pattern(&NAMED, r#"(?i)(?-u:\b)(?:called|named|titled)[\s\x{feff}]+["“]([^"”]{2,60})["”]"#)
         .captures(&plain)
-        .map(|found| trim(found[1].trim_start_matches('#').trim_start_matches(is_space)).to_string())
+        .map(|found| (found[1].trim_start_matches('#').trim_start()).trim().to_string())
         .filter(|name| !name.is_empty());
     if named.is_some() {
         return named;
@@ -397,15 +386,14 @@ pub fn derived_title(text: &str) -> Option<String> {
     );
     let mut clause = first_clause(&plain).to_string();
     loop {
-        let stripped = trim(&lead.replace(&clause, "")).to_string();
+        let stripped = lead.replace(&clause, "").trim().to_string();
         if stripped == clause {
             break;
         }
         clause = stripped;
     }
     let clause = pattern(&FOR_ME, r"(?i)^(?:for )?me[\s\x{feff}]+").replace(&clause, "");
-    let mut words: Vec<&str> =
-        clause.trim_end_matches(['?', '!', '.', ',', ':', ';']).split(is_space).filter(|word| !word.is_empty()).take(TITLE_WORDS).collect();
+    let mut words: Vec<&str> = clause.trim_end_matches(['?', '!', '.', ',', ':', ';']).split_whitespace().take(TITLE_WORDS).collect();
     while words.len() > 1 {
         let last: String = words[words.len() - 1].to_lowercase().chars().filter(|c| c.is_ascii_lowercase() || *c == '\'').collect();
         if !TITLE_TAIL.contains(&last.as_str()) {
@@ -420,8 +408,8 @@ pub fn derived_title(text: &str) -> Option<String> {
     let title = title.trim_end_matches([',', ':', ';']);
     let mut rest = title.chars();
     Some(match rest.next() {
-        Some(first) if first.len_utf16() == 1 => first.to_uppercase().chain(rest).collect(),
-        _ => title.to_string(),
+        Some(first) => first.to_uppercase().chain(rest).collect(),
+        None => title.to_string(),
     })
 }
 
@@ -449,7 +437,7 @@ impl LogStateAccumulator {
                 self.owner_wrote = true;
                 if self.preview.is_none() {
                     // A message of attachments alone still says what it was.
-                    self.preview = first_line(&owner_words(text)).or_else(|| (!trim(text).is_empty()).then(|| "Photo".to_string()));
+                    self.preview = first_line(&owner_words(text)).or_else(|| (!text.trim().is_empty()).then(|| "Photo".to_string()));
                 }
                 self.derived = derived_title(text);
             }
@@ -530,7 +518,7 @@ fn command_text(output: &str, exit_code: Option<i32>) -> String {
         fence_length = fence_length.max(run + 1);
     }
     let fence = "`".repeat(fence_length);
-    format!("{fence}\n{}\n{fence}{status}", trim_end(output))
+    format!("{fence}\n{}\n{fence}{status}", output.trim_end())
 }
 
 /// One entry's renderable messages from its `skip`th, at most `take` of them;
@@ -539,7 +527,7 @@ pub fn entry_messages(entry: &LogEntry, entry_id: &str, skip: usize, take: usize
     let message = |role, content, entry_id: String| TranscriptMessage { role, content, entry_id, content_truncated: false, error_message: None };
     match entry {
         LogEntry::User { text, origin, .. } => vec![TranscriptMessage {
-            content_truncated: text.len() >= MAX_LOG_TEXT && utf16_len(text) >= MAX_LOG_TEXT,
+            content_truncated: text.len() >= MAX_LOG_TEXT && text::len(text) >= MAX_LOG_TEXT,
             ..message(
                 if *origin == Some(Origin::Hook) { Role::Hook } else { Role::User },
                 vec![AssistantPart::text(text.as_str())],
@@ -582,40 +570,6 @@ pub fn message_count(entry: &LogEntry) -> usize {
     }
 }
 
-/// `\uXXXX` escapes of half a surrogate pair replaced by U+FFFD's, or None
-/// when the line has none. The earlier daemon cut a stored text at a UTF-16
-/// unit, which could leave half a pair as the last escape of a string; such
-/// a line is still an entry.
-fn repair_lone_surrogates(line: &str) -> Option<String> {
-    let bytes = line.as_bytes();
-    let unit = |at: usize| -> Option<u32> {
-        let escape = bytes.get(at..at + 6)?;
-        (escape[0] == b'\\' && escape[1] == b'u').then(|| u32::from_str_radix(std::str::from_utf8(&escape[2..]).ok()?, 16).ok())?
-    };
-    let mut repaired = String::with_capacity(line.len());
-    let (mut copied, mut at, mut changed) = (0, 0, false);
-    while at < bytes.len() {
-        if bytes[at] != b'\\' {
-            at += 1;
-            continue;
-        }
-        match unit(at) {
-            Some(0xd800..=0xdbff) if matches!(unit(at + 6), Some(0xdc00..=0xdfff)) => at += 12,
-            Some(0xd800..=0xdfff) => {
-                repaired.push_str(&line[copied..at]);
-                repaired.push_str("\\ufffd");
-                at += 6;
-                copied = at;
-                changed = true;
-            }
-            // Any other escape, an escaped backslash included, is two bytes or more that are not a backslash to read again.
-            _ => at += 2,
-        }
-    }
-    repaired.push_str(line.get(copied..).unwrap_or_default());
-    changed.then_some(repaired)
-}
-
 #[cfg(test)]
 thread_local! {
     /// How many lines this thread has parsed, so a test can tell what an index re-read.
@@ -626,11 +580,7 @@ fn parse_entry(bytes: &[u8]) -> Option<LogEntry> {
     #[cfg(test)]
     PARSED.with(|parsed| parsed.set(parsed.get() + 1));
     let line = String::from_utf8_lossy(bytes);
-    let value: Value = match serde_json::from_str(&line) {
-        Ok(value) => value,
-        Err(_) => serde_json::from_str(&repair_lone_surrogates(&line)?).ok()?,
-    };
-    LogEntry::from_json(&value)
+    LogEntry::from_json(&serde_json::from_str(&line).ok()?)
 }
 
 /// Where one entry with messages sits in the file, and which messages are its.

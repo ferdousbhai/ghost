@@ -31,8 +31,8 @@ pub fn stable_policy_sections(documents: &Path, first_meeting: bool) -> Vec<Stri
 mod tests {
     use super::*;
     use crate::help_topics::HELP_TOPICS;
-    use crate::js_text::utf16_len;
     use crate::persona::{GhostSystemPromptInput, build_ghost_system_prompt};
+    use crate::text;
     use regex::Regex;
 
     #[test]
@@ -62,8 +62,7 @@ mod tests {
     // a budget, not a place to put things: growth has to be a deliberate
     // decision rather than the accumulated residue of unrelated commits.
     //
-    // Each ceiling is the exact rendered size (in UTF-16 code units, as it was
-    // first measured) at the time it was set, so any added character fails
+    // Each ceiling is the exact rendered size (in characters) at the time it was set, so any added character fails
     // here. The way to raise one is to lower another or to justify it in the
     // commit message that raises it. Only the stable text is budgeted: the
     // character body is the ghost's own and is out of scope.
@@ -74,8 +73,8 @@ mod tests {
     const DOCUMENTS: &str = "/home/owner/Documents";
 
     /// The exact rendered size of each section when its ceiling was last set.
-    const CEILINGS: [(&str, usize); 4] = [("Character file", 369), ("Ghost", 360), ("Owner context", 589), ("First meeting", 321)];
-    const TOTAL_CEILING: usize = 1639;
+    const CEILINGS: [(&str, usize); 4] = [("Character file", 369), ("Ghost", 360), ("Owner context", 588), ("First meeting", 321)];
+    const TOTAL_CEILING: usize = 1638;
 
     /// The character-file section is internal to the prompt builder, so it is
     /// measured where it is shipped: in a prompt built with an unwritten
@@ -104,7 +103,7 @@ mod tests {
     fn measure_stable_policy() -> Vec<(String, usize)> {
         let mut sections = vec![prompt_section("## Character file")];
         sections.extend(stable_policy_sections(Path::new(DOCUMENTS), true));
-        sections.iter().map(|section| (section["## ".len()..section.find('\n').expect("a heading line")].to_string(), utf16_len(section))).collect()
+        sections.iter().map(|section| (section["## ".len()..section.find('\n').expect("a heading line")].to_string(), text::len(section))).collect()
     }
 
     /// The whole budget, so a failure names the offender instead of one number.

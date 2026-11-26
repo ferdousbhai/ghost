@@ -151,12 +151,10 @@ fn writes_each_entry_with_the_keys_and_key_order_every_version_has_written() {
 }
 
 #[test]
-fn serves_a_part_it_does_not_write_as_it_was_read() {
-    let line = r#"{"type":"assistant","at":"now","content":[{"type":"thinking","thinking":"hm"},{"type":"toolCall","id":"1","name":"read"},{"type":"text","text":"ok","extra":1}]}"#;
-    let entry = parse_entry(line.as_bytes()).unwrap();
-    assert_eq!(entry.to_json().to_string(), line);
-    let LogEntry::Assistant { content, .. } = &entry else { panic!("an assistant entry") };
-    assert!(content.iter().all(|part| matches!(part, AssistantPart::Other(_))));
+fn drops_a_part_it_does_not_write() {
+    let line = r#"{"type":"assistant","at":"now","content":[{"type":"image","url":"x"},{"type":"toolCall","id":"1","name":"read"},{"type":"text","text":"ok"}]}"#;
+    let LogEntry::Assistant { content, .. } = parse_entry(line.as_bytes()).unwrap() else { panic!("an assistant entry") };
+    assert_eq!(content, vec![AssistantPart::text("ok")]);
 }
 
 #[test]
@@ -164,7 +162,7 @@ fn stores_a_long_text_cut_to_the_limit_and_marks_it_truncated() {
     let root = Scratch::new();
     let exact = "x".repeat(MAX_LOG_TEXT - 1);
     let long = "x".repeat(MAX_LOG_TEXT + 5);
-    // A cut that would split the cat keeps the length and ends in U+FFFD.
+    // The cut is in characters: the cat is the last one kept.
     let split = format!("{}🐈tail", "x".repeat(MAX_LOG_TEXT - 1));
     append_log(
         &root.0,
@@ -200,8 +198,8 @@ fn stores_a_long_text_cut_to_the_limit_and_marks_it_truncated() {
     };
     assert_eq!(text(0), exact);
     assert_eq!(text(1), "x".repeat(MAX_LOG_TEXT));
-    assert_eq!(text(2), format!("{}\u{fffd}", "x".repeat(MAX_LOG_TEXT - 1)));
-    assert_eq!(utf16_len(&text(2)), MAX_LOG_TEXT);
+    assert_eq!(text(2), format!("{}🐈", "x".repeat(MAX_LOG_TEXT - 1)));
+    assert_eq!(text::len(&text(2)), MAX_LOG_TEXT);
     assert_eq!(text(3), "x".repeat(MAX_LOG_TEXT));
     assert_eq!(text(4), "x".repeat(MAX_LOG_TEXT));
     // A tool's arguments are the model's own and are stored whole.
@@ -213,16 +211,6 @@ fn stores_a_long_text_cut_to_the_limit_and_marks_it_truncated() {
         entry_messages(&entries[0], "e0", 0, 1)[0].to_json().to_string(),
         format!(r#"{{"role":"user","content":[{{"type":"text","text":"{exact}"}}],"entryId":"e0"}}"#)
     );
-}
-
-#[test]
-fn reads_a_text_an_earlier_version_cut_inside_a_character() {
-    // JavaScript cut at a UTF-16 unit and wrote the half it kept as an escape.
-    let line = r#"{"type":"user","at":"now","text":"cut \\ud83d here 🐈 and \ud83d"}"#;
-    assert_eq!(parse_entry(line.as_bytes()), Some(user_at("now", "cut \\ud83d here 🐈 and \u{fffd}")));
-    assert_eq!(parse_entry(br#"{"type":"user","at":"now","text":"\udc08 low \ud83dx"}"#), Some(user_at("now", "\u{fffd} low \u{fffd}x")));
-    assert_eq!(repair_lone_surrogates(r#"{"text":"🐈 \\ud83d"}"#), None);
-    assert_eq!(parse_entry(br#"{"type":"user","at":"now","text":"\ud83d"#), None);
 }
 
 #[test]
