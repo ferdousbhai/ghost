@@ -1,6 +1,6 @@
 # ghost
 
-**Work resumed on 2026-11-24, with a narrower aim: Ghost is the hub over the owner's own data. No release, and no publish of the page, without the owner's go. Read `docs/status.md` before starting anything.**
+**Work resumed on 2026-11-24, with a narrower aim: one persona per machine, answered by a local model, that works with the owner's data through the apps that hold it. Ghost shows none of that data itself. No release, and no publish of the page, without the owner's go. Read `docs/status.md` before starting anything.**
 
 Local Omarchy-native AI persona with file-backed state, a daemon API, a window, a page for reaching it from a phone, and Bash browser automation.
 

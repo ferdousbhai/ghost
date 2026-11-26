@@ -102,7 +102,7 @@
     },
     {
       "id": "lastbook",
-      "need": "An offline survival library: manuals, videos, encyclopedias, a world map and a local AI that cites its sources",
+      "need": "An offline survival library: manuals, videos, encyclopedias and a world map, which agents search and cite",
       "name": "Lastbook",
       "source": "https://github.com/ferdousbhai/lastbook-for-omarchy",
       "cli": "lastbook",

@@ -1,9 +1,13 @@
-# Status: resumed on 2026-11-24 as the hub
+# Status: resumed on 2026-11-24
 
 The owner reopened Ghost on 2026-11-24 with a narrower aim: the one place
 that shows and answers from the owner's own data, whichever product holds it
-(the iCloud apps, the Cloud apps, WhatsApp, and now Google). What they said
-it must be:
+(the iCloud apps, the Cloud apps, WhatsApp, and now Google). On 2026-11-25
+they dropped the showing: "stopped making ghost the interface to all my
+data: which is fine, as each of those apps already provide their own
+interface and can be easily found by the user". The ghost answers from that
+data and works with it through each app's command line; the apps show it.
+What they said it must be:
 
 - A local model answers, always. Its tools stay minimal: search, and running
   shell commands.
