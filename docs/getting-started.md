@@ -136,16 +136,16 @@ Set `local` in `~/.config/ghost/config.json` and restart ghostd:
 ```
 
 `server` may be left out when `llama-server` is on your `PATH`. What to
-install, which model fits which machine, and the alternatives are in
-`ghost help products`, under "Running locally"; what was measured on real
-machines is in [local-models.md](local-models.md). Ghost starts the server on
+install is in `ghost help products`, under "Running locally". No guide names
+a model, since the best one changes too often; what was measured, on which
+machine and when, is in [local-models.md](local-models.md). Ghost starts the server on
 the first turn and stops it after five idle minutes.
 
 The model has two tools, a shell that runs as you and a question to you
 with answers to pick from, and Ghost has no other
 model, model picker, or provider login. For work on code it runs your coding
-agent (Claude Code, Codex, or Antigravity: your Omarchy default agent when it
-is one of them, else the first installed) by that agent's own command, in the
+agent (Claude Code, Codex, or Antigravity, when it is your Omarchy default
+agent) by that agent's own command, in the
 project's directory, with that agent's own sign-in. What it hands that agent
 leaves the machine; nothing else does.
 

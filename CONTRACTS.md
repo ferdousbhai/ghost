@@ -558,8 +558,8 @@ whose steps the owner sees as it prints them and whose answer the model
 reads. The section names one command only, the owner's
 choice among `claude -p` (streaming JSON through `jq`, since it otherwise
 prints nothing until it ends), `codex exec` and `agy -p`: Omarchy's default agent
-(`omarchy default agent`) when it is one of them and installed, else the
-first installed ([`coding_agent.rs`](packages/daemon/src/coding_agent.rs)). With none of the three installed it names none. Ghost teaches the
+(`omarchy default agent`) when it is one of them and on PATH
+([`coding_agent.rs`](packages/daemon/src/coding_agent.rs)); otherwise it names none. Ghost teaches the
 model no command of its own for this. The section asks
 it to say what a command will do, and wait for the owner's yes, before one
 that sends something to another person, spends money, or deletes what cannot
