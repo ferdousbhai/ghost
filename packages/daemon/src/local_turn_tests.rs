@@ -677,20 +677,30 @@ fn an_earlier_output_is_replayed_whole_and_a_handoff_note_stands_for_all_before_
     let replayed = conversation_messages(&[said_by_owner("go"), pass(vec![ran("c", "seq", Some(&long)), AssistantPart::text("done")])], "");
     assert!(replayed[2]["content"].as_str().unwrap().contains(&long));
 
+    // Written in the background from the first two entries; "meanwhile" was said before it landed.
     let entries = [
         said_by_owner("old question"),
         pass(vec![AssistantPart::text("old answer")]),
-        pass(vec![AssistantPart::Handoff { text: "The boat is Heron.".into() }]),
+        said_by_owner("meanwhile"),
+        pass(vec![AssistantPart::Handoff { text: "The boat is Heron.".into(), covers: 2 }]),
+        pass(vec![AssistantPart::text("noted")]),
         said_by_owner("and the pier?"),
     ];
-    // The note and the owner's next words are one message; nothing before the note is sent.
+    // The note stands for what it was written from; what was said meanwhile follows it, and the note's own entry is not a message.
     assert_eq!(
         conversation_messages(&entries, ""),
-        vec![json!({ "role": "user", "content": "The conversation before this was handed off. Its note:\n\nThe boat is Heron.\n\nand the pier?" })]
+        vec![
+            json!({ "role": "user", "content": "The conversation before this was handed off. Its note:\n\nThe boat is Heron.\n\nmeanwhile" }),
+            json!({ "role": "assistant", "content": "noted" }),
+            json!({ "role": "user", "content": "and the pier?" }),
+        ]
     );
     // The newest note is the one that counts.
-    let again = [&entries[..], &[pass(vec![AssistantPart::text("north")]), pass(vec![AssistantPart::Handoff { text: "Heron, north pier.".into() }])]]
-        .concat();
+    let again = [
+        &entries[..],
+        &[pass(vec![AssistantPart::text("north")]), pass(vec![AssistantPart::Handoff { text: "Heron, north pier.".into(), covers: 7 }])],
+    ]
+    .concat();
     assert_eq!(conversation_messages(&again, "").len(), 1);
     assert!(conversation_messages(&again, "")[0]["content"].as_str().unwrap().ends_with("Heron, north pier."));
 }

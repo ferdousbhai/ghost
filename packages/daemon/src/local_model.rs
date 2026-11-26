@@ -188,6 +188,8 @@ impl LocalModel {
                 "--api-key",
                 &key,
             ])
+            // One slot: one request at a time, with the whole context and everything the slot has read.
+            // It is why a turn waits for a handoff note being written (CONTRACTS.md "Local model").
             .args(["--n-gpu-layers", "99", "--ctx-size", &inner.config.context_size.to_string(), "--parallel", "1"])
             .args(["--batch-size", "2048", "--ubatch-size", "2048", "--jinja", "--no-webui"])
             .env_clear()

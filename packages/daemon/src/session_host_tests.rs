@@ -991,40 +991,51 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     assert_eq!(sessions(&host)[0]["question"], Value::Null);
 }
 
-// A conversation grows as long as the model's context permits; near it, the
-// ghost writes a note that stands for everything before it.
+// A conversation grows as long as the model's context permits; past the
+// threshold, the ghost writes a note in the background once the turn has ended.
 #[test]
-fn a_conversation_near_the_models_context_is_handed_off_in_a_note_before_the_next_turn() {
+fn a_conversation_near_the_models_context_is_handed_off_in_the_background_and_a_turn_waits_for_the_note() {
     let home = Home::new();
     // Past three quarters of the default context, at three characters to a token.
     let long = "x".repeat(80_000);
-    let fake = Fake::new(replies(&[&long, "The owner said hello; I answered at length.", "Still here."]));
+    let gate = Gate::default();
+    let writing = FakeTurn { gate: Some(gate.clone()), ..says("The owner said hello; I answered at length.") };
+    let fake = Fake::new([replies(&[&long]), vec![writing], replies(&["Still here.", "Good."])].concat());
     let host = home.host(&fake);
-    turn(&host, "hello");
-    assert_eq!(fake.calls().len(), 1);
-
-    let events = turn(&host, "are you there?");
-    assert_has(&events, json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+    // The turn itself is not held up: the note is asked for after it has ended.
+    let first = turn(&host, "hello");
+    assert!(of_type(&first, &["thinking"]).is_empty());
+    fake.wait_for_calls(2);
     let calls = fake.calls();
-    assert_eq!(calls.len(), 3);
-    // The note is asked for as the conversation's own next message, so the server has read all before it.
+    // It is asked as the conversation's own next message, so the server has read all before it.
     assert_eq!(calls[1].prompt, crate::local_turn::HANDOFF_PROMPT);
     assert_eq!(calls[1].history, vec![json!({ "role": "user", "content": "hello" }), json!({ "role": "assistant", "content": long })]);
-    // The turn itself is handed the note in place of the conversation, with the owner's words.
+
+    // The model answers one request at a time: a turn that arrives meanwhile waits, saying why.
+    let (events, running) = start(&host, "c1", "are you there?");
+    wait_for_event(&events, "thinking");
+    assert_eq!(fake.calls().len(), 2);
+    gate.release();
+    running.join().unwrap();
+    assert_has(&events.all(), json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+    // It then runs from the note, with the owner's words.
+    let calls = fake.calls();
+    assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].history, Vec::<Value>::new());
     assert_eq!(
         calls[2].prompt,
         "The conversation before this was handed off. Its note:\n\nThe owner said hello; I answered at length.\n\nare you there?"
     );
-    // The log keeps everything, the note among it, and the owner reads it all.
+    // The log keeps everything, the note among it and saying what it covers, and the owner reads it all.
     let logged = messages(&host, "c1");
     let contents: Vec<&Value> = logged.iter().map(|message| &message["content"][0]).collect();
-    assert_eq!(contents[2], &json!({ "type": "handoff", "text": "The owner said hello; I answered at length." }));
+    assert_eq!(contents[2], &json!({ "type": "handoff", "text": "The owner said hello; I answered at length.", "covers": 3 }));
     assert_eq!(contents[3], &json!({ "type": "text", "text": "are you there?" }));
     assert_eq!(contents[4], &json!({ "type": "text", "text": "Still here." }));
 
-    // Short again, the next turn hands off nothing.
-    turn(&host, "good");
+    // Short again, the next turn hands off nothing and waits for nothing.
+    let last = turn(&host, "good");
+    assert!(of_type(&last, &["thinking"]).is_empty());
     assert_eq!(fake.calls().len(), 4);
     assert_eq!(fake.calls()[3].prompt, "good");
 }

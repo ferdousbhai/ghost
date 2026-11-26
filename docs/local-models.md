@@ -63,9 +63,13 @@ lists Intel GPUs only, so Ghost starts the server itself.
   follow-up, each after a warm-up turn: 39 s and 30 s before; 28 s and 10 s,
   then 33 s and 8 s, after. The server log shows why: the follow-up reads
   only the new message. One run each.
-- The handoff, tried the same day with `contextSize` 6000: after outputs
-  that filled it, the next turn wrote a 1,700-character note in 143 s, and
-  the turn after took 8 s and answered from the note. Columns of numbers ran
+- The handoff, tried the same day with `contextSize` 6000. Written in the
+  background once a turn ends past the threshold: a message sent straight
+  after waited 173 s for a 970-character note and its own answer, and the
+  turn after took 20 s; both knew what was said before the note and after.
+  With two server slots instead, so that turns ran beside the note, a turn
+  took 42 s where it took 7 s alone and the note had not landed after four
+  minutes, so the server keeps one slot and the turn waits. Columns of numbers ran
   at about 1.3 characters to a token, so nothing here estimates tokens from
   characters where the server's count is known.
 - The same day the time left the prompt. Asked the time or the weekday, the

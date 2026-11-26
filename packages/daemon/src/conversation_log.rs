@@ -44,9 +44,12 @@ pub enum AssistantPart {
         output: Option<String>,
     },
     /// The note the ghost wrote when the conversation neared the model's
-    /// context: later turns are handed it in place of everything before it.
+    /// context: later turns are handed it in place of the log's first
+    /// `covers` entries. It is written in the background, so entries may have
+    /// been added after those and before the note itself.
     Handoff {
         text: String,
+        covers: usize,
     },
     /// A part in a shape this version does not write, kept as it was read so a client is served it unchanged.
     Other(Value),
@@ -62,7 +65,7 @@ impl AssistantPart {
         match self {
             Self::Text { text } => json!({ "type": "text", "text": text }),
             Self::Thinking { text } => json!({ "type": "thinking", "text": text }),
-            Self::Handoff { text } => json!({ "type": "handoff", "text": text }),
+            Self::Handoff { text, covers } => json!({ "type": "handoff", "text": text, "covers": covers }),
             Self::ToolCall { id, name, arguments, failed, output } => {
                 let mut part = json!({ "type": "toolCall", "id": id, "name": name, "arguments": arguments });
                 if *failed {
@@ -82,7 +85,10 @@ impl AssistantPart {
         let typed = match value.get("type").and_then(Value::as_str) {
             Some("text") => text("text").map(|text| Self::Text { text }),
             Some("thinking") => text("text").map(|text| Self::Thinking { text }),
-            Some("handoff") => text("text").map(|text| Self::Handoff { text }),
+            Some("handoff") => match (text("text"), value.get("covers").and_then(Value::as_u64)) {
+                (Some(text), Some(covers)) => Some(Self::Handoff { text, covers: covers as usize }),
+                _ => None,
+            },
             Some("toolCall") => match (text("id"), text("name"), value.get("arguments")) {
                 (Some(id), Some(name), Some(arguments)) => Some(Self::ToolCall {
                     id,

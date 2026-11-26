@@ -545,17 +545,24 @@ model runs `date`), so llama-server reuses what it has already read and only
 the new message costs time. Nothing is searched ahead of the model.
 
 A conversation grows as long as the context permits, by the server's own
-count of each request. Past three quarters of the context, the next turn
-starts with a handoff: the ghost is asked, as the conversation's own next
-message, to write a note of it (`HANDOFF_PROMPT`), the note is logged as a
-`handoff` part, and from then on a turn is handed the note in place of
-everything before it. The log and every client still hold the whole
-conversation. A request the server refuses for length is retried once with
-the newest of the conversation that fits, and the turn after it starts with
-the handoff, written from that same newest part. It keeps no session of its
-own, streams its text, reasoning, and commands, with a running command's
-latest output (at most every 100 ms). It sends `reasoning_effort`;
-sampling is the model's and llama-server's own default.
+count of each request. When a turn ends past three quarters of the context,
+a handoff starts in the background: the ghost is asked, as the conversation's
+own next message, to write a note of it (`HANDOFF_PROMPT`). The note is
+logged as a `handoff` part that says how many of the log's entries it covers,
+and from then on a turn is handed the note in place of those entries. The
+log and every client still hold the whole conversation.
+
+A turn that arrives while the note is being written waits for it, saying so,
+and then runs from the note. It waits rather than running beside it because
+the model server has one slot (`--parallel 1`) and answers one request at a
+time: a second slot would halve the context each gets, share the GPU between
+the two, and make the note's slot read the whole conversation again, since
+what a slot has read is its own. So the wait is the note's own length, and
+nothing is cancelled or done twice.
+
+A request the server refuses for length is retried once with the newest of
+the conversation that fits, and the handoff that follows is written from
+that same newest part.
 
 It offers two tools ([`local_turn.rs`](packages/daemon/src/local_turn.rs)).
 `ask(question, options)` puts a question to the owner: 2 to 4 ways forward

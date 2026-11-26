@@ -98,6 +98,9 @@ struct State {
     context: HashMap<String, (u64, usize)>,
     /// Conversations whose last turn was sent only its newest part, for want of room: they are due a handoff note.
     outgrown: HashSet<String>,
+    /// The handoff notes being written in the background, each with its own stop.
+    handoffs: HashMap<String, (u64, Abort)>,
+    next_handoff: u64,
 }
 
 struct Inner {
@@ -114,6 +117,8 @@ struct Inner {
     state: Mutex<State>,
     /// Serializes sidecar rewrites, so two of them cannot interleave a read and a write.
     metadata: Mutex<()>,
+    /// Signalled when a handoff note stops being written.
+    handoff_done: std::sync::Condvar,
 }
 
 #[derive(Clone)]
@@ -226,6 +231,7 @@ impl SessionHost {
                 push: options.push,
                 state: Mutex::new(State::default()),
                 metadata: Mutex::new(()),
+                handoff_done: std::sync::Condvar::new(),
             }),
         }
     }
@@ -354,8 +360,6 @@ impl SessionHost {
                 *turn_id = crate::random::uuid();
                 owner_prompt = text.clone();
             }
-            // Before the message is logged, so the note stands for everything before it.
-            self.hand_off_if_full(id, abort, emit)?;
             append_log(&session_dir, id, &[LogEntry::user(text.clone(), origin)])?;
             // The owner's message answers what the ghost was waiting on.
             if !from_hook {
@@ -426,52 +430,100 @@ impl SessionHost {
         crate::local_turn::newest(messages, (self.context_size() as f64 / 2.0 * per_token) as usize)
     }
 
-    /// A conversation grows as long as the model's context permits. Past three
-    /// quarters of it the ghost writes a handoff note, asked as the
-    /// conversation's own next message, and later turns are handed the note in
-    /// place of everything before it. The log keeps all of it. A note that
-    /// could not be written changes nothing: the turn goes on as it would have.
-    fn hand_off_if_full(&self, id: &str, abort: &Abort, emit: &Emit) -> Result<()> {
-        let Some(answerer) = self.inner.answerer.clone() else { return Ok(()) };
-        let session_dir = self.session_dir();
-        let entries = read_log(&session_dir, id)?.unwrap_or_default();
+    /// A conversation grows as long as the model's context permits. Once a
+    /// turn ends past three quarters of it, the ghost writes a handoff note in
+    /// the background, asked as the conversation's own next message. The
+    /// model answers one request at a time, so a turn that arrives while the
+    /// note is being written waits for it (`wait_for_handoff`) and then runs
+    /// from the note. A note replaces, for later turns, the entries it was
+    /// written from. The log keeps all of it.
+    fn start_handoff_if_due(&self, id: &str) {
+        let Some(answerer) = self.inner.answerer.clone() else { return };
+        let Ok(Some(entries)) = read_log(&self.session_dir(), id) else { return };
         let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
         let used = self.context_used(id, &history);
-        let outgrown = self.inner.state.lock().unwrap().outgrown.contains(id);
-        if history.is_empty() || (!outgrown && used < self.context_size() * 3 / 4) {
-            return Ok(());
-        }
+        let (abort, generation, outgrown) = {
+            let mut state = self.inner.state.lock().unwrap();
+            let outgrown = state.outgrown.contains(id);
+            let due = !history.is_empty() && (outgrown || used >= self.context_size() * 3 / 4);
+            if !due || state.shutting_down || state.reserved.contains(id) || state.handoffs.contains_key(id) {
+                return;
+            }
+            state.next_handoff += 1;
+            let (generation, abort) = (state.next_handoff, Abort::new());
+            state.handoffs.insert(id.to_string(), (generation, abort.clone()));
+            (abort, generation, outgrown)
+        };
         // Already too long for the note's own request to fit: the note is written from the newest of it that does.
         if outgrown || used >= self.context_size() * 9 / 10 {
             history = self.fitting(id, history);
         }
-        emit(json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+        let (host, id, covers) = (self.clone(), id.to_string(), entries.len());
+        std::thread::spawn(move || {
+            host.write_handoff(&id, answerer.as_ref(), history, covers, &abort);
+            let mut state = host.inner.state.lock().unwrap();
+            if state.handoffs.get(&id).is_some_and(|(running, _)| *running == generation) {
+                state.handoffs.remove(&id);
+            }
+            host.inner.handoff_done.notify_all();
+        });
+    }
+
+    fn write_handoff(&self, id: &str, answerer: &dyn Answerer, history: Vec<Value>, covers: usize, abort: &Abort) {
+        let counted = self.inner.state.lock().unwrap().context.get(id).copied();
         let quiet: Emit = Arc::new(|_| {});
-        let written = self.run_pass(id, answerer.as_ref(), crate::local_turn::HANDOFF_PROMPT.to_string(), history, &quiet, &mut 0, abort)?;
+        let written = self.run_pass(id, answerer, crate::local_turn::HANDOFF_PROMPT.to_string(), history, &quiet, &mut 0, abort);
+        // The note's own request is not the conversation: what the last turn counted still stands.
+        {
+            let mut state = self.inner.state.lock().unwrap();
+            match counted {
+                Some(counted) => state.context.insert(id.to_string(), counted),
+                None => state.context.remove(id),
+            };
+        }
+        let Ok(written) = written else { return };
         let note: Vec<&str> =
             written.content.iter().filter_map(|part| if let AssistantPart::Text { text } = part { Some(text.as_str()) } else { None }).collect();
         let note = note.join("\n\n");
+        if abort.is_aborted() {
+            return;
+        }
         if written.error.is_some() || crate::js_text::trim(&note).is_empty() {
             self.inner.logger.warn("no handoff note was written", json!({ "conversation": id, "reason": written.error }));
-            // Counted as full, so the turn itself is handed only the newest of the conversation.
-            let full = self.context_size();
-            let mut state = self.inner.state.lock().unwrap();
-            let characters = state.context.get(id).map_or(full as usize * 2, |(_, characters)| *characters);
-            state.context.insert(id.to_string(), (full, characters));
-            return Ok(());
+            return;
         }
-        append_log(
-            &session_dir,
-            id,
-            &[LogEntry::Assistant { at: clock::now_iso(), content: vec![AssistantPart::Handoff { text: note }], error: None }],
-        )?;
+        let logged = LogEntry::Assistant { at: clock::now_iso(), content: vec![AssistantPart::Handoff { text: note, covers }], error: None };
+        if self.require_conversation(id).is_err() || append_log(&self.session_dir(), id, &[logged]).is_err() {
+            return;
+        }
         {
             let mut state = self.inner.state.lock().unwrap();
             state.context.remove(id);
             state.outgrown.remove(id);
         }
         self.announce(id);
-        Ok(())
+    }
+
+    /// Stop a handoff note still being written for a conversation that is going away.
+    fn cancel_handoff(&self, id: &str) {
+        if let Some((_, abort)) = self.inner.state.lock().unwrap().handoffs.remove(id) {
+            abort.abort();
+        }
+        self.inner.handoff_done.notify_all();
+    }
+
+    /// A turn that arrives while the conversation's handoff note is being
+    /// written waits for it, saying why, and then runs from the note. A turn
+    /// that is stopped stops waiting.
+    fn wait_for_handoff(&self, id: &str, emit: &Emit, abort: &Abort) {
+        let mut state = self.inner.state.lock().unwrap();
+        if !state.handoffs.contains_key(id) {
+            return;
+        }
+        emit(json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+        while state.handoffs.contains_key(id) && !abort.is_aborted() && !state.shutting_down {
+            state = self.inner.handoff_done.wait_timeout(state, std::time::Duration::from_millis(100)).unwrap().0;
+        }
     }
 
     /// Run one prompt on the local model, handed the conversation so far as
@@ -1038,6 +1090,7 @@ impl SessionHost {
     /// Move the conversation's directory, log and all, to recoverable Trash.
     pub fn delete_session(&self, session_id: &str) -> Result<()> {
         let id = self.require_conversation(session_id)?;
+        self.cancel_handoff(&id);
         {
             let mut state = self.inner.state.lock().unwrap();
             if state.admissions.contains_key(&id) || state.reserved.contains(&id) {
@@ -1075,7 +1128,8 @@ impl SessionHost {
             let mut state = self.inner.state.lock().unwrap();
             state.shutting_down = true;
             let closers: Vec<_> = state.listeners.drain(..).map(|listener| listener.close).collect();
-            (state.admissions.values().cloned().collect::<Vec<_>>(), closers)
+            let writing: Vec<Abort> = state.handoffs.drain().map(|(_, (_, abort))| abort).collect();
+            (state.admissions.values().cloned().chain(writing).collect::<Vec<_>>(), closers)
         };
         for abort in aborts {
             abort.abort();
@@ -1094,6 +1148,7 @@ impl TurnAdmission {
     /// then exactly one terminal `done` or `error`.
     pub fn run(self, emit: Emit) {
         let TurnAdmission { host, session_id: id, prompt, command, abort } = self;
+        host.wait_for_handoff(&id, &emit, &abort);
         let initial_turn_id = crate::random::uuid();
         let outcome = host.run_admitted(&id, &prompt, command.as_ref(), &emit, &abort, initial_turn_id.clone());
         // A turn that failed outside its passes (its log could not be written) is still a turn that ended.
@@ -1102,6 +1157,7 @@ impl TurnAdmission {
         emit(terminal.clone());
         host.inner.state.lock().unwrap().admissions.remove(&id);
         host.announce(&id);
+        host.start_handoff_if_due(&id);
         // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
         std::thread::spawn(move || host.turn_end(&id, &terminal, &abort, &turn_id));
     }
