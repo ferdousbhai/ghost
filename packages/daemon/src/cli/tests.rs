@@ -300,7 +300,7 @@ fn show_renders_tool_calls_hook_messages_and_an_empty_conversation() {
         "/api/sessions/conv-mine/transcript" => responder.json(
             200,
             &json!({ "total": 2, "truncated": false, "messages": [
-                { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" } }, { "type": "text", "text": "" }, { "type": "toolCall", "name": "ask", "arguments": { "question": "Which?", "options": ["A", "B"] } }, { "type": "text", "text": "Which?\n\n1. A\n2. B" }] },
+                { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "thinking", "text": "List it.\nThen say." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" }, "output": "a.txt\n" }, { "type": "text", "text": "" }, { "type": "toolCall", "name": "ask", "arguments": { "question": "Which?", "options": ["A", "B"] } }, { "type": "text", "text": "Which?\n\n1. A\n2. B" }] },
                 { "role": "hook", "content": [{ "type": "text", "text": "Not done." }] },
             ] }),
         ),
@@ -308,7 +308,10 @@ fn show_renders_tool_calls_hook_messages_and_an_empty_conversation() {
     }
     });
     let shown = daemon.run_env(&["show"], MINE);
-    assert_eq!(shown.stdout, "**ghost:**\n\nOn it.\n> ⚙ bash({\"command\":\"ls\"})\n> ⚙ ask\nWhich?\n\n1. A\n2. B\n\n**Stop hook:**\n\nNot done.\n");
+    assert_eq!(
+        shown.stdout,
+        "**ghost:**\n\nOn it.\n> List it.\n> Then say.\n```\n$ ls\na.txt\n```\n> ⚙ ask\nWhich?\n\n1. A\n2. B\n\n**Stop hook:**\n\nNot done.\n"
+    );
     let empty = daemon.run(&["show", "-s", "conv-other"]);
     assert_eq!((empty.code, empty.stdout.as_str()), (0, "No messages.\n"));
 }
@@ -813,7 +816,7 @@ fn say_prints_a_question_and_its_answers_as_the_reply() {
 fn say_streams_text_reports_tool_activity_and_sends_a_new_raw_cli_id() {
     let daemon = turn_daemon(success_events(), vec![]);
     let result = daemon.run(&["say", "hello", "--new"]);
-    assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "hello there\n", "⚙ bash: pwd\n"));
+    assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "hello there\n", "$ pwd\nwhoami\n"));
     let sent = posted(&daemon);
     assert_eq!(sent["prompt"], "hello");
     assert!(is_new_cli_id(sent["sessionId"].as_str().unwrap()), "{sent}");
@@ -886,8 +889,10 @@ fn say_reports_a_failed_tool_and_the_other_secondary_lines() {
         vec![
             json!({ "type": "pass" }),
             json!({ "type": "owner_message", "text": "and another thing" }),
-            json!({ "type": "tool_execution_start", "id": "1", "toolName": "read", "arguments": { "path": "/x" } }),
-            json!({ "type": "tool_execution_end", "id": "1", "toolName": "read", "isError": true, "summary": "no such file" }),
+            json!({ "type": "thinking", "delta": "It should " }),
+            json!({ "type": "thinking", "delta": "be there." }),
+            json!({ "type": "tool_execution_start", "id": "1", "toolName": "bash", "arguments": { "command": "cat /x\nls /" } }),
+            json!({ "type": "tool_execution_end", "id": "1", "toolName": "bash", "isError": true, "summary": "no such file", "output": "cat: /x: no such file\n(exit 1)\n" }),
             json!({ "type": "session_stop_continued", "reason": "tests are red" }),
             json!({ "type": "done" }),
         ],
@@ -895,7 +900,8 @@ fn say_reports_a_failed_tool_and_the_other_secondary_lines() {
     );
     let result = daemon.run(&["say", "go", "--new"]);
     assert_eq!(result.stdout, "and another thing\nStop hook · tests are red\n");
-    assert_eq!(result.stderr, "⚙ read: {\"path\":\"/x\"}\n✗ read: no such file\n");
+    // Nothing is held back: the reasoning, the whole command, and all it printed.
+    assert_eq!(result.stderr, "It should be there.\n$ cat /x\nls /\ncat: /x: no such file\n(exit 1)\n✗ bash\n");
     let quiet = daemon.run(&["say", "go", "--new", "-q"]);
     assert_eq!((quiet.code, quiet.stdout.as_str(), quiet.stderr.as_str()), (0, "", ""));
 }

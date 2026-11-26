@@ -1,4 +1,4 @@
-/* Ghost's own styles, over omui's stylesheet: the chat, an answer's Markdown and the composer.
+/* Ghost's own styles, over omui's stylesheet: the chat, an answer's reasoning, commands and Markdown, and the composer.
    Colours are omui's @om_* tokens, tinted with alpha(); no hex. */
 
 /* --------------------------------------------------------------------------------------------------------- chat -- */
@@ -10,6 +10,17 @@
 }
 .answer { padding: 2px 0; }
 .step { color: @om_dim_text; font-size: 0.9em; }
+/* What the model thought, and each command with what it printed: all of it, quieter than what it said. */
+.thinking { color: @om_dim_text; font-style: italic; }
+.tool-command { font-family: monospace; font-size: 0.92em; color: @om_accent; }
+.tool-output {
+  font-family: monospace;
+  font-size: 0.88em;
+  color: @om_dim_text;
+  background: alpha(@om_text, 0.04);
+  border-radius: 5px;
+  padding: 6px 10px;
+}
 .step:first-child { margin-top: 2px; }
 
 .md-p, .md-li { line-height: 1.35; }

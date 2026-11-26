@@ -102,18 +102,20 @@ fn writes_each_entry_with_the_keys_and_key_order_every_version_has_written() {
             LogEntry::Assistant {
                 at: at.into(),
                 content: vec![
+                    AssistantPart::Thinking { text: "List it first.".into() },
                     AssistantPart::text("hi"),
                     AssistantPart::ToolCall {
                         id: "c1".into(),
                         name: "bash".into(),
                         arguments: json!({ "command": "ls", "timeout": 5 }),
                         failed: false,
+                        output: Some("a.txt\nb.txt\n".into()),
                     },
-                    AssistantPart::ToolCall { id: "c2".into(), name: "read".into(), arguments: json!({}), failed: true },
+                    AssistantPart::ToolCall { id: "c2".into(), name: "read".into(), arguments: json!({}), failed: true, output: None },
                 ],
                 error: None,
             },
-            r#"{"type":"assistant","at":"2026-11-25T08:21:20.123Z","content":[{"type":"text","text":"hi"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls","timeout":5}},{"type":"toolCall","id":"c2","name":"read","arguments":{},"failed":true}]}"#,
+            r#"{"type":"assistant","at":"2026-11-25T08:21:20.123Z","content":[{"type":"thinking","text":"List it first."},{"type":"text","text":"hi"},{"type":"toolCall","id":"c1","name":"bash","arguments":{"command":"ls","timeout":5},"output":"a.txt\nb.txt\n"},{"type":"toolCall","id":"c2","name":"read","arguments":{},"failed":true}]}"#,
         ),
         (
             LogEntry::Assistant { at: at.into(), content: Vec::new(), error: Some("The model stopped.".into()) },
@@ -176,7 +178,13 @@ fn stores_a_long_text_cut_to_the_limit_and_marks_it_truncated() {
             answer(AT, &long),
             LogEntry::Assistant {
                 at: AT.into(),
-                content: vec![AssistantPart::ToolCall { id: "1".into(), name: "bash".into(), arguments: json!({ "command": long }), failed: false }],
+                content: vec![AssistantPart::ToolCall {
+                    id: "1".into(),
+                    name: "bash".into(),
+                    arguments: json!({ "command": long }),
+                    failed: false,
+                    output: None,
+                }],
                 error: None,
             },
         ],
@@ -392,7 +400,7 @@ fn the_handoff_preserves_chronological_labels_and_skips_display_only_and_exclude
             at: "now".into(),
             content: vec![
                 AssistantPart::text(" answer "),
-                AssistantPart::ToolCall { id: "1".into(), name: "read".into(), arguments: json!({}), failed: false },
+                AssistantPart::ToolCall { id: "1".into(), name: "read".into(), arguments: json!({}), failed: false, output: None },
             ],
             error: None,
         },

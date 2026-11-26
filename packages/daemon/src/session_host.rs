@@ -454,6 +454,8 @@ impl SessionHost {
         let mut open: Option<Open> = None;
         let mut error: Option<String> = None;
         let mut thought_block: Option<String> = None;
+        // The reasoning part being written, while nothing has followed it.
+        let mut thinking: Option<usize> = None;
         fn close_block(open: &mut Option<Open>, content: &mut [AssistantPart], emit: &Emit) {
             if let Some(block) = open.take() {
                 emit(json!({ "type": "text_end", "contentIndex": block.index, "content": block.text }));
@@ -461,13 +463,25 @@ impl SessionHost {
             }
         }
         let mut on_event = |event: PassEvent| match event {
-            // Reasoning streams for the activity line; it is not an answer and is not logged.
+            // Reasoning streams and is logged where it happened: before the text or the call it led to.
             PassEvent::Thinking { block, delta } => {
                 if delta.is_empty() {
                     return;
                 }
                 let new_block = thought_block.as_ref().is_some_and(|previous| *previous != block);
-                emit(json!({ "type": "thinking", "delta": if new_block { format!("\n{delta}") } else { delta } }));
+                let delta = if new_block { format!("\n{delta}") } else { delta };
+                // "Loading the local model…" is a notice, not reasoning.
+                if block != "load" {
+                    close_block(&mut open, &mut content, emit);
+                    match thinking.and_then(|part| content.get_mut(part)) {
+                        Some(AssistantPart::Thinking { text }) => text.push_str(&delta),
+                        _ => {
+                            thinking = Some(content.len());
+                            content.push(AssistantPart::Thinking { text: delta.trim_start_matches('\n').to_string() });
+                        }
+                    }
+                }
+                emit(json!({ "type": "thinking", "delta": delta }));
                 thought_block = Some(block);
             }
             PassEvent::Text { block, delta } => {
@@ -476,6 +490,7 @@ impl SessionHost {
                 }
                 if open.as_ref().is_none_or(|current| current.key != block) {
                     close_block(&mut open, &mut content, emit);
+                    thinking = None;
                     let index = *blocks;
                     *blocks += 1;
                     open = Some(Open { key: block, index, part: content.len(), text: String::new() });
@@ -491,8 +506,9 @@ impl SessionHost {
                     return;
                 }
                 close_block(&mut open, &mut content, emit);
+                thinking = None;
                 tools.insert(tool.clone(), (name.clone(), content.len()));
-                content.push(AssistantPart::ToolCall { id: tool.clone(), name: name.clone(), arguments: args.clone(), failed: false });
+                content.push(AssistantPart::ToolCall { id: tool.clone(), name: name.clone(), arguments: args.clone(), failed: false, output: None });
                 emit(json!({ "type": "tool_execution_start", "id": tool, "toolName": name, "arguments": args, "cwd": cwd }));
             }
             PassEvent::ToolUpdate { id: tool, output } => {
@@ -502,12 +518,17 @@ impl SessionHost {
             }
             PassEvent::ToolEnd { id: tool, is_error, output } => {
                 let Some((name, part)) = tools.get(&tool).cloned() else { return };
-                if is_error && let AssistantPart::ToolCall { failed, .. } = &mut content[part] {
-                    *failed = true;
+                if let AssistantPart::ToolCall { failed, output: logged, .. } = &mut content[part] {
+                    *failed = is_error;
+                    *logged = output.clone();
                 }
                 let mut event = json!({ "type": "tool_execution_end", "id": tool, "toolName": name, "isError": is_error });
                 if let Some(summary) = output.as_deref().and_then(tail) {
                     event["summary"] = json!(summary);
+                }
+                // The whole of what the call returned, as the model is given it.
+                if let Some(output) = &output {
+                    event["output"] = json!(output);
                 }
                 emit(event);
             }

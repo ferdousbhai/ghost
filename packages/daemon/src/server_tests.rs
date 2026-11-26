@@ -775,17 +775,19 @@ fn refuses_to_resume_a_turn_it_does_not_know_or_past_where_the_turn_has_reached(
 }
 
 #[test]
-fn streams_reasoning_for_the_activity_line_but_never_logs_it() {
+fn streams_reasoning_and_keeps_it_in_the_transcript() {
     let daemon = Daemon::answering(vec![FakeTurn {
-        events: vec![PassEvent::Thinking { block: "r".to_string(), delta: "private reasoning".to_string() }, text("Answer.")],
+        events: vec![PassEvent::Thinking { block: "r".to_string(), delta: "its reasoning".to_string() }, text("Answer.")],
         ..FakeTurn::default()
     }]);
     let events = daemon.post_turn(&first_turn()).events();
-    assert!(events.contains(&json!({ "type": "thinking", "delta": "private reasoning" })), "{events:?}");
-    let transcript = daemon.get("/api/sessions/conv-1/transcript").text();
-    assert!(transcript.contains("Answer."));
-    assert!(!transcript.contains("private reasoning"));
-    assert!(!std::fs::read_to_string(conversation_dir(&daemon.session_dir, "conv-1").join(LOG_FILENAME)).unwrap().contains("private reasoning"));
+    assert!(events.contains(&json!({ "type": "thinking", "delta": "its reasoning" })), "{events:?}");
+    let transcript = daemon.get("/api/sessions/conv-1/transcript").json();
+    assert_eq!(
+        transcript["messages"].as_array().unwrap().last().unwrap()["content"],
+        json!([{ "type": "thinking", "text": "its reasoning" }, { "type": "text", "text": "Answer." }])
+    );
+    assert!(std::fs::read_to_string(conversation_dir(&daemon.session_dir, "conv-1").join(LOG_FILENAME)).unwrap().contains("its reasoning"));
 }
 
 #[test]

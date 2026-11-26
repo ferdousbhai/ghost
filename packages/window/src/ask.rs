@@ -3,6 +3,7 @@
 
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -16,13 +17,87 @@ use crate::{
     ui::App,
 };
 
-/// One answer on the page: its steps, its Markdown, and what failed.
+/// One answer on the page, everything it held in the order it happened: the
+/// model's reasoning, each command with what it printed, what was said, and
+/// what failed. Nothing is left out.
 struct Answer {
     step: gtk::Label,
-    body: gtk::Box,
+    parts: gtk::Box,
     errors: gtk::Box,
-    text: RefCell<String>,
+    /// The text block being written: its box and its Markdown so far.
+    text: RefCell<Option<(gtk::Box, String)>>,
+    /// The reasoning block being written.
+    thinking: RefCell<Option<gtk::Label>>,
+    /// A running command's output, by the call's id.
+    tools: RefCell<HashMap<String, gtk::Label>>,
     dirty: Cell<bool>,
+}
+
+impl Answer {
+    fn block(&self, text: &str, class: &str) -> gtk::Label {
+        let label = omui::label(text, class);
+        label.set_xalign(0.0);
+        label.set_wrap(true);
+        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        label.set_selectable(true);
+        self.parts.append(&label);
+        label
+    }
+
+    /// Reasoning, appended to the block being written or starting one.
+    fn think(&self, delta: &str) {
+        *self.text.borrow_mut() = None;
+        let mut open = self.thinking.borrow_mut();
+        match open.as_ref() {
+            Some(label) => label.set_text(&format!("{}{delta}", label.text())),
+            None => *open = Some(self.block(delta.trim_start(), "thinking")),
+        }
+    }
+
+    /// A call: the command as a shell would echo it, and a place for what it prints.
+    fn call(&self, id: &str, name: &str, arguments: &Value) {
+        *self.text.borrow_mut() = None;
+        *self.thinking.borrow_mut() = None;
+        let shown = match arguments["command"].as_str() {
+            Some(command) if name == "bash" => format!("$ {}", command.trim()),
+            _ if name == "ask" => "Asking you".to_string(),
+            _ => format!("{name} {arguments}"),
+        };
+        self.block(&shown, "tool-command");
+        let output = self.block("", "tool-output");
+        output.set_visible(false);
+        self.tools.borrow_mut().insert(id.to_string(), output);
+    }
+
+    /// What a call has printed so far, or all of it once it has ended.
+    fn output(&self, id: &str, text: &str, failed: bool) {
+        if let Some(label) = self.tools.borrow().get(id) {
+            label.set_text(text.trim_end());
+            label.set_visible(!text.trim().is_empty());
+            if failed {
+                label.add_css_class("error");
+            }
+        }
+    }
+
+    /// Text, appended to the block being written or starting one.
+    fn say(&self, delta: &str) {
+        *self.thinking.borrow_mut() = None;
+        let mut open = self.text.borrow_mut();
+        if open.is_none() {
+            let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            self.parts.append(&body);
+            *open = Some((body, String::new()));
+        }
+        open.as_mut().expect("just opened").1.push_str(delta);
+        self.dirty.set(true);
+    }
+
+    fn draw(&self) {
+        if let Some((body, text)) = self.text.borrow().as_ref() {
+            md::render(body, text);
+        }
+    }
 }
 
 pub struct AskPage {
@@ -248,23 +323,38 @@ impl AskPage {
             match reply {
                 Ok(body) => {
                     for message in body["messages"].as_array().into_iter().flatten() {
-                        let text: Vec<&str> = message["content"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .filter(|part| part["type"] == "text")
-                            .filter_map(|part| part["text"].as_str())
-                            .collect();
-                        let text = text.join("\n\n");
-                        if text.trim().is_empty() {
-                            continue;
-                        }
+                        let parts: Vec<&Value> = message["content"].as_array().into_iter().flatten().collect();
                         match message["role"].as_str() {
-                            Some("user") => this.question(&text),
+                            Some("user") => {
+                                let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
+                                if !text.join("").trim().is_empty() {
+                                    this.question(&text.join("\n\n"));
+                                }
+                            }
+                            // Everything the turn held, as it was recorded.
                             Some("assistant") => {
                                 let answer = this.answer();
-                                *answer.text.borrow_mut() = text;
-                                this.draw(&answer);
+                                for (index, part) in parts.iter().enumerate() {
+                                    match part["type"].as_str() {
+                                        Some("thinking") => answer.think(part["text"].as_str().unwrap_or_default()),
+                                        Some("toolCall") => {
+                                            let id = index.to_string();
+                                            answer.call(&id, part["name"].as_str().unwrap_or_default(), &part["arguments"]);
+                                            answer.output(&id, part["output"].as_str().unwrap_or_default(), part["failed"] == true);
+                                        }
+                                        _ => {
+                                            if let Some(text) = part["text"].as_str().filter(|text| !text.trim().is_empty()) {
+                                                answer.say(text);
+                                                answer.draw();
+                                                *answer.text.borrow_mut() = None;
+                                            }
+                                        }
+                                    }
+                                }
+                                answer.dirty.set(false);
+                                if let Some(message) = message["errorMessage"].as_str() {
+                                    this.fail(&answer, message);
+                                }
                             }
                             _ => {}
                         }
@@ -292,13 +382,21 @@ impl AskPage {
         frame.add_css_class("answer");
         let step = omui::label("", "step");
         step.set_visible(false);
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        let parts = gtk::Box::new(gtk::Orientation::Vertical, 6);
         let errors = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        frame.append(&parts);
         frame.append(&step);
-        frame.append(&body);
         frame.append(&errors);
         self.convo.append(&frame);
-        Rc::new(Answer { step, body, errors, text: RefCell::new(String::new()), dirty: Cell::new(false) })
+        Rc::new(Answer {
+            step,
+            parts,
+            errors,
+            text: RefCell::new(None),
+            thinking: RefCell::new(None),
+            tools: RefCell::new(HashMap::new()),
+            dirty: Cell::new(false),
+        })
     }
 
     fn to_end(&self) {
@@ -307,10 +405,6 @@ impl AskPage {
             let adjustment = scroll.vadjustment();
             adjustment.set_value(adjustment.upper());
         });
-    }
-
-    fn draw(&self, answer: &Answer) {
-        md::render(&answer.body, &answer.text.borrow());
     }
 
     fn ask(self: &Rc<Self>) {
@@ -341,7 +435,7 @@ impl AskPage {
         let drawn = answer.clone();
         glib::timeout_add_local(Duration::from_millis(60), move || {
             if drawn.dirty.replace(false) {
-                this.draw(&drawn);
+                drawn.draw();
                 this.to_end();
             }
             if this.live.borrow().as_ref().is_some_and(|(live, _)| Rc::ptr_eq(live, &drawn)) {
@@ -382,7 +476,7 @@ impl AskPage {
             *this.live.borrow_mut() = None;
             // The redraw timer must not draw the unfinished form over the finished one.
             answer.dirty.set(false);
-            this.draw(&answer);
+            answer.draw();
             this.send.set_label("Ask");
             this.to_end();
             this.refresh_chats().await;
@@ -402,34 +496,32 @@ impl AskPage {
         };
         match event["type"].as_str().unwrap_or_default() {
             "pass" => step("Thinking…".to_string()),
-            "thinking" => {
-                if let Some(text) = event["delta"].as_str().filter(|text| text.contains("Loading")) {
-                    step(text.trim().to_string());
+            // "Loading the local model…" is a notice; anything else is the model's reasoning, shown as it comes.
+            "thinking" => match event["delta"].as_str() {
+                Some(text) if text.trim_start().starts_with("Loading the local model") => step(text.trim().to_string()),
+                Some(text) => {
+                    answer.think(text);
+                    answer.step.set_visible(false);
+                    self.to_end();
                 }
-            }
+                None => {}
+            },
             "tool_execution_start" => {
-                let arguments = &event["arguments"];
-                step(match event["toolName"].as_str().unwrap_or_default() {
-                    "ask" => "Asking you…".to_string(),
-                    // The command itself says what it is doing.
-                    "bash" => format!("Running: {}", arguments["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default()),
-                    name => format!("Running {name}…"),
-                });
+                answer.call(event["id"].as_str().unwrap_or_default(), event["toolName"].as_str().unwrap_or_default(), &event["arguments"]);
+                step("Running…".to_string());
+                self.to_end();
             }
-            // A running command's latest line: a coding agent's steps as they happen.
-            "tool_execution_update" => {
-                if let Some(line) = event["summary"].as_str().and_then(|text| text.lines().rev().find(|line| !line.trim().is_empty())) {
-                    step(line.trim().to_string());
-                }
+            // What a running command has printed lately, then all of it once it ends.
+            "tool_execution_update" => answer.output(event["id"].as_str().unwrap_or_default(), event["summary"].as_str().unwrap_or_default(), false),
+            "tool_execution_end" => {
+                let output = event["output"].as_str().or(event["summary"].as_str()).unwrap_or_default();
+                answer.output(event["id"].as_str().unwrap_or_default(), output, event["isError"] == true);
+                answer.step.set_visible(false);
+                self.to_end();
             }
-            "text_start" => {
-                if !answer.text.borrow().is_empty() {
-                    answer.text.borrow_mut().push_str("\n\n");
-                }
-            }
+            "text_start" => *answer.text.borrow_mut() = None,
             "text_delta" => {
-                answer.text.borrow_mut().push_str(event["delta"].as_str().unwrap_or_default());
-                answer.dirty.set(true);
+                answer.say(event["delta"].as_str().unwrap_or_default());
                 answer.step.set_visible(false);
             }
             "error" => self.fail(answer, event["errorMessage"].as_str().unwrap_or("The turn failed.")),

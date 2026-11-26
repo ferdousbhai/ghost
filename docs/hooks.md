@@ -103,8 +103,8 @@ contains the same message directly:
 ```
 
 `messages` exposes only that
-pass, its content Ghost's assistant parts (`text`, and `toolCall` with
-`failed: true` on a call that failed).
+pass, its content Ghost's assistant parts (`thinking`, `text`, and `toolCall`
+with its `output`, and `failed: true` on a call that failed).
 `owner_prompt` is the owner's request and `turn_id` a UUID naming it; both
 stay fixed across hook continuations, and every owner request, a queued
 follow-up included, gets a fresh `turn_id`.

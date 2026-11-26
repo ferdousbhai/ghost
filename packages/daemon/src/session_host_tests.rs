@@ -495,7 +495,7 @@ fn tool_calls_stream_as_cards_and_a_failed_one_stays_marked_in_the_log() {
         cards,
         vec![
             json!({ "type": "tool_execution_start", "id": "t1", "toolName": "Bash", "arguments": { "command": "false" }, "cwd": cwd.to_string_lossy() }),
-            json!({ "type": "tool_execution_end", "id": "t1", "toolName": "Bash", "isError": true, "summary": "exit 1" }),
+            json!({ "type": "tool_execution_end", "id": "t1", "toolName": "Bash", "isError": true, "summary": "exit 1", "output": "exit 1" }),
         ]
     );
     let logged = messages(&host, "c1");
@@ -503,14 +503,14 @@ fn tool_calls_stream_as_cards_and_a_failed_one_stays_marked_in_the_log() {
     assert_eq!(
         assistant["content"],
         json!([
-            { "type": "toolCall", "id": "t1", "name": "Bash", "arguments": { "command": "false" }, "failed": true },
+            { "type": "toolCall", "id": "t1", "name": "Bash", "arguments": { "command": "false" }, "failed": true, "output": "exit 1" },
             { "type": "text", "text": "It failed." },
         ])
     );
 }
 
 #[test]
-fn reasoning_streams_without_being_logged_and_a_running_tool_shows_the_tail_of_its_output() {
+fn reasoning_streams_and_is_logged_and_a_running_tool_shows_the_tail_of_its_output() {
     let home = Home::new();
     let thought = |block: &str, delta: &str| PassEvent::Thinking { block: block.to_string(), delta: delta.to_string() };
     let started = || PassEvent::ToolStart { id: "t1".to_string(), name: "bash".to_string(), args: json!({ "command": "make" }) };
@@ -551,7 +551,11 @@ fn reasoning_streams_without_being_logged_and_a_running_tool_shows_the_tail_of_i
     );
     assert_eq!(
         messages(&host, "c1").last().unwrap()["content"],
-        json!([{ "type": "toolCall", "id": "t1", "name": "bash", "arguments": { "command": "make" } }, { "type": "text", "text": "Built." }])
+        json!([
+            { "type": "thinking", "text": "Let me see.\nNext." },
+            { "type": "toolCall", "id": "t1", "name": "bash", "arguments": { "command": "make" } },
+            { "type": "text", "text": "Built." }
+        ])
     );
 }
 

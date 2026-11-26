@@ -224,7 +224,7 @@ const PRODUCTS_AFTER: &[&str] = &[
     r"| Piece | Recommended | Alternatives |",
     r"| --- | --- | --- |",
     r"| Runtime | `llama-server` from llama.cpp with Vulkan: AUR `llama.cpp-vulkan` on Arch | a source build with `-DGGML_VULKAN=ON`; any `llama-server` (CUDA, ROCm, Metal) for that GPU |",
-    r"| Model | Inkling 2 Mini, `ggml-org/Inkling-2-Mini-GGUF`, `Inkling-2-Mini-IQ4_NL.gguf` (17.6 GB) | Gemma 4 26B A4B instruct, `unsloth/gemma-4-26B-A4B-it-GGUF`, `UD-Q4_K_M` (16 GiB); any GGUF with tool calling |",
+    r"| Model | Inkling 2 Mini, `ggml-org/Inkling-2-Mini-GGUF`, `Inkling-2-Mini-IQ4_NL.gguf` (17.6 GB) | none |",
     r"| Search | Recall (above), with Omarchy's ripgrep, fd and fzf always alongside | without Recall, those three alone, by keyword and file name |",
     r"| Mail, contacts | Cloudmail, iCloud for Omarchy (above) | none: the local model then cannot see them |",
     r"| WhatsApp | wacli (above), whose folders Recall indexes | any export kept as files under Recall's root |",

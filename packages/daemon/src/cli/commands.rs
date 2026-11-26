@@ -50,15 +50,26 @@ fn transcript_markdown(body: &Value) -> String {
             Some("hook") => "Stop hook",
             _ => "ghost",
         };
+        // Everything the turn held, in order: reasoning quoted, a command with what it printed, then what was said.
         let line = |part: &Value| {
-            if part.get("type").and_then(Value::as_str) == Some("toolCall") && part.get("name").and_then(Value::as_str) == Some("ask") {
+            let kind = part.get("type").and_then(Value::as_str);
+            let text = part.get("text").and_then(Value::as_str).unwrap_or("");
+            let name = part.get("name").and_then(Value::as_str);
+            let command = part.get("arguments").and_then(|arguments| arguments.get("command")).and_then(Value::as_str);
+            match (kind, name, command) {
+                (Some("thinking"), _, _) => text.trim().lines().map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"),
                 // The question and its answers are the text that follows.
-                "> ⚙ ask".to_string()
-            } else if part.get("type").and_then(Value::as_str) == Some("toolCall") {
-                let arguments = present(part, "arguments").map_or_else(|| "{}".to_string(), Value::to_string);
-                format!("> ⚙ {}({})", text_of(part.get("name")), truncate(&arguments, 120))
-            } else {
-                part.get("text").and_then(Value::as_str).unwrap_or("").to_string()
+                (Some("toolCall"), Some("ask"), _) => "> ⚙ ask".to_string(),
+                (Some("toolCall"), Some("bash"), Some(command)) => {
+                    let output = part.get("output").and_then(Value::as_str).map_or_else(String::new, |output| format!("\n{}", output.trim_end()));
+                    let failed = if truthy(part.get("failed")) { " ✗" } else { "" };
+                    format!("```\n$ {command}{failed}{output}\n```")
+                }
+                (Some("toolCall"), _, _) => {
+                    let arguments = present(part, "arguments").map_or_else(|| "{}".to_string(), Value::to_string);
+                    format!("> ⚙ {}({})", text_of(part.get("name")), truncate(&arguments, 120))
+                }
+                _ => text.to_string(),
             }
         };
         let lines: Vec<String> = items(message, "content").iter().map(line).filter(|line| !line.is_empty()).collect();

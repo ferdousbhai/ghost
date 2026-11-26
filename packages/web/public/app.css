@@ -175,6 +175,13 @@ main > * { width: 100%; max-width: 46rem; margin-inline: auto; }
 .assistant table { border-collapse: collapse; display: block; overflow-x: auto; margin: 0 0 .75em; font-size: .9em; }
 .assistant :is(th, td) { border: 1px solid var(--line); padding: .35em .65em; text-align: left; vertical-align: top; }
 .assistant th { background: var(--deep); font-family: var(--mono); font-size: .85em; color: var(--amber); font-weight: 600; }
+/* What the model thought, and each command with all it printed: quieter than what it said, never hidden. */
+.thinking { color: var(--faint); font-style: italic; font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool { font-family: var(--mono); font-size: .78rem; min-width: 0; }
+.tool pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-command { color: var(--amber); }
+.tool-output { color: var(--faint); margin-top: .3rem; padding: .45rem .6rem; border-radius: .45rem; background: var(--amber-soft); max-height: 60vh; overflow: auto; }
+.tool.failed-call .tool-command { color: var(--rose); }
 .failed { font-family: var(--mono); font-size: .75rem; color: var(--rose); margin-top: -.5rem; }
 .activity { font-family: var(--mono); font-size: .75rem; color: var(--faint); display: flex; gap: .45rem; align-items: center; margin-top: -.5rem; }
 .activity::before { content: ""; width: .35rem; height: .35rem; background: var(--amber-fill); opacity: .6; flex: none; }

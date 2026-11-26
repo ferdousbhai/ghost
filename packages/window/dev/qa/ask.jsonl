@@ -8,6 +8,10 @@
 {"do":"wait","role":"text-box","focused":true}
 {"do":"type","text":"When does the boat leave?"}
 {"do":"key","keys":"Return"}
+# Nothing of the turn is hidden: its reasoning, its command, and what the command printed.
+{"do":"wait","role":"label","name":"The ferry note should say. I will read it.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"$ echo 'The boat leaves at nine from the north pier.'","visible":true}
+{"do":"wait","role":"label","name":"The boat leaves at nine from the north pier.","visible":true}
 {"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
 {"do":"wait","role":"button","name":"Ask","visible":true}
 {"do":"wait","role":"list-item","name":"When does the boat leave","selected":true}
@@ -26,6 +30,8 @@
 {"do":"wait","role":"text-box","focused":true,"text":"Bring\nwhat?"}
 {"do":"select","role":"list-item","name":"When does the boat leave"}
 {"do":"wait","role":"label","name":"Bring the tickets.","visible":true}
+{"do":"wait","role":"label","name":"The ferry note should say. I will read it.","visible":true}
+{"do":"wait","role":"label","name":"The boat leaves at nine from the north pier.","visible":true}
 {"do":"wait","role":"label","name":"Ask about your notes, mail, chats, files and photos.","visible":false}
 {"do":"shot","path":"qa-ask-reopened.png"}
 {"do":"quit"}

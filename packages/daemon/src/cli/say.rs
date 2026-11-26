@@ -4,7 +4,7 @@ use super::client::{DaemonClient, EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_SUCCESS};
 use super::common::{
     conversation_id, id_of, latest_session, list_sessions, preferred_session_id, resolve_session, session_path, stdin_is_tty, stdin_text,
 };
-use super::output::{Rendered, dim, text_of, truncate};
+use super::output::{Rendered, dim, text_of};
 use super::{CliError, Context};
 use crate::abort::Abort;
 use crate::http::percent_encode;
@@ -110,17 +110,17 @@ fn tool_name(event: &Value) -> &str {
     event.get("toolName").and_then(Value::as_str).unwrap_or("tool")
 }
 
+/// A call as it is shown: a command whole, as a shell would echo it; anything else by name and arguments.
 fn tool_description(event: &Value) -> String {
     // The question and its answers are the reply itself.
     if tool_name(event) == "ask" {
-        return "ask".to_string();
+        return "⚙ ask".to_string();
     }
     let arguments = event.get("arguments").filter(|arguments| !arguments.is_null());
-    let detail = match arguments.filter(|arguments| arguments.is_object()).and_then(|arguments| arguments.get("command")).and_then(Value::as_str) {
-        Some(command) => command.split('\n').next().unwrap_or("").trim().to_string(),
-        None => arguments.map_or_else(|| "{}".to_string(), Value::to_string),
-    };
-    format!("{}: {}", tool_name(event), truncate(&detail, 80))
+    match arguments.filter(|arguments| arguments.is_object()).and_then(|arguments| arguments.get("command")).and_then(Value::as_str) {
+        Some(command) => format!("$ {}", command.trim()),
+        None => format!("⚙ {}: {}", tool_name(event), arguments.map_or_else(|| "{}".to_string(), Value::to_string)),
+    }
 }
 
 /// Which conversation a fresh turn joins: `--new`, then `-s`/`$GHOST_SESSION`, then the latest.
@@ -147,6 +147,8 @@ struct Turn {
     done: Option<bool>,
     /// A long turn's response is cut, its last frame naming where the next resumes.
     resume: Option<(String, String)>,
+    /// Reasoning as it streams, printed whole when something else follows it.
+    thinking: String,
 }
 
 impl Turn {
@@ -202,13 +204,30 @@ impl Turn {
             }
             Rendered::Both { human, quiet }
         });
+        // Everything else the turn holds goes to stderr, dimmed and whole: the
+        // model's reasoning, each command, and what the command printed.
         let secondary = !ctx.parsed.boolean("json") && !ctx.parsed.boolean("quiet");
         let tty = ctx.runtime.stdout_is_tty;
-        if secondary && kind == "tool_execution_start" {
-            ctx.err(&format!("{}\n", dim(&format!("⚙ {}", tool_description(event)), tty)));
-        } else if secondary && kind == "tool_execution_end" && event.get("isError") == Some(&Value::Bool(true)) && !self.owner_command {
-            let summary = text("summary").map_or_else(String::new, |summary| format!(": {}", truncate(summary, 80)));
-            ctx.err(&format!("{}\n", dim(&format!("✗ {}{summary}", tool_name(event)), tty)));
+        if !secondary {
+            return;
+        }
+        if kind == "thinking" {
+            self.thinking.push_str(text("delta").unwrap_or(""));
+            return;
+        }
+        let thought = std::mem::take(&mut self.thinking);
+        if !thought.trim().is_empty() {
+            ctx.err(&format!("{}\n", dim(thought.trim(), tty)));
+        }
+        if kind == "tool_execution_start" {
+            ctx.err(&format!("{}\n", dim(&tool_description(event), tty)));
+        } else if kind == "tool_execution_end" && !self.owner_command {
+            if let Some(output) = text("output").map(str::trim_end).filter(|output| !output.is_empty()) {
+                ctx.err(&format!("{}\n", dim(output, tty)));
+            }
+            if event.get("isError") == Some(&Value::Bool(true)) {
+                ctx.err(&format!("{}\n", dim(&format!("✗ {}", tool_name(event)), tty)));
+            }
         }
     }
 }

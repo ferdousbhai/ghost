@@ -33,11 +33,18 @@ pub enum AssistantPart {
     Text {
         text: String,
     },
+    /// The model's reasoning before what follows it, as far as it showed it.
+    Thinking {
+        text: String,
+    },
     ToolCall {
         id: String,
         name: String,
         arguments: Value,
         failed: bool,
+        /// What the call returned, as the model was given it; None for a call
+        /// that never ended, or one an earlier version logged.
+        output: Option<String>,
     },
     /// A part in a shape this version does not write, kept as it was read so a client is served it unchanged.
     Other(Value),
@@ -48,14 +55,18 @@ impl AssistantPart {
         Self::Text { text: text.into() }
     }
 
-    /// As the log and the API carry it: `type`, then `text`, or `id`, `name`, `arguments` and `failed` only when true.
+    /// As the log and the API carry it: `type`, then `text`, or `id`, `name`, `arguments`, `failed` only when true, and `output` once the call has ended.
     pub fn to_json(&self) -> Value {
         match self {
             Self::Text { text } => json!({ "type": "text", "text": text }),
-            Self::ToolCall { id, name, arguments, failed } => {
+            Self::Thinking { text } => json!({ "type": "thinking", "text": text }),
+            Self::ToolCall { id, name, arguments, failed, output } => {
                 let mut part = json!({ "type": "toolCall", "id": id, "name": name, "arguments": arguments });
                 if *failed {
                     part["failed"] = Value::Bool(true);
+                }
+                if let Some(output) = output {
+                    part["output"] = json!(output);
                 }
                 part
             }
@@ -67,10 +78,15 @@ impl AssistantPart {
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
         let typed = match value.get("type").and_then(Value::as_str) {
             Some("text") => text("text").map(|text| Self::Text { text }),
+            Some("thinking") => text("text").map(|text| Self::Thinking { text }),
             Some("toolCall") => match (text("id"), text("name"), value.get("arguments")) {
-                (Some(id), Some(name), Some(arguments)) => {
-                    Some(Self::ToolCall { id, name, arguments: arguments.clone(), failed: value.get("failed") == Some(&Value::Bool(true)) })
-                }
+                (Some(id), Some(name), Some(arguments)) => Some(Self::ToolCall {
+                    id,
+                    name,
+                    arguments: arguments.clone(),
+                    failed: value.get("failed") == Some(&Value::Bool(true)),
+                    output: text("output"),
+                }),
                 _ => None,
             },
             _ => None,
@@ -546,6 +562,8 @@ fn assistant_text(content: &[AssistantPart]) -> String {
         .iter()
         .map(|part| match part {
             AssistantPart::Text { text } => text.clone(),
+            // Earlier reasoning is not handed on: only what was said and done.
+            AssistantPart::Thinking { .. } => String::new(),
             AssistantPart::ToolCall { name, .. } => format!("[ran {name}]"),
             AssistantPart::Other(value) if value.get("type").and_then(Value::as_str) == Some("text") => {
                 value.get("text").and_then(Value::as_str).unwrap_or_default().to_string()

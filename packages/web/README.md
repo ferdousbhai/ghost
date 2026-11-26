@@ -41,7 +41,9 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   wrapped in try/catch so the page works without it. Removed hosts are
   remembered, so discovery does not bring them back. An offline machine keeps
   its ghost's last-known name.
-- **A conversation:** bubbles and the activity line; the newest transcript
+- **A conversation:** everything a turn held, in order (the model's
+  reasoning, each command whole with all it printed, and what it said), live
+  and from the transcript; the newest transcript
   page; read marking only while the page is visible and focused; the turn wire
   and its `resume` frames; photos uploaded on send; the follow-up queue (while
   a turn runs the send button queues, and stops when the composer is empty);

@@ -506,12 +506,24 @@ function assistantBubble(value) {
   bubble.replaceChildren(renderMarkdown(value, document));
   return bubble;
 }
+
+// Nothing of a turn is hidden: what the model thought, and each command with all it printed.
+const thinkingBlock = (text) => el("div", "thinking", text);
+/** A call as a block: the command as a shell would echo it, and what it printed (`output` is its element). */
+function toolBlock(name, args, output = "", failed = false) {
+  const block = el("div", "tool" + (failed ? " failed-call" : ""));
+  block.append(el("pre", "tool-command", toolCall(name, args)));
+  block.output = el("pre", "tool-output", output.trimEnd());
+  block.output.hidden = !output.trim();
+  block.append(block.output);
+  return block;
+}
 /** A message's texts as the bubbles they show as: text after a tool call is the next message. */
 function bubbles(parts) {
   const out = [];
   let tooled = true;
   for (const p of parts) {
-    if (p.type === "toolCall") tooled = true;
+    if (p.type !== "text") tooled = true;
     else if (p.text?.trim()) {
       if (tooled) out.push(p.text);
       else out[out.length - 1] += "\n\n" + p.text;
@@ -529,7 +541,15 @@ function render(messages, keep = false) {
     const texts = bubbles(m.content || []);
     if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\n\n")));
     else if (m.role === "assistant") {
-      for (const text of texts) log.append(assistantBubble(text));
+      // In the order it happened: reasoning, each call with its output, and what was said.
+      let said = [];
+      const flush = () => { if (said.length) log.append(assistantBubble(said.join("\n\n"))); said = []; };
+      for (const p of m.content || []) {
+        if (p.type === "thinking") { flush(); if (p.text?.trim()) log.append(thinkingBlock(p.text.trim())); }
+        else if (p.type === "toolCall") { flush(); log.append(toolBlock(p.name, p.arguments, p.output || "", p.failed === true)); }
+        else if (p.text?.trim()) said.push(p.text);
+      }
+      flush();
       if (m.errorMessage) log.append(el("div", "failed", "Failed: " + m.errorMessage.slice(0, 600)));
     }
   }
@@ -808,6 +828,14 @@ async function send() {
   refresh();
   const parts = [];
   let renderedTexts = 0;
+  // A block of reasoning or a call goes where it happened: above a reply bubble still waiting for its text, else after everything.
+  let thinking = null;
+  const tools = new Map();
+  const place = (block) => {
+    if (!turn.live) return;
+    const waiting = replies.at(-1);
+    if (waiting.childNodes.length) log.append(block); else waiting.before(block);
+  };
   const nextReply = () => {
     replies.at(-1).classList.remove("pending");
     replies.push(replyBubble());
@@ -827,9 +855,22 @@ async function send() {
         parts.length = 0;
         renderedTexts = 0;
       } else if (ev.type === "queue") showQueue(ev.followUp || []);
-      else if (ev.type === "text_start") parts.push({ type: "text", text: "" });
+      else if (ev.type === "thinking") {
+        // "Loading the local model…" is a notice; anything else is the model's reasoning, shown as it comes.
+        if (!thinking && ev.delta.trimStart().startsWith("Loading the local model")) {
+          call = ev.delta.trim();
+          callStarted = Date.now();
+          tick();
+          replies.at(-1).after(activity);
+        } else {
+          if (!thinking) { thinking = thinkingBlock(""); parts.push({ type: "thinking" }); place(thinking); }
+          thinking.textContent += thinking.textContent ? ev.delta : ev.delta.trimStart();
+        }
+      }
+      else if (ev.type === "text_start") { thinking = null; parts.push({ type: "text", text: "" }); }
       else if (ev.type === "text_delta") {
-        if (!parts.length) parts.push({ type: "text", text: "" });
+        thinking = null;
+        if (parts.at(-1)?.type !== "text") parts.push({ type: "text", text: "" });
         parts.at(-1).text += ev.delta;
         const texts = bubbles(parts);
         if (texts.length) activity.remove(); // Words mean the call before them is over.
@@ -840,17 +881,27 @@ async function send() {
         renderedTexts = texts.length;
         if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
       } else if (ev.type === "tool_execution_start") {
+        thinking = null;
         parts.push({ type: "toolCall" });
+        const block = toolBlock(ev.toolName, ev.arguments);
+        tools.set(ev.id, block);
+        place(block);
         call = toolCall(ev.toolName, ev.arguments);
         callStarted = Date.now();
         tick();
         clearInterval(clock);
         clock = setInterval(tick, 1000);
         replies.at(-1).after(activity);
-      } else if (ev.type === "tool_execution_end") {
-        clearInterval(clock);
-        // A failed call stays named, with its error, until the next words or call.
-        if (ev.isError) activity.textContent = call + " failed" + (ev.summary ? ": " + ev.summary.replace(/\s+/g, " ").trim().slice(0, 600) : "");
+      } else if (ev.type === "tool_execution_update" || ev.type === "tool_execution_end") {
+        // What it has printed lately while it runs, then all of it.
+        const block = tools.get(ev.id), ended = ev.type === "tool_execution_end";
+        const text = (ended ? ev.output ?? ev.summary : ev.summary) || "";
+        if (block) {
+          block.output.textContent = text.trimEnd();
+          block.output.hidden = !text.trim();
+          if (ended && ev.isError) block.classList.add("failed-call");
+        }
+        if (ended) { clearInterval(clock); activity.remove(); }
       }
       // A stop hook runs once the reply is complete; only a continuation shows.
       else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");

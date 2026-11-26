@@ -183,8 +183,10 @@ the CLI `cli-…`). The directory is
 the directory the model's commands run in and holds Ghost's log, `.conversation.jsonl`
 ([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)): one JSON
 object per line — the conversation header, owner and follow-up and hook
-messages, the assistant's text and tool calls (a failed call marked
-`failed`, a failed turn carrying `error`), the owner's `!` commands, and title
+messages, the assistant's parts in the order they happened (`thinking`, its
+reasoning; `text`; `toolCall` with its `arguments`, `output`, the whole of
+what it returned as the model was given it, and `failed` on one that
+failed; a failed turn carries `error`), the owner's `!` commands, and title
 records. A torn last line is skipped, and so is any record ghostd does not write (an earlier version's `harness`, `compacted`, `resources` or `handoff`); logs are never rewritten. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
 The log is the history
@@ -391,12 +393,15 @@ remote access is the summonghost.com app.
 The event union is the contract; clients must ignore unknown future event
 types. See [`session_host.rs`](packages/daemon/src/session_host.rs), which builds the events, and [`server.rs`](packages/daemon/src/server.rs), which encodes them. A turn
 emits `start`, then ordered `pass` (the model starting on a prompt), `text_*`, `thinking` (the model's reasoning, as
-far as it shows it; never logged), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or model command has printed), `queue` (the follow-ups still
+far as it shows it), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or model command has printed), `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
 running, by its `name` and `event`; clients show it as a settled turn), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. Tool events carry the call id; a start names the
 tool and the directory it runs in, an update carries a bounded output
-summary, and an end names the tool and carries `isError` and the summary. An owner `!command` is
+summary, and an end names the tool and carries `isError`, the summary, and
+`output`, the whole of what the call returned as the model was given it.
+Nothing of a turn is held back from the owner: clients show the reasoning,
+each call whole, and all it printed, and the log keeps them (below). An owner `!command` is
 one `bash` tool card, then `done`.
 
 A turn response is cut after about 1 MB of events so no client has to hold
