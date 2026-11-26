@@ -13,7 +13,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, a window, 
 ## Glossary
 
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
-- **ghost** — a machine's one persona, reached from elsewhere over Tailscale; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
+- **ghost** — a machine's one persona, reached from elsewhere over Tailscale; **ghost home** — its directory, `~/.local/share/ghost/` (layout in `CONTRACTS.md`).
 - **local model** — the GGUF model ghostd runs and loops over; every turn runs on it. **coding agent** — an agent CLI the owner already has (claude, codex, agy), which the model runs from its shell.
 - **daemon** (`ghostd`) — the HTTP API that owns conversations; **window** (`ghost-window`) — the GTK app that talks to it.
 
@@ -28,7 +28,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 ## The three ways to hurt yourself
 
-1. **Testing against the live install.** Tests use scratch ghost homes, never `~/ghosts`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; window checks use `packages/window/dev/qa.sh` (a private broadway display) against a scratch ghostd. The live install need not use this checkout: discover `systemctl --user cat ghostd.service` and `command -v ghostd ghost-window` before deploying. A checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version) and the installed artifacts.
+1. **Testing against the live install.** Tests use scratch ghost homes, never `~/.local/share/ghost`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; window checks use `packages/window/dev/qa.sh` (a private broadway display) against a scratch ghostd. The live install need not use this checkout: discover `systemctl --user cat ghostd.service` and `command -v ghostd ghost-window` before deploying. A checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version) and the installed artifacts.
 2. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
 3. **Touching a peer's git state.** The same shared checkout means `git stash` pops someone else's stash, so never stash here; commit or branch instead. A worktree and branch outlive their PR only while it is open: after the merge, `git worktree remove`, delete the branch locally and on origin, `git worktree prune`.
 

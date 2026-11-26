@@ -219,7 +219,7 @@ impl Home {
     }
 
     fn ghost(&self) -> Ghost {
-        Ghost { name: "casper".to_string(), dir: self.root.join("casper") }
+        Ghost { dir: self.root.join("casper") }
     }
 
     fn owner_home(&self) -> PathBuf {
@@ -939,7 +939,7 @@ fn the_turn_continues_while_a_session_stop_hook_asks_it_to() {
         json!({
             "session_id": "c1",
             "conversation_id": "c1",
-            "ghost_name": "casper",
+            "ghost_name": "Casper",
             "ghost_home": home.ghost().dir.to_string_lossy(),
             "cwd": conversation_dir(&home.session_dir(), "c1").to_string_lossy(),
             "transcript_path": log_path(&home.session_dir(), "c1").to_string_lossy(),
@@ -1380,7 +1380,7 @@ fn a_turn_that_ends_alerts_the_owners_devices_once_with_a_bounded_excerpt_and_it
     assert_eq!(sent.len(), 1);
     assert_carries(
         &sent[0],
-        json!({ "title": "Make the report", "url": "https://summonghost.com/#/ghost.example.ts.net/c1", "tag": "c1", "ghost": "casper" }),
+        json!({ "title": "Make the report", "url": "https://summonghost.com/#/ghost.example.ts.net/c1", "tag": "c1", "ghost": "Casper" }),
     );
     let body = sent[0]["body"].as_str().unwrap();
     assert_eq!(utf16_len(body), 280);

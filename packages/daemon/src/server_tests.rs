@@ -358,7 +358,7 @@ impl Daemon {
             ("XDG_STATE_HOME".to_string(), scratch(".state")),
             ("XDG_CONFIG_HOME".to_string(), scratch(".config")),
         ]);
-        let ghost = Ghost { name: "casper".to_string(), dir: ghost_dir.clone() };
+        let ghost = Ghost { dir: ghost_dir.clone() };
         let pushed: Pushed = Arc::default();
         let hooks_path = root.join(".hooks.json");
         let hooks = Arc::new(HookRunner::from_config(&hooks_path, Logger::silent(), env.clone()).unwrap());

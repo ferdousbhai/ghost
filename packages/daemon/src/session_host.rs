@@ -272,10 +272,10 @@ impl SessionHost {
         let ghost = &self.inner.ghost;
         let character = read_character(&ghost.dir, true)?;
         let documents = crate::xdg::documents_dir(&self.inner.env, &self.inner.owner_home);
-        let first_meeting = is_seeded_character(&ghost.name, character.as_ref().map(|character| character.body.as_str()));
+        let first_meeting = is_seeded_character(&ghost.name(), character.as_ref().map(|character| character.body.as_str()));
         let sections = stable_policy_sections(&documents, first_meeting);
         Ok(build_ghost_system_prompt(&GhostSystemPromptInput {
-            ghost_name: &ghost.name,
+            ghost_name: &ghost.name(),
             character: character.as_ref(),
             home_dir: &ghost.dir,
             extra_sections: &sections,
@@ -325,7 +325,7 @@ impl SessionHost {
         let outcome = self.run_passes(id, prompt, emit, abort, &mut turn_id);
         self.inner.state.lock().unwrap().live.remove(id);
         let terminal = outcome.unwrap_or_else(|error| {
-            self.inner.logger.error("turn failed", json!({ "ghost": self.inner.ghost.name, "conversation": id, "error": error.message }));
+            self.inner.logger.error("turn failed", json!({ "ghost": self.inner.ghost.name(), "conversation": id, "error": error.message }));
             error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message)
         });
         Ok(terminal)
@@ -715,7 +715,7 @@ impl SessionHost {
         let base = json!({
             "session_id": id,
             "transcript_path": log_path(&session_dir, id).to_string_lossy(),
-            "ghost_name": ghost.name,
+            "ghost_name": ghost.name(),
             "ghost_home": ghost.dir.to_string_lossy(),
             "cwd": cwd.to_string_lossy(),
             "conversation_id": id,
@@ -755,11 +755,11 @@ impl SessionHost {
             }
         };
         let url = self.inner.conversation_url.as_ref().and_then(|link| link(id));
-        let title = log_state(&entries).title.unwrap_or_else(|| self.inner.ghost.name.clone());
+        let title = log_state(&entries).title.unwrap_or_else(|| self.inner.ghost.name());
         let excerpt = text.split(crate::js_text::is_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
         // What the app's service worker shows; `tag` lets a later alert for the conversation replace an earlier one.
         let body = if failed { format!("Failed: {}", utf16_prefix(&excerpt, 280)) } else { utf16_prefix(&excerpt, 280).to_string() };
-        push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name }));
+        push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name() }));
     }
 
     fn session_stop(&self, id: &str, owner_prompt: &str, turn_id: &str, active: bool, abort: &Abort, emit: &Emit) -> Result<Option<String>> {
@@ -1081,7 +1081,7 @@ impl SessionHost {
                 }
             }
             self.drop_question(&id)?;
-            self.inner.logger.info("trashed conversation", json!({ "ghost": self.inner.ghost.name, "conversation": id }));
+            self.inner.logger.info("trashed conversation", json!({ "ghost": self.inner.ghost.name(), "conversation": id }));
             self.announce(&id);
             Ok(())
         })();

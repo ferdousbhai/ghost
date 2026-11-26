@@ -113,8 +113,8 @@ while IFS= read -r -d '' link; do
   fi
 done < <(find "$root" -type l -print0)
 
-if find "$root" -path '*/ghosts/*' -print -quit | grep -q .; then
-  printf 'package payload must not own a user ghosts directory\n' >&2
+if find "$root" -path '*/.local/*' -print -quit | grep -q .; then
+  printf 'package payload must not own a user ghost home\n' >&2
   exit 1
 fi
 

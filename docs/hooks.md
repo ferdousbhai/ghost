@@ -91,11 +91,11 @@ contains the same message directly:
     "content": [{ "type": "text", "text": "The answer." }]
   },
   "session_id": "conversation-a",
-  "transcript_path": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
+  "transcript_path": "/home/me/.local/share/ghost/sessions/conversation-a/.conversation.jsonl",
   "stop_hook_active": false,
   "ghost_name": "casper",
-  "ghost_home": "/home/me/ghosts/casper",
-  "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
+  "ghost_home": "/home/me/.local/share/ghost",
+  "cwd": "/home/me/.local/share/ghost/sessions/conversation-a",
   "conversation_id": "conversation-a"
 }
 ```

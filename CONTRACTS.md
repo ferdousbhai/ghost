@@ -96,26 +96,29 @@ service holds an alert up to a day for an offline device); a `404` or `410`
 forgets the device. A cancelled turn alerts no one, and no subscribed device
 means no outbound request.
 
-## Ghost home (`ghost-home/v2`)
+## Ghost home (`ghost-home/v3`)
 
-The default root is `~/ghosts`; a direct child holding a `character.md` is a
-ghost home, and its directory name is the ghost's name:
+A machine has one ghost, and its home is one fixed directory,
+`$XDG_DATA_HOME/ghost` (default `~/.local/share/ghost`; `home` in the config,
+`GHOST_HOME`, or `--home` move it):
 
 ```text
-~/ghosts/<name>/
+~/.local/share/ghost/
   character.md
   sessions/<id>/       (one directory per conversation)
 ```
 
-A machine has one ghost: the one ghost home under the root. A daemon start
-that finds none makes `<root>/ghost/` with a seeded `character.md`
-([`ghosts.rs`](packages/daemon/src/ghosts.rs)); that is the only way Ghost
-makes one, and it never renames, moves, or removes a home. A root holding more
-than one is refused at start with an error naming them. No route, command or
-URL carries the ghost's name; `GET /api/ghost` reports it. Another machine's
-ghost is reached at that machine, over Tailscale
-([Remote access](#remote-access)). The directory is the whole ghost: to rename it, stop
-ghostd, rename the directory, and start ghostd; to remove it, `gio trash` it.
+A daemon start that finds no `character.md` there makes one, seeded
+([`ghosts.rs`](packages/daemon/src/ghosts.rs)), unless an earlier version left
+the ghost under `~/ghosts/<name>/`: that home, when it is the only one there,
+is moved here once, and several are refused at start with an error naming
+them. Ghost never otherwise moves or removes a home. The ghost's name is its
+persona's title, the leading `# ` heading of `character.md`, read when it is
+needed, else `ghost`; to rename the ghost, retitle its persona. No route,
+command or URL carries the name; `GET /api/ghost` reports it. Another
+machine's ghost is reached at that machine, over Tailscale
+([Remote access](#remote-access)). The directory is the whole ghost: to remove
+it, `gio trash` it.
 Machine credentials, owner documents, screenshots, and downloads are not in it.
 
 The checkout a ghost may edit is the clone the daemon was built from
@@ -261,7 +264,7 @@ handed the ghost's persona and the conversation so far, replayed from the log
 as the chat messages it was, since the model keeps no session of its own. Its
 commands run in the conversation directory with the conversation's identity
 (`GHOST_SESSION`) in their environment, beside the daemon's resolved
-`GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOSTS_ROOT`, and `GHOSTD_HOOKS`, which every
+`GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOST_HOME`, and `GHOSTD_HOOKS`, which every
 child of ghostd (a command, a hook, `ghost`) inherits, so a daemon started
 with flags is the one they address. Ghost has no screen control: desktop work goes through
 Omarchy's commands, app CLIs, and config files, on the bet that Omarchy's
@@ -598,7 +601,7 @@ is answered with what was wrong, and nothing runs.
 
 ## Lifecycle invariants
 
-- Never start a test daemon against `~/ghosts` or the live port 7717.
+- Never start a test daemon against the owner's ghost home or the live port 7717.
   Canary daemons isolate Ghost config and owner hooks.
   Tests use scratch homes, and the window's scripted QA a private
   HOME, XDG directories and display.
@@ -620,7 +623,7 @@ is answered with what was wrong, and nothing runs.
   ghost and conversation included, are JSON in its journal `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
   CLI, or machine skill is required before enabling the services.
-- Package removal preserves ghost homes, XDG config/state, and owner documents.
+- Package removal preserves the ghost home, XDG config/state, and owner documents.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute

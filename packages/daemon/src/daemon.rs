@@ -34,14 +34,14 @@ Subcommands:
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
-      --ghosts-root <dir>  Directory holding the ghost home (default ~/ghosts)
+      --home <dir>         The ghost home (default ~/.local/share/ghost)
       --config <file>      Config file (default ~/.config/ghost/config.json)
       --log-level <level>  info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
 
 Environment:
-  GHOSTD_PORT, GHOSTS_ROOT, GHOSTD_CONFIG, GHOSTD_HOOKS,
+  GHOSTD_PORT, GHOST_HOME, GHOSTD_CONFIG, GHOSTD_HOOKS,
   GHOSTD_API_TOKEN_FILE, XDG_CONFIG_HOME, XDG_STATE_HOME,
   XDG_CACHE_HOME, XDG_DOCUMENTS_DIR
 ";
@@ -72,7 +72,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
                 let raw = value(name)?;
                 parsed.overrides.port = Some(raw.parse::<u16>().map_err(|_| format!("Invalid port: {raw}"))?);
             }
-            "--ghosts-root" => parsed.overrides.ghosts_root = Some(value(name)?),
+            "--home" => parsed.overrides.home = Some(value(name)?),
             "--config" => parsed.overrides.config_path = Some(PathBuf::from(value(name)?)),
             "--log-level" => {
                 let raw = value(name)?;
@@ -85,12 +85,12 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 }
 
 /// Point every child — a turn's commands, a hook, `ghostd hook-complete`,
-/// `ghost` — at this daemon: a `--port`, `--config`, or `--ghosts-root` flag is
+/// `ghost` — at this daemon: a `--port`, `--config`, or `--home` flag is
 /// otherwise invisible to them, and they would address the default daemon.
 pub fn daemon_env(config: &DaemonConfig, port: u16, mut env: Env) -> Env {
     env.insert("GHOSTD_PORT".into(), port.to_string());
     env.insert("GHOSTD_CONFIG".into(), config.config_path.to_string_lossy().into_owned());
-    env.insert("GHOSTS_ROOT".into(), config.ghosts_root.to_string_lossy().into_owned());
+    env.insert("GHOST_HOME".into(), config.home.to_string_lossy().into_owned());
     env.insert("GHOSTD_HOOKS".into(), config.hooks_path.to_string_lossy().into_owned());
     env
 }
@@ -193,7 +193,7 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
     };
     // What is running: the source checkout behind this process, if it has one.
     let running_source = resolve_running_source(crate::VERSION, &running_executable(), &env);
-    let ghost = match the_ghost(&config.ghosts_root) {
+    let ghost = match the_ghost(&config.home, &home.join("ghosts")) {
         Ok(ghost) => ghost,
         Err(error) => {
             logger.error("no ghost home", json!({ "error": error.message }));
@@ -218,8 +218,8 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
     });
     let summary = json!({
         "url": format!("http://127.0.0.1:{}", config.port),
-        "ghostsRoot": config.ghosts_root.to_string_lossy(),
-        "ghost": ghost.name,
+        "home": config.home.to_string_lossy(),
+        "ghost": ghost.name(),
         "version": running_source.version,
         "commit": running_source.commit,
         "source": running_source.root.as_ref().map(|root| root.to_string_lossy()),
@@ -274,9 +274,9 @@ mod tests {
 
     #[test]
     fn flags_are_read_in_both_spellings() {
-        let parsed = parse_args(&args(&["-p", "7001", "--ghosts-root=/g", "--config", "/c.json", "--log-level", "warn"])).unwrap();
+        let parsed = parse_args(&args(&["-p", "7001", "--home=/g", "--config", "/c.json", "--log-level", "warn"])).unwrap();
         assert_eq!(parsed.overrides.port, Some(7001));
-        assert_eq!(parsed.overrides.ghosts_root.as_deref(), Some("/g"));
+        assert_eq!(parsed.overrides.home.as_deref(), Some("/g"));
         assert_eq!(parsed.overrides.config_path.as_deref(), Some(Path::new("/c.json")));
         assert_eq!(parsed.log_level, Level::Warn);
         assert!(parse_args(&args(&["-h"])).unwrap().help && parse_args(&args(&["--version"])).unwrap().version);
@@ -295,16 +295,15 @@ mod tests {
     #[test]
     fn defaults_to_no_overrides() {
         let parsed = parse_args(&[]).unwrap();
-        assert_eq!((parsed.overrides.port, parsed.overrides.ghosts_root, parsed.overrides.config_path), (None, None, None));
+        assert_eq!((parsed.overrides.port, parsed.overrides.home, parsed.overrides.config_path), (None, None, None));
         assert_eq!((parsed.log_level, parsed.help, parsed.version), (Level::Info, false, false));
     }
 
     #[test]
     fn parses_the_serve_options() {
-        let parsed =
-            parse_args(&args(&["--port", "7788", "--ghosts-root", "/tmp/ghosts", "--config", "/tmp/config.json", "--log-level", "warn"])).unwrap();
+        let parsed = parse_args(&args(&["--port", "7788", "--home", "/tmp/ghosts", "--config", "/tmp/config.json", "--log-level", "warn"])).unwrap();
         assert_eq!(
-            (parsed.overrides.port, parsed.overrides.ghosts_root.as_deref(), parsed.overrides.config_path.as_deref()),
+            (parsed.overrides.port, parsed.overrides.home.as_deref(), parsed.overrides.config_path.as_deref()),
             (Some(7788), Some("/tmp/ghosts"), Some(Path::new("/tmp/config.json")))
         );
         assert_eq!((parsed.log_level, parsed.help, parsed.version), (Level::Warn, false, false));
@@ -340,11 +339,10 @@ mod tests {
         for command in ["api-token", "hook-complete"] {
             assert!(USAGE.contains(&format!("ghostd {command}")), "{command}");
         }
-        for flag in ["-p, --port <port>", "--ghosts-root <dir>", "--config <file>", "--log-level <level>", "-h, --help", "-v, --version"] {
+        for flag in ["-p, --port <port>", "--home <dir>", "--config <file>", "--log-level <level>", "-h, --help", "-v, --version"] {
             assert!(USAGE.contains(flag), "{flag}");
         }
-        for variable in ["GHOSTD_PORT", "GHOSTS_ROOT", "GHOSTD_CONFIG", "GHOSTD_HOOKS", "GHOSTD_API_TOKEN_FILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME"]
-        {
+        for variable in ["GHOSTD_PORT", "GHOST_HOME", "GHOSTD_CONFIG", "GHOSTD_HOOKS", "GHOSTD_API_TOKEN_FILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME"] {
             assert!(USAGE.contains(variable), "{variable}");
         }
         assert!(USAGE.ends_with('\n'));
@@ -355,7 +353,7 @@ mod tests {
         let scratch = std::env::temp_dir().join(format!("ghostd-env-{}", crate::random::uuid()));
         std::fs::create_dir_all(&scratch).unwrap();
         let (config_file, root) = (scratch.join("config.json").display().to_string(), scratch.join("ghosts").display().to_string());
-        let parsed = parse_args(&args(&["--port", "7788", "--config", &config_file, "--ghosts-root", &root])).unwrap();
+        let parsed = parse_args(&args(&["--port", "7788", "--config", &config_file, "--home", &root])).unwrap();
         let config = load_config(&parsed.overrides, &Env::new(), &scratch).unwrap();
         let inherited = Env::from([("HOME".to_string(), scratch.display().to_string()), ("PATH".to_string(), "/usr/bin:/bin".to_string())]);
         let env = daemon_env(&config, 7788, inherited.clone());
@@ -363,7 +361,7 @@ mod tests {
         assert_eq!(env.len(), inherited.len() + 4);
         assert!(inherited.iter().all(|(name, value)| env.get(name) == Some(value)));
         // A hook's shell sees the flag's port…
-        let print = "printf '%s %s %s %s' \"$GHOSTD_PORT\" \"$GHOSTD_CONFIG\" \"$GHOSTS_ROOT\" \"$GHOSTD_HOOKS\"";
+        let print = "printf '%s %s %s %s' \"$GHOSTD_PORT\" \"$GHOSTD_CONFIG\" \"$GHOST_HOME\" \"$GHOSTD_HOOKS\"";
         let hook =
             crate::process::run_command("/bin/bash", &["-c", print], &env, None, std::time::Duration::from_secs(30), &crate::abort::Abort::new())
                 .unwrap();

@@ -34,7 +34,7 @@ impl Scratch {
         for (name, value) in [
             ("HOME", self.path("home")),
             ("PATH", self.path("bin")),
-            ("GHOSTS_ROOT", self.path("ghosts")),
+            ("GHOST_HOME", self.path("ghost")),
             ("GHOSTD_CONFIG", self.path("config/config.json")),
             ("GHOSTD_HOOKS", self.path("config/hooks.json")),
             ("GHOSTD_API_TOKEN_FILE", self.path("state/api-token")),
@@ -145,16 +145,16 @@ fn starts_serves_the_ghost_and_stops_cleanly_on_sigterm() {
     assert!(port != 0 && port != 7717);
     // A first start makes the ghost home, and the summary says what was resolved, the environment's paths included.
     assert_eq!(
-        (&listening["ghost"], &listening["ghostsRoot"], &listening["config"], &listening["hooks"], &listening["version"]),
+        (&listening["ghost"], &listening["home"], &listening["config"], &listening["hooks"], &listening["version"]),
         (
             &json!("ghost"),
-            &json!(scratch.path("ghosts")),
+            &json!(scratch.path("ghost")),
             &json!(scratch.path("config/config.json")),
             &json!(scratch.path("config/hooks.json")),
             &json!(ghostd::VERSION)
         )
     );
-    assert!(Path::new(&scratch.path("ghosts/ghost/character.md")).is_file());
+    assert!(Path::new(&scratch.path("ghost/character.md")).is_file());
     // Outside systemd, a line carries its own time and level.
     let line = daemon.seen.last().unwrap();
     let (time, rest) = line.split_once(' ').unwrap();
@@ -180,15 +180,15 @@ fn starts_serves_the_ghost_and_stops_cleanly_on_sigterm() {
 #[test]
 fn stops_on_sigint_too_and_serves_the_ghost_home_it_is_pointed_at() {
     let scratch = Scratch::new();
-    let home = scratch.0.join("elsewhere").join("casper");
+    let home = scratch.0.join("elsewhere");
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(home.join("character.md"), "# casper\n\nYou are casper, a letterpress printer.\n").unwrap();
-    let root = scratch.path("elsewhere");
+    std::fs::write(home.join("character.md"), "# Casper\n\nYou are Casper, a letterpress printer.\n").unwrap();
+    let home = scratch.path("elsewhere");
     // Flags beat the environment the daemon was started in, and reach what it starts in turn.
-    let mut daemon = Daemon::spawn(scratch.ghostd(&["--ghosts-root", &root, "-p", "0", "--log-level", "info"]));
+    let mut daemon = Daemon::spawn(scratch.ghostd(&["--home", &home, "-p", "0", "--log-level", "info"]));
     let listening = daemon.wait_for("listening");
-    assert_eq!((&listening["ghost"], &listening["ghostsRoot"]), (&json!("casper"), &json!(root)));
-    assert!(!Path::new(&scratch.path("ghosts")).exists());
+    assert_eq!((&listening["ghost"], &listening["home"]), (&json!("Casper"), &json!(home)));
+    assert!(!Path::new(&scratch.path("ghost")).exists());
     daemon.signal(libc::SIGINT);
     assert_eq!(daemon.exit_code(), Some(0), "{}", daemon.seen.join("\n"));
     assert!(daemon.seen.iter().any(|line| line.contains("shutting down {\"signal\":\"SIGINT\"}")));
@@ -240,7 +240,7 @@ fn refuses_arguments_and_configuration_it_cannot_read_and_says_why() {
     assert_eq!(said.lines().count(), 1, "{said}");
     assert!(said.contains("ghostd: hook configuration is invalid") && said.contains("unsupported hook event"), "{said}");
     // None of them got as far as a ghost home or a token.
-    assert!(!Path::new(&scratch.path("ghosts")).exists() && !Path::new(&scratch.path("state")).exists());
+    assert!(!Path::new(&scratch.path("ghost")).exists() && !Path::new(&scratch.path("state")).exists());
 }
 
 #[test]

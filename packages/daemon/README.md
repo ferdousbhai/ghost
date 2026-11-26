@@ -17,8 +17,8 @@ cargo clippy -p ghostd --all-targets --locked -- -D warnings
 cargo test -p ghostd --locked
 ```
 
-The daemon is a native Rust binary. Tests must use a scratch ghosts root and ephemeral port.
-Never point a development daemon at `~/ghosts`, never contact the live port
+The daemon is a native Rust binary. Tests must use a scratch ghost home and ephemeral port.
+Never point a development daemon at `~/.local/share/ghost`, never contact the live port
 7717, and never restart the owner's `ghostd.service` from a test. Deployment follows
 [the maintenance runbook](../../docs/self-maintenance.md).
 

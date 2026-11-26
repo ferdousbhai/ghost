@@ -110,17 +110,10 @@ To replace it, delete the file and `systemctl --user restart ghostd`.
 
 ## 4. Your ghost
 
-Each machine has one ghost. The first time ghostd starts and finds no ghost home, it
-makes `~/ghosts/ghost/` with a seeded `character.md`; `ghost status` prints the
-name. The directory name *is* the ghost's name. To use another (1–64
-characters of letters, digits, `.`, `_`, or `-`, starting with a letter or
-digit), rename the directory while ghostd is stopped:
-
-```sh
-systemctl --user stop ghostd.service
-mv ~/ghosts/ghost ~/ghosts/sage
-systemctl --user start ghostd.service
-```
+Each machine has one ghost, at home in `~/.local/share/ghost/`. The first time
+ghostd starts it makes that directory with a seeded `character.md`;
+`ghost status` prints the ghost's name, which is its persona's title (`ghost`
+until the persona is written). To rename it, change the title.
 
 While `character.md` is still the seed, the ghost knows it has not met you: it
 helps with what you asked first, learns about you in the gaps, and offers a
@@ -194,15 +187,15 @@ codes.
 
 | Path | What |
 |---|---|
-| `~/ghosts/<name>/` | the ghost home: `character.md` and `sessions/<id>/`, one directory per conversation |
-| `~/.config/ghost/config.json` | daemon config (port, ghosts root, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
+| `~/.local/share/ghost/` | the ghost home: `character.md` and `sessions/<id>/`, one directory per conversation |
+| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/push.json` | the devices that get alerts, with their keys |
 | `~/.cache/ghost/slot/` | what the model had read when it last stopped (up to some 5 GB), so a conversation is not read again; safe to delete |
 | XDG Pictures | browser screenshots, unless you name another destination |
 
-`GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
+`GHOST_HOME` moves the ghost home, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` the API token file.
 `GHOSTD_PORT` moves the port the daemon binds on `127.0.0.1` and the CLI and
 window dial (7717 by default).

@@ -46,7 +46,8 @@ pub struct LocalModelConfig {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DaemonConfig {
     pub port: u16,
-    pub ghosts_root: PathBuf,
+    /// The ghost home.
+    pub home: PathBuf,
     pub remote: RemoteConfig,
     /// The config file read; it need not exist.
     pub config_path: PathBuf,
@@ -57,8 +58,13 @@ pub struct DaemonConfig {
 #[derive(Default, Clone, Debug)]
 pub struct Overrides {
     pub port: Option<u16>,
-    pub ghosts_root: Option<String>,
+    pub home: Option<String>,
     pub config_path: Option<PathBuf>,
+}
+
+/// `$XDG_DATA_HOME/ghost`, else `~/.local/share/ghost`.
+pub fn default_ghost_home(env: &Env, home: &Path) -> PathBuf {
+    base_dir(env, Base::Data, home).join("ghost")
 }
 
 pub fn default_config_path(env: &Env, home: &Path) -> PathBuf {
@@ -122,7 +128,7 @@ fn parse_local(raw: &Value, path: &str, home: &Path) -> Result<LocalModelConfig,
 #[derive(Default)]
 struct ConfigFile {
     port: Option<u16>,
-    ghosts_root: Option<String>,
+    home: Option<String>,
     owner: Option<String>,
     apps: Option<Vec<String>>,
     local: Option<LocalModelConfig>,
@@ -142,8 +148,8 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
         }
         config.port = Some(parse_port(&whole(port).map_or_else(|| port.to_string(), |port| port.to_string()), &shown)?);
     }
-    if let Some(root) = file.get("ghostsRoot") {
-        config.ghosts_root = Some(root.as_str().ok_or_else(|| format!("{shown}: \"ghostsRoot\" must be a string."))?.to_string());
+    if let Some(dir) = file.get("home") {
+        config.home = Some(dir.as_str().ok_or_else(|| format!("{shown}: \"home\" must be a string."))?.to_string());
     }
     if let Some(remote) = file.get("remote") {
         let remote = remote.as_object().ok_or_else(|| format!("{shown}: \"remote\" must be a JSON object."))?;
@@ -170,12 +176,12 @@ pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<Daem
     let file = read_config_file(&config_path, home)?.unwrap_or_default();
     let env_port = var(env, "GHOSTD_PORT").map(|raw| parse_port(raw, "GHOSTD_PORT")).transpose()?;
     let port = overrides.port.or(env_port).or(file.port).unwrap_or(DEFAULT_PORT);
-    let raw_root = overrides
-        .ghosts_root
+    let raw_home = overrides
+        .home
         .clone()
-        .or_else(|| var(env, "GHOSTS_ROOT").map(str::to_string))
-        .or(file.ghosts_root)
-        .unwrap_or_else(|| home.join("ghosts").to_string_lossy().into_owned());
+        .or_else(|| var(env, "GHOST_HOME").map(str::to_string))
+        .or(file.home)
+        .unwrap_or_else(|| default_ghost_home(env, home).to_string_lossy().into_owned());
     let hooks = match var(env, "GHOSTD_HOOKS") {
         Some(path) => expand_home(path, home),
         None => config_path.parent().unwrap_or(Path::new("/")).join("hooks.json"),
@@ -183,7 +189,7 @@ pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<Daem
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     Ok(DaemonConfig {
         port,
-        ghosts_root: resolve(&cwd, &expand_home(&raw_root, home)),
+        home: resolve(&cwd, &expand_home(&raw_home, home)),
         remote: RemoteConfig { owner: file.owner, apps: file.apps.unwrap_or_else(|| RemoteConfig::default().apps) },
         hooks_path: resolve(&cwd, &hooks),
         config_path,
@@ -214,7 +220,7 @@ mod tests {
         let (dir, env) = scratch(None);
         let config = load(&dir, &env).unwrap();
         assert_eq!(config.port, 7717);
-        assert_eq!(config.ghosts_root, dir.join("ghosts"));
+        assert_eq!(config.home, dir.join(".local/share/ghost"));
         assert_eq!(config.hooks_path, dir.join(".config/ghost/hooks.json"));
         assert_eq!(config.remote, RemoteConfig::default());
         assert_eq!(config.local, None);
@@ -223,16 +229,16 @@ mod tests {
 
     #[test]
     fn flags_beat_the_environment_which_beats_the_file() {
-        let (dir, mut env) = scratch(Some(json!({ "port": 7001, "ghostsRoot": "~/a", "host": "0.0.0.0" })));
+        let (dir, mut env) = scratch(Some(json!({ "port": 7001, "home": "~/a", "host": "0.0.0.0" })));
         assert_eq!(load(&dir, &env).unwrap().port, 7001);
-        assert_eq!(load(&dir, &env).unwrap().ghosts_root, dir.join("a"));
+        assert_eq!(load(&dir, &env).unwrap().home, dir.join("a"));
         env.insert("GHOSTD_PORT".into(), "7002".into());
-        env.insert("GHOSTS_ROOT".into(), "/b".into());
+        env.insert("GHOST_HOME".into(), "/b".into());
         env.insert("GHOSTD_HOOKS".into(), "~/h.json".into());
         let config = load(&dir, &env).unwrap();
-        assert_eq!((config.port, config.ghosts_root.clone(), config.hooks_path.clone()), (7002, PathBuf::from("/b"), dir.join("h.json")));
-        let flagged = load_config(&Overrides { port: Some(7003), ghosts_root: Some("/c".into()), config_path: None }, &env, &dir).unwrap();
-        assert_eq!((flagged.port, flagged.ghosts_root), (7003, PathBuf::from("/c")));
+        assert_eq!((config.port, config.home.clone(), config.hooks_path.clone()), (7002, PathBuf::from("/b"), dir.join("h.json")));
+        let flagged = load_config(&Overrides { port: Some(7003), home: Some("/c".into()), config_path: None }, &env, &dir).unwrap();
+        assert_eq!((flagged.port, flagged.home), (7003, PathBuf::from("/c")));
         env.insert("GHOSTD_PORT".into(), "70000".into());
         assert!(load(&dir, &env).unwrap_err().contains("Invalid port from GHOSTD_PORT"));
         std::fs::remove_dir_all(dir).unwrap();
@@ -303,7 +309,7 @@ mod tests {
                 reasoning_effort: "minimal".into(),
             })
         );
-        // A relative model is under the directory ghostd runs in, as `ghostsRoot` is.
+        // A relative model is under the directory ghostd runs in, as `home` is.
         rewrite(&dir, json!({ "local": { "model": "models/../m.gguf" } }));
         assert_eq!(load(&dir, &env).unwrap().local.unwrap().model, std::env::current_dir().unwrap().join("m.gguf"));
         for local in [
@@ -375,9 +381,9 @@ mod tests {
 
     #[test]
     fn reads_the_xdg_config_file_and_honours_xdg_config_home() {
-        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "ghostsRoot": "~/Spirits", "offline": true })));
+        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "home": "~/Spirits", "offline": true })));
         let config = load(&dir, &env).unwrap();
-        assert_eq!((config.port, config.ghosts_root, config.config_path), (8123, dir.join("Spirits"), dir.join(".config/ghost/config.json")));
+        assert_eq!((config.port, config.home, config.config_path), (8123, dir.join("Spirits"), dir.join(".config/ghost/config.json")));
         let xdg = dir.join("xdg");
         std::fs::create_dir_all(xdg.join("ghost")).unwrap();
         std::fs::write(xdg.join("ghost/config.json"), json!({ "port": 9001 }).to_string()).unwrap();
@@ -390,20 +396,20 @@ mod tests {
 
     #[test]
     fn the_environment_overrides_the_file_and_an_empty_variable_is_not_set() {
-        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "ghostsRoot": "/from-file", "offline": true })));
+        let (dir, mut env) = scratch(Some(json!({ "port": 8123, "home": "/from-file", "offline": true })));
         env.insert("GHOSTD_PORT".into(), " 7000 ".into());
-        env.insert("GHOSTS_ROOT".into(), dir.join("FromEnv").display().to_string());
+        env.insert("GHOST_HOME".into(), dir.join("FromEnv").display().to_string());
         let config = load(&dir, &env).unwrap();
-        assert_eq!((config.port, config.ghosts_root), (7000, dir.join("FromEnv")));
+        assert_eq!((config.port, config.home), (7000, dir.join("FromEnv")));
         // An explicit override beats the environment.
         assert_eq!(load_config(&Overrides { port: Some(7788), ..Default::default() }, &env, &dir).unwrap().port, 7788);
         // Empty variables fall back: the default config path, the file's port and root, hooks beside the config.
-        for name in ["GHOSTD_CONFIG", "GHOSTD_PORT", "GHOSTS_ROOT", "GHOSTD_HOOKS"] {
+        for name in ["GHOSTD_CONFIG", "GHOSTD_PORT", "GHOST_HOME", "GHOSTD_HOOKS"] {
             env.insert(name.into(), "  ".into());
         }
         let config = load(&dir, &env).unwrap();
         assert_eq!(config.config_path, dir.join(".config/ghost/config.json"));
-        assert_eq!((config.port, config.ghosts_root, config.hooks_path), (8123, PathBuf::from("/from-file"), dir.join(".config/ghost/hooks.json")));
+        assert_eq!((config.port, config.home, config.hooks_path), (8123, PathBuf::from("/from-file"), dir.join(".config/ghost/hooks.json")));
         // A named config file is the one read, and hooks.json is beside it.
         let elsewhere = dir.join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
@@ -426,8 +432,8 @@ mod tests {
         let config = load(&dir, &env).unwrap();
         assert_eq!(config.remote, RemoteConfig { owner: None, apps: vec!["https://summonghost.com".into()] });
         assert_eq!((config.port, config.local), (DEFAULT_PORT, None));
-        rewrite(&dir, json!({ "ghostsRoot": 7 }));
-        assert!(load(&dir, &env).unwrap_err().contains("\"ghostsRoot\" must be a string"));
+        rewrite(&dir, json!({ "home": 7 }));
+        assert!(load(&dir, &env).unwrap_err().contains("\"home\" must be a string"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

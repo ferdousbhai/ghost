@@ -1,8 +1,8 @@
 # Sourced by qa.sh: a scratch owner home under the caller's private `$root`, and a scratch ghostd against it.
-# Private HOME and XDG directories and a stand-in model server: never the owner's ghosts, data, accounts,
+# Private HOME and XDG directories and a stand-in model server: never the owner's ghost, data, accounts,
 # session bus, or port 7717.
 #
-#   stand_in_home      exports HOME, the XDG directories and GHOSTS_ROOT under $root
+#   stand_in_home      exports HOME, the XDG directories and GHOST_HOME under $root
 #   stand_in_ghostd    starts ghostd on a spare port (sets daemon_pid, exports GHOSTD_PORT) with the ghost home its first start makes
 #
 # The caller sets `root` (an empty directory of its own) and a private XDG_RUNTIME_DIR, and kills `daemon_pid` when
@@ -15,10 +15,10 @@ stand_in_ghostd_binary=$stand_in_repo/target/debug/ghostd
 stand_in_tool=$stand_in_repo/target/debug/examples/stand_in
 
 stand_in_home() {
-  mkdir -p "$root"/{home,config,state,data,cache,ghosts,bin}
+  mkdir -p "$root"/{home,config,state,data,cache,bin}
   export HOME=$root/home
   export XDG_CONFIG_HOME=$root/config XDG_STATE_HOME=$root/state XDG_DATA_HOME=$root/data XDG_CACHE_HOME=$root/cache
-  export GHOSTS_ROOT=$root/ghosts
+  export GHOST_HOME=$root/ghost
   unset GHOSTD_CONFIG GHOSTD_HOOKS GHOSTD_API_TOKEN_FILE GHOSTD_PORT GHOST_SESSION XDG_DOCUMENTS_DIR
 }
 

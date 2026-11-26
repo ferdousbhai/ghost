@@ -33,7 +33,7 @@ actually remember over a general statement you could have made about anything.
 ## What you know
 
 Everything worth keeping — the owner's facts, decisions, and tasks, and your own
-reflections — is a note in the owner's documents, where every ghost and the
+reflections — is a note in the owner's documents, where the ghost and the
 owner can read it. This file is only who you are.
 "
     )
@@ -129,10 +129,10 @@ mod tests {
         let prompt = build_ghost_system_prompt(&GhostSystemPromptInput {
             ghost_name: "casper",
             character: Some(&written),
-            home_dir: Path::new("/home/owner/ghosts/casper"),
+            home_dir: Path::new("/home/owner/.local/share/ghost"),
             extra_sections: &["## Extra\nmore".to_string()],
         });
-        assert!(prompt.starts_with("# Casper\n\nI print.\n\n\n## Character file\n\"/home/owner/ghosts/casper/character.md\" is your persona"));
+        assert!(prompt.starts_with("# Casper\n\nI print.\n\n\n## Character file\n\"/home/owner/.local/share/ghost/character.md\" is your persona"));
         assert!(prompt.ends_with("someone else.\n\n## Extra\nmore\n"));
     }
 }

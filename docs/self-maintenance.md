@@ -125,7 +125,7 @@ non-live port (7799 below):
 ```sh
 task_canary_dir=$(mktemp -d /tmp/ghost-canary.XXXXXX)
 printf '{}\n' > "$task_canary_dir/hooks.json"
-GHOSTS_ROOT="$task_canary_dir/ghosts" \
+GHOST_HOME="$task_canary_dir/ghost" \
 GHOSTD_CONFIG="$task_canary_dir/config.json" \
 GHOSTD_HOOKS="$task_canary_dir/hooks.json" \
 XDG_STATE_HOME="$task_canary_dir/state" \
@@ -138,8 +138,8 @@ with `GHOSTD_PORT=7799` and
 before deleting the scratch directory. Functional window verification
 uses `packages/window/dev/qa.sh`, never the owner's session.
 
-Never port 7717 or `~/ghosts`; scratch configuration also prevents live
-owner hooks from running. Every canary must use its own ghost root.
+Never port 7717 or `~/.local/share/ghost`; scratch configuration also prevents
+live owner hooks from running. Every canary must use its own ghost home.
 
 ## Rollback
 

@@ -70,12 +70,12 @@ mod tests {
 
     /// Fixed inputs: every ceiling is only meaningful against the same rendering.
     const GHOST_NAME: &str = "casper";
-    const HOME_DIR: &str = "/home/owner/ghosts/casper";
+    const HOME_DIR: &str = "/home/owner/.local/share/ghost";
     const DOCUMENTS: &str = "/home/owner/Documents";
 
     /// The exact rendered size of each section when its ceiling was last set.
-    const CEILINGS: [(&str, usize); 4] = [("Character file", 364), ("Ghost", 360), ("Owner context", 589), ("First meeting", 321)];
-    const TOTAL_CEILING: usize = 1634;
+    const CEILINGS: [(&str, usize); 4] = [("Character file", 369), ("Ghost", 360), ("Owner context", 589), ("First meeting", 321)];
+    const TOTAL_CEILING: usize = 1639;
 
     /// The character-file section is internal to the prompt builder, so it is
     /// measured where it is shipped: in a prompt built with an unwritten

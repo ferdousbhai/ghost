@@ -562,7 +562,7 @@ impl Shared {
                     "restartNeeded": replaced_since_start(running),
                 }))
             }
-            Route::GhostName => ok(json!({ "name": options.ghost.name })),
+            Route::GhostName => ok(json!({ "name": options.ghost.name() })),
             Route::CharacterGet => {
                 let character = read_character(&options.ghost.dir, false)?;
                 ok(json!({ "body": character.map(|character| character.body).unwrap_or_default(), "limit": MAX_CHARACTER_BODY_LENGTH }))
@@ -623,7 +623,7 @@ impl Shared {
                     }
                     // One alert to one device, now, so the owner sees that alerts reach it.
                     _ => {
-                        let sent = push.test(string_field(&body, "endpoint")?, &options.ghost.name).map_err(GhostError::invalid)?;
+                        let sent = push.test(string_field(&body, "endpoint")?, &options.ghost.name()).map_err(GhostError::invalid)?;
                         ok(match sent {
                             crate::push::Sent::Delivered => json!({ "ok": true, "delivered": true }),
                             crate::push::Sent::Gone => json!({ "ok": true, "delivered": false, "reason": "The device is no longer subscribed." }),
