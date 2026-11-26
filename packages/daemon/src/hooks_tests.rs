@@ -68,16 +68,6 @@ fn stop_event() -> HookEvent {
     stop_event_in(&here(), &Abort::new(), json!({}))
 }
 
-fn turn_end_event(cwd: &Path, url: Value) -> HookEvent {
-    let mut payload = base("turn_end", cwd);
-    payload["turn_id"] = json!("turn-2");
-    payload["outcome"] = json!("done");
-    payload["title"] = json!("Report ready");
-    payload["excerpt"] = json!("Finished the report.");
-    payload["url"] = url;
-    HookEvent { name: HookEventName::TurnEnd, payload, cwd: cwd.to_path_buf(), abort: Abort::new() }
-}
-
 fn configured(path: &Path) -> HookRunner {
     HookRunner::from_config(path, Logger::silent(), crate::env::current()).unwrap()
 }
@@ -152,8 +142,7 @@ const POLICY_PATH: &str = "/owner/hooks.json";
 fn policy_config() -> Value {
     json!({
         "hooks": {
-            "turn_end": group(json!([command("first"), { "type": "command", "command": "second", "name": "Named notice", "timeout": 0.5 }])),
-            "session_stop": group(json!([command("accept"), command("continue"), command("unreached")])),
+            "session_stop": group(json!([command("accept"), command("continue"), command("unreached"), { "type": "command", "command": "named", "name": "Named reviewer", "timeout": 0.5 }])),
         },
     })
 }
@@ -170,12 +159,11 @@ fn keeps_local_admission_defaults_source_order_and_public_status() {
             ("session_stop", "accept", 30_000),
             ("session_stop", "continue", 30_000),
             ("session_stop", "unreached", 30_000),
-            ("turn_end", "first", 30_000),
-            ("turn_end", "second", 500),
+            ("session_stop", "named", 500),
         ]
     );
-    assert_eq!(commands[4].name, "Named notice");
-    assert_eq!(commands[3].name, "Turn-end command hook");
+    assert_eq!(commands[3].name, "Named reviewer");
+    assert_eq!(commands[2].name, "Session-stop command hook");
     assert_eq!(commands[0].description, "Runs after the assistant pass and may continue it.");
     assert_eq!(commands[1].source, "/owner/hooks.json#hooks.session_stop[0].hooks[1]");
     for invalid in [json!({ "hooks": { "other": [] } }), json!({ "hooks": { "session_stop": group(json!([command("a\0b")])) } })] {
@@ -194,9 +182,12 @@ fn every_refusal_names_the_offending_field() {
     assert_eq!(refused(json!({ "hooks": [] })), "/owner/hooks.json: \"hooks\" must be an object.");
     assert_eq!(refused(json!({ "hooks": null })), "/owner/hooks.json: \"hooks\" must be an object.");
     assert_eq!(refused(json!({ "hooks": { "conversation_idle": [] } })), "/owner/hooks.json: unsupported hook event \"conversation_idle\".");
-    assert_eq!(refused(json!({ "hooks": { "turn_end": {} } })), "/owner/hooks.json: \"hooks.turn_end\" must be an array.");
-    assert_eq!(refused(json!({ "hooks": { "turn_end": [{ "hooks": "x" }] } })), "/owner/hooks.json: hooks.turn_end[0].hooks must be an array.");
-    assert_eq!(refused(json!({ "hooks": { "turn_end": [[]] } })), "/owner/hooks.json: hooks.turn_end[0].hooks must be an array.");
+    assert_eq!(refused(json!({ "hooks": { "session_stop": {} } })), "/owner/hooks.json: \"hooks.session_stop\" must be an array.");
+    assert_eq!(
+        refused(json!({ "hooks": { "session_stop": [{ "hooks": "x" }] } })),
+        "/owner/hooks.json: hooks.session_stop[0].hooks must be an array."
+    );
+    assert_eq!(refused(json!({ "hooks": { "session_stop": [[]] } })), "/owner/hooks.json: hooks.session_stop[0].hooks must be an array.");
     let handler = |handler: Value| refused(json!({ "hooks": { "session_stop": [{ "hooks": [] }, { "hooks": [command("ok"), handler] }] } }));
     let label = "/owner/hooks.json: hooks.session_stop[1].hooks[1]";
     for not_a_command in [json!("echo"), json!({ "type": "prompt", "command": "x" }), json!({ "type": "command", "command": 7 }), command("  \n")] {
@@ -222,8 +213,11 @@ fn every_refusal_names_the_offending_field() {
 #[test]
 fn names_are_trimmed_and_measured_as_the_earlier_daemon_did() {
     let named = |name: &str| {
-        parse_hooks_document(&json!({ "hooks": { "turn_end": group(json!([{ "type": "command", "command": "x", "name": name }])) } }), POLICY_PATH)
-            .map(|commands| commands[0].name.clone())
+        parse_hooks_document(
+            &json!({ "hooks": { "session_stop": group(json!([{ "type": "command", "command": "x", "name": name }])) } }),
+            POLICY_PATH,
+        )
+        .map(|commands| commands[0].name.clone())
     };
     assert_eq!(named("  Reviewer\u{feff}\n").as_deref(), Ok("Reviewer"));
     assert_eq!(named(&"n".repeat(80)).map(|name| name.len()), Ok(80));
@@ -232,11 +226,11 @@ fn names_are_trimmed_and_measured_as_the_earlier_daemon_did() {
     assert!(named(&"🙂".repeat(40)).is_ok());
     assert!(named(&"🙂".repeat(41)).is_err());
     // What JavaScript trims away leaves no command, and no name.
-    assert!(parse_hooks_document(&json!({ "hooks": { "turn_end": group(json!([command("\u{feff}\u{2028}")])) } }), POLICY_PATH).is_err());
+    assert!(parse_hooks_document(&json!({ "hooks": { "session_stop": group(json!([command("\u{feff}\u{2028}")])) } }), POLICY_PATH).is_err());
     assert!(named("\u{feff}").is_err());
     // A timeout is whole milliseconds, rounded down.
     let timed =
-        parse_hooks_document(&json!({ "hooks": { "turn_end": group(json!([{ "type": "command", "command": "x", "timeout": 0.0015 }])) } }), "p");
+        parse_hooks_document(&json!({ "hooks": { "session_stop": group(json!([{ "type": "command", "command": "x", "timeout": 0.0015 }])) } }), "p");
     assert_eq!(timed.unwrap()[0].timeout_ms, 1);
 }
 
@@ -254,7 +248,7 @@ fn stops_at_the_first_real_continuation() {
             Ok(outcome(HookCommandResult { stdout: stdout.to_string(), ..Default::default() }))
         }),
     );
-    assert!(runner.has_handlers(HookEventName::SessionStop) && runner.has_handlers(HookEventName::TurnEnd));
+    assert!(runner.has_handlers(HookEventName::SessionStop));
     let observed = Mutex::new(Vec::new());
     let observer = |name: &str, event: HookEventName, running: bool| observed.lock().unwrap().push((name.to_string(), event, running));
     let result = runner.emit_session_stop(&stop_event(), Some(&observer));
@@ -271,21 +265,16 @@ fn stops_at_the_first_real_continuation() {
     stopped.abort();
     assert_eq!(runner.emit_session_stop(&stop_event_in(&here(), &stopped, json!({})), None), None);
     assert!(called.lock().unwrap().is_empty());
-
-    // turn_end handlers all run, in file order.
-    runner.emit_turn_end(&turn_end_event(&here(), Value::Null));
-    assert_eq!(*called.lock().unwrap(), ["first", "second"]);
 }
 
 #[test]
 fn preserves_exit_code_invalid_output_and_fail_open_interpretation() {
     let commands = parse_hooks_document(&policy_config(), POLICY_PATH).unwrap();
-    let (stop, notice) = (&commands[0], &commands[3]);
+    let stop = &commands[0];
     let warnings = Mutex::new(Vec::new());
     let warn = |message: &str, _: Value| warnings.lock().unwrap().push(message.to_string());
     let read = |hook: &CommandHook, fields: HookCommandResult| parse_command_result(hook, &outcome(fields), &warn);
     let blocked = || HookCommandResult { stderr: "Blocked".to_string(), ..Default::default() };
-    assert_eq!(parse_command_result(notice, &HookCommandResult { exit_code: Some(2), ..blocked() }, &warn), None);
     assert_eq!(
         parse_command_result(stop, &HookCommandResult { exit_code: Some(2), ..blocked() }, &warn),
         Some(StopResult { block: true, reason: Some("Blocked".to_string()), ..Default::default() })
@@ -298,7 +287,6 @@ fn preserves_exit_code_invalid_output_and_fail_open_interpretation() {
     assert_eq!(
         *warnings.lock().unwrap(),
         [
-            "turn_end hook attempted to block and was ignored",
             "session_stop hook returned invalid JSON",
             "session_stop hook timed out",
             "session_stop hook wrote more than 1 MB",
@@ -317,7 +305,7 @@ fn preserves_exit_code_invalid_output_and_fail_open_interpretation() {
 #[test]
 fn reads_every_shape_of_a_clean_answer() {
     let commands = parse_hooks_document(&policy_config(), POLICY_PATH).unwrap();
-    let (stop, notice) = (&commands[0], &commands[3]);
+    let stop = &commands[0];
     let warnings = Mutex::new(Vec::new());
     let warn = |message: &str, details: Value| warnings.lock().unwrap().push((message.to_string(), details));
     let answered = |hook: &CommandHook, stdout: &str| {
@@ -337,8 +325,6 @@ fn reads_every_shape_of_a_clean_answer() {
     assert_eq!(continuation(Some(&StopResult { block: true, continue_turn: false, ..both.clone() })).as_deref(), Some("Why."));
     assert_eq!(continuation(Some(&StopResult { additional_context: Some(String::new()), ..both.clone() })).as_deref(), Some("Why."));
     assert_eq!(continuation(Some(&StopResult { block: true, continue_turn: false, reason: Some(String::new()), ..both })).as_deref(), Some("More."));
-    // A turn_end handler's output is never read.
-    assert_eq!(answered(notice, r#"{"decision":"block","reason":"x"}"#), None);
     assert!(warnings.lock().unwrap().is_empty());
 
     // Anything but an object, or a decision other than "block", is invalid output.
@@ -406,7 +392,6 @@ fn replaces_the_command_configuration_live() {
     assert_eq!(std::fs::metadata(&config).unwrap().permissions().mode() & 0o777, 0o600);
     assert_eq!(std::fs::read_dir(config.parent().unwrap()).unwrap().count(), 1);
     assert!(runner.has_handlers(HookEventName::SessionStop));
-    assert!(!runner.has_handlers(HookEventName::TurnEnd));
     assert_eq!(reason(runner.emit_session_stop(&stop_event(), None)).as_deref(), Some("Revise."));
     assert_eq!(runner.config().unwrap().1, first);
 
@@ -591,27 +576,24 @@ fn kills_a_term_ignoring_descendant_when_the_stopped_hook_leader_exits_first() {
     }
 }
 
-fn both_events(command_line: &str) -> Value {
-    json!({ "hooks": { "session_stop": group(json!([command(command_line)])), "turn_end": group(json!([command(command_line)])) } })
+fn one_hook(command_line: &str) -> Value {
+    json!({ "hooks": { "session_stop": group(json!([command(command_line)])) } })
 }
 
 #[test]
-fn rejects_nul_commands_and_fails_every_command_event_open_on_execution_rejection() {
+fn rejects_nul_commands_and_fails_a_hook_open_on_execution_rejection() {
     let scratch = Scratch::new();
     let nul = scratch.config("nul-hooks.json", &json!({ "hooks": { "session_stop": group(json!([command("echo before\0after")])) } }));
     assert!(load_error(&nul).contains("NUL-free command"));
 
     let (logger, records) = Logger::recording();
-    let commands = parse_hooks_document(&both_events("/bin/true"), "/owner/throwing-hooks.json").unwrap();
+    let commands = parse_hooks_document(&one_hook("/bin/true"), "/owner/throwing-hooks.json").unwrap();
     let runner = HookRunner::with_runner(commands, logger, Box::new(|_, _| Err("must-not-leak execution sentinel".to_string())));
     assert_eq!(runner.emit_session_stop(&stop_event(), None), None);
-    runner.emit_turn_end(&turn_end_event(&here(), Value::Null));
-    assert_eq!(warnings(&records), ["session_stop hook failed open", "turn_end hook failed open"]);
+    assert_eq!(warnings(&records), ["session_stop hook failed open"]);
     let records = records.lock().unwrap();
-    assert_eq!(
-        Value::Object(records[1].fields.clone()),
-        json!({ "ghost": "casper", "conversation": "session-1", "source": "/owner/throwing-hooks.json#hooks.turn_end[0].hooks[0]", "error": "command execution failed" })
-    );
+    assert_eq!(records[0].fields["source"], "/owner/throwing-hooks.json#hooks.session_stop[0].hooks[0]");
+    assert_eq!(records[0].fields["error"], "command execution failed");
     assert!(!format!("{records:?}").contains("must-not-leak"));
 }
 
@@ -667,15 +649,14 @@ fn logs_categorical_command_failures_without_stdout_or_stderr_detail() {
 }
 
 #[test]
-fn fails_process_startup_errors_open_for_every_command_event() {
+fn fails_process_startup_errors_open() {
     let scratch = Scratch::new();
-    let config = scratch.config("startup-hooks.json", &both_events("/bin/true"));
+    let config = scratch.config("startup-hooks.json", &one_hook("/bin/true"));
     let missing = scratch.path("missing-cwd");
     let (logger, records) = Logger::recording();
     let runner = HookRunner::from_config(&config, logger, crate::env::current()).unwrap();
     assert_eq!(runner.emit_session_stop(&stop_event_in(&missing, &Abort::new(), json!({})), None), None);
-    runner.emit_turn_end(&turn_end_event(&missing, Value::Null));
-    assert_eq!(warnings(&records), ["session_stop hook failed open", "turn_end hook failed open"]);
+    assert_eq!(warnings(&records), ["session_stop hook failed open"]);
     assert!(records.lock().unwrap().iter().all(|record| record.fields["error"] == "command execution failed"));
 }
 
@@ -708,34 +689,4 @@ fn a_real_command_reports_its_exit_its_stderr_and_an_overflow() {
     // More than 1 MB of stdout ends the command and fails open, even when it would have blocked.
     let (overflowed, said) = run("head -c 2000000 /dev/zero | tr '\\0' x; exit 2");
     assert_eq!((overflowed, said), (None, vec!["session_stop hook wrote more than 1 MB".to_string()]));
-}
-
-#[test]
-fn delivers_turn_completion_to_a_local_notification_endpoint_and_honors_live_opt_out() {
-    let received = Arc::new(Mutex::new(Vec::new()));
-    let posted = received.clone();
-    let server = crate::http::Server::start("127.0.0.1:0".parse().unwrap(), move |mut request, responder| {
-        let body = request.read_body(64 * 1024).unwrap_or_default();
-        posted.lock().unwrap().push(serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null));
-        responder.bytes(200, &[], b"ok");
-    })
-    .unwrap();
-    let scratch = Scratch::new();
-    let line = format!(
-        "jq '{{topic:\"scratch\",title:.title,message:.excerpt,click:.url}}' | curl --fail --silent --show-error --noproxy 127.0.0.1 --max-time 10 -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:{}/",
-        server.address.port()
-    );
-    let config =
-        scratch.config("hooks.json", &json!({ "hooks": { "turn_end": group(json!([{ "type": "command", "command": line, "timeout": 20 }])) } }));
-    let (logger, records) = Logger::recording();
-    let runner = HookRunner::from_config(&config, logger, crate::env::current()).unwrap();
-    let url = "https://summonghost.com/#/ghost.example.ts.net/c1";
-    let notification = turn_end_event(&scratch.0, json!(url));
-    runner.emit_turn_end(&notification);
-    assert_eq!(warnings(&records), Vec::<String>::new());
-    assert_eq!(*received.lock().unwrap(), [json!({ "topic": "scratch", "title": "Report ready", "message": "Finished the report.", "click": url })]);
-    runner.replace_config(json!({ "hooks": {} })).unwrap();
-    runner.emit_turn_end(&notification);
-    assert_eq!(received.lock().unwrap().len(), 1);
-    server.close();
 }

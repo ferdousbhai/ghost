@@ -284,10 +284,7 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
 // ── Hooks ───────────────────────────────────────────────────────────────
 
 /// A handler's default name and description, per event, in the order hooks are loaded.
-const HOOK_EVENTS: &[(&str, &str, &str)] = &[
-    ("session_stop", "Session-stop command hook", "Runs after the assistant pass and may continue it."),
-    ("turn_end", "Turn-end command hook", "Observes final turn success or failure without continuing it."),
-];
+const HOOK_EVENTS: &[(&str, &str, &str)] = &[("session_stop", "Session-stop command hook", "Runs after the assistant pass and may continue it.")];
 
 fn display_text(value: Option<&Value>, fallback: &str, label: &str, maximum: usize) -> Result<String, CliError> {
     match value {

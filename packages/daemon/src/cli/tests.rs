@@ -615,8 +615,10 @@ fn sessions_prints_a_table_of_titles_ages_counts_and_states() {
 
 fn hooks_document() -> Value {
     json!({ "hooks": {
-        "session_stop": [{ "hooks": [{ "type": "command", "command": "/bin/true", "name": "Review", "description": "Reviews the pass." }] }],
-        "turn_end": [{ "hooks": [{ "type": "command", "command": "/bin/true" }] }],
+        "session_stop": [{ "hooks": [
+            { "type": "command", "command": "/bin/true", "name": "Review", "description": "Reviews the pass." },
+            { "type": "command", "command": "/bin/true" },
+        ] }],
     } })
 }
 
@@ -625,11 +627,11 @@ fn hooks_status_prints_each_hooks_event_name_and_description() {
     let daemon = answering(json!({ "path": "/home/owner/.config/ghost/hooks.json", "document": hooks_document() }));
     assert_eq!(
         daemon.run(&["hooks"]).stdout,
-        "EVENT         NAME                   DESCRIPTION\n\
-         session_stop  Review                 Reviews the pass.\n\
-         turn_end      Turn-end command hook  Observes final turn success or failure without continuing it.\n"
+        "EVENT         NAME                       DESCRIPTION\n\
+         session_stop  Review                     Reviews the pass.\n\
+         session_stop  Session-stop command hook  Runs after the assistant pass and may continue it.\n"
     );
-    assert_eq!(daemon.run(&["hooks", "status", "-q"]).stdout, "Review\nTurn-end command hook\n");
+    assert_eq!(daemon.run(&["hooks", "status", "-q"]).stdout, "Review\nSession-stop command hook\n");
     let shown = daemon.run(&["hooks", "show"]);
     assert!(
         shown.stdout.starts_with("{\n  \"path\": \"/home/owner/.config/ghost/hooks.json\",\n  \"document\": {\n    \"hooks\": {\n"),
@@ -651,24 +653,25 @@ fn hooks_refuses_a_document_ghostd_would_not_run() {
     assert_eq!(refused(json!([])), "ghost: /h.json must contain a JSON object.\n");
     assert_eq!(refused(json!({ "path": "x", "hooks": {} })), "ghost: /h.json has no top-level \"path\"; send the document itself.\n");
     assert_eq!(refused(json!({ "hooks": { "pre_tool": [] } })), "ghost: /h.json: unsupported hook event \"pre_tool\".\n");
-    assert_eq!(refused(json!({ "hooks": { "turn_end": {} } })), "ghost: /h.json: \"hooks.turn_end\" must be an array.\n");
+    assert_eq!(refused(json!({ "hooks": { "turn_end": [] } })), "ghost: /h.json: unsupported hook event \"turn_end\".\n");
+    assert_eq!(refused(json!({ "hooks": { "session_stop": {} } })), "ghost: /h.json: \"hooks.session_stop\" must be an array.\n");
     assert_eq!(
-        refused(json!({ "hooks": { "turn_end": [{ "hooks": [{ "type": "command", "command": " " }] }] } })),
-        "ghost: /h.json: hooks.turn_end[0].hooks[0] must be a command hook with a non-empty NUL-free command.\n"
+        refused(json!({ "hooks": { "session_stop": [{ "hooks": [{ "type": "command", "command": " " }] }] } })),
+        "ghost: /h.json: hooks.session_stop[0].hooks[0] must be a command hook with a non-empty NUL-free command.\n"
     );
     assert_eq!(
-        refused(json!({ "hooks": { "turn_end": [{ "hooks": [{ "type": "command", "command": "x", "timeout": 601 }] }] } })),
-        "ghost: /h.json: hooks.turn_end[0].hooks[0].timeout must be a number in (0, 600].\n"
+        refused(json!({ "hooks": { "session_stop": [{ "hooks": [{ "type": "command", "command": "x", "timeout": 601 }] }] } })),
+        "ghost: /h.json: hooks.session_stop[0].hooks[0].timeout must be a number in (0, 600].\n"
     );
     assert_eq!(
-        refused(json!({ "hooks": { "turn_end": [{ "hooks": [{ "type": "command", "command": "x", "name": "" }] }] } })),
-        "ghost: /h.json: hooks.turn_end[0].hooks[0].name must be a non-empty string of at most 80 characters.\n"
+        refused(json!({ "hooks": { "session_stop": [{ "hooks": [{ "type": "command", "command": "x", "name": "" }] }] } })),
+        "ghost: /h.json: hooks.session_stop[0].hooks[0].name must be a non-empty string of at most 80 characters.\n"
     );
 }
 
 #[test]
 fn hooks_set_acknowledges_in_words_json_keeps_the_api_body_and_q_prints_nothing() {
-    let document = json!({ "hooks": { "turn_end": [{ "hooks": [{ "type": "command", "command": "/bin/true" }, { "type": "command", "command": "/bin/false" }] }] } });
+    let document = json!({ "hooks": { "session_stop": [{ "hooks": [{ "type": "command", "command": "/bin/true" }, { "type": "command", "command": "/bin/false" }] }] } });
     let config = json!({ "path": "/home/owner/.config/ghost/hooks.json", "document": document });
     let daemon = answering(config.clone());
     let file = daemon.dir.join("hooks.json").display().to_string();

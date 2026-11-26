@@ -1,7 +1,6 @@
-//! The owner's command hooks (docs/hooks.md): `session_stop`, awaited after a
-//! pass and able to continue it, and `turn_end`, which only observes. This
-//! module admits `hooks.json`, runs a handler, and reads its answer; every
-//! failure of a handler fails open.
+//! The owner's command hook (docs/hooks.md): `session_stop`, awaited after a
+//! pass and able to continue it. This module admits `hooks.json`, runs a
+//! handler, and reads its answer; every failure of a handler fails open.
 use crate::abort::Abort;
 use crate::env::Env;
 use crate::log::Logger;
@@ -18,24 +17,21 @@ const MAX_HOOK_OUTPUT_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HookEventName {
     SessionStop,
-    TurnEnd,
 }
 
 impl HookEventName {
     /// Every hook event, in the order hooks are loaded.
-    const ALL: [Self; 2] = [Self::SessionStop, Self::TurnEnd];
+    const ALL: [Self; 1] = [Self::SessionStop];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::SessionStop => "session_stop",
-            Self::TurnEnd => "turn_end",
         }
     }
     /// A handler's default name and description.
     fn defaults(self) -> (&'static str, &'static str) {
         match self {
             Self::SessionStop => ("Session-stop command hook", "Runs after the assistant pass and may continue it."),
-            Self::TurnEnd => ("Turn-end command hook", "Observes final turn success or failure without continuing it."),
         }
     }
 }
@@ -179,10 +175,6 @@ pub fn parse_command_result(hook: &CommandHook, result: &HookCommandResult, warn
         return None;
     }
     if result.exit_code == Some(2) {
-        if hook.event != HookEventName::SessionStop {
-            warn(&format!("{event} hook attempted to block and was ignored"), json!({ "source": hook.source }));
-            return None;
-        }
         let reason = crate::js_text::trim(&result.stderr);
         return Some(StopResult {
             block: true,
@@ -192,9 +184,6 @@ pub fn parse_command_result(hook: &CommandHook, result: &HookCommandResult, warn
     }
     if result.exit_code != Some(0) {
         warn(&format!("{event} hook failed open"), json!({ "source": hook.source, "exitCode": result.exit_code }));
-        return None;
-    }
-    if hook.event == HookEventName::TurnEnd {
         return None;
     }
     let output = crate::js_text::trim(&result.stdout);
@@ -352,13 +341,6 @@ impl HookRunner {
                 );
                 None
             }
-        }
-    }
-
-    /// Run every `turn_end` handler in file order; none can change anything.
-    pub fn emit_turn_end(&self, event: &HookEvent) {
-        for hook in self.handlers(HookEventName::TurnEnd) {
-            self.run_fail_open(&hook, event);
         }
     }
 

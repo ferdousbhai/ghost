@@ -5,12 +5,10 @@ conversation turn. A coding agent the ghost runs from its shell (Claude Code,
 Codex, …) keeps its own native hook behavior;
 Ghost does not translate, duplicate, or await those hooks.
 
-Ghost supports two events. `session_stop` runs after a
-pass ends and before Ghost emits the turn's terminal `done` frame. It
-can accept the pass or return context for a continuation pass. `turn_end` runs once
-after the whole streamed turn succeeds or fails, including queued passes and owner
-commands; cancelled turns are quiet. It is for the owner's own delivery of a
-completion, and cannot continue or block the turn.
+Ghost supports one event, `session_stop`. It runs after a pass ends and before
+Ghost emits the turn's terminal `done` frame, and can accept the pass or return
+context for a continuation pass. Alerts when a turn ends need no hook: the app
+turns them on ([mobile.md](mobile.md#completion-alerts)).
 
 ## Configuration
 
@@ -169,36 +167,6 @@ that file as one object and its absolute path; `ghost hooks` reads it there, sho
 which refuses a top-level key other than `hooks` (so a pasted `{ path,
 document }` reply cannot empty the file), writes it atomically, and swaps the
 live command hooks. A rejected document
-is a 400 naming the offending field and changes nothing. `session_stop` and
-`turn_end` changes apply at the next boundary.
+is a 400 naming the offending field and changes nothing. Changes apply at the
+next boundary.
 
-## `turn_end` protocol
-
-An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
-`conversation_id`, `session_id`, `transcript_path`, and `turn_id` fields (the
-`turn_id` of the owner request the final pass answered), plus:
-
-```json
-{
-  "type": "turn_end",
-  "outcome": "done",
-  "title": "Prepare the report",
-  "excerpt": "The report is ready.",
-  "url": "https://summonghost.com/#/ghostbox.example.ts.net/c1"
-}
-```
-
-`outcome` is `done` or `error`; `title` is at most 160 characters and the
-whitespace-normalized `excerpt` at most 280. `url` opens the conversation in the first
-`remote.apps` app (`<origin>/#/<hostname>/<id>`, each segment
-URI-encoded), never a bearer token; it is null while remote access is off, or
-when `remote.apps` is `[]`, and with no `turn_end` handler Ghost never looks
-it up. Failed turns use the failure message. Handlers run in order,
-under the existing timeout/output bounds, after the terminal stream frame and
-outside the conversation's busy state, so they never delay the next prompt.
-Their output cannot change the result; failures fail open and are logged. Removing the
-handler through `ghost hooks set` disables delivery at the
-next boundary. A handler that posts to a service sends it conversation text,
-so configure one only when the owner wants that delivery. Alerts to the
-owner's devices need no hook: the app turns them on
-([mobile.md](mobile.md#completion-alerts)).

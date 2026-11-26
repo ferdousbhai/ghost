@@ -348,21 +348,8 @@ fn hooks_run_by(document: Value, run: impl Fn(&HookEvent) -> std::result::Result
     HookRunner::with_runner(parse_hooks_document(&document, "test").unwrap(), Logger::silent(), Box::new(move |_hook, event| run(event)))
 }
 
-fn turn_end_hooks() -> Value {
-    json!({ "hooks": { "turn_end": [{ "hooks": [{ "type": "command", "command": "notify" }] }] } })
-}
-
 fn succeeded(stdout: &str) -> std::result::Result<HookCommandResult, String> {
     Ok(HookCommandResult { exit_code: Some(0), stdout: stdout.to_string(), ..Default::default() })
-}
-
-/// A `turn_end` hook that keeps each event it is handed, and fails afterwards when `fail`.
-fn delivery(notifications: &Arc<Seen<Value>>, fail: bool) -> HookRunner {
-    let notifications = notifications.clone();
-    hooks_run_by(turn_end_hooks(), move |event| {
-        notifications.push(event.payload.clone());
-        if fail { Err("delivery offline".to_string()) } else { succeeded("{\"continue\":true}") }
-    })
 }
 
 /// A real `session_stop` command hook, run by bash, which keeps each event it
@@ -1347,113 +1334,90 @@ fn shutdown_aborts_the_turn_that_is_running() {
     assert_carries(events.all().last().unwrap(), json!({ "type": "error", "reason": "aborted" }));
 }
 
-// ── Completion delivery ────────────────────────────────────────────────
+// ── Alerts when a turn ends ─────────────────────────────────────────────
 
-#[test]
-fn a_final_bounded_excerpt_and_the_exact_conversation_link_are_delivered_once_after_done() {
-    let home = Home::new();
-    let notifications = Seen::new();
-    let fake = Fake::new(replies(&[&format!("Finished.\n{}", "a".repeat(400))]));
-    let host = SessionHost::new(SessionHostOptions {
-        hooks: Arc::new(delivery(&notifications, false)),
-        conversation_url: Some(Box::new(|id| Some(format!("https://summonghost.com/#/ghost.example.ts.net/{id}")))),
-        ..home.options(Some(fake.clone()))
-    });
-    let events = turn(&host, "Make the report");
-    let delivered = notifications.wait("the turn_end notification", |seen| !seen.is_empty());
-    assert_eq!(delivered.len(), 1);
-    assert_carries(
-        &delivered[0],
-        json!({
-            "type": "turn_end",
-            "outcome": "done",
-            "title": "Make the report",
-            "url": "https://summonghost.com/#/ghost.example.ts.net/c1",
-            "session_id": "c1",
-            "conversation_id": "c1",
-            "ghost_name": "casper",
+/// A host whose one subscribed device's alerts are kept in the returned list
+/// instead of being sent; `hold` keeps each send waiting until released.
+fn alerting(home: &Home, fake: &Arc<Fake>, link: bool, hold: Option<Gate>) -> (SessionHost, Arc<Seen<Value>>) {
+    let alerts = Seen::new();
+    let kept = alerts.clone();
+    let push = crate::push::Push::with_sender(
+        home.root.join("push.json"),
+        Logger::silent(),
+        Box::new(move |_, alert| {
+            kept.push(alert.clone());
+            if let Some(gate) = &hold {
+                let _ = gate.hold(&Abort::new());
+            }
+            crate::push::Sent::Delivered
         }),
     );
-    assert!(delivered[0]["turn_id"].is_string());
-    let excerpt = delivered[0]["excerpt"].as_str().unwrap();
-    assert_eq!(utf16_len(excerpt), 280);
-    assert!(excerpt.starts_with("Finished. aaaa"), "{excerpt}");
-    assert_eq!(of_type(&events, &["done"]).len(), 1);
-    assert_eq!(of_type(&events, &["hook_start"]), Vec::<Value>::new());
-    assert_eq!(events.last().unwrap()["type"], "done");
-    assert_eq!(fake.calls().len(), 1);
-}
-
-#[test]
-fn turn_end_reports_the_turn_id_of_the_owner_request_the_final_pass_answered() {
-    let home = Home::new();
-    let seen = Seen::new();
-    let kept = seen.clone();
-    let hooks = hooks_run_by(
-        json!({ "hooks": {
-            "session_stop": [{ "hooks": [{ "type": "command", "command": "record" }] }],
-            "turn_end": [{ "hooks": [{ "type": "command", "command": "notify" }] }],
-        } }),
-        move |event| {
-            kept.push(event.payload.clone());
-            succeeded("")
-        },
-    );
-    let gate = Gate::default();
-    let fake = Fake::new([vec![FakeTurn { gate: Some(gate.clone()), ..says("first") }], replies(&["second"])].concat());
-    let host = home.host_with_hooks(&fake, hooks);
-    let (_events, running) = start(&host, "c1", "one");
-    fake.wait_for_calls(1);
-    host.queue_message("c1", "two").unwrap();
-    gate.release();
-    running.join().unwrap();
-    let seen = seen.wait("the turn_end notification", |seen| seen.iter().any(|event| event["type"] == "turn_end"));
-    let follow_up = seen.iter().find(|event| event["type"] == "session_stop" && event["owner_prompt"] == "two").expect("the follow-up was reviewed");
-    assert!(follow_up["turn_id"].is_string());
-    let ended = seen.iter().find(|event| event["type"] == "turn_end").unwrap();
-    assert_carries(ended, json!({ "turn_id": follow_up["turn_id"], "excerpt": "second" }));
-}
-
-#[test]
-fn the_owner_can_prompt_again_while_a_slow_notifier_is_still_delivering() {
-    let home = Home::new();
-    let notifications = Seen::new();
-    let held = Gate::default();
-    let (kept, holding) = (notifications.clone(), held.clone());
-    let hooks = hooks_run_by(turn_end_hooks(), move |event| {
-        kept.push(event.payload.clone());
-        holding.hold(&Abort::new())?;
-        succeeded("")
+    push.subscribe(
+        crate::push::Subscription::parse(&json!({
+            "endpoint": "https://fcm.googleapis.com/fcm/send/phone",
+            "p256dh": "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+            "auth": "BTBZMqHH6r4Tts7J_aSIgg",
+            "vapidKey": "yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw",
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let host = SessionHost::new(SessionHostOptions {
+        push: Some(push),
+        conversation_url: link.then(|| Box::new(|id: &str| Some(format!("https://summonghost.com/#/ghost.example.ts.net/{id}"))) as ConversationUrl),
+        ..home.options(Some(fake.clone()))
     });
-    let host = home.host_with_hooks(&Fake::new(replies(&["One.", "Two."])), hooks);
+    (host, alerts)
+}
+
+#[test]
+fn a_turn_that_ends_alerts_the_owners_devices_once_with_a_bounded_excerpt_and_its_link() {
+    let home = Home::new();
+    let fake = Fake::new(replies(&[&format!("Finished.\n{}", "a".repeat(400))]));
+    let (host, alerts) = alerting(&home, &fake, true, None);
+    let events = turn(&host, "Make the report");
+    let sent = alerts.wait("the alert", |seen| !seen.is_empty());
+    assert_eq!(sent.len(), 1);
+    assert_carries(
+        &sent[0],
+        json!({ "title": "Make the report", "url": "https://summonghost.com/#/ghost.example.ts.net/c1", "tag": "c1", "ghost": "casper" }),
+    );
+    let body = sent[0]["body"].as_str().unwrap();
+    assert_eq!(utf16_len(body), 280);
+    assert!(body.starts_with("Finished. aaaa"), "{body}");
+    assert_eq!(events.last().unwrap()["type"], "done");
+}
+
+#[test]
+fn the_owner_can_prompt_again_while_a_slow_push_service_is_still_delivering() {
+    let home = Home::new();
+    let held = Gate::default();
+    let (host, alerts) = alerting(&home, &Fake::new(replies(&["One.", "Two."])), false, Some(held.clone()));
     turn(&host, "First");
-    notifications.wait("the first notification", |seen| seen.len() == 1);
+    alerts.wait("the first alert", |seen| seen.len() == 1);
     assert_eq!(turn(&host, "Second").last().unwrap()["type"], "done");
-    notifications.wait("the second notification", |seen| seen.len() == 2);
+    alerts.wait("the second alert", |seen| seen.len() == 2);
     held.release();
 }
 
 #[test]
-fn a_failed_turn_is_reported_and_delivery_fails_open_when_the_service_is_unavailable() {
+fn a_failed_turn_alerts_with_what_failed() {
     let home = Home::new();
-    let notifications = Seen::new();
     let failing = Fake::new(vec![FakeTurn { fail: Some("service unavailable".to_string()), ..Default::default() }]);
-    let host = home.host_with_hooks(&failing, delivery(&notifications, true));
+    let (host, alerts) = alerting(&home, &failing, false, None);
     let events = turn(&host, "Try it");
-    let delivered = notifications.wait("the turn_end notification", |seen| !seen.is_empty());
-    assert_eq!(delivered.len(), 1);
-    assert_carries(&delivered[0], json!({ "type": "turn_end", "outcome": "error", "url": null, "excerpt": "service unavailable" }));
+    let sent = alerts.wait("the alert", |seen| !seen.is_empty());
+    assert_carries(&sent[0], json!({ "body": "Failed: service unavailable", "url": null }));
     assert_carries(events.last().unwrap(), json!({ "type": "error" }));
 }
 
 #[test]
-fn a_turn_that_fails_outside_its_passes_is_still_reported() {
+fn a_turn_that_fails_outside_its_passes_still_alerts() {
     use std::os::unix::fs::PermissionsExt;
     let home = Home::new();
-    let notifications = Seen::new();
-    let host = home.host_with_hooks(&Fake::new(replies(&["hi"])), delivery(&notifications, false));
+    let (host, alerts) = alerting(&home, &Fake::new(replies(&["hi"])), false, None);
     turn(&host, "hello");
-    notifications.wait("the first turn's notification", |seen| seen.len() == 1);
+    alerts.wait("the first turn's alert", |seen| seen.len() == 1);
     // The owner command runs, and then cannot be logged.
     let log = log_path(&home.session_dir(), "c1");
     std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o400)).unwrap();
@@ -1465,9 +1429,8 @@ fn a_turn_that_fails_outside_its_passes_is_still_reported() {
     std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o600)).unwrap();
     let last = events.last().unwrap();
     assert_carries(last, json!({ "type": "error", "reason": "error" }));
-    let delivered = notifications.wait("the failed turn's notification", |seen| seen.len() == 2);
-    assert_carries(&delivered[1], json!({ "type": "turn_end", "outcome": "error", "excerpt": last["errorMessage"] }));
-    assert!(delivered[1]["turn_id"].is_string());
+    let sent = alerts.wait("the failed turn's alert", |seen| seen.len() == 2);
+    assert_eq!(sent[1]["body"], format!("Failed: {}", last["errorMessage"].as_str().unwrap()));
     // The conversation is not left held.
     assert_eq!(turn(&host, "still there?").last().unwrap(), &json!({ "type": "done" }));
 }
@@ -1475,24 +1438,23 @@ fn a_turn_that_fails_outside_its_passes_is_still_reported() {
 #[test]
 fn a_cancelled_turn_is_kept_quiet() {
     let home = Home::new();
-    let notifications = Seen::new();
     let fake = Fake::new(vec![FakeTurn { gate: Some(Gate::default()), ..Default::default() }]);
-    let host = home.host_with_hooks(&fake, delivery(&notifications, false));
+    let (host, alerts) = alerting(&home, &fake, false, None);
     let (events, running) = start(&host, "c1", "wait");
     fake.wait_for_calls(1);
     host.stop_turn("c1").unwrap();
     running.join().unwrap();
     assert_carries(events.all().last().unwrap(), json!({ "type": "error", "reason": "aborted" }));
-    // A turn that ends after it is delivered first, so a notification for the cancelled one would be here by then.
+    // A turn that ends after it alerts first, so an alert for the cancelled one would be here by then.
     fake.script.lock().unwrap().push(says("after"));
     turn(&host, "again");
-    let delivered = notifications.wait("the later turn's notification", |seen| !seen.is_empty());
-    assert_eq!(delivered.len(), 1);
-    assert_carries(&delivered[0], json!({ "outcome": "done", "excerpt": "after" }));
+    let sent = alerts.wait("the later turn's alert", |seen| !seen.is_empty());
+    assert_eq!(sent.len(), 1);
+    assert_carries(&sent[0], json!({ "body": "after" }));
 }
 
 #[test]
-fn no_link_is_looked_up_when_notification_delivery_is_disabled() {
+fn no_link_is_looked_up_when_no_device_gets_alerts() {
     let home = Home::new();
     let lookups = Seen::new();
     let counted = lookups.clone();

@@ -56,7 +56,7 @@ pub struct SessionHostOptions {
     pub owner_home: PathBuf,
     pub logger: Logger,
     pub hooks: Arc<HookRunner>,
-    /// The app's link to a conversation for `turn_end`'s `url`.
+    /// The app's link to a conversation, for an alert's `url`.
     pub conversation_url: Option<ConversationUrl>,
     /// The model ghostd runs (CONTRACTS.md "Local model"); without one no turn can run.
     pub local_model: Option<LocalModel>,
@@ -309,15 +309,7 @@ impl SessionHost {
         Ok(())
     }
 
-    fn run_admitted(
-        &self,
-        id: &str,
-        prompt: &str,
-        command: Option<&OwnerCommand>,
-        emit: &Emit,
-        abort: &Abort,
-        initial_turn_id: String,
-    ) -> Result<(String, Value)> {
+    fn run_admitted(&self, id: &str, prompt: &str, command: Option<&OwnerCommand>, emit: &Emit, abort: &Abort) -> Result<Value> {
         let session_dir = self.session_dir();
         if !log_path(&session_dir, id).exists() {
             append_log(&session_dir, id, &[new_conversation_entry(id, clock::now_ms())])?;
@@ -325,19 +317,18 @@ impl SessionHost {
         emit(json!({ "type": "start" }));
         if let Some(command) = command {
             self.announce(id);
-            let terminal = self.run_owner_command(id, command, emit, abort)?;
-            return Ok((initial_turn_id, terminal));
+            return self.run_owner_command(id, command, emit, abort);
         }
         self.inner.state.lock().unwrap().live.insert(id.to_string(), LiveTurn { follow_ups: Vec::new(), emit: emit.clone() });
-        // The id of the owner request the final pass answered, which `turn_end` reports.
-        let mut turn_id = initial_turn_id;
+        // The id of the owner request a pass answers, which `session_stop` reports.
+        let mut turn_id = crate::random::uuid();
         let outcome = self.run_passes(id, prompt, emit, abort, &mut turn_id);
         self.inner.state.lock().unwrap().live.remove(id);
         let terminal = outcome.unwrap_or_else(|error| {
             self.inner.logger.error("turn failed", json!({ "ghost": self.inner.ghost.name, "conversation": id, "error": error.message }));
             error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message)
         });
-        Ok((turn_id, terminal))
+        Ok(terminal)
     }
 
     fn queued(&self, id: &str) -> usize {
@@ -742,55 +733,33 @@ impl SessionHost {
         self.inner.push.as_ref()
     }
 
-    fn turn_end(&self, id: &str, terminal: &Value, abort: &Abort, turn_id: &str) {
-        let hooks = &self.inner.hooks;
+    /// Alert the owner's devices that a turn ended (CONTRACTS.md "Push alerts"). A cancelled turn alerts no one.
+    fn alert(&self, id: &str, terminal: &Value, abort: &Abort) {
         let failed = terminal["type"] == "error";
-        let devices = self.inner.push.as_ref().filter(|push| push.count() > 0);
-        if (!hooks.has_handlers(HookEventName::TurnEnd) && devices.is_none()) || abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
+        let Some(push) = self.inner.push.as_ref().filter(|push| push.count() > 0) else { return };
+        if abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
             return;
         }
-        let delivered = (|| -> Result<()> {
-            let entries = read_log(&self.session_dir(), id)?.unwrap_or_default();
-            let last = entries.iter().rev().find(|entry| matches!(entry, LogEntry::Assistant { .. } | LogEntry::Command { .. }));
-            let text = if failed {
-                terminal["errorMessage"].as_str().unwrap_or("").to_string()
-            } else {
-                match last {
-                    Some(LogEntry::Assistant { content, .. }) => {
-                        let texts: Vec<&str> = content
-                            .iter()
-                            .filter_map(|part| if let AssistantPart::Text { text } = part { Some(text.as_str()) } else { None })
-                            .collect();
-                        texts.join("\n")
-                    }
-                    Some(LogEntry::Command { output, .. }) => output.clone(),
-                    _ => String::new(),
+        let Ok(entries) = read_log(&self.session_dir(), id).map(Option::unwrap_or_default) else { return };
+        let text = if failed {
+            terminal["errorMessage"].as_str().unwrap_or("").to_string()
+        } else {
+            match entries.iter().rev().find(|entry| matches!(entry, LogEntry::Assistant { .. } | LogEntry::Command { .. })) {
+                Some(LogEntry::Assistant { content, .. }) => {
+                    let texts: Vec<&str> =
+                        content.iter().filter_map(|part| if let AssistantPart::Text { text } = part { Some(text.as_str()) } else { None }).collect();
+                    texts.join("\n")
                 }
-            };
-            let url = self.inner.conversation_url.as_ref().and_then(|link| link(id));
-            let title = log_state(&entries).title.unwrap_or_else(|| self.inner.ghost.name.clone());
-            let excerpt = text.split(crate::js_text::is_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
-            let payload = json!({
-                "type": "turn_end",
-                "turn_id": turn_id,
-                "outcome": terminal["type"],
-                "title": utf16_prefix(&title, 160),
-                "excerpt": utf16_prefix(&excerpt, 280),
-                "url": url,
-            });
-            if let Some(push) = devices {
-                // What the app's service worker shows; `tag` lets a later alert for the conversation replace an earlier one.
-                let body = if failed { format!("Failed: {}", utf16_prefix(&excerpt, 280)) } else { utf16_prefix(&excerpt, 280).to_string() };
-                push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name }));
+                Some(LogEntry::Command { output, .. }) => output.clone(),
+                _ => String::new(),
             }
-            if hooks.has_handlers(HookEventName::TurnEnd) {
-                hooks.emit_turn_end(&self.hook_event(HookEventName::TurnEnd, payload, id, abort, &[]));
-            }
-            Ok(())
-        })();
-        if delivered.is_err() {
-            self.inner.logger.warn("turn_end delivery failed open", json!({ "ghost": self.inner.ghost.name, "conversation": id }));
-        }
+        };
+        let url = self.inner.conversation_url.as_ref().and_then(|link| link(id));
+        let title = log_state(&entries).title.unwrap_or_else(|| self.inner.ghost.name.clone());
+        let excerpt = text.split(crate::js_text::is_space).filter(|word| !word.is_empty()).collect::<Vec<_>>().join(" ");
+        // What the app's service worker shows; `tag` lets a later alert for the conversation replace an earlier one.
+        let body = if failed { format!("Failed: {}", utf16_prefix(&excerpt, 280)) } else { utf16_prefix(&excerpt, 280).to_string() };
+        push.notify(json!({ "title": utf16_prefix(&title, 160), "body": body, "url": url, "tag": id, "ghost": self.inner.ghost.name }));
     }
 
     fn session_stop(&self, id: &str, owner_prompt: &str, turn_id: &str, active: bool, abort: &Abort, emit: &Emit) -> Result<Option<String>> {
@@ -1149,17 +1118,15 @@ impl TurnAdmission {
     pub fn run(self, emit: Emit) {
         let TurnAdmission { host, session_id: id, prompt, command, abort } = self;
         host.wait_for_handoff(&id, &emit, &abort);
-        let initial_turn_id = crate::random::uuid();
-        let outcome = host.run_admitted(&id, &prompt, command.as_ref(), &emit, &abort, initial_turn_id.clone());
+        let outcome = host.run_admitted(&id, &prompt, command.as_ref(), &emit, &abort);
         // A turn that failed outside its passes (its log could not be written) is still a turn that ended.
-        let (turn_id, terminal) =
-            outcome.unwrap_or_else(|error| (initial_turn_id, error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message)));
+        let terminal = outcome.unwrap_or_else(|error| error_event(if abort.is_aborted() { "aborted" } else { "error" }, &error.message));
         emit(terminal.clone());
         host.inner.state.lock().unwrap().admissions.remove(&id);
         host.announce(&id);
         host.start_handoff_if_due(&id);
-        // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
-        std::thread::spawn(move || host.turn_end(&id, &terminal, &abort, &turn_id));
+        // An alert observes a settled turn; a slow push service never holds the conversation busy.
+        std::thread::spawn(move || host.alert(&id, &terminal, &abort));
     }
 }
 

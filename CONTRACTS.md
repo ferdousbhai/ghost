@@ -76,16 +76,10 @@ navigation keeps the requested URL and shows an error instead of silently
 opening a different conversation. A completed turn does not imply its result
 was read; reopening the right conversation does.
 
-`turn_end` is an opt-in owner command-hook boundary after a whole conversation
-turn or owner `!command` settles, including failure; cancellation is quiet. It
-cannot continue or block a turn, delay the owner's next prompt, or change the
-conversation's outcome. Its payload, with that app link to the conversation as
-`url`, and how its handlers run are defined in [`docs/hooks.md`](docs/hooks.md).
-Removing a `turn_end` handler opts out at the next boundary.
-
 ### Push alerts
 
-At the same boundary ghostd alerts the owner's devices itself
+When a whole conversation turn or owner `!command` settles, including in
+failure (a cancelled one is quiet), ghostd alerts the owner's devices itself
 ([`push.rs`](packages/daemon/src/push.rs)): Web Push, since summonghost.com
 has no backend to send one. A device that turns alerts on in the app hands
 this machine its push subscription and a P-256 signing key its browser made
@@ -311,10 +305,8 @@ with the owner's own settings for it — its full tool set, project discovery,
 auth, and session semantics. Ghost adds no command of its own around it and
 keeps no record of the run.
 
-Ghost hooks are `session_stop` and `turn_end`, run by ghostd.
-`session_stop` is awaited after each pass; `turn_end` runs detached after the
-terminal frame, bounded by its own timeout (a daemon stop does not wait for it).
-Their JSON protocol, failure behavior, and settings are defined in
+Ghost's one hook is `session_stop`, run by ghostd and awaited after each pass.
+Its JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
 Ghost sets `stop_hook_active` on hook continuation passes and does not impose
 a host bound; `owner_prompt` and `turn_id` identify one owner request across

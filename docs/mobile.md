@@ -40,8 +40,6 @@ Cancelled turns stay quiet. The machine must be awake and online to send one;
 a device that is offline gets it within a day. A failed delivery is logged
 and is not retried. Turn the switch off to stop them.
 
-A `turn_end` [hook](hooks.md) can still deliver alerts some other way.
-
 The app marks a reply read only after displaying its transcript while visible
 and focused. Opening an unrelated conversation does not acknowledge it.
 
