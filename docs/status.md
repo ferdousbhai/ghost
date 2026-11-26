@@ -60,9 +60,13 @@ Not done:
 - Alerts are Web Push, sent by ghostd to the owner's devices (added
   2026-11-25, replacing the ntfy recipe); see `CONTRACTS.md` "Push alerts".
   The daemon gained the RustCrypto crates for it and posts with `curl`.
-- Ghost still starts its own `llama-server`. Omarchy's model engine does not
-  run on this machine yet; when it does, Ghost and Lastbook should both use
-  its endpoint.
+- Ghost follows Omarchy for the model, the owner decided on 2026-11-26:
+  Omarchy's engine (`omarchy-local-ai`, `omarchy models use best text`)
+  picks, pins and serves the recommended model, so Ghost names none and
+  downloads none. That engine does not support Apple Silicon yet. Until it
+  runs on the owner's machine Ghost still starts its own `llama-server`
+  from `local.model`; when it does, Ghost (and Lastbook) should use its
+  endpoint, and `local_model.rs` goes.
 
 The last release is 0.13.0, the first with the daemon and the `ghost`
 command in Rust; 0.12.0 was the last one in TypeScript. Omarchy's
