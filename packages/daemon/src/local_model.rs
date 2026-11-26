@@ -89,6 +89,11 @@ impl LocalModel {
         &self.inner.config
     }
 
+    /// The context the server is started with, in tokens.
+    pub fn context_size(&self) -> u64 {
+        self.inner.config.context_size
+    }
+
     /// The model's name as requests name it: its file name without `.gguf`.
     pub fn name(&self) -> String {
         let file = self.inner.config.model.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();

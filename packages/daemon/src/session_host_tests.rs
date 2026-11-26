@@ -91,8 +91,10 @@ struct FakeTurn {
 #[derive(Clone, Debug)]
 struct FakeCall {
     prompt: String,
-    /// The prompt without the conversation so far that every pass is handed.
+    /// The same: what this pass answers.
     message: String,
+    /// The conversation before it, as the chat messages the pass was handed.
+    history: Vec<Value>,
     cwd: PathBuf,
     session: Option<String>,
     persona: String,
@@ -139,15 +141,10 @@ impl Fake {
 
 impl Answerer for Fake {
     fn turn(&self, input: &PassInput, on_event: &mut dyn FnMut(PassEvent)) -> std::result::Result<(), String> {
-        let message = match input.prompt.rfind("\n</conversation-so-far>\n\n") {
-            Some(end) if input.prompt.starts_with("<conversation-so-far>\n") => {
-                input.prompt[end + "\n</conversation-so-far>\n\n".len()..].to_string()
-            }
-            _ => input.prompt.clone(),
-        };
         let turn = self.next(FakeCall {
             prompt: input.prompt.clone(),
-            message,
+            message: input.prompt.clone(),
+            history: input.history.clone(),
             cwd: input.cwd.clone(),
             session: input.env.get("GHOST_SESSION").cloned(),
             persona: input.persona.clone(),
@@ -169,6 +166,7 @@ impl Answerer for Fake {
         let call = FakeCall {
             prompt: prompt.to_string(),
             message: prompt.to_string(),
+            history: Vec::new(),
             cwd: PathBuf::new(),
             session: None,
             persona: String::new(),
@@ -462,7 +460,10 @@ fn a_later_turn_is_handed_the_conversation_so_far_and_both_are_in_the_log() {
     turn(&host, "ping");
     turn(&host, "again");
 
-    assert_eq!(fake.prompts(), ["ping", "<conversation-so-far>\nOwner: ping\n\nYou: pong\n</conversation-so-far>\n\nagain"]);
+    // The second turn answers "again", handed the first as the messages it was.
+    assert_eq!(fake.prompts(), ["ping", "again"]);
+    assert_eq!(fake.calls()[0].history, Vec::<Value>::new());
+    assert_eq!(fake.calls()[1].history, vec![json!({ "role": "user", "content": "ping" }), json!({ "role": "assistant", "content": "pong" })]);
     let transcript: Vec<Value> = messages(&host, "c1").iter().map(|message| json!([message["role"], message["content"]])).collect();
     assert_eq!(
         transcript,
@@ -805,7 +806,8 @@ fn an_owner_command_runs_in_the_owner_home_and_its_output_is_handed_to_the_next_
 
     turn(&host, "what did I run?");
     let prompt = &fake.calls()[0].prompt;
-    assert!(prompt.contains("Owner ran `echo printed-$GHOST_SESSION`"), "{prompt}");
+    assert!(prompt.starts_with("I ran this myself:\n$ echo printed-$GHOST_SESSION\n"), "{prompt}");
+    assert!(prompt.ends_with("\n\nwhat did I run?"), "{prompt}");
     assert!(prompt.contains("printed-c1"), "{prompt}");
 }
 
@@ -1002,7 +1004,7 @@ fn a_pass_puts_its_question_to_the_owner_in_its_own_conversation() {
     turn(&host, "North pier");
     assert_eq!(sessions(&host)[0]["question"], Value::Null);
     // The answer's pass is handed the question, as the reply said it.
-    assert!(fake.prompts()[1].contains("Which pier?"));
+    assert!(json!(fake.calls()[1].history).to_string().contains("Which pier?"));
 }
 
 #[test]

@@ -84,10 +84,7 @@ struct Fake {
 
 impl Fake {
     fn enter(&self, prompt: &str, cwd: &Path) -> FakeTurn {
-        let message = match (prompt.starts_with("<conversation-so-far>\n"), prompt.rfind("\n</conversation-so-far>\n\n")) {
-            (true, Some(end)) => &prompt[end + "\n</conversation-so-far>\n\n".len()..],
-            _ => prompt,
-        };
+        let message = prompt;
         let mut calls = self.calls.lock().unwrap();
         calls.push(FakeCall { prompt: prompt.to_string(), message: message.to_string(), cwd: cwd.to_path_buf() });
         let turn = self.script.get((calls.len() - 1).min(self.script.len().saturating_sub(1))).cloned().unwrap_or_default();

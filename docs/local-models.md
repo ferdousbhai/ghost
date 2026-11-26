@@ -57,6 +57,16 @@ lists Intel GPUs only, so Ghost starts the server itself.
   but for the task"; then twice of twice it ran it as written, in 56 and
   88 s, and Claude's tool use and answer showed as they were printed.
 
+- 2026-11-26, the conversation replayed as real messages and nothing in the
+  prompt changing between turns (the idea is pi's; a stripped-down pi on the
+  same model took 26 s and 4 s for these two turns). A file question and a
+  follow-up, each after a warm-up turn: 39 s and 30 s before; 28 s and 10 s,
+  then 33 s and 8 s, after. The server log shows why: the follow-up reads
+  only the new message. One run each.
+- The same day the time left the prompt. Asked the time or the weekday, the
+  model ran `date` unprompted, twice of twice. Writing a note, it once dated
+  a change with the note's old date rather than look the date up.
+
 ## Gemma 4 26B A4B (2026-11-17)
 
 Model: `unsloth/gemma-4-26B-A4B-it-GGUF`, `gemma-4-26B-A4B-it-UD-Q4_K_M.gguf`

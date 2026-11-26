@@ -157,7 +157,6 @@ fn serves_a_part_it_does_not_write_as_it_was_read() {
     assert_eq!(entry.to_json().to_string(), line);
     let LogEntry::Assistant { content, .. } = &entry else { panic!("an assistant entry") };
     assert!(content.iter().all(|part| matches!(part, AssistantPart::Other(_))));
-    assert_eq!(handoff_context(&[entry]).as_deref(), Some("You: [ran undefined]\n[ran read]\nok"));
 }
 
 #[test]
@@ -391,54 +390,6 @@ fn a_commands_output_is_fenced_past_its_own_backticks_and_says_how_it_ended() {
 
 // ── The handoff ─────────────────────────────────────────────────────────
 
-#[test]
-fn the_handoff_preserves_chronological_labels_and_skips_display_only_and_excluded_entries() {
-    let context = handoff_context(&[
-        user_at("now", "hello"),
-        LogEntry::User { at: "now".into(), text: "continue".into(), origin: Some(Origin::Hook) },
-        LogEntry::Assistant {
-            at: "now".into(),
-            content: vec![
-                AssistantPart::text(" answer "),
-                AssistantPart::ToolCall { id: "1".into(), name: "read".into(), arguments: json!({}), failed: false, output: None },
-            ],
-            error: None,
-        },
-        title("now", Some("ignored")),
-        command("now", "pwd", "/tmp", Some(0), false),
-        command("now", "secret", "ignored", Some(0), true),
-        LogEntry::Assistant { at: "now".into(), content: vec![AssistantPart::text(" \n")], error: None },
-    ]);
-    assert_eq!(context.as_deref(), Some("Owner: hello\n\nHook: continue\n\nYou: answer \n[ran read]\n\nOwner ran `pwd`:\n/tmp"));
-    assert_eq!(handoff_context(&[]), None);
-}
-
-#[test]
-fn the_handoff_matches_the_exact_suffix_across_the_context_boundary() {
-    for length in [HANDOFF_CONTEXT_CHARS - 7, HANDOFF_CONTEXT_CHARS - 6, HANDOFF_CONTEXT_CHARS, HANDOFF_CONTEXT_CHARS + 1] {
-        let text = "x".repeat(length);
-        let full = format!("Owner: first\n\nOwner: {text}");
-        assert_eq!(
-            handoff_context(&[user_at("now", "first"), user_at("now", &text)]),
-            Some(format!("…{}", &full[full.len() - HANDOFF_CONTEXT_CHARS..]))
-        );
-        let single = format!("Owner: {text}");
-        let expected = if single.len() > HANDOFF_CONTEXT_CHARS { format!("…{}", &single[single.len() - HANDOFF_CONTEXT_CHARS..]) } else { single };
-        assert_eq!(handoff_context(&[user_at("now", &text)]), Some(expected));
-    }
-}
-
-#[test]
-fn the_handoff_is_the_newest_context_alone_once_it_is_full_and_never_starts_inside_a_character() {
-    assert_eq!(
-        handoff_context(&[user_at("now", "old"), user_at("now", &"x".repeat(HANDOFF_CONTEXT_CHARS))]),
-        Some(format!("…{}", "x".repeat(HANDOFF_CONTEXT_CHARS)))
-    );
-    // The cut would fall inside the cat (two UTF-16 units): it is left out whole.
-    let cats = handoff_context(&[user_at("now", &format!("🐈{}", "x".repeat(HANDOFF_CONTEXT_CHARS - 1)))]).unwrap();
-    assert_eq!(cats, format!("…{}", "x".repeat(HANDOFF_CONTEXT_CHARS - 1)));
-}
-
 // ── Reads from the file ─────────────────────────────────────────────────
 
 #[test]
@@ -461,7 +412,6 @@ fn a_text_holding_a_unicode_line_separator_is_one_entry_to_the_log_and_the_index
     assert!(std::fs::read_to_string(log_path(&root.0, "s")).unwrap().contains("first\u{2028}second"));
     assert_eq!(read_log(&root.0, "s").unwrap().as_deref(), Some(&entries[..]));
     assert_eq!(read_transcript_page(&root.0, "s", 0, 10).unwrap(), whole(&entries));
-    assert_eq!(handoff_context(&entries).as_deref(), Some("Owner: first\u{2028}second\n\nYou: one\u{2029}two\n\nOwner: third"));
 }
 
 #[test]

@@ -9,8 +9,8 @@ use crate::attachments::{Attachment, read_attachment, save_attachment};
 use crate::clock;
 use crate::coding_agent::{choose_coding_agent, coding_agent_command};
 use crate::conversation_log::{
-    AssistantPart, LogEntry, Origin, append_log, conversation_dir, conversation_environment, handoff_context, is_valid_conversation_id, listed_log,
-    log_path, log_state, new_conversation_entry, read_log, read_transcript_page, require_conversation_id,
+    AssistantPart, LogEntry, Origin, append_log, conversation_dir, conversation_environment, is_valid_conversation_id, listed_log, log_path,
+    log_state, new_conversation_entry, read_log, read_transcript_page, require_conversation_id,
 };
 use crate::env::Env;
 use crate::error::{GhostError, Result};
@@ -19,7 +19,7 @@ use crate::home::read_character;
 use crate::hooks::{HookEvent, HookEventName, HookRunner, continuation};
 use crate::js_text::{utf16_len, utf16_prefix, utf16_suffix};
 use crate::local_model::LocalModel;
-use crate::local_turn::{Answerer, LocalAnswerer, PassEvent, PassInput};
+use crate::local_turn::{Answerer, LocalAnswerer, PassEvent, PassInput, conversation_messages};
 use crate::log::Logger;
 use crate::persona::{GhostSystemPromptInput, build_ghost_system_prompt, is_seeded_character};
 use crate::process::{ProcessOptions, run_process, signal_name};
@@ -356,8 +356,7 @@ impl SessionHost {
             }
             // Other clients learn the turn is running with its prompt already readable.
             self.announce(id);
-            let pass_prompt = if from_hook { format!("{STOP_HOOK_FEEDBACK_PREFIX}{text}") } else { text };
-            let failure = self.run_turn_on_model(id, &pass_prompt, emit, &mut blocks, abort)?;
+            let failure = self.run_turn_on_model(id, &text, emit, &mut blocks, abort)?;
             // A failed pass ends the turn only when nothing is queued behind it:
             // the owner's follow-ups were accepted and still run.
             let failed = failure.is_some();
@@ -397,20 +396,30 @@ impl SessionHost {
         Ok(terminal)
     }
 
-    /// Run one prompt on the local model, handed the conversation so far: it
-    /// keeps no session of its own. Returns the terminal error, or None on success.
+    /// How much earlier conversation a turn is handed: as many characters as
+    /// the model's context has tokens, about a third of it, which leaves the
+    /// rest for the prompt, this turn's commands and the answer.
+    fn history_chars(&self) -> usize {
+        self.inner.local_model.as_ref().map_or(crate::config::DEFAULT_LOCAL_CONTEXT, LocalModel::context_size) as usize
+    }
+
+    /// Run one prompt on the local model, handed the conversation so far as
+    /// the messages it was: the model keeps no session of its own. Returns the terminal error, or None on success.
     fn run_turn_on_model(&self, id: &str, prompt: &str, emit: &Emit, blocks: &mut usize, abort: &Abort) -> Result<Option<Value>> {
         let Some(answerer) = self.inner.answerer.clone() else { return Ok(Some(error_event("error", NO_LOCAL_MODEL))) };
         let session_dir = self.session_dir();
+        // Every pass's prompt is already the log's last entry: the owner's message, a follow-up, or a hook's feedback.
         let entries = read_log(&session_dir, id)?.unwrap_or_default();
-        let last_user = entries.iter().rposition(|entry| matches!(entry, LogEntry::User { .. }));
-        let carried = handoff_context(&entries[..last_user.unwrap_or(0)]);
-        let pass_prompt = match carried {
-            Some(carried) => format!("<conversation-so-far>\n{carried}\n</conversation-so-far>\n\n{prompt}"),
-            None => prompt.to_string(),
+        let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX, self.history_chars());
+        let pass_prompt = match history.pop() {
+            Some(last) if last["role"] == "user" => last["content"].as_str().unwrap_or(prompt).to_string(),
+            other => {
+                history.extend(other);
+                prompt.to_string()
+            }
         };
         emit(json!({ "type": "pass" }));
-        let result = self.run_pass(id, answerer.as_ref(), pass_prompt, emit, blocks, abort)?;
+        let result = self.run_pass(id, answerer.as_ref(), pass_prompt, history, emit, blocks, abort)?;
         append_log(&session_dir, id, &[LogEntry::Assistant { at: clock::now_iso(), content: result.content, error: result.error.clone() }])?;
         Ok(result.error.map(|message| error_event(if result.aborted { "aborted" } else { "error" }, &message)))
     }
@@ -432,7 +441,17 @@ impl SessionHost {
         Ok(text.to_string())
     }
 
-    fn run_pass(&self, id: &str, answerer: &dyn Answerer, prompt: String, emit: &Emit, blocks: &mut usize, abort: &Abort) -> Result<PassResult> {
+    #[allow(clippy::too_many_arguments)]
+    fn run_pass(
+        &self,
+        id: &str,
+        answerer: &dyn Answerer,
+        prompt: String,
+        history: Vec<Value>,
+        emit: &Emit,
+        blocks: &mut usize,
+        abort: &Abort,
+    ) -> Result<PassResult> {
         let dir = conversation_dir(&self.session_dir(), id);
         let persona = self.render_persona()?;
         {
@@ -541,7 +560,7 @@ impl SessionHost {
         let (host, conversation) = (self.clone(), id.to_string());
         let ask: crate::local_turn::Ask =
             Arc::new(move |question, options| host.set_question(&conversation, question, options).map(|_| ()).map_err(|error| error.to_string()));
-        let input = PassInput { prompt, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone(), ask };
+        let input = PassInput { prompt, history, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone(), ask };
         let outcome = answerer.turn(&input, &mut on_event);
         if let Err(failure) = outcome
             && !abort.is_aborted()

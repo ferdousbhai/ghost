@@ -262,8 +262,8 @@ ghost rewrote is who it is on the next one.
 
 A turn runs on the [local model](#local-model), and on nothing else: with no
 `local.model` configured it ends in an error that says so. Each pass is
-handed the ghost's persona and the newest `HANDOFF_CONTEXT_CHARS` of the log
-as `<conversation-so-far>`, since the model keeps no session of its own. Its
+handed the ghost's persona and the conversation so far, replayed from the log
+as the chat messages it was, since the model keeps no session of its own. Its
 commands run in the conversation directory with the conversation's identity
 (`GHOST_SESSION`) in their environment, beside the daemon's resolved
 `GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOSTS_ROOT`, and `GHOSTD_HOOKS`, which every
@@ -534,9 +534,16 @@ only that process. Another program loading the same file (Lastbook) holds its
 own copy; Ghost does not stop it, and frees its own when idle.
 
 A pass ([`local_turn.rs`](packages/daemon/src/local_turn.rs)) is the
-smallest loop that works: it sends the ghost's whole persona, plus the "Running locally" section and the current time, and, as the
-user message, the conversation so far (`HANDOFF_CONTEXT_CHARS`) and the
-prompt. Nothing is searched ahead of the model. It keeps no session of its
+smallest loop that works: it sends the ghost's whole persona and the "Running
+locally" section as the system message, the same bytes every turn; then the
+conversation so far as the messages it was (`conversation_messages`: what
+each side said, and each earlier call with what it returned, an output over
+`REPLAY_OUTPUT_CHARS` keeping its start and end; reasoning is not handed on);
+then the prompt. Nothing in it changes between turns, the time included (the
+model runs `date`), so llama-server reuses what it has already read and only
+the new message costs time. Past as many characters as the context has
+tokens, the oldest turns go, a stretch at once. Nothing is searched ahead of
+the model. It keeps no session of its
 own, streams its text, reasoning, and commands, with a running command's
 latest output (at most every 100 ms). It sends `reasoning_effort`;
 sampling is the model's and llama-server's own default.

@@ -8,7 +8,7 @@
 //! are in UTF-16 code units, as the logs written before this version counted
 //! them; a cut never lands inside a character.
 use crate::error::{GhostError, Result};
-use crate::js_text::{is_space, trim, trim_end, utf16_len, utf16_prefix, utf16_suffix};
+use crate::js_text::{is_space, trim, trim_end, utf16_len, utf16_prefix};
 use crate::sidecars::SIDECAR_FILENAMES;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -22,9 +22,6 @@ const LOG_VERSION: i64 = 1;
 /// A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`.
 pub const MAX_LOG_TEXT: usize = 200_000;
 const PREVIEW_MAX: usize = 120;
-/// How much of the earlier conversation a turn is handed.
-pub const HANDOFF_CONTEXT_CHARS: usize = 24_000;
-
 pub const LOG_FILENAME: &str = ".conversation.jsonl";
 
 /// One part of what the ghost answered.
@@ -555,49 +552,6 @@ pub fn entry_messages(entry: &LogEntry, entry_id: &str, skip: usize, take: usize
         }
         _ => Vec::new(),
     }
-}
-
-fn assistant_text(content: &[AssistantPart]) -> String {
-    let parts: Vec<String> = content
-        .iter()
-        .map(|part| match part {
-            AssistantPart::Text { text } => text.clone(),
-            // Earlier reasoning is not handed on: only what was said and done.
-            AssistantPart::Thinking { .. } => String::new(),
-            AssistantPart::ToolCall { name, .. } => format!("[ran {name}]"),
-            AssistantPart::Other(value) if value.get("type").and_then(Value::as_str) == Some("text") => {
-                value.get("text").and_then(Value::as_str).unwrap_or_default().to_string()
-            }
-            AssistantPart::Other(value) => format!("[ran {}]", value.get("name").and_then(Value::as_str).unwrap_or("undefined")),
-        })
-        .collect();
-    parts.join("\n")
-}
-
-/// The earlier conversation as text, handed to each turn: the newest
-/// `HANDOFF_CONTEXT_CHARS`, owner and ghost lines labelled. Read from the
-/// newest entry back, so old history costs nothing once the context is full.
-pub fn handoff_context(entries: &[LogEntry]) -> Option<String> {
-    let mut context = String::new();
-    for entry in entries.iter().rev() {
-        let line = match entry {
-            LogEntry::User { text, origin, .. } => format!("{}: {text}", if *origin == Some(Origin::Hook) { "Hook" } else { "Owner" }),
-            LogEntry::Assistant { content, .. } => {
-                let text = assistant_text(content);
-                match trim(&text) {
-                    "" => continue,
-                    text => format!("You: {text}"),
-                }
-            }
-            LogEntry::Command { command, output, excluded: false, .. } => format!("Owner ran `{command}`:\n{output}"),
-            _ => continue,
-        };
-        context = if context.is_empty() { line } else { format!("{line}\n\n{context}") };
-        if utf16_len(&context) > HANDOFF_CONTEXT_CHARS {
-            return Some(format!("…{}", utf16_suffix(&context, HANDOFF_CONTEXT_CHARS)));
-        }
-    }
-    (!context.is_empty()).then_some(context)
 }
 
 /// How many transcript messages an entry shows: a `!command` is two, the owner's words and its output.

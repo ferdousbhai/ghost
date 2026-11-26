@@ -111,20 +111,6 @@ pub fn parse_iso(text: &str) -> Option<i64> {
     }
 }
 
-/// The time now in the owner's own zone, for the model: `Wed Nov 25 2026 08:21:20 GMT+0800 (WITA)`.
-pub fn local_now() -> String {
-    let seconds = (now_ms() / 1000) as libc::time_t;
-    let mut parts: libc::tm = unsafe { std::mem::zeroed() };
-    let mut buffer = [0u8; 96];
-    let format = c"%a %b %d %Y %H:%M:%S GMT%z (%Z)";
-    // SAFETY: `parts` and `buffer` are ours and sized; `format` is NUL-terminated.
-    let written = unsafe {
-        libc::localtime_r(&seconds, &mut parts);
-        libc::strftime(buffer.as_mut_ptr().cast(), buffer.len(), format.as_ptr(), &parts)
-    };
-    String::from_utf8_lossy(&buffer[..written]).into_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,10 +133,5 @@ mod tests {
         for bad in ["", "soon", "2026-13-01", "2026-11-25T", "2026-11-25T08:21:20.Z", "2026-11-25T08:21:20+8"] {
             assert_eq!(parse_iso(bad), None, "{bad}");
         }
-    }
-
-    #[test]
-    fn local_time_names_its_zone() {
-        assert!(local_now().contains("GMT"));
     }
 }
