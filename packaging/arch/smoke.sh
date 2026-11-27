@@ -50,7 +50,7 @@ data_files=(
   /usr/share/icons/hicolor/scalable/apps/ghost.svg
   /usr/share/icons/hicolor/128x128/apps/ghost.png
 )
-executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-window)
+executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-bar)
 for path in "${data_files[@]}"; do
   require_file "$path"
   [[ "$(stat -c '%a' "$root$path")" == 644 ]] || exit 1
@@ -72,7 +72,7 @@ desktop-file-validate "$root/usr/share/applications/io.github.ferdousbhai.Ghost.
 # from all three, and printing it proves each binary loads its libraries.
 version="$("$root/usr/bin/ghostd" --version)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-[[ "$("$root/usr/bin/ghost" --version)" == "$version" && "$("$root/usr/bin/ghost-window" --version)" == "$version" ]]
+[[ "$("$root/usr/bin/ghost" --version)" == "$version" && "$("$root/usr/bin/ghost-bar" --version)" == "$version" ]]
 
 for license in LICENSE THIRD_PARTY_NOTICES.md; do
   require_file "$(cd "$root" && printf '/%s' usr/share/licenses/*/"$license")"

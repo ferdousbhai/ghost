@@ -2,8 +2,8 @@
 
 ## Lucide
 
-The app icon is Lucide's `ghost` glyph. Ghost's window
-(`ghost-window`) holds the Lucide 1.35.0 icons that
+The app icon is Lucide's `ghost` glyph. Ghost's bar
+(`ghost-bar`) holds the Lucide 1.35.0 icons that
 [omui](https://github.com/ferdousbhai/omui) bundles, each stroke outlined as a
 filled path and renamed `om-<name>-symbolic`.
 
@@ -53,7 +53,7 @@ SOFTWARE.
 
 ## Strata
 
-Ghost's window themes GTK 4 through [omui](https://github.com/ferdousbhai/omui),
+Ghost's bar themes GTK 4 through [omui](https://github.com/ferdousbhai/omui),
 whose theme code, empty GTK theme resource, hidden title bar, and visual
 conventions are adapted from [Strata](https://github.com/lgse/strata) under the
 MIT license.
@@ -100,14 +100,14 @@ The daemon and the `ghost` command (`ghostd`, `ghost`):
 - Unlicense or MIT: aho-corasick, memchr
 - Zlib: foldhash
 
-The window (`ghost-window`):
+The bar (`ghost-bar`):
 
 - MIT and ISC: omui (its Lucide icons and Strata theme code are above)
 - MIT, the [gtk-rs](https://gtk-rs.org) crates: cairo-rs, cairo-sys-rs,
   gdk-pixbuf, gdk-pixbuf-sys, gdk4, gdk4-sys, gio, gio-sys, glib, glib-sys,
   gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
   pango, pango-sys
-- MIT: memoffset, pulldown-cmark, slab, urlencoding, zmij
+- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, slab, urlencoding, zmij
 - MIT or Apache-2.0: async-channel, base64, bitflags, concurrent-queue,
   crossbeam-utils, equivalent, event-listener, event-listener-strategy,
   field-offset, form_urlencoded, futures-channel, futures-core,

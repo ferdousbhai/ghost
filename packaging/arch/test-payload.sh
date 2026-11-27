@@ -9,7 +9,7 @@ trap cleanup EXIT
 # Stand-ins for the built binaries: the payload check only asks their version.
 binaries="$work/release"
 mkdir -p "$binaries"
-for name in ghostd ghost ghost-window; do
+for name in ghostd ghost ghost-bar; do
   printf '#!/bin/sh\necho 0.3.0\n' > "$binaries/$name"
   chmod 755 "$binaries/$name"
 done

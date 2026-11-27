@@ -2,7 +2,7 @@
 
 **Work resumed on 2026-11-24, with a narrower aim: one persona per machine, answered by a local model, that works with the owner's data through the apps that hold it. Ghost shows none of that data itself. No release, and no publish of the page, without the owner's go. Read `docs/status.md` before starting anything.**
 
-Local Omarchy-native AI persona with file-backed state, a daemon API, a window, a page for reaching it from a phone, and Bash browser automation.
+Local Omarchy-native AI persona with file-backed state, a daemon API, a bar at the bottom of the screen, a page for reaching it from a phone, and Bash browser automation.
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
 
@@ -15,7 +15,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, a window, 
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
 - **ghost** — a machine's one persona, reached from elsewhere over Tailscale; **ghost home** — its directory, `~/.local/share/ghost/` (layout in `CONTRACTS.md`).
 - **local model** — the GGUF model ghostd runs and loops over; every turn runs on it. **coding agent** — an agent CLI the owner already has (claude, codex, agy), which the model runs from its shell.
-- **daemon** (`ghostd`) — the HTTP API that owns conversations; **window** (`ghost-window`) — the GTK app that talks to it.
+- **daemon** (`ghostd`) — the HTTP API that owns conversations; **bar** (`ghost-bar`) — the prompt and captions at the bottom of the screen, a client of it. Ghost has no window.
 
 ## Taste
 
@@ -28,7 +28,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 ## The three ways to hurt yourself
 
-1. **Testing against the live install.** Tests use scratch ghost homes, never `~/.local/share/ghost`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; window checks use `packages/window/dev/qa.sh` (a private broadway display) against a scratch ghostd. The live install need not use this checkout: discover `systemctl --user cat ghostd.service` and `command -v ghostd ghost-window` before deploying. A checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version) and the installed artifacts.
+1. **Testing against the live install.** Tests use scratch ghost homes, never `~/.local/share/ghost`, port 7717, or the owner's desktop. Ghost has no screen control, so no test drives a desktop; the bar's checks use `packages/bar/dev/qa.sh` (a private broadway display) against a scratch ghostd. The live install need not use this checkout: discover `systemctl --user cat ghostd.service` and `command -v ghostd ghost-bar` before deploying. A checkout build alone ships nothing. See `docs/self-maintenance.md`. Restart `ghostd.service` for daemon changes. Verify `ghost status` (no `restart needed` line: a restart that did not take leaves the old daemon answering under the same version) and the installed artifacts.
 2. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
 3. **Touching a peer's git state.** The same shared checkout means `git stash` pops someone else's stash, so never stash here; commit or branch instead. A worktree and branch outlive their PR only while it is open: after the merge, `git worktree remove`, delete the branch locally and on origin, `git worktree prune`.
 
@@ -36,7 +36,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, `ghost` CLI, the window, the summonghost.com page (`packages/web`, rules in its README), the local model's tools. A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, `ghost` CLI, the bar, the summonghost.com page (`packages/web`, rules in its README), the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help_topics.rs`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in the budget test in `packages/daemon/src/prompt_policy.rs` to its exact new size so growth is always a decision.
@@ -49,10 +49,10 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --release --locked
-bash packages/window/dev/qa.sh
+bash packages/bar/dev/qa.sh
 bash packages/web/check.sh
 ```
 
-Verify with the smallest proof: the tests you touched (`cargo test -p <crate> <name>`; the window's scripted QA is `packages/window/dev/qa.sh`) plus `clippy` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (format, lints, a release build, tests, the window's scripted QA, the page's checks, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by the test in `packages/daemon/src/prompt_policy.rs`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
+Verify with the smallest proof: the tests you touched (`cargo test -p <crate> <name>`; the bar's scripted QA is `packages/bar/dev/qa.sh`) plus `clippy` for the packages you changed. Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, before building the package, on x86_64 and aarch64 — (format, lints, a release build, tests, the bar's scripted QA, the page's checks, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by the test in `packages/daemon/src/prompt_policy.rs`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message.
 
-The daemon and the window are Rust, in one cargo workspace at the repository root; `packages/web` is the summonghost.com page, plain files published only on the owner's go (`packages/web/publish.sh`). Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.
+The daemon and the bar are Rust, in one cargo workspace at the repository root; `packages/web` is the summonghost.com page, plain files published only on the owner's go (`packages/web/publish.sh`). Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.

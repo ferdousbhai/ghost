@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# The window's QA scripts (dev/qa/*.jsonl, omui's scripted QA: README "Scripted QA" in omui), each in a fresh window
+# The bar's QA scripts (dev/qa/*.jsonl, omui's scripted QA: README "Scripted QA" in omui), each in a fresh bar
 # built with feature `qa`, against one scratch ghostd and a stand-in model (stand-in.sh), on a broadway display of its own:
 # private HOME, XDG directories and runtime, no session bus, no Wayland or X display, so no window opens anywhere and
 # nothing of the desktop this is run from is read. Any failed command, GLib warning or critical fails the run.
 # The gate (`.githooks/verify`) runs it.
 #
 #   dev/qa.sh [script.jsonl ...]           every script under dev/qa when none is named
-#   GHOST_WINDOW_QA=0                      skip it (the package build's check(), which builds no `qa` window)
-#   GHOST_WINDOW_QA_BINARY=<path>          a window already built with `--features qa`
-#   GHOST_WINDOW_QA_SHOTS=<dir>            keep the scripts' shots there (they are written relative to it)
+#   GHOST_BAR_QA=0                      skip it (the package build's check(), which builds no `qa` bar)
+#   GHOST_BAR_QA_BINARY=<path>          a bar already built with `--features qa`
+#   GHOST_BAR_QA_SHOTS=<dir>            keep the scripts' shots there (they are written relative to it)
 #   OMUI_QA_TIMEOUT=120                    seconds before one script's run is stopped
-if [[ ${GHOST_WINDOW_QA:-1} == 0 ]]; then
-  echo "qa: skipped (GHOST_WINDOW_QA=0)"
+if [[ ${GHOST_BAR_QA:-1} == 0 ]]; then
+  echo "qa: skipped (GHOST_BAR_QA=0)"
   exit 0
 fi
 here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -29,15 +29,15 @@ else
 fi
 for index in "${!scripts[@]}"; do scripts[index]=$(realpath -e -- "${scripts[index]}"); done
 
-binary=${GHOST_WINDOW_QA_BINARY:-}
+binary=${GHOST_BAR_QA_BINARY:-}
 if [[ -z $binary ]]; then
-  # A debug build: target/release stays the window the package ships, without `qa`.
+  # A debug build: target/release stays the bar the package ships, without `qa`.
   (cd "$here/.." && bash dev/cargo.sh build --locked --features qa --quiet)
-  binary=$here/../../../target/debug/ghost-window
+  binary=$here/../../../target/debug/ghost-bar
 fi
 binary=$(realpath -e -- "$binary")
 
-root=$(mktemp -d /tmp/ghost-window-qa.XXXXXX)
+root=$(mktemp -d /tmp/ghost-bar-qa.XXXXXX)
 broadway_pid=""
 daemon_pid=""
 app_pid=""
@@ -52,7 +52,7 @@ cleanup() {
   for pid in "$app_pid" "$broadway_pid" "$daemon_pid"; do
     [[ -z $pid ]] || wait "$pid" 2>/dev/null || true
   done
-  [[ -z $root || $root != /tmp/ghost-window-qa.* ]] || rm -rf -- "$root"
+  [[ -z $root || $root != /tmp/ghost-bar-qa.* ]] || rm -rf -- "$root"
   exit "$status"
 }
 trap cleanup EXIT
@@ -64,7 +64,7 @@ chmod 700 "$root/runtime"
 export XDG_RUNTIME_DIR=$root/runtime
 stand_in_home
 stand_in_ghostd
-shots=${GHOST_WINDOW_QA_SHOTS:-$root/shots}
+shots=${GHOST_BAR_QA_SHOTS:-$root/shots}
 mkdir -p "$shots"
 
 # A display number and input port from this script's PID, so two runs at once do not share one. broadwayd listens on
@@ -84,7 +84,7 @@ for script in "${scripts[@]}"; do
   echo "qa: ${script#"$here/"}"
   # In the background, waited for: bash runs a trap only once the foreground command ends, and `timeout` puts the app
   # in a process group of its own, which Ctrl-C does not reach. Killing `timeout` stops the app with it. TZ fixes the
-  # times the window shows, which the scripts name widgets by.
+  # times it shows, which the scripts name widgets by.
   status=0
   (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent TZ=UTC \

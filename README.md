@@ -8,7 +8,7 @@ on [Omarchy](https://omarchy.org): a persona that works with your notes,
 reminders, mail, chats, files and photos through the apps that already hold
 them. Every turn runs on a local model, so none of it leaves the computer.
 
-Talk to it in its window or the terminal; both share one conversation
+Talk to it from its bar at the bottom of the screen or the terminal; both share one conversation
 history, and `ghost say` joins the most recent conversation:
 
 ```sh

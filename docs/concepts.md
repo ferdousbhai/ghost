@@ -2,7 +2,7 @@
 
 Ghost gives the owner a persistent persona and one conversation history. The
 daemon owns that
-state; the window and terminal are clients of the same authenticated API.
+state; the bar and terminal are clients of the same authenticated API.
 [Getting started](getting-started.md) covers use;
 [CONTRACTS.md](../CONTRACTS.md) defines storage, wire, and lifecycle guarantees.
 
@@ -40,8 +40,8 @@ or todo API.
 
 ## Why existing machine facilities own the rest
 
-- The window follows Omarchy's current theme through omui. Ghost has no
-  shell plugin, bar widget, or tray helper.
+- The bar follows Omarchy's current theme through omui. Ghost has no
+  shell plugin, widget in Omarchy's bar, or tray helper.
 - Browser automation uses the installed agent-browser CLI through Bash in
   the owner's signed-in Chromium, with separate tabs for concurrent tasks.
 - There is no screen control. Desktop work goes through Omarchy's commands,

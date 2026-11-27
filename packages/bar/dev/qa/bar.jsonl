@@ -1,0 +1,25 @@
+# The bar on the stand-in model (`stand_in llama-server`): a question by Enter, its answer as a caption, and the
+# conversation gone back through with Up and Down. dev/qa.sh runs it.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+# The prompt has the keyboard from the start, and nothing is said yet.
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"shot","path":"qa-bar-empty.png"}
+{"do":"type","text":"When does the boat leave?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"When does the boat leave?","visible":true}
+# What the ghost says is one caption: its Markdown marks dropped, a dot before each list item.
+{"do":"wait","role":"label","name":"The boat leaves at nine, from the north pier (Documents/Notes/Ferry trip.md). · Bring the tickets. · Sara is meeting you there.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true,"text":""}
+{"do":"shot","path":"qa-bar-answer.png"}
+
+# Up names the caption on screen; Down from the last is the end of the conversation, nothing but the prompt; Up
+# brings it back.
+{"do":"key","keys":"Up"}
+{"do":"wait","role":"label","name":"1 of 1","visible":true,"timeout_ms":10000}
+{"do":"key","keys":"Down"}
+{"do":"wait","role":"label","name":"When does the boat leave?","visible":false}
+{"do":"key","keys":"Up"}
+{"do":"wait","role":"label","name":"1 of 1","visible":true}
+{"do":"wait","role":"label","name":"When does the boat leave?","visible":true}
+{"do":"quit"}

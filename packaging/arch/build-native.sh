@@ -21,7 +21,7 @@ export CARGO_HOME=/cache/cargo
 cd /build
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-# The window's scripted QA needs a display; .githooks/verify runs it.
+# The bar's scripted QA needs a display; .githooks/verify runs it.
 cargo test --workspace --release --locked
 version=\$(bash packaging/release/verify-release-version.sh .)
 recipe=\$(mktemp -d)/ghost

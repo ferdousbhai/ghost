@@ -27,7 +27,7 @@ answers every turn, so the owner's data stays on the machine; Ghost runs no
 turn on a cloud model. A coding agent the owner has (Claude Code, Codex,
 Antigravity) is a command the model runs from its shell, with that agent's
 own sign-in, tools, and limits.
-`ghostd` owns sessions and state transitions; the window and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no web page; remote
+`ghostd` owns sessions and state transitions; the bar and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no web page; remote
 access is the summonghost.com app over an explicit Tailscale Serve address. The
 app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale
@@ -171,8 +171,8 @@ that project's instructions and nothing of Ghost's.
 
 A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
 `[A-Za-z0-9._-]` not starting with `.` and not a sidecar's name
-(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the window `app-…`,
-the CLI `cli-…`). The directory is
+(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the CLI `cli-…`); the bar
+writes to `default` alone. The directory is
 the directory the model's commands run in and holds Ghost's log, `.conversation.jsonl`
 ([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)): one JSON
 object per line — the conversation header, owner and follow-up and hook
@@ -388,8 +388,10 @@ terminal `done` or `error`. Tool events carry the call id; a start names the
 tool and the directory it runs in, an update carries a bounded output
 summary, and an end names the tool and carries `isError`, the summary, and
 `output`, the whole of what the call returned as the model was given it.
-Nothing of a turn is held back from the owner: clients show the reasoning,
-each call whole, and all it printed, and the log keeps them (below). An owner `!command` is
+Nothing of a turn is held back from the owner: the log keeps the reasoning,
+each call whole, and all it printed (below), `ghost show` and the app show
+them, and the bar, which is captions, shows what was said and the command
+running. An owner `!command` is
 one `bash` tool card, then `done`.
 
 A turn response is cut after about 1 MB of events so no client has to hold
@@ -442,27 +444,40 @@ The ghost runs unthrottled: Ghost adds no turn, concurrency, or spend cap.
 
 The seam between the packages is the authenticated HTTP/SSE API. The Arch
 install is one package, `ghost`: the daemon,
-CLI, user unit, docs and licenses, and the window with its launcher entry and
+CLI, user unit, docs and licenses, and the bar with its launcher entry and
 icons. It replaces the `ghost-runtime` package that 0.11.9 and earlier split
 the daemon into. Removing it preserves owner data.
 
 - [`packages/daemon`](packages/daemon/src/daemon.rs) owns ghost homes and the
   persona prompt, configuration, authentication, conversations, the local model and its loop, hooks, lifecycle,
   HTTP, and the `ghost` CLI. It is a native Rust binary.
-- [`packages/window`](packages/window/src/main.rs) is Ghost's window
-  (`ghost-window`, app id `io.github.ferdousbhai.Ghost`): a Rust and GTK 4
-  app whose look (Omarchy's current theme, followed live), icons, and shared
-  widgets are [omui](https://github.com/ferdousbhai/omui)'s;
-  [`style.css`](packages/window/src/style.css) holds only Ghost's own rules,
+- [`packages/bar`](packages/bar/src/main.rs) is Ghost's bar
+  (`ghost-bar`, app id `io.github.ferdousbhai.Ghost`): a prompt pinned to
+  the bottom of the screen, over whatever else is there, with what the owner
+  asked and what the ghost says above it as captions. Ghost has no window. It
+  is Rust and GTK 4, a layer-shell surface (`gtk4-layer-shell`; a plain
+  undecorated window where the display has none), whose look (Omarchy's
+  current theme, followed live) is [omui](https://github.com/ferdousbhai/omui)'s;
+  [`style.css`](packages/bar/src/style.css) holds only Ghost's own rules,
   on omui's `@om_*` colours. It is a client of the
-  API and keeps no data: the conversations, and the one open, with the
-  answers to the ghost's open question as buttons above the composer. It finds the daemon as the CLI
+  API and keeps no data. It shows one conversation, `default`, a caption at a
+  time: each thing the ghost says takes the caption from the one before, a
+  full caption gives way to the next, a running command is one status line,
+  and Up and Down go back and forth through the whole conversation, which it
+  reads again each time it is shown and when a turn ends. The answers to the
+  ghost's open question are buttons under its caption. Reasoning, commands
+  and what they printed are not in it: `ghost show` lists them. Escape stops
+  a running turn, and with none puts the bar away. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
-  file). One instance: a second launch presents the first.
+  file). One instance: `ghost-bar` again shows the first and gives it the
+  keyboard, which is how a key binding summons it. `ghost-bar --listen` also
+  runs `omarchy-dictation toggle`, so one key opens the bar and listens;
+  dictation types into the bar's prompt as into any focused field, and Ghost
+  has no speech stack of its own.
   It is a member of the
   cargo workspace at the repository root, built, linted (rustfmt and clippy)
   and tested with the daemon, and the gate also walks its main flows with omui's scripted QA
-  ([`dev/qa.sh`](packages/window/dev/qa.sh): a window built with the `qa`
+  ([`dev/qa.sh`](packages/bar/dev/qa.sh): a bar built with the `qa`
   feature, against a scratch ghostd and a stand-in model, on a private
   broadway display); the package build's `check()`
   skips the QA, and no release build has the feature. It makes the `ghost`
@@ -567,7 +582,7 @@ the model has worked out, the one it recommends first (fewer is refused, said
 to the model). It records the conversation's open question
 (`question` in `GET /api/sessions`), says the question in the reply with its answers
 numbered, so the transcript keeps them and the next turn is handed them, and
-ends the turn; the window and the app also show the answers as buttons, the
+ends the turn; the bar and the app also show the answers as buttons, the
 first marked, and any other answer is typed.
 `bash(command)` is a command line run as the owner in the conversation's
 directory, with the conversation's environment, no sandbox and no
@@ -598,7 +613,7 @@ is answered with what was wrong, and nothing runs.
 
 - Never start a test daemon against the owner's ghost home or the live port 7717.
   Canary daemons isolate Ghost config and owner hooks.
-  Tests use scratch homes, and the window's scripted QA a private
+  Tests use scratch homes, and the bar's scripted QA a private
   HOME, XDG directories and display.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.

@@ -1,4 +1,4 @@
-//! Stand-ins for the window's scripted QA (`packages/window/dev/stand-in.sh`):
+//! Stand-ins for the bar's scripted QA (`packages/bar/dev/stand-in.sh`):
 //!
 //!   stand_in llama-server … --port <n>   a model server that, for every turn, reasons, runs one command and gives one
 //!                                        short reply, so Ask can be checked without loading a model (ghostd spawns it

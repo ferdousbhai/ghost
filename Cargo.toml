@@ -1,11 +1,11 @@
-# Ghost: the daemon with its `ghost` command line, and the window.
+# Ghost: the daemon with its `ghost` command line, and the bar.
 [workspace]
 resolver = "3"
-members = ["packages/daemon", "packages/window"]
+members = ["packages/daemon", "packages/bar"]
 
 [workspace.package]
 # The release version, in this one place: both crates inherit it, and
-# `ghostd --version`, `ghost --version` and `ghost-window --version` print it.
+# `ghostd --version`, `ghost --version` and `ghost-bar --version` print it.
 version = "0.13.0"
 edition = "2024"
 license = "Apache-2.0"

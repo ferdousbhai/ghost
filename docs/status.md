@@ -17,6 +17,17 @@ What they said it must be:
 
 Done since:
 
+- 2026-11-27, the window is gone, at the owner's word ("the ghost should
+  literally feel like it lives in the computer, not an app"): `ghost-bar`
+  (`packages/bar`, formerly `packages/window`) is a prompt pinned to the
+  bottom of the screen with captions above it, one conversation (`default`),
+  Up and Down through it, `--listen` to start Omarchy's dictation with it.
+  The window's chat list, Markdown rendering, and its showing of reasoning
+  and command output went with it; `ghost show` still lists those.
+  Still to come, agreed in outline: one conversation in the daemon, CLI and
+  page too (no thread list anywhere), with handoff keeping a document per
+  topic. Not checked on a real desktop yet: dictation into the bar, and
+  Escape then summoning again.
 - 2026-11-26, a second cleanup, agreed with the owner: the turn_end hook
   (push alerts replaced its one use), the read-only guest role (only the
   owner reaches Ghost), the ghosts root (the home is

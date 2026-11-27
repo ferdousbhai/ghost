@@ -25,5 +25,5 @@ their GitHub identity; an existing instruction to push is sufficient.
    its worktree and branches after merge.
 
 A source build does not update a packaged install. Deploy and verify using
-[the maintenance runbook](docs/self-maintenance.md), Test changes against scratch state and the isolated window preview,
+[the maintenance runbook](docs/self-maintenance.md), Test changes against scratch state and the bar's scripted QA,
 never the owner's live ghost or desktop.

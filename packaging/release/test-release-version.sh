@@ -24,7 +24,7 @@ for invalid in 1.2.3.alpha 01.2.3 0.0.0; do
 done
 
 # Neither crate carries a version of its own to fall out of step.
-for crate in daemon window; do
+for crate in daemon bar; do
   grep -Fxq 'version.workspace = true' "$source_root/packages/$crate/Cargo.toml"
 done
 

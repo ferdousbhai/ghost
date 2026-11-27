@@ -6,7 +6,7 @@ code history, journald is the lifecycle history, and systemd is the guardian
 that survives the daemon it restarts.
 
 Any part of Ghost's code is a ghost's to change, to fit its owner: its
-persona, its window, its daemon, its recipes. On Omarchy, Ghost is a packaged
+persona, its bar, its daemon, its recipes. On Omarchy, Ghost is a packaged
 install whose files pacman owns and a ghost cannot write; a ghost changes
 itself by running from its own clone instead, as below, which needs no sudo beyond
 installing `cargo` and is undone in a few commands. That clone runs the
@@ -21,11 +21,11 @@ Before deploying, inspect the actual paths:
 
 ```sh
 systemctl --user cat ghostd.service
-command -v ghostd ghost-window
+command -v ghostd ghost-bar
 ghost status
 ```
 
-The package installs the daemon and the window from one version; building
+The package installs the daemon and the bar from one version; building
 another checkout does not update them. The sections below describe an explicit development
 override, not a second package distribution channel.
 
@@ -75,12 +75,12 @@ invisible to the daemon's writes even when the file permissions allow them.
 The daemon runs the *built* binary. Source edits reach the running daemon
 only after `cargo build --release --locked` and a restart.
 
-### The window
+### The bar
 
-The window is one binary, `ghost-window`, and a client of the daemon's API.
-The same build compiles a clone's to `target/release/ghost-window`;
-run that file to use it, and close the window to go back
-to the packaged one. `packages/window/dev/qa.sh` walks a change's flows, with
+The bar is one binary, `ghost-bar`, and a client of the daemon's API.
+The same build compiles a clone's to `target/release/ghost-bar`. One bar
+runs at a time and stays running once summoned, hidden by Escape, so the
+packaged one must have ended before a clone's can start, and the reverse. `packages/bar/dev/qa.sh` walks a change's flows, with
 screenshots, against a scratch ghostd and a stand-in model.
 
 The ghost's prompt carries none of this: the loop, the restart unit, and the
@@ -135,8 +135,8 @@ XDG_STATE_HOME="$task_canary_dir/state" \
 Run that command from the built checkout. Point the client at the canary
 with `GHOSTD_PORT=7799` and
 `GHOSTD_API_TOKEN_FILE="$task_canary_dir/state/ghost/api-token"`. Stop its captured process
-before deleting the scratch directory. Functional window verification
-uses `packages/window/dev/qa.sh`, never the owner's session.
+before deleting the scratch directory. Functional verification of the bar
+uses `packages/bar/dev/qa.sh`, never the owner's session.
 
 Never port 7717 or `~/.local/share/ghost`; scratch configuration also prevents
 live owner hooks from running. Every canary must use its own ghost home.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole gate, once: format, lints, a release build, every test, the
-# window's scripted QA, the page's checks, and the packaging suites. A green run on a clean tree
+# bar's scripted QA, the page's checks, and the packaging suites. A green run on a clean tree
 # is remembered by that tree's hash, so the pre-push hook can skip a suite that
 # already passed on exactly what is being pushed.
 #
@@ -31,8 +31,8 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 # The release build is what the package ships; the tests run on it.
 cargo build --workspace --release --locked
 cargo test --workspace --release --locked
-# The window's main flows, against a scratch ghostd, on a private display.
-bash packages/window/dev/qa.sh
+# The bar's main flows, against a scratch ghostd, on a private display.
+bash packages/bar/dev/qa.sh
 # The summonghost.com page, in headless Chromium.
 bash packages/web/check.sh
 # What the gate checks beyond the workspace, run as the PKGBUILD's check()

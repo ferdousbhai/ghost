@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # The release version lives in the root Cargo.toml alone ([workspace.package]);
-# the daemon and the window both inherit it.
+# the daemon and the bar both inherit it.
 usage='verify-release-version.sh <source-root> | --valid <version>'
 
 # x.y.z with no leading zeros, and not 0.0.0.

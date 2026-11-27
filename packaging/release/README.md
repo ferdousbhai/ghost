@@ -10,8 +10,8 @@ and its `sync-upstream` workflow follows the tags.
 
 The recipe builds everything from that snapshot: `prepare()` downloads what
 cargo's lockfile names, and `build()` compiles the daemon, the `ghost`
-command and the window with cargo. One archive, one commit: a package cannot
-mix an old window with a new daemon or client.
+command and the bar with cargo. One archive, one commit: a package cannot
+mix an old bar with a new daemon or client.
 
 ## Cutting a release
 

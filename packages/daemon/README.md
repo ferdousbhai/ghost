@@ -25,4 +25,4 @@ Never point a development daemon at `~/.local/share/ghost`, never contact the li
 ## Runtime notes
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
-the authenticated HTTP API, and renders the same conversations as the window. Run `ghost help` for the current command catalog.
+the authenticated HTTP API, and reaches the same conversations as the bar. Run `ghost help` for the current command catalog.

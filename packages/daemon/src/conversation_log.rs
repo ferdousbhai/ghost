@@ -1,6 +1,6 @@
 //! A conversation's own record, `sessions/<id>/.conversation.jsonl` in the
 //! ghost home: what the owner said, what the ghost answered, the tools it ran,
-//! the owner's `!` commands. The window, `ghost show` and the phone read it,
+//! the owner's `!` commands. The bar, `ghost show` and the phone read it,
 //! and each turn is handed its newest part: the model keeps no session of its
 //! own.
 //!

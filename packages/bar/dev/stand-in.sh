@@ -10,7 +10,7 @@
 stand_in_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 stand_in_repo=$(realpath -e -- "$stand_in_dir/../../..")
 # The daemon and the stand-in tools (packages/daemon/examples/stand_in.rs), built once, as debug builds.
-(cd "$stand_in_repo" && bash packages/window/dev/cargo.sh build --locked --quiet -p ghostd --bin ghostd --example stand_in)
+(cd "$stand_in_repo" && bash packages/bar/dev/cargo.sh build --locked --quiet -p ghostd --bin ghostd --example stand_in)
 stand_in_ghostd_binary=$stand_in_repo/target/debug/ghostd
 stand_in_tool=$stand_in_repo/target/debug/examples/stand_in
 

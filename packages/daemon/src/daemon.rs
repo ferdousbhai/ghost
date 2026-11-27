@@ -24,7 +24,7 @@ Usage:
 
 Subcommands:
   api-token                Print the bearer token local API clients present
-                           (minting one on first run). The window and CLI read
+                           (minting one on first run). The bar and CLI read
                            the file themselves; this is for curl, scripts, and
                            diagnosing a 401. To replace it, delete the file and
                            restart.

@@ -1,6 +1,6 @@
 # Getting started
 
-Install Ghost and talk to it in its window or the terminal.
+Install Ghost and talk to it from its bar or the terminal.
 
 For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
 of — this page.
@@ -92,8 +92,13 @@ systemctl --user enable --now ghostd.service
 
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
-launcher opens the window (`ghost-window`): your conversations with the
-ghost.
+launcher summons the bar (`ghost-bar`): a prompt at the bottom of the
+screen, with what you ask and what the ghost says above it as captions.
+Up and Down go back through the conversation, and Escape puts the bar away.
+Bind a key to it in `~/.config/hypr/bindings.lua` so it is always one press
+away, for example `o.bind("SUPER + CTRL + G", "Ghost", "ghost-bar --listen")`;
+with `--listen` the same key starts Omarchy's dictation, and pressed again
+ends it, so what you said is in the prompt.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -104,7 +109,7 @@ ghost status
 It prints the daemon URL, the token file path, the ghost, and whether it is
 served to your tailnet; that it prints at all means the daemon answered and
 accepted the token (otherwise it exits 3 or 4). The bearer token is minted on
-first run at `~/.local/state/ghost/api-token` (mode 0600); the window and CLI read
+first run at `~/.local/state/ghost/api-token` (mode 0600); the bar and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
 To replace it, delete the file and `systemctl --user restart ghostd`.
 
@@ -144,10 +149,13 @@ leaves the machine; nothing else does.
 
 ## 6. First conversation
 
-Open Ghost from your app launcher. **Ask** is a conversation with the ghost:
-type, and `Enter` sends (`Shift+Enter` is a newline). The answer streams in
-with a line saying what the ghost is doing; `Esc` or **Stop** ends a running
-turn. Your conversations are listed beside it, and **New chat** starts one.
+Summon Ghost from your app launcher, or with the key you bound. Type in the
+prompt at the bottom of the screen, and `Enter` sends. What the ghost says
+appears above it as captions, with a line saying which command it is
+running; `Esc` ends a running turn, and with none puts the bar away. It is
+one conversation: `Up` and `Down` go back and forth through it, and
+`ghost show default` in a terminal lists all of it, the ghost's reasoning
+and commands included.
 
 Your notes, mail, photos and the rest stay in their own apps. The ghost
 reaches them through each app's command line, and installs or connects one
@@ -176,8 +184,8 @@ command reports back.
 The CLI talks to this machine's ghost; the session is `-s`,
 then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
 carries that variable. It never edits a ghost home directly: every change to
-a ghost goes through the daemon, so the window shows the same conversations,
-and the reverse.
+a ghost goes through the daemon, so the bar shows what was said from the
+terminal in the `default` conversation, and the reverse.
 
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
@@ -198,7 +206,7 @@ codes.
 `GHOST_HOME` moves the ghost home, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` the API token file.
 `GHOSTD_PORT` moves the port the daemon binds on `127.0.0.1` and the CLI and
-window dial (7717 by default).
+bar dial (7717 by default).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
 leaves the ghost home, conversations, tokens, and your documents untouched.
@@ -207,8 +215,8 @@ leaves the ghost home, conversations, tokens, and your documents untouched.
 
 - **Use websites.** Install agent-browser; `ghost help browser` covers signed-in Chromium
   setup, shared-session tab locking, and cleanup.
-- **Talk instead of typing.** Omarchy's dictation types into the window's
-  composer as into any app. Ghost adds no speech stack of its own.
+- **Talk instead of typing.** Omarchy's dictation types into the bar's
+  prompt as into any app, and `ghost-bar --listen` starts it as the bar opens. Ghost adds no speech stack of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** Tailscale Serve is the opt-in: `tailscale serve --bg --https=443 http://127.0.0.1:7717`
   turns it on and `tailscale serve --https=443 off` turns it off. `ghost
@@ -223,7 +231,7 @@ leaves the ghost home, conversations, tokens, and your documents untouched.
 | Symptom | Check |
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
-| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the window and CLI read `~/.local/state/ghost/api-token` |
+| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the bar and CLI read `~/.local/state/ghost/api-token` |
 | A turn fails at once | Is `local.model` set in `~/.config/ghost/config.json`, and does `llama-server` start? `journalctl --user -u ghostd -e` has its error |
 
 After an upgrade, restart the daemon to load the new build:

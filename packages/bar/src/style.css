@@ -1,0 +1,21 @@
+/* Ghost's own styles, over omui's stylesheet: the bar's captions and its prompt.
+   Colours are omui's @om_* tokens, tinted with alpha(); no hex. */
+
+/* Nothing of a window shows, only the captions and the prompt over whatever is on screen. */
+.bar-window { background: transparent; }
+.captions {
+  background: alpha(@om_bg, 0.82);
+  border-radius: 10px;
+  padding: 10px 18px;
+}
+.caption-asked { color: @om_dim_text; font-size: 1.05em; }
+.caption-said { font-size: 1.5em; font-weight: 600; line-height: 1.25; }
+.caption-status { color: @om_dim_text; font-family: monospace; font-size: 0.95em; }
+.bar-entry {
+  background: alpha(@om_bg, 0.92);
+  border: 1px solid alpha(@om_border, 0.8);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 1.15em;
+}
+.bar-entry:focus-within { border-color: @om_accent; }

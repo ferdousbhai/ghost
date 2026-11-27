@@ -4,7 +4,7 @@ pkgname=ghost
 pkgver=@@VERSION@@
 pkgrel=1
 pkgdesc="Your own ghost, answered by a model on your machine"
-# The daemon, the ghost command and the window are native code.
+# The daemon, the ghost command and the bar are native code.
 arch=('x86_64' 'aarch64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
 license=('Apache-2.0')
@@ -12,6 +12,7 @@ depends=(
   'curl'
   'glib2'
   'gtk4>=4.14'
+  'gtk4-layer-shell'
   'jq'
   'systemd'
 )
@@ -44,7 +45,7 @@ prepare() {
 
 build() {
   cd -- "$srcdir/ghost-${pkgver}"
-  # The daemon, the ghost command and the window. No build or home folder in
+  # The daemon, the ghost command and the bar. No build or home folder in
   # their panic messages.
   RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$srcdir=/build --remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo" \
     cargo build --frozen --release

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage='install-payload.sh <source-root> <binaries> <pkgdir> <pkgname>'
 source_root="${1:?usage: $usage}"
-# Where cargo left the release build: ghostd, ghost and ghost-window.
+# Where cargo left the release build: ghostd, ghost and ghost-bar.
 binaries="$(realpath -e -- "${2:?usage: $usage}")"
 pkgdir="${3:?usage: $usage}"
 pkgname="${4:?usage: $usage}"
@@ -23,15 +23,15 @@ for doc in "$source_root"/docs/*.md; do
   install -Dm644 "$doc" "$pkgdir/usr/share/doc/ghost/docs/${doc##*/}"
 done
 
-# The window is the app the launcher entry opens, named by its app id so
+# The bar is what the launcher entry summons, named by its app id so
 # the compositor finds the entry's icon for it.
-install -Dm755 "$binaries/ghost-window" "$pkgdir/usr/bin/ghost-window"
-install -Dm644 "$source_root/packages/window/contrib/io.github.ferdousbhai.Ghost.desktop" \
+install -Dm755 "$binaries/ghost-bar" "$pkgdir/usr/bin/ghost-bar"
+install -Dm644 "$source_root/packages/bar/contrib/io.github.ferdousbhai.Ghost.desktop" \
   "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
-install -Dm644 "$source_root/packages/window/contrib/icons/ghost.svg" \
+install -Dm644 "$source_root/packages/bar/contrib/icons/ghost.svg" \
   "$pkgdir/usr/share/icons/hicolor/scalable/apps/ghost.svg"
 for size in 48 128 256; do
-  install -Dm644 "$source_root/packages/window/contrib/icons/ghost-$size.png" \
+  install -Dm644 "$source_root/packages/bar/contrib/icons/ghost-$size.png" \
     "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/ghost.png"
 done
 

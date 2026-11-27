@@ -5,7 +5,7 @@ Ghost is installed. Start its daemon in the current graphical session with:
   systemctl --user enable --now ghostd.service
   ghost status
 
-Its window is "Ghost" in the app launcher.
+"Ghost" in the app launcher summons its bar at the bottom of the screen; bind a key to: ghost-bar --listen
 Browser automation uses the optional agent-browser CLI through Bash.
 
 Your ghost home, credentials, and state belong to you; package removal preserves them.
