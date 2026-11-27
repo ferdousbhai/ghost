@@ -21,6 +21,24 @@ the app, which leaves no remote client.
 
 Only your own Tailscale login gets in. See `CONTRACTS.md` for the wire contract.
 
+## The app
+
+It works as a messaging app does. The first screen lists your machines, each
+with its ghost's name, the last message and when, and a mark when there is
+something you have not read. Opening a machine opens its one conversation:
+your messages on the right, the ghost's on the left, the newest at the bottom;
+scroll up for earlier ones. While the ghost works, a typing bubble shows the
+command it is running. Each reply has a small line above it, such as "Thought,
+ran 3 commands": tap it to see the ghost's reasoning and every command with
+all it printed.
+
+Send while the ghost is working and your message waits its turn; the send
+button with nothing typed stops the turn and hands back what was waiting. When
+the ghost asks you something, its answers are buttons above the message box,
+its recommendation first, and you can type any other answer. The camera button
+attaches photos. "Start over…" in the chat's menu moves the conversation to
+that machine's Trash and begins a new one with your next message.
+
 ## Completion alerts
 
 Turn them on in the app: "Alert this device when a ghost finishes", on the

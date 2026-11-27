@@ -5,7 +5,7 @@
  */
 const CACHE = "summonghost-shell";
 const SHELL = [
-  "/", "/app.css", "/js/app.js", "/js/net.js", "/js/store.js", "/js/push.js", "/js/markdown.js", "/js/tool-call.js",
+  "/", "/app.css", "/js/app.js", "/js/net.js", "/js/store.js", "/js/push.js", "/js/markdown.js", "/js/thread.js", "/js/tool-call.js",
   "/manifest.webmanifest", "/icons/ghost.svg", "/icons/icon-192.png", "/icons/icon-512.png",
 ];
 
@@ -32,17 +32,26 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
-// An alert from one of the owner's machines: a ghost finished a turn. The
-// conversation the owner is looking at needs none.
+/**
+ * An alert as it is shown: `{ title, body, url }` from one of the owner's
+ * machines, its link kept only when it is this app's. The tag is the machine
+ * the link names, so a machine's newer alert replaces its own older one and
+ * never another machine's.
+ */
+function shown(alert, origin) {
+  const url = typeof alert?.url === "string" && alert.url.startsWith(origin + "/") ? alert.url : origin + "/";
+  const host = new URL(url).hash.replace(/^#\/?/, "").split("/")[0];
+  return { title: String(alert?.title || "Ghost"), body: String(alert?.body || ""), url, tag: host ? "ghost:" + host : "ghost" };
+}
+
+// A ghost finished a turn. The chat the owner is looking at needs no alert.
 self.addEventListener("push", (event) => {
   let alert = {};
   try { alert = event.data.json(); } catch {}
-  const url = typeof alert.url === "string" && alert.url.startsWith(self.location.origin + "/") ? alert.url : "/";
+  const { title, body, url, tag } = shown(alert, self.location.origin);
   event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((open) => {
     if (open.some((client) => client.focused && client.url === url)) return;
-    return self.registration.showNotification(String(alert.title || alert.ghost || "Ghost"), {
-      body: String(alert.body || ""), tag: String(alert.tag || "ghost"), icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", data: { url },
-    });
+    return self.registration.showNotification(title, { body, tag, icon: "/icons/icon-192.png", badge: "/icons/icon-192.png", data: { url } });
   }));
 });
 

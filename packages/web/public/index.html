@@ -26,8 +26,6 @@
   <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 3 3 9-3 9 19-9z"/><path d="M6 12h16"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
-  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 3h6l-1 6 3 3v2H7v-2l3-3z"/></symbol>
-  <symbol id="i-machine" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
 </svg>
 
 <div id="banner" role="status"></div>
@@ -64,25 +62,19 @@
   </div>
 </section>
 
-<section id="ghost-pane" class="pane side" aria-label="Conversations">
-  <header>
-    <a id="ghost-back" class="round small back" href="#/" aria-label="Machines"><svg class="icon"><use href="#i-back"/></svg></a>
-    <div class="titles"><div id="ghost-name" class="ghost-name"></div><div id="ghost-machine" class="sub"></div></div>
-    <button id="ghost-new" class="round small accent" type="button" aria-label="New conversation" title="New conversation"><svg class="icon"><use href="#i-plus"/></svg></button>
-  </header>
-  <div class="scroll"><div id="ghost-note" class="note" role="status"></div><nav id="sessions"></nav></div>
-</section>
-
 <section id="chat" class="pane main" aria-label="Conversation">
   <header>
-    <a id="chat-back" class="round small back" href="#/" aria-label="Conversations"><svg class="icon"><use href="#i-back"/></svg></a>
+    <a id="chat-back" class="round small back" href="#/" aria-label="Machines"><svg class="icon"><use href="#i-back"/></svg></a>
+    <span class="avatar small"><svg class="glyph"><use href="#i-ghost"/></svg></span>
     <div class="titles"><div id="chat-title" class="chat-title"></div><div id="chat-sub" class="sub"></div></div>
-    <details id="chat-tools" class="tools"><summary aria-label="Conversation tools">⋯</summary><div>
-      <button id="chat-pin" type="button">Pin</button>
-      <button id="chat-delete" type="button">Delete</button>
+    <details id="chat-tools" class="tools" hidden><summary aria-label="Conversation menu">⋯</summary><div>
+      <button id="chat-restart" type="button">Start over…</button>
     </div></details>
   </header>
-  <main id="log"></main>
+  <main id="log" aria-label="Messages">
+    <button id="earlier" class="earlier" type="button" hidden>Earlier messages</button>
+    <div id="typing" class="typing" hidden><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="typing-what" role="status"></span><span id="typing-for" aria-hidden="true"></span></div>
+  </main>
   <div id="question" class="question" hidden><p id="question-text"></p><div id="question-options"></div></div>
   <div id="queue" class="queue" hidden></div>
   <div id="status" role="status"></div>
@@ -90,9 +82,8 @@
   <form id="composer" hidden>
     <div id="tray"></div>
     <div class="row">
-      <button id="new" class="round" type="button" aria-label="New conversation" title="New conversation"><svg class="icon"><use href="#i-plus"/></svg></button>
       <div class="box">
-        <textarea id="prompt" placeholder="Message" rows="1"></textarea>
+        <textarea id="prompt" aria-label="Message" placeholder="Message" rows="1"></textarea>
         <button id="camera" type="button" aria-label="Attach a photo" title="Attach a photo"><svg class="icon"><use href="#i-camera"/></svg></button>
         <input id="file" type="file" accept="image/*" multiple hidden>
       </div>
@@ -104,6 +95,15 @@
 <section id="placeholder" class="pane main" aria-hidden="true">
   <div class="empty"><svg class="glyph"><use href="#i-ghost"/></svg><span id="placeholder-text">Pick a machine.</span></div>
 </section>
+
+<dialog id="restart" aria-labelledby="restart-title" aria-describedby="restart-text">
+  <h2 id="restart-title"></h2>
+  <p id="restart-text"></p>
+  <div class="dialog-actions">
+    <button id="restart-cancel" class="pill quiet" type="button">Cancel</button>
+    <button id="restart-confirm" class="pill danger" type="button">Start over</button>
+  </div>
+</dialog>
 
 <template id="empty-log"><div class="empty"><svg class="glyph"><use href="#i-ghost"/></svg><span></span></div></template>
 </body>

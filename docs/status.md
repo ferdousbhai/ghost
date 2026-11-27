@@ -26,7 +26,8 @@ Done since:
   keeps its old `sessions/` unread; with ghostd stopped,
   `mv sessions/<id> conversation` carries one over by hand (its log and
   attachments; an open question and the read mark are not carried). The
-  page (`packages/web`) still calls the old routes until it is redone.
+  page (`packages/web`) is redone for it as one chat per machine, in the
+  owner's words "similar to on whatsapp messages"; it is not yet published.
 - 2026-11-27, handoff keeps a document per topic, at the owner's word ("The
   ghost makes use of handoff to maintain documents for context and
   continuity as conversation topics change"): at a handoff the ghost first

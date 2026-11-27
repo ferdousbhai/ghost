@@ -3,8 +3,10 @@
 <meta charset="utf-8">
 <title>The page's checks</title>
 <!-- Run by check.sh in headless Chromium: every script parses, the service
-     worker caches exactly the shell that exists, and machine names normalize.
-     The verdict is left on the <html> element once the page has loaded. -->
+     worker caches exactly the shell that exists and tags an alert by its
+     machine, machine names normalize, and a transcript becomes the thread it
+     should (thread.js). The verdict is left on the <html> element once the
+     page has loaded. -->
 <body>
 <script>
 const failures = [];
@@ -42,6 +44,9 @@ for (const name of scripts) document.write(`<script type="module" src="public/js
 </script>
 <script type="module">
 import { normalizeHost, shortName, tailnetOf } from "./public/js/net.js";
+import { attachmentOf, fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, worked } from "./public/js/thread.js";
+
+const same = (got, want, what) => equal(JSON.stringify(got), JSON.stringify(want), what);
 
 try {
   const worker = read("public/sw.js");
@@ -60,8 +65,128 @@ try {
   equal(normalizeHost("a.ts.net:99999x"), null, "a bad port");
   equal(tailnetOf("alarm.tail58bdd3.ts.net:8443"), "tail58bdd3.ts.net", "tailnetOf");
   equal(shortName("alarm.tail58bdd3.ts.net:8443"), "alarm", "shortName");
+
+  // An alert is `{ title, body, url }`: tagged by the machine its link names, so machines do not replace each other's.
+  const origin = "https://summonghost.com";
+  const shown = new Function("self", `${worker}\nreturn shown;`)({ addEventListener() {}, location: { origin } });
+  same(shown({ title: "Mira", body: "Done.", url: origin + "/#/desk.tail1.ts.net" }, origin),
+    { title: "Mira", body: "Done.", url: origin + "/#/desk.tail1.ts.net", tag: "ghost:desk.tail1.ts.net" }, "an alert");
+  check(shown({ url: origin + "/#/laptop.tail1.ts.net" }, origin).tag !== shown({ url: origin + "/#/desk.tail1.ts.net" }, origin).tag, "two machines share an alert tag");
+  same(shown({ title: "x", url: "https://evil.example/#/desk.tail1.ts.net" }, origin), { title: "x", body: "", url: origin + "/", tag: "ghost" }, "an alert linking elsewhere");
+  same(shown(null, origin), { title: "Ghost", body: "", url: origin + "/", tag: "ghost" }, "an alert with nothing in it");
 } catch (error) {
   failures.push(`sw.js: ${error.message}`);
+}
+
+try {
+  // The route is the machine and nothing else.
+  equal(routeHost("#/desk.tail1.ts.net"), "desk.tail1.ts.net", "a machine's route");
+  equal(routeHost("#/desk.tail1.ts.net%3A8443"), "desk.tail1.ts.net:8443", "a route with a port");
+  equal(routeHost(link("desk.tail1.ts.net:8443")), "desk.tail1.ts.net:8443", "a link read back");
+  equal(routeHost("#/desk.tail1.ts.net/app-1"), "desk.tail1.ts.net", "a link from before one conversation");
+  for (const hash of ["", "#", "#/", "#/%E0%A4%A"]) equal(routeHost(hash), null, `the machine list at ${JSON.stringify(hash)}`);
+  equal(link(), "#/", "the machine list's link");
+
+  equal(attachmentOf("![image](attachments/a.png)"), "attachments/a.png", "an attachment line");
+  equal(attachmentOf("see ![image](attachments/a.png)"), null, "an attachment inside a sentence");
+
+  // Bubbles: the owner's words and photos; the ghost's words under the working that led to them.
+  const text = (value) => ({ type: "text", text: value });
+  const bash = (command, output, more = {}) => ({ type: "toolCall", id: command, name: "bash", arguments: { command }, output, ...more });
+  const items = thread([
+    { role: "user", entryId: "e1", content: [text("When is the ferry?\n\n![image](attachments/p.jpg)")] },
+    { role: "assistant", entryId: "e2", content: [
+      { type: "handoff", text: "Earlier: the trip.", covers: 4 }, { type: "thinking", text: " The note says. " }, bash("cat note", "nine\n"),
+      text("At nine."), text("From the north pier."),
+      bash("false", "", { failed: true }), bash("date", "Fri"), text("Today."),
+      { type: "toolCall", id: "q", name: "ask", arguments: { question: "Book it?", options: ["Yes", "No"] }, output: "Asked." },
+    ] },
+    { role: "hook", entryId: "e3", content: [text("Run the tests.")] },
+    { role: "user", entryId: "e4", content: [text("!ls")] },
+    { role: "assistant", entryId: "e4o", content: [text("a.txt")] },
+    { role: "assistant", entryId: "e5", content: [bash("sleep 9", "")], errorMessage: "The model stopped." },
+    { role: "assistant", entryId: "e6", content: [] },
+  ]);
+  same(items.map((item) => `${item.kind} ${item.key}`),
+    ["owner e1", "ghost e2.0", "ghost e2.1", "ghost e2.2", "hook e3.hook", "owner e4", "ghost e4o.0", "ghost e5.0"], "the thread's bubbles");
+  same(items[0], { kind: "owner", key: "e1", text: "When is the ferry?", pics: ["attachments/p.jpg"] }, "the owner's bubble");
+  equal(items[1].text, "At nine.\n\nFrom the north pier.", "words between two commands are one bubble");
+  same(items[1].steps, [
+    { type: "handoff", text: "Earlier: the trip." }, { type: "thinking", text: "The note says." },
+    { type: "call", asks: false, line: "$ cat note", output: "nine" },
+  ], "the working over a reply, in the order it happened");
+  equal(worked(items[1].steps), "Wrote a handoff note, thought, ran 1 command", "a fold's line");
+  equal(worked(items[2].steps), "Ran 2 commands, 1 failed", "a fold's line with a failed command");
+  same([items[3].text, worked(items[3].steps)], ["", "Asked you"], "working with no words after it");
+  same([items[7].error, items[7].text], ["The model stopped.", ""], "a failed turn");
+  equal(new Set(items.map((item) => item.key)).size, items.length, "bubble keys repeat");
+
+  // A running turn folds into the shape its transcript will have.
+  const live = [];
+  const notices = [
+    { type: "owner_message", text: "When is the ferry?" }, { type: "start" }, { type: "pass" },
+    { type: "thinking", delta: "Loading the local model…" },
+    { type: "thinking", delta: " The note" }, { type: "thinking", delta: " says." },
+    { type: "tool_execution_start", id: "c1", toolName: "bash", arguments: { command: "cat note" } },
+    { type: "tool_execution_update", id: "c1", summary: "ni" },
+  ].map((ev) => fold(live, ev));
+  same(notices.filter(Boolean), ["Loading the local model…"], "the loading notice is not reasoning");
+  same(thread(live).at(-1).steps, [{ type: "thinking", text: "The note says." }, { type: "call", asks: false, line: "$ cat note", output: "ni", running: true }], "a command while it runs");
+  for (const ev of [
+    { type: "tool_execution_end", id: "c1", toolName: "bash", isError: false, summary: "nine", output: "nine\n" },
+    { type: "text_start" }, { type: "text_delta", delta: "At " }, { type: "text_delta", delta: "nine." },
+    { type: "something_new" },
+    { type: "owner_message", text: "And back?" }, { type: "pass" },
+    { type: "text_delta", delta: "At six." }, { type: "error", reason: "error", errorMessage: "The model stopped." },
+  ]) fold(live, ev);
+  const strip = (list) => list.map(({ key, ...rest }) => rest);
+  same(strip(thread(live)), strip(thread([
+    { role: "user", entryId: "e1", content: [text("When is the ferry?")] },
+    { role: "assistant", entryId: "e2", content: [{ type: "thinking", text: "The note says." }, bash("cat note", "nine\n"), text("At nine.")] },
+    { role: "user", entryId: "e3", content: [text("And back?")] },
+    { role: "assistant", entryId: "e4", content: [text("At six.")], errorMessage: "The model stopped." },
+  ])), "a turn's events against its transcript");
+  const stopped = [];
+  fold(stopped, { type: "error", reason: "aborted", errorMessage: "Aborted." });
+  equal(thread(stopped).length, 0, "a stopped turn is not a failure");
+
+  // Paging: the newest page first, then the one before it, down to the oldest message.
+  equal(newestOffset(0), 0, "an empty transcript");
+  equal(newestOffset(30), 0, "one full page");
+  equal(newestOffset(95), 65, "the newest page of many");
+  same(olderPage(65), { offset: 35, limit: 30 }, "the page before");
+  same(olderPage(5), { offset: 0, limit: 5 }, "the oldest page is only what is left");
+  equal(olderPage(0), null, "nothing before the oldest");
+
+  const noon = new Date(2026, 10, 27, 12, 0).getTime();
+  // ICU puts a narrow space before "AM" in some versions.
+  equal(when(new Date(2026, 10, 27, 9, 5).toISOString(), noon, "en-US").replace(/\s/g, " "), "9:05 AM", "a time today");
+  equal(when(new Date(2026, 10, 26, 23, 59).toISOString(), noon, "en-US"), "Yesterday", "a time yesterday");
+  equal(when(new Date(2026, 10, 23, 9, 0).toISOString(), noon, "en-US"), "Monday", "a time this week");
+  equal(when(new Date(2026, 9, 1, 9, 0).toISOString(), noon, "en-US"), "10/1/26", "an older time");
+  for (const none of [null, undefined, "", "soon"]) equal(when(none, noon), "", `no time for ${JSON.stringify(none)}`);
+
+  // The turn wire: a response cut at `resume` goes on in the next, each event once, in order, whatever the chunking.
+  const frames = (...events) => events.map((ev) => `data: ${JSON.stringify(ev)}\n\n`).join("");
+  const cut = (text, size) => new Response(new ReadableStream({
+    start(controller) {
+      const bytes = new TextEncoder().encode(text);
+      for (let at = 0; at < bytes.length; at += size) controller.enqueue(bytes.slice(at, at + size));
+      controller.close();
+    },
+  }));
+  const asked = [], heard = [];
+  const rest = async (path) => {
+    asked.push(path);
+    return asked.length === 1
+      ? cut(frames({ type: "text_delta", delta: "né" }, { type: "resume", turn: "t 1", from: 4 }), 3)
+      : cut(": keep-alive\n\n" + frames({ type: "done" }), 1000);
+  };
+  for await (const ev of turnEvents(cut(frames({ type: "start" }, { type: "pass" }, { type: "resume", turn: "t 1", from: 2 }), 7), rest)) heard.push(ev);
+  same(heard, [{ type: "start" }, { type: "pass" }, { type: "text_delta", delta: "né" }, { type: "done" }], "a turn cut into three responses");
+  same(asked, ["/conversation/stream?turn=t%201&from=2", "/conversation/stream?turn=t%201&from=4"], "where a cut turn goes on");
+} catch (error) {
+  failures.push(`thread.js: ${error.message}`);
 }
 ran = true;
 </script>

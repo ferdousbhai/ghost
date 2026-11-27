@@ -1,12 +1,14 @@
 /**
  * SummonGhost: every machine the owner has added, each with its one ghost and
- * that ghost's conversations, talked to straight over Tailscale. The route
- * lives in the hash, `#/<host>/<conversation>`, so the back button walks out.
+ * that ghost's one conversation, talked to straight over Tailscale, as a
+ * messaging app shows its chats. The route lives in the hash, `#/<host>`, so
+ * the back button walks out.
  */
 import { renderMarkdown } from "./markdown.js";
 import { api, base, label, normalizeHost, request, seg, shortName, tailnetOf } from "./net.js";
 import * as push from "./push.js";
 import { load, save } from "./store.js";
+import { fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, worked } from "./thread.js";
 import { toolCall } from "./tool-call.js";
 
 const $ = (id) => document.getElementById(id);
@@ -25,15 +27,16 @@ const svg = (name, cls = "icon") => {
   node.append(use);
   return node;
 };
-const mint = () => "app-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-const link = (host, session) =>
-  "#/" + [host, session].filter(Boolean).map(seg).join("/");
 
 // ── Machines ────────────────────────────────────────────────────────────────
 
 const saved = load();
-/** Each: `{ host, role, ghost, seen }` as saved (`ghost` is its ghost's name), plus `status`, `error`, `unread` for this visit. */
-const machines = saved.machines.map((m) => ({ ...m, status: "unknown", error: null, unread: 0 }));
+/**
+ * Each: `{ host, role, ghost, seen }` as saved (`ghost` is its ghost's name),
+ * plus, for this visit only, `status`, `error`, `conv` (its conversation as
+ * `GET /api/conversation` gives it) and `last` (its last message's words).
+ */
+const machines = saved.machines.map((m) => ({ ...m, status: "unknown", error: null, conv: null, last: "" }));
 const forgotten = new Set(saved.forgotten);
 let storageWorks = true;
 
@@ -47,7 +50,7 @@ function addMachine(host, fields = {}) {
   forgotten.delete(host);
   let m = machineOf(host);
   if (!m) {
-    m = { host, role: null, ghost: null, seen: 0, status: "unknown", error: null, unread: 0, ...fields };
+    m = { host, role: null, ghost: null, seen: 0, status: "unknown", error: null, conv: null, last: "", ...fields };
     machines.push(m);
   }
   persist();
@@ -59,7 +62,7 @@ function forgetMachine(host) {
   if (at >= 0) machines.splice(at, 1);
   forgotten.add(host);
   persist();
-  if (route.host === host) location.hash = "#/";
+  if (route === host) location.hash = link();
   renderHome();
 }
 
@@ -78,10 +81,9 @@ function refreshMachine(m) {
       m.status = "online";
       m.error = null;
       persist();
-      try {
-        const { sessions } = await api(m.host, "/sessions");
-        m.unread = sessions.filter((s) => s.unread).length;
-      } catch {}
+      // The open chat reads its own conversation, and its row with it.
+      if (m.host === route) loadConversation().catch(show);
+      else await readSummary(m).catch(() => {});
       if (m.role === "owner") discover(m).catch(() => {});
       // A machine reached as owner hears of this device, when alerts are on here.
       if (m.role === "owner") push.sync(m.host).catch(() => {});
@@ -91,9 +93,9 @@ function refreshMachine(m) {
     } finally {
       refreshing.delete(m.host);
       renderHome();
-      if (m.host === route.host) {
+      if (m.host === route) {
         applyRole();
-        if (m.status === "online") loadSessions().catch(show);
+        drawMeta();
       }
     }
   })();
@@ -125,7 +127,24 @@ async function discover(m) {
 
 const refreshAll = () => Promise.all(machines.map(refreshMachine));
 
-// ── Home ────────────────────────────────────────────────────────────────────
+/** What a ghost bubble says in one line: its words, else why it failed, else what it did. */
+function lastWords(item) {
+  if (!item) return "";
+  if (item.kind === "owner") return "You: " + (item.text.split("\n")[0] || "Photo");
+  if (item.kind === "hook") return item.text.split("\n")[0];
+  const said = renderMarkdown(item.text, document).firstChild?.textContent.trim() || "";
+  return (said.split("\n")[0] || (item.error ? "Failed: " + item.error : worked(item.steps))).slice(0, 200);
+}
+
+/** A machine's row, for a chat that is not open: its conversation's summary and its last message. */
+async function readSummary(m) {
+  m.conv = await api(m.host, "/conversation");
+  const count = m.conv.messageCount;
+  const tail = count ? (await api(m.host, "/conversation/transcript?limit=1&offset=" + (count - 1))).messages : [];
+  m.last = lastWords(thread(tail).at(-1));
+}
+
+// ── Home: the machines, as a messaging app lists its chats ──────────────────
 
 function renderBanner() {
   const reached = machines.filter((m) => m.status !== "unknown" && m.status !== "checking");
@@ -147,6 +166,41 @@ function ago(time) {
   return `seen ${Math.round(minutes / 1440)}d ago`;
 }
 
+/** A machine's row: its ghost, the last message and when, and whether there is something unread. */
+function machineRow(m) {
+  const c = m.status === "online" || m.status === "checking" ? m.conv : null;
+  const row = el(m.ghost ? "a" : "div", "chat-row" + (m.status === "offline" || m.status === "error" ? " stale" : c?.unread ? " unread" : ""));
+  if (m.ghost) {
+    row.href = link(m.host);
+    if (route === m.host) row.setAttribute("aria-current", "page");
+  }
+  const avatar = el("span", "avatar");
+  avatar.append(svg("ghost", "glyph"), el("span", "dot " + (m.status === "unknown" ? "" : m.status)));
+  const top = el("span", "row-top"), bottom = el("span", "row-bottom");
+  const machine = el("span", "row-machine", m.ghost ? label(m.host) : "");
+  machine.title = m.host;
+  top.append(el("span", "row-name", m.ghost || label(m.host)), machine, el("span", "row-time", when(c?.updatedAt)));
+  const state = {
+    online: "",
+    checking: c ? "" : "checking…",
+    offline: "offline · " + ago(m.seen),
+    error: m.error?.kind === "outdated" ? "update Ghost" : m.error?.kind === "not-owner" ? "not yours" : "error",
+    unknown: "",
+  }[m.status];
+  bottom.append(el("span", "row-last" + (c?.running ? " working" : ""), state || (c?.running ? "working…" : m.last || (c ? "No messages yet" : ""))));
+  if (c?.question) bottom.append(el("span", "tag", "asks"));
+  if (c?.unread) {
+    const badge = el("span", "badge");
+    badge.setAttribute("role", "img");
+    badge.setAttribute("aria-label", "Unread");
+    bottom.append(badge);
+  }
+  const text = el("span", "row-text");
+  text.append(top, bottom);
+  row.append(avatar, text);
+  return row;
+}
+
 function renderHome() {
   renderBanner();
   const empty = !machines.length;
@@ -154,39 +208,29 @@ function renderHome() {
   if (empty) $("add-form").hidden = false;
   renderAlerts().catch(() => {});
   const list = $("machines");
+  // A refresh redraws the rows; a menu the owner has open stays open.
+  const menu = list.querySelector("details[open]")?.dataset.host;
   list.replaceChildren();
   for (const m of machines) {
     const card = el("article", "machine");
-    const head = el("div", "machine-head");
-    const dot = el("span", "dot " + (m.status === "unknown" ? "" : m.status));
-    const name = el("span", "machine-name", label(m.host));
-    name.title = m.host;
-    const state = el("span", "state", {
-      online: "",
-      checking: "checking…",
-      offline: "offline · " + ago(m.seen),
-      error: m.error?.kind === "outdated" ? "update Ghost" : m.error?.kind === "not-owner" ? "not yours" : "error",
-      unknown: "",
-    }[m.status]);
-    const forget = el("button", "forget", "Remove");
+    const tools = el("details", "tools");
+    tools.dataset.host = m.host;
+    tools.open = menu === m.host;
+    const summary = el("summary", "", "⋯");
+    summary.setAttribute("aria-label", "Menu for " + label(m.host));
+    const forget = el("button", "", "Remove");
     forget.type = "button";
     forget.onclick = () => {
-      if (forget.classList.contains("armed")) return forgetMachine(m.host);
-      forget.classList.add("armed");
-      forget.textContent = "Tap to remove";
-      setTimeout(() => { forget.classList.remove("armed"); forget.textContent = "Remove"; }, 3000);
+      if (forget.classList.contains("danger")) return forgetMachine(m.host);
+      forget.classList.add("danger");
+      forget.textContent = "Tap again to remove";
+      setTimeout(() => { forget.classList.remove("danger"); forget.textContent = "Remove"; }, 3000);
     };
-    head.append(svg("machine"), name, state, dot, forget);
-    card.append(head);
+    const box = el("div");
+    box.append(forget);
+    tools.append(summary, box);
+    card.append(machineRow(m), tools);
     if (m.error) card.append(el("p", "machine-error", m.error.message));
-    if (m.ghost) {
-      const row = el("a", "ghost-row" + (m.status === "online" ? "" : " stale"));
-      row.href = link(m.host);
-      if (route.host === m.host) row.setAttribute("aria-current", "page");
-      row.append(svg("ghost", "glyph"), el("span", "", m.ghost));
-      if (m.unread) row.append(el("span", "badge", String(m.unread)));
-      card.append(row);
-    }
     list.append(card);
   }
 }
@@ -249,196 +293,380 @@ $("add-form").onsubmit = (event) => {
 
 // ── Route ───────────────────────────────────────────────────────────────────
 
-let route = { host: null, session: null };
+/** The machine whose chat is open; null on the machine list. */
+let route = null;
+/** A machine a link named that this browser does not list. */
+let stray = null;
 
-function parseRoute() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map((p) => {
-    try { return decodeURIComponent(p); } catch { return ""; }
-  });
-  const [host = null, session = null] = parts;
-  return machineOf(host) ? { host, session } : { host: null, session: null };
-}
-
-async function applyRoute() {
-  const next = parseRoute();
-  const ghostChanged = next.host !== route.host;
-  const sessionChanged = ghostChanged || next.session !== route.session;
+function applyRoute() {
+  const asked = routeHost(location.hash);
+  const next = machineOf(asked) ? asked : null;
+  const changed = next !== route;
   route = next;
-  document.body.dataset.view = route.session ? "chat" : route.host ? "ghost" : "home";
-  $("placeholder-text").textContent = route.host ? "Pick a conversation, or start one." : machines.length ? "Pick a machine." : "Add a machine to begin.";
+  document.body.dataset.view = route ? "chat" : "home";
+  $("placeholder-text").textContent = machines.length ? "Pick a machine." : "Add a machine to begin.";
+  // A link to a machine this browser does not list stays in the address bar, and says so.
+  if (asked && !next) {
+    stray = asked;
+    $("add-form").hidden = false;
+    $("add-host").value = normalizeHost(asked) || "";
+    $("add-error").textContent = `${asked} isn't one of your machines here. Add it to open its chat.`;
+  } else if (stray) {
+    stray = null;
+    $("add-form").hidden = machines.length > 0;
+    $("add-host").value = "";
+    $("add-error").textContent = "";
+  }
   renderHome();
-  if (ghostChanged) openGhost();
-  if (sessionChanged) openChat();
-  else renderSessions();
+  if (!changed) return;
+  openChat();
+  // Back at the list: each chat's last word may have changed since it was drawn.
+  if (!route) refreshAll();
 }
 window.addEventListener("hashchange", () => {
   const added = takeAddLink();
-  applyRoute().catch(show);
+  applyRoute();
   if (added) refreshAll();
 });
 
-// ── A ghost's conversations ─────────────────────────────────────────────────
+// ── A machine's chat ────────────────────────────────────────────────────────
 
-let sessions = [];
-let sessionsFor = "";
+const log = $("log"), prompt = $("prompt"), earlier = $("earlier"), typing = $("typing");
 let events = null;
-
-const owner = () => machineOf(route.host)?.role === "owner";
-/** The open machine's ghost, by name. */
-const ghostName = () => machineOf(route.host)?.ghost || "ghost";
-const conversationPath = (session) => "/sessions/" + seg(session);
-const rowOf = (id) => sessions.find((s) => s.id === id);
-
-function openGhost() {
-  events?.close();
-  events = null;
-  sessions = [];
-  sessionsFor = "";
-  $("sessions").replaceChildren();
-  $("ghost-note").textContent = "";
-  if (!route.host) return;
-  $("ghost-name").textContent = ghostName();
-  applyRole();
-  watch();
-  loadSessions().catch(show);
-}
-
-/** Invalidations from this machine; each names a conversation, and only that one's transcript is read again. */
-function watch() {
-  const { host } = route;
-  const source = new EventSource(base(host) + "/api/events");
-  let connected = false;
-  source.onopen = () => {
-    if (connected) loadSessions().catch(show);
-    connected = true;
-  };
-  source.onmessage = (event) => {
-    let id;
-    try { id = JSON.parse(event.data).id; } catch {}
-    loadSessions(id).catch(show);
-  };
-  events = source;
-}
-
-/** `changed`: the conversation an event named; undefined reads the open one again too. */
-async function loadSessions(changed) {
-  const { host } = route;
-  if (!host) return;
-  let rows;
-  try {
-    rows = (await api(host, "/sessions")).sessions;
-  } catch (error) {
-    if (route.host === host) $("ghost-note").textContent = error.message;
-    throw error;
-  }
-  if (route.host !== host) return;
-  $("ghost-note").textContent = "";
-  sessions = rows;
-  sessionsFor = host;
-  const m = machineOf(host);
-  m.unread = rows.filter((s) => s.unread).length;
-  $("ghost-name").textContent = ghostName();
-  renderHome();
-  renderSessions();
-  if (route.session) {
-    renderChatMeta();
-    if (changed === undefined || changed === route.session) {
-      if (!liveHere()) await loadTranscript(changed !== undefined);
-    }
-  }
-}
-
-function renderSessions() {
-  const nav = $("sessions");
-  nav.replaceChildren();
-  if (!route.host || sessionsFor !== route.host) return;
-  const list = draft && !rowOf(draft) ? [{ id: draft, title: "New conversation" }, ...sessions] : sessions;
-  if (!list.length) nav.append(el("p", "note", owner() ? "No conversations yet. Start one with +." : "No conversations yet."));
-  const item = (s) => {
-    const a = el("a", "session" + (s.unread ? " unread" : ""));
-    a.href = link(route.host, s.id);
-    if (s.id === route.session) a.setAttribute("aria-current", "page");
-    if (s.pinned) a.append(svg("pin"));
-    a.append(el("span", "label", s.title || s.preview || s.id));
-    if (s.question) a.append(el("span", "tag", "asks"));
-    if (s.running) a.append(el("span", "tag", "working"));
-    if (s.unread) a.append(el("span", "unread-dot"));
-    return a;
-  };
-  for (const s of list) nav.append(item(s));
-}
-
-function newConversation() {
-  if (!route.host || !owner()) return;
-  draft = mint();
-  location.hash = link(route.host, draft);
-}
-$("ghost-new").onclick = newConversation;
-$("new").onclick = () => { if (!turnHere()) newConversation(); };
-
-// ── The conversation ────────────────────────────────────────────────────────
-
-const log = $("log"), prompt = $("prompt");
-let draft = null;
-let readThrough = null, reading = false;
-/** The turn this page is streaming: `{ host, session, live }`; `live` while its bubbles are on screen. */
+/** The transcript read so far: the messages from `offset` (counted from the oldest) to the newest. */
+let page = { loaded: false, offset: 0, messages: [] };
+/** The bubbles on screen, by key, so a redraw keeps an open fold and a scrolled output as they were. */
+const nodes = new Map();
+let readThrough = null, marking = false;
+/**
+ * The turn this page is streaming: `{ host, shown, messages, now, quiet }`.
+ * `shown` while its bubbles are on screen; `messages` its events folded as the
+ * transcript will hold them; `now` the call running, `{ text, since }`;
+ * `quiet` while the ghost is writing its reply, when nothing need say it is busy.
+ */
 let turn = null;
 let pending = [];
 
-const turnHere = () => !!turn && turn.host === route.host && turn.session === route.session;
+const owner = () => machineOf(route)?.role === "owner";
+const conv = () => machineOf(route)?.conv;
+/** The open machine's ghost, by name. */
+const ghostName = () => machineOf(route)?.ghost || "ghost";
+const turnHere = () => !!turn && turn.host === route;
 /** This page's turn is here and its bubbles are on screen. */
-const liveHere = () => turnHere() && turn.live;
-const runningHere = () => turnHere() || !!rowOf(route.session)?.running;
-const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-const follow = (stick) => { if (stick) log.scrollTop = log.scrollHeight; };
+const liveHere = () => turnHere() && turn.shown;
+const runningHere = () => turnHere() || !!conv()?.running;
+/** The reader is at the newest message, so the thread follows what arrives; scrolled up, it stays put. */
+let following = true;
+const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+const toBottom = () => { log.scrollTop = log.scrollHeight; };
+// A fold opened at the bottom pushes the newest message down: the reader is where they chose to look.
+log.addEventListener("toggle", () => { following = atBottom(); }, true);
+// The ghost's question, the queue, a growing composer and a phone's keyboard take height from the thread;
+// a scrollbar appearing only narrows it, and moves no one.
+let height = log.clientHeight;
+new ResizeObserver(() => {
+  if (following && log.clientHeight !== height) toBottom();
+  height = log.clientHeight;
+}).observe(log);
 
 function show(error) {
   $("status").textContent = error?.message || String(error || "");
 }
 
 function openChat() {
-  if (turn && !turnHere()) turn.live = false;
+  events?.close();
+  events = null;
+  // A turn left behind runs on; back here, the transcript shows it.
+  if (turn) turn.shown = false;
+  page = { loaded: false, offset: 0, messages: [] };
   readThrough = null;
+  unreadable = false;
+  nodes.clear();
+  following = true;
+  log.replaceChildren(earlier, typing);
+  earlier.hidden = true;
   show("");
   clearTray();
   $("chat-tools").open = false;
   $("question").hidden = true;
   $("queue").hidden = true;
-  if (!route.session) return;
-  if (route.session !== draft && draft && !rowOf(draft)) draft = null;
-  $("chat-back").href = link(route.host);
+  if (!route) {
+    document.title = "SummonGhost";
+    return;
+  }
   applyRole();
-  renderChatMeta();
-  if (liveHere()) return; // Its bubbles are being drawn by the stream.
-  log.replaceChildren();
-  loadTranscript().catch(show);
+  drawMeta();
+  watch();
+  // A machine still being asked who we are reads its conversation when it answers.
+  if (machineOf(route).status !== "checking") loadConversation().catch(show);
+}
+
+/** Invalidations from the open machine: its one conversation changed, so it is read again. */
+function watch() {
+  const source = new EventSource(base(route) + "/api/events");
+  let connected = false;
+  source.onopen = () => {
+    if (connected) loadConversation().catch(show);
+    connected = true;
+  };
+  source.onmessage = () => loadConversation().catch(show);
+  events = source;
 }
 
 /** What the caller may do here, once the machine has said who they are. */
 function applyRole() {
-  const m = machineOf(route.host);
+  const m = machineOf(route);
   if (!m) return;
-  $("ghost-machine").textContent = label(route.host);
-  $("ghost-new").hidden = m.role !== "owner";
   $("composer").hidden = m.role !== "owner";
   $("readonly").hidden = m.role === "owner";
   $("readonly").textContent = m.role ? "" : "Checking who you are…";
 }
 
-function renderChatMeta() {
-  if (!route.session) return;
-  const row = rowOf(route.session);
-  $("chat-title").textContent = row ? row.title || row.preview || "Conversation" : "New conversation";
-  $("chat-sub").textContent = ghostName() + " · " + label(route.host);
-  document.title = (row?.title || ghostName()) + " · SummonGhost";
-  $("chat-tools").hidden = !owner() || !row;
-  $("chat-pin").textContent = row?.pinned ? "Unpin" : "Pin";
-  const question = owner() && !turnHere() ? row?.question : null;
+let reading = null, readAgain = false, unreadable = false;
+/**
+ * Reads the open machine's conversation again, one read at a time: a change
+ * during a read is read after it. A read that works takes back what a failed
+ * one said, and no other message.
+ */
+function loadConversation() {
+  if (reading) {
+    readAgain = true;
+    return reading;
+  }
+  reading = (async () => {
+    try {
+      do {
+        readAgain = false;
+        await readConversation();
+      } while (readAgain);
+    } catch (error) {
+      unreadable = true;
+      throw error;
+    }
+    if (unreadable) show("");
+    unreadable = false;
+  })().finally(() => { reading = null; });
+  return reading;
+}
+
+/** The messages from `from` to the newest. Started over, or grown past one response, since `from` was chosen: the newest page. */
+async function readTranscript(host, from) {
+  const t = await api(host, "/conversation/transcript?limit=2000&offset=" + from);
+  if (from + t.messages.length === t.total) return { ...t, offset: from };
+  const offset = newestOffset(t.total);
+  return { ...(await api(host, "/conversation/transcript?limit=2000&offset=" + offset)), offset };
+}
+
+async function readConversation() {
+  const host = route, m = machineOf(host);
+  if (!host) return;
+  const c = await api(host, "/conversation");
+  if (route !== host) return;
+  m.conv = c;
+  // The stream is drawing this page's turn; the transcript is read when it ends.
+  if (!liveHere()) {
+    const t = await readTranscript(host, page.loaded ? page.offset : newestOffset(c.messageCount));
+    if (route !== host || liveHere()) return;
+    page = { loaded: true, offset: t.offset, messages: t.messages };
+    readThrough = t.readThrough || null;
+    m.last = lastWords(thread(t.messages).at(-1));
+    draw();
+    markDisplayedRead().catch(show);
+  }
+  renderHome();
+  drawMeta();
+}
+
+/** Reads the page before the oldest message shown, and keeps the reader where they were. */
+let readingOlder = false;
+async function loadOlder() {
+  const host = route, older = olderPage(page.offset);
+  if (!older || readingOlder || !page.loaded) return;
+  readingOlder = true;
+  try {
+    const t = await api(host, `/conversation/transcript?limit=${older.limit}&offset=${older.offset}`);
+    // A reload meanwhile already holds another range.
+    if (route !== host || page.offset !== older.offset + older.limit || t.messages.length !== older.limit) return;
+    page = { ...page, offset: older.offset, messages: t.messages.concat(page.messages) };
+    const height = log.scrollHeight, top = log.scrollTop, focused = document.activeElement === earlier;
+    draw();
+    log.scrollTop = top + log.scrollHeight - height;
+    // The keyboard reader's place is the first of the messages just read.
+    if (focused) (earlier.hidden ? log.querySelector(".msg") : earlier)?.focus();
+  } catch (error) {
+    show(error);
+  } finally {
+    readingOlder = false;
+  }
+}
+earlier.onclick = loadOlder;
+log.addEventListener("scroll", () => {
+  following = atBottom();
+  if (log.scrollTop < 200 && !earlier.hidden) loadOlder();
+}, { passive: true });
+
+// ── The thread: bubbles, with a turn's working folded into them ─────────────
+
+const attachmentUrl = (path) => base(route) + "/api/conversation/attachments/" + seg(path.slice("attachments/".length));
+
+/** A visually hidden word for a screen reader: who is speaking. */
+const who = (name) => el("span", "sr", name + ": ");
+
+function fillOwner(node, item) {
+  node.replaceChildren(who("You"));
+  if (item.pics.length) {
+    const pics = el("div", "pics");
+    for (const path of item.pics) {
+      const a = el("a");
+      a.href = attachmentUrl(path);
+      a.target = "_blank";
+      a.rel = "noopener";
+      const img = el("img");
+      img.src = a.href;
+      img.alt = "Attached photo";
+      img.loading = "lazy";
+      img.onload = () => { if (following) toBottom(); };
+      img.onerror = () => a.replaceWith("Photo unavailable");
+      a.append(img);
+      pics.append(a);
+    }
+    node.append(pics);
+  }
+  if (item.text) node.append(el("div", "text", item.text));
+}
+
+function fillHook(node, item) {
+  const note = el("details", "work");
+  note.append(el("summary", "", "A stop hook had " + ghostName() + " go on"), el("div", "thinking", item.text));
+  node.replaceChildren(note);
+}
+
+/** One part of a ghost's working, drawn into `node`: its reasoning, a handoff note, or a command with all it printed. */
+function fillStep(node, step) {
+  if (step.type !== "call") {
+    node.className = "thinking";
+    node.textContent = (step.type === "handoff" ? "Handoff note\n\n" : "") + step.text;
+    return;
+  }
+  node.className = "tool" + (step.failed ? " failed-call" : "");
+  if (!node.firstChild) node.append(el("pre", "tool-command"), el("pre", "tool-output"));
+  const [command, output] = node.children;
+  command.textContent = step.line;
+  // Only new output touches the element, so a reader's place in a long one holds.
+  if (output.textContent !== step.output) output.textContent = step.output;
+  output.hidden = !step.output;
+}
+
+/** A ghost bubble: the working that led to its words, folded over them; nothing of a turn is left out. */
+function fillGhost(node, item) {
+  if (!node.firstChild) {
+    node.work = el("details", "work");
+    node.steps = el("div", "steps");
+    node.work.append(el("summary"), node.steps);
+    node.said = el("div", "said");
+    node.failed = el("div", "failed");
+    node.append(who(ghostName()), node.work, node.said, node.failed);
+  }
+  node.classList.toggle("bare", !item.text && !item.error);
+  node.work.hidden = !item.steps.length;
+  node.work.firstChild.textContent = worked(item.steps);
+  item.steps.forEach((step, i) => {
+    if (!node.steps.children[i]) node.steps.append(el("div"));
+    fillStep(node.steps.children[i], step);
+  });
+  while (node.steps.children.length > item.steps.length) node.steps.lastChild.remove();
+  if (node.text !== item.text) {
+    node.text = item.text;
+    node.said.replaceChildren(renderMarkdown(item.text, document));
+  }
+  node.said.hidden = !item.text;
+  node.failed.textContent = item.error ? "Failed: " + item.error.slice(0, 600) : "";
+}
+
+const fill = { owner: fillOwner, hook: fillHook, ghost: fillGhost };
+
+/**
+ * Draws the thread: the transcript read so far, then this page's running
+ * turn. It follows the newest message only for a reader already at the bottom.
+ */
+function draw() {
+  // Where the reader is now, not only where the last scroll event left them.
+  const stick = following && atBottom();
+  const live = liveHere() ? thread(turn.messages) : [];
+  const items = thread(page.messages).concat(live);
+  // A turn that just ended comes back from the transcript under its own keys: what was open in it stays open.
+  const ended = live.length ? [] : [...nodes].filter(([key]) => key.startsWith("live")).map(([, node]) => !!node.work?.open);
+  let at = earlier;
+  const kept = new Set();
+  for (const item of items) {
+    let node = nodes.get(item.key);
+    const drawn = JSON.stringify(item);
+    if (!node) {
+      node = el("div", "msg " + item.kind);
+      node.tabIndex = -1;
+      nodes.set(item.key, node);
+    }
+    if (node.drawn !== drawn) fill[item.kind](node, item);
+    node.drawn = drawn;
+    if (at.nextSibling !== node) at.after(node);
+    at = node;
+    kept.add(item.key);
+  }
+  for (const [key, node] of nodes) {
+    if (kept.has(key)) continue;
+    node.remove();
+    nodes.delete(key);
+  }
+  const shown = log.querySelectorAll(".msg");
+  ended.forEach((open, i) => {
+    const work = shown[shown.length - ended.length + i]?.work;
+    if (open && work) work.open = true;
+  });
+  earlier.hidden = page.offset === 0;
+  log.querySelector(".empty")?.remove();
+  if (!items.length && page.loaded) {
+    const empty = $("empty-log").content.firstElementChild.cloneNode(true);
+    empty.querySelector("span").textContent = owner() ? "Say something to " + ghostName() + "." : "Nothing here yet.";
+    typing.before(empty);
+  }
+  drawTyping();
+  if (stick) toBottom();
+}
+
+/** The ghost at work, as a messaging app shows someone typing: the command running now and for how long. */
+let clock = 0;
+function drawTyping() {
+  clearInterval(clock);
+  const mine = liveHere() ? turn : null;
+  typing.hidden = mine ? mine.quiet : !conv()?.running;
+  if (typing.hidden) return;
+  const text = mine?.now?.text || "", what = $("typing-what");
+  // Said once per change: a status that is rewritten is announced again.
+  if (what.textContent !== (text || ghostName() + " is working")) what.textContent = text || ghostName() + " is working";
+  what.classList.toggle("sr", !text);
+  const tick = () => {
+    const s = mine?.now ? Math.floor((Date.now() - mine.now.since) / 1000) : 0;
+    $("typing-for").textContent = s < 1 ? "" : s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s";
+  };
+  tick();
+  if (mine?.now) clock = setInterval(tick, 1000);
+}
+
+/** The header, the ghost's open question, and what the composer offers. */
+function drawMeta() {
+  const m = machineOf(route);
+  if (!m) return;
+  const c = m.conv;
+  $("chat-title").textContent = ghostName();
+  $("chat-sub").textContent = label(route) + (m.status === "offline" ? " · offline" : "");
+  document.title = ghostName() + " · SummonGhost";
+  $("chat-tools").hidden = !owner() || !c?.messageCount;
+  const question = owner() && !turnHere() ? c?.question : null;
   $("question").hidden = !question;
   if (question) {
-    // The ask tool says its question in the reply; the panel does not repeat the last bubble.
+    // The ghost's reply says its question; the panel does not repeat the last bubble.
     $("question-text").textContent = question.text;
-    $("question-text").hidden = !!log.lastElementChild?.textContent.includes(question.text);
+    $("question-text").hidden = !!thread(page.messages).at(-1)?.text?.includes(question.text);
     const options = $("question-options");
     options.replaceChildren();
     for (const option of question.options || []) {
@@ -451,188 +679,65 @@ function renderChatMeta() {
   }
   prompt.placeholder = question ? "Answer " + ghostName() : runningHere() ? "Add to this turn" : "Message";
   if (!turnHere()) {
-    const working = log.querySelector(".activity.elsewhere");
-    if (row?.running && !working) {
-      const line = el("div", "activity elsewhere", "Working…");
-      log.append(line);
-    } else if (!row?.running) working?.remove();
-    if (row?.running) readQueue().catch(() => {});
+    if (c?.running) readQueue().catch(() => {});
     else $("queue").hidden = true;
   }
+  drawTyping();
   refresh();
-}
-
-function emptyLog() {
-  const node = $("empty-log").content.firstElementChild.cloneNode(true);
-  node.querySelector("span").textContent = owner() ? "Say something to " + ghostName() + "." : "Nothing here yet.";
-  log.replaceChildren(node);
-}
-
-const attachmentUrl = (path) =>
-  base(route.host) + "/api" + conversationPath(route.session) + "/attachments/" + seg(path.slice("attachments/".length));
-
-/** An attachment line, `![image](attachments/<file>)`, gives its path; any other line gives null. */
-function attachmentOf(line) {
-  const t = line.trim(), at = t.indexOf("](attachments/");
-  return t.startsWith("![") && t.endsWith(")") && at > 0 && !t.slice(at + 2, -1).includes(" ") ? t.slice(at + 2, -1) : null;
-}
-
-function userBubble(value) {
-  const bubble = el("div", "msg user");
-  const lines = value.split("\n"), paths = lines.map(attachmentOf).filter(Boolean);
-  if (paths.length) {
-    const pics = el("div", "pics");
-    for (const path of paths) {
-      const a = el("a");
-      a.href = attachmentUrl(path);
-      a.target = "_blank";
-      a.rel = "noopener";
-      const img = el("img");
-      img.src = a.href;
-      img.alt = "Attached photo";
-      img.loading = "lazy";
-      img.onerror = () => a.replaceWith("Photo unavailable");
-      a.append(img);
-      pics.append(a);
-    }
-    bubble.append(pics);
-  }
-  const rest = lines.filter((l) => !attachmentOf(l)).join("\n").trim();
-  if (rest) bubble.append(el("div", "text", rest));
-  return bubble;
-}
-function assistantBubble(value) {
-  const bubble = el("div", "msg assistant");
-  bubble.replaceChildren(renderMarkdown(value, document));
-  return bubble;
-}
-
-// Nothing of a turn is hidden: what the model thought, and each command with all it printed.
-const thinkingBlock = (text) => el("div", "thinking", text);
-/** A call as a block: the command as a shell would echo it, and what it printed (`output` is its element). */
-function toolBlock(name, args, output = "", failed = false) {
-  const block = el("div", "tool" + (failed ? " failed-call" : ""));
-  block.append(el("pre", "tool-command", toolCall(name, args)));
-  block.output = el("pre", "tool-output", output.trimEnd());
-  block.output.hidden = !output.trim();
-  block.append(block.output);
-  return block;
-}
-/** A message's texts as the bubbles they show as: text after a tool call is the next message. */
-function bubbles(parts) {
-  const out = [];
-  let tooled = true;
-  for (const p of parts) {
-    if (p.type !== "text") tooled = true;
-    else if (p.text?.trim()) {
-      if (tooled) out.push(p.text);
-      else out[out.length - 1] += "\n\n" + p.text;
-      tooled = false;
-    }
-  }
-  return out;
-}
-
-// `keep`: a refresh of the same conversation holds the reader's place unless they were at the newest message.
-function render(messages, keep = false) {
-  const stick = !keep || nearBottom(), top = log.scrollTop;
-  log.replaceChildren();
-  for (const m of messages) {
-    const texts = bubbles(m.content || []);
-    if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\n\n")));
-    else if (m.role === "assistant") {
-      // In the order it happened: reasoning, each call with its output, and what was said.
-      let said = [];
-      const flush = () => { if (said.length) log.append(assistantBubble(said.join("\n\n"))); said = []; };
-      for (const p of m.content || []) {
-        if (p.type === "thinking") { flush(); if (p.text?.trim()) log.append(thinkingBlock(p.text.trim())); }
-        // The note that stands for the conversation before it, in later turns.
-        else if (p.type === "handoff") { flush(); log.append(thinkingBlock("Handoff note\n\n" + (p.text || "").trim())); }
-        else if (p.type === "toolCall") { flush(); log.append(toolBlock(p.name, p.arguments, p.output || "", p.failed === true)); }
-        else if (p.text?.trim()) said.push(p.text);
-      }
-      flush();
-      if (m.errorMessage) log.append(el("div", "failed", "Failed: " + m.errorMessage.slice(0, 600)));
-    }
-  }
-  if (!log.childElementCount) emptyLog();
-  if (rowOf(route.session)?.running) log.append(el("div", "activity elsewhere", "Working…"));
-  log.scrollTop = stick ? log.scrollHeight : top;
-  // The question panel leaves out a question the last bubble already says.
-  renderChatMeta();
-}
-
-async function loadTranscript(keep = false) {
-  const { host, session } = route;
-  if (!session || !rowOf(session)) {
-    if (sessionsFor === host || session === draft) return render([]);
-    return; // The list is still loading; it reads the transcript when it lands.
-  }
-  const path = conversationPath(session) + "/transcript";
-  let t = await api(host, path);
-  // A phone shows the newest page; a long conversation's first page is its oldest.
-  if (t.truncated) t = await api(host, path + "?offset=" + (t.total - t.messages.length));
-  if (route.host !== host || route.session !== session || liveHere()) return;
-  render(t.messages, keep);
-  readThrough = t.readThrough || null;
-  await markDisplayedRead();
 }
 
 /** The owner's reply is read once shown while the page is visible and focused (Ghost's read contract). */
 async function markDisplayedRead() {
-  const { host, session } = route;
-  const row = rowOf(session);
-  if (!owner() || !row?.unread || !readThrough || reading || document.visibilityState !== "visible" || !document.hasFocus()) return;
-  reading = true;
+  const host = route, m = machineOf(host);
+  if (!owner() || !m.conv?.unread || !readThrough || marking || document.visibilityState !== "visible" || !document.hasFocus()) return;
+  marking = true;
   try {
-    await api(host, conversationPath(session) + "/read", { method: "PUT", body: { readThrough } });
-    if (route.session === session && rowOf(session)) {
-      rowOf(session).unread = false;
-      const m = machineOf(host);
-      m.unread = sessions.filter((s) => s.unread).length;
-      renderSessions();
-      renderHome();
-    }
+    await api(host, "/conversation/read", { method: "PUT", body: { readThrough } });
+    if (m.conv) m.conv.unread = false;
+    renderHome();
   } finally {
-    reading = false;
+    marking = false;
   }
 }
 
 function onReturn() {
   if (document.visibilityState !== "visible") return;
-  if (route.host) loadSessions().catch(show);
+  if (route) loadConversation().catch(show);
   else refreshAll();
 }
 window.addEventListener("focus", onReturn);
 document.addEventListener("visibilitychange", onReturn);
 
-// ── Pin and delete ──────────────────────────────────────────────────────────
-
-$("chat-pin").onclick = async () => {
-  const row = rowOf(route.session);
-  $("chat-tools").open = false;
-  if (!row) return;
-  try {
-    await api(route.host, conversationPath(route.session) + "/pin", { method: "PUT", body: { pinned: !row.pinned } });
-    await loadSessions(null);
-  } catch (error) { show(error); }
-};
-$("chat-delete").onclick = async () => {
-  const button = $("chat-delete");
-  if (!button.classList.contains("danger")) {
-    button.classList.add("danger");
-    button.textContent = "Tap again to delete";
-    setTimeout(() => { button.classList.remove("danger"); button.textContent = "Delete"; }, 3000);
-    return;
+// A menu closes when the owner goes elsewhere.
+document.addEventListener("click", (event) => {
+  for (const menu of document.querySelectorAll("details.tools[open]")) if (!menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  for (const menu of document.querySelectorAll("details.tools[open]")) {
+    menu.open = false;
+    menu.querySelector("summary").focus();
   }
-  button.classList.remove("danger");
-  button.textContent = "Delete";
+});
+
+// ── Starting over ───────────────────────────────────────────────────────────
+
+const restart = $("restart");
+$("chat-restart").onclick = () => {
   $("chat-tools").open = false;
-  const { host, session } = route;
+  $("restart-title").textContent = "Start over with " + ghostName() + "?";
+  $("restart-text").textContent = `This conversation moves to the Trash on ${label(route)}, where it can be restored. Your next message starts a new one.`;
+  restart.showModal();
+};
+$("restart-cancel").onclick = () => restart.close();
+$("restart-confirm").onclick = async () => {
+  restart.close();
+  const host = route;
   try {
-    await api(host, conversationPath(session), { method: "DELETE" });
-    location.hash = link(host);
-    await loadSessions(null);
+    await api(host, "/conversation", { method: "DELETE" });
+    if (route !== host) return;
+    page = { loaded: false, offset: 0, messages: [] };
+    await loadConversation();
   } catch (error) { show(error); }
 };
 
@@ -691,11 +796,11 @@ function grow() {
 }
 
 /** The composer's text and photos as one message; photos are uploaded now. */
-async function compose(host, session) {
+async function compose(host) {
   const text = prompt.value.trim();
   const paths = await Promise.all(pending.map(async (p) => {
     const blob = await shrink(p.file);
-    return (await api(host, conversationPath(session) + "/attachments", { method: "POST", body: blob })).path;
+    return (await api(host, "/conversation/attachments", { method: "POST", body: blob })).path;
   }));
   return [text, ...paths.map((path) => "![image](" + path + ")")].filter(Boolean).join("\n\n");
 }
@@ -705,7 +810,7 @@ async function compose(host, session) {
 let sending = false;
 
 async function submit() {
-  if (sending || !route.session || !owner()) return;
+  if (sending || !route || !owner()) return;
   const typed = !!prompt.value.trim() || pending.length > 0;
   if (!typed) {
     if (runningHere()) await stop();
@@ -720,7 +825,7 @@ async function submit() {
       await send();
     } catch (error) {
       // A turn another device started: this joins it as its next pass.
-      if (error.code !== "session_busy" || !(await queue())) throw error;
+      if (error.code !== "conversation_busy" || !(await queue())) throw error;
     }
   } finally {
     sending = false;
@@ -730,12 +835,12 @@ async function submit() {
 
 /** Adds the composer to the running turn as its next pass; false when the turn has already ended. */
 async function queue() {
-  const { host, session } = route;
-  const message = await compose(host, session);
+  const host = route;
+  const message = await compose(host);
   try {
-    await api(host, conversationPath(session) + "/queue", { method: "POST", body: { text: message } });
+    await api(host, "/conversation/queue", { method: "POST", body: { text: message } });
   } catch (error) {
-    if (error.code === "session_not_streaming") return false;
+    if (error.code === "conversation_not_streaming") return false;
     throw error;
   }
   prompt.value = "";
@@ -751,20 +856,20 @@ function showQueue(followUp) {
   box.hidden = !followUp.length;
 }
 async function readQueue() {
-  const { host, session } = route;
-  const { followUp } = await api(host, conversationPath(session) + "/queue");
-  if (route.session === session) showQueue(followUp || []);
+  const host = route;
+  const { followUp } = await api(host, "/conversation/queue");
+  if (route === host) showQueue(followUp || []);
   return followUp || [];
 }
 
 /** Stops the running turn; what was queued and never ran comes back to the composer. */
 async function stop() {
-  const { host, session } = route;
+  const host = route;
   const left = await readQueue().catch(() => []);
   try {
-    await api(host, conversationPath(session) + "/stop", { method: "POST", body: {} });
+    await api(host, "/conversation/stop", { method: "POST", body: {} });
   } catch (error) {
-    if (error.code !== "session_not_streaming") throw error;
+    if (error.code !== "conversation_not_streaming") throw error;
   }
   if (left.length && !prompt.value.trim()) {
     prompt.value = left.join("\n\n");
@@ -773,153 +878,57 @@ async function stop() {
   showQueue([]);
 }
 
-/** A turn's events, across the responses a long turn is cut into. */
-async function* turnEvents(host, response, conversation) {
-  while (response) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", resume = null;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let index;
-      while ((index = buffer.indexOf("\n\n")) >= 0) {
-        const frame = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        const line = frame.split("\n").find((l) => l.startsWith("data: "));
-        if (!line) continue;
-        const ev = JSON.parse(line.slice(6));
-        if (ev.type === "resume") resume = ev;
-        else yield ev;
-      }
-    }
-    response = resume && (await request(host, conversation + "/stream?turn=" + seg(resume.turn) + "&from=" + resume.from));
-  }
-}
-
 async function send() {
-  const { host, session } = route;
-  const conversation = conversationPath(session);
-  const message = await compose(host, session);
-  const response = await request(host, "/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt: message, sessionId: session }),
-  });
-  turn = { host, session, live: true };
+  const host = route;
+  const message = await compose(host);
+  const mine = { host, shown: route === host, messages: [], now: null, quiet: false };
+  fold(mine.messages, { type: "owner_message", text: message });
+  // The turn is this page's before the machine hears of it: a transcript read crossing the request would show the message twice.
+  turn = mine;
+  if (mine.shown) {
+    following = true;
+    toBottom();
+    draw();
+  }
+  let response;
+  try {
+    response = await request(host, "/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: message }),
+    });
+  } catch (error) {
+    turn = null;
+    if (route === host) draw();
+    throw error;
+  }
   sending = false; // The turn is under way: the composer now queues and stops.
   prompt.value = "";
   grow();
   clearTray();
-  $("question").hidden = true;
-  log.querySelector(".empty")?.remove();
-  log.querySelector(".activity.elsewhere")?.remove();
-  log.append(userBubble(message));
-  // A reply bubble waiting for its text; text after a tool call opens the next.
-  const replyBubble = () => { const b = assistantBubble(""); b.classList.add("pending"); if (turn.live) log.append(b); return b; };
-  const replies = [replyBubble()];
-  // Only the call running now.
-  const activity = el("div", "activity");
-  let call = "", callStarted = 0, clock = 0;
-  const tick = () => {
-    const s = Math.floor((Date.now() - callStarted) / 1000);
-    activity.textContent = call + (s < 1 ? "" : " · " + (s < 60 ? s + "s" : Math.floor(s / 60) + "m " + (s % 60) + "s"));
-  };
-  follow(true);
-  refresh();
-  const parts = [];
-  let renderedTexts = 0;
-  // A block of reasoning or a call goes where it happened: above a reply bubble still waiting for its text, else after everything.
-  let thinking = null;
-  const tools = new Map();
-  const place = (block) => {
-    if (!turn.live) return;
-    const waiting = replies.at(-1);
-    if (waiting.childNodes.length) log.append(block); else waiting.before(block);
-  };
-  const nextReply = () => {
-    replies.at(-1).classList.remove("pending");
-    replies.push(replyBubble());
-    parts.length = 0;
-    renderedTexts = 0;
-  };
+  if (mine.shown) drawMeta();
   try {
-    for await (const ev of turnEvents(host, response, conversation)) {
-      if (!turn.live) continue; // Drained off screen: the transcript shows it when read again.
-      const stick = nearBottom();
-      if (ev.type === "pass" && parts.length) nextReply();
-      else if (ev.type === "owner_message") {
-        activity.remove();
-        if (replies.at(-1).textContent === "") replies.pop().remove();
-        log.append(userBubble(ev.text));
-        replies.push(replyBubble());
-        parts.length = 0;
-        renderedTexts = 0;
-      } else if (ev.type === "queue") showQueue(ev.followUp || []);
-      else if (ev.type === "thinking") {
-        // "Loading the local model…" is a notice; anything else is the model's reasoning, shown as it comes.
-        if (!thinking && ev.delta.trimStart().startsWith("Loading the local model")) {
-          call = ev.delta.trim();
-          callStarted = Date.now();
-          tick();
-          replies.at(-1).after(activity);
-        } else {
-          if (!thinking) { thinking = thinkingBlock(""); parts.push({ type: "thinking" }); place(thinking); }
-          thinking.textContent += thinking.textContent ? ev.delta : ev.delta.trimStart();
-        }
-      }
-      else if (ev.type === "text_start") { thinking = null; parts.push({ type: "text", text: "" }); }
-      else if (ev.type === "text_delta") {
-        thinking = null;
-        if (parts.at(-1)?.type !== "text") parts.push({ type: "text", text: "" });
-        parts.at(-1).text += ev.delta;
-        const texts = bubbles(parts);
-        if (texts.length) activity.remove(); // Words mean the call before them is over.
-        if (texts.length > renderedTexts && renderedTexts > 0) {
-          replies.at(-1).classList.remove("pending");
-          replies.push(replyBubble());
-        }
-        renderedTexts = texts.length;
-        if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
-      } else if (ev.type === "tool_execution_start") {
-        thinking = null;
-        parts.push({ type: "toolCall" });
-        const block = toolBlock(ev.toolName, ev.arguments);
-        tools.set(ev.id, block);
-        place(block);
-        call = toolCall(ev.toolName, ev.arguments);
-        callStarted = Date.now();
-        tick();
-        clearInterval(clock);
-        clock = setInterval(tick, 1000);
-        replies.at(-1).after(activity);
-      } else if (ev.type === "tool_execution_update" || ev.type === "tool_execution_end") {
-        // What it has printed lately while it runs, then all of it.
-        const block = tools.get(ev.id), ended = ev.type === "tool_execution_end";
-        const text = (ended ? ev.output ?? ev.summary : ev.summary) || "";
-        if (block) {
-          block.output.textContent = text.trimEnd();
-          block.output.hidden = !text.trim();
-          if (ended && ev.isError) block.classList.add("failed-call");
-        }
-        if (ended) { clearInterval(clock); activity.remove(); }
-      }
-      // A stop hook runs once the reply is complete; only a continuation shows.
-      else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");
-      else if (ev.type === "error" && ev.reason !== "aborted") show(new Error(ev.errorMessage || ev.reason));
-      follow(stick);
+    for await (const ev of turnEvents(response, (path) => request(host, path))) {
+      const notice = fold(mine.messages, ev);
+      if (notice) mine.now = { text: notice, since: Date.now() };
+      else if (ev.type === "tool_execution_start") mine.now = { text: toolCall(ev.toolName, ev.arguments), since: Date.now() };
+      else if (ev.type === "tool_execution_end" || ev.type === "pass") mine.now = null;
+      // Words mean the ghost is answering, and a stop hook runs once the reply is complete: neither needs a busy line.
+      if (ev.type === "text_start" || ev.type === "text_delta" || (ev.type === "hook_start" && ev.event === "session_stop")) mine.quiet = true;
+      else if (["pass", "thinking", "tool_execution_start", "owner_message"].includes(ev.type)) mine.quiet = false;
+      if (!mine.shown) continue; // Drained off screen: the transcript shows it when read again.
+      if (ev.type === "queue") showQueue(ev.followUp || []);
+      else draw();
     }
   } finally {
-    replies.at(-1).classList.remove("pending");
-    for (const b of replies) if (!b.childNodes.length) b.remove();
-    clearInterval(clock);
-    activity.remove();
-    showQueue([]);
     turn = null;
-    refresh();
+    if (route === host) {
+      showQueue([]);
+      refresh();
+    }
   }
-  if (route.host === host) await loadSessions(session === route.session ? undefined : null);
+  if (route === host) await loadConversation();
+  else await readSummary(machineOf(host)).then(renderHome, () => {});
 }
 
 prompt.oninput = grow;
@@ -955,7 +964,7 @@ function takeAddLink() {
 
 takeAddLink();
 persist();
-applyRoute().catch(show);
+applyRoute();
 refreshAll();
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
