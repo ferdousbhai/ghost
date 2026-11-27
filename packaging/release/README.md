@@ -39,18 +39,22 @@ release carrying:
 - `ghost-recipe.tar.gz` (Omarchy's `pkgbuilds/ghost` rendered for this
   release), `install.sh` and `omarchy-install-ai-ghost`: what
   `ferdousbhai.com/ghost/install.sh`, a redirect to the latest release's
-  `install.sh`, runs for an owner ahead of Omarchy's sync.
-  [`test-install-script.sh`](test-install-script.sh), which the gate runs,
-  checks its choices.
+  `install.sh`, runs for an owner ahead of Omarchy's sync. It installs the
+  same package: from Omarchy's repository when that has the latest release,
+  else built with makepkg from the recipe, never from a second package
+  repository, so `omarchy update` carries on from there.
+  [`test-install-script.sh`](test-install-script.sh) checks its choices.
 
-Users install the `ghost` package from Omarchy's repository. The
-Install → AI → Ghost entry contributed to Omarchy is
-[`omarchy-install-ai-ghost`](../omarchy/bin/omarchy-install-ai-ghost).
+Users install the `ghost` package from Omarchy's repository.
+[`omarchy-install-ai-ghost`](../omarchy/bin/omarchy-install-ai-ghost) is the
+step proposed for Omarchy's Install → AI menu
+([#54](https://github.com/ferdousbhai/ghost/issues/54)), and the one
+`install.sh` ends with: it installs the package and starts ghostd for this
+login, whose first start makes the ghost home.
 
 ## Omarchy's recipe
 
-The rendered contribution
-([`../omarchy/render-contribution.sh`](../omarchy/render-contribution.sh)) is
+The recipe [`render-arch-package.sh`](render-arch-package.sh) renders is
 what went into `pkgbuilds/ghost` of omarchy-pkgs; its `.omarchy/package.json`
 declares this release feed (`upstream.github` and the release's source archive,
 checked against GitHub's digest), so `sync-upstream` rewrites `pkgver` and
@@ -81,9 +85,12 @@ is Omarchy's, not the release's. Meanwhile the release's `install.sh`
   [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md). Ghost
   does not poll for releases.
 
-The `Native packages` workflow runs the workspace's tests and builds this
-recipe from the commit's own source archive, in clean Arch Linux x86_64 and
-Arch Linux ARM aarch64 roots, on every pull request and master push
-(`sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh`).
+The packaging checks are [`../check.sh`](../check.sh), which the gate and the
+recipe's `check()` run; `check()` calls it by the path the 0.13.0 archive has,
+[`../arch/test-check-dependencies.sh`](../arch/test-check-dependencies.sh), so
+one recipe builds that release and later ones. The `Native packages` workflow
+builds this recipe, tests included, from the commit's own source archive, in
+clean Arch Linux x86_64 and Arch Linux ARM aarch64 roots, on every master
+push (`sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh`).
 Generated archives and work trees live under
 `out/` and `work/`, which are ignored.

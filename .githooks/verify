@@ -31,15 +31,14 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 # The release build is what the package ships; the tests run on it.
 cargo build --workspace --release --locked
 cargo test --workspace --release --locked
-# The bar's main flows, against a scratch ghostd, on a private display.
+# The bar's main flows, against a scratch ghostd (the release one just built),
+# on a private display.
 bash packages/bar/dev/qa.sh
 # The summonghost.com page, in headless Chromium.
 bash packages/web/check.sh
-# What the gate checks beyond the workspace, run as the PKGBUILD's check()
-# runs it: inside the source archive, so a file the archive loses
-# or a link it breaks fails here, not only in the package build. The
-# packaging scripts chain the other packaging suites, including the installer
-# this repository publishes.
+# The packaging checks (packaging/check.sh), run as the PKGBUILD's check()
+# runs them: inside the source archive, so a file the archive loses or a link
+# it breaks fails here, not only in the package build.
 bash packaging/release/test-release-source.sh
 
 # A dirty tree was not what the suite proved, and neither is a HEAD a peer

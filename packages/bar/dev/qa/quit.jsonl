@@ -1,0 +1,8 @@
+# Ctrl+Q ends the bar: the process exits there, with status 0, so nothing after the key is run. A bar that stayed
+# would fail the wait after it. dev/qa.sh runs it.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"key","keys":"<Control>q"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

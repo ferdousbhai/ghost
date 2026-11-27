@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The packaging checks, run where the stable package runs them: inside an
+# The packaging checks, run where the package build runs them: inside an
 # extracted source archive, with no Git metadata. A file the archive loses or
 # a link it breaks fails here.
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -15,7 +15,6 @@ tar -xf "$work/ghost-$version.tar.gz" -C "$work"
 extracted="$work/ghost-$version"
 [[ ! -e "$extracted/.git" && -f "$extracted/CONTRACTS.md" ]]
 
-mkdir "$work/stable-check-work"
-TMPDIR="$work/stable-check-work" \
-  bash "$extracted/packaging/arch/test-check-dependencies.sh"
+mkdir "$work/tmp"
+TMPDIR="$work/tmp" bash "$extracted/packaging/check.sh"
 printf 'Release source check passed\n'

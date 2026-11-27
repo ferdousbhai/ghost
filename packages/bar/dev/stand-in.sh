@@ -9,10 +9,13 @@
 # it ends.
 stand_in_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 stand_in_repo=$(realpath -e -- "$stand_in_dir/../../..")
-# The daemon and the stand-in tools (packages/daemon/examples/stand_in.rs), built once, as debug builds.
-(cd "$stand_in_repo" && bash packages/bar/dev/cargo.sh build --locked --quiet -p ghostd --bin ghostd --example stand_in)
-stand_in_ghostd_binary=$stand_in_repo/target/debug/ghostd
-stand_in_tool=$stand_in_repo/target/debug/examples/stand_in
+# rustup's own directory when no cargo is on PATH.
+command -v cargo >/dev/null || PATH="$HOME/.cargo/bin:$PATH"
+# The daemon and the stand-in tools (packages/daemon/examples/stand_in.rs), as release builds: the daemon is the
+# one the gate has just built and tested, so only the stand-in is compiled for this.
+(cd "$stand_in_repo" && cargo build --release --locked --quiet -p ghostd --bin ghostd --example stand_in)
+stand_in_ghostd_binary=$stand_in_repo/target/release/ghostd
+stand_in_tool=$stand_in_repo/target/release/examples/stand_in
 
 stand_in_home() {
   mkdir -p "$root"/{home,config,state,data,cache,bin}

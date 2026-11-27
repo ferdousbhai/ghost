@@ -8,14 +8,9 @@ set -Eeuo pipefail
 # The gate (`.githooks/verify`) runs it.
 #
 #   dev/qa.sh [script.jsonl ...]           every script under dev/qa when none is named
-#   GHOST_BAR_QA=0                      skip it (the package build's check(), which builds no `qa` bar)
 #   GHOST_BAR_QA_BINARY=<path>          a bar already built with `--features qa`
 #   GHOST_BAR_QA_SHOTS=<dir>            keep the scripts' shots there (they are written relative to it)
 #   OMUI_QA_TIMEOUT=120                    seconds before one script's run is stopped
-if [[ ${GHOST_BAR_QA:-1} == 0 ]]; then
-  echo "qa: skipped (GHOST_BAR_QA=0)"
-  exit 0
-fi
 here=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=stand-in.sh
 source "$here/stand-in.sh"
@@ -32,7 +27,7 @@ for index in "${!scripts[@]}"; do scripts[index]=$(realpath -e -- "${scripts[ind
 binary=${GHOST_BAR_QA_BINARY:-}
 if [[ -z $binary ]]; then
   # A debug build: target/release stays the bar the package ships, without `qa`.
-  (cd "$here/.." && bash dev/cargo.sh build --locked --features qa --quiet)
+  (cd "$here/.." && cargo build --locked --features qa --quiet)
   binary=$here/../../../target/debug/ghost-bar
 fi
 binary=$(realpath -e -- "$binary")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cut a Ghost release from this machine: build the source archive,
 # verify it, tag the commit, and publish a GitHub release on
-# ferdousbhai/ghost (GHOST_RELEASE_REPOSITORY to override). Omarchy's
+# ferdousbhai/ghost. Omarchy's
 # package repository builds the `ghost` package from that release: its
 # sync-upstream workflow follows the tags and rewrites the recipe's pkgver and
 # checksums on its own.
@@ -27,7 +27,7 @@ esac
 
 script_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_root/../..")"
-repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
+repository=ferdousbhai/ghost
 out="$script_root/out"
 tag="v$version"
 
@@ -82,6 +82,9 @@ source_sha="$(sed -n 1p "$out/SHA256SUMS" | cut -d' ' -f1)"
 mkdir -p -- "$work"
 build="$(mktemp -d "$work/package-build.XXXXXX")"
 bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha"
+# The recipe built below is the one the release carries: what
+# ferdousbhai.com/ghost/install.sh builds for an owner ahead of Omarchy's sync.
+tar -czf "$out/ghost-recipe.tar.gz" -C "$build" --owner=0 --group=0 --sort=name ghost
 cp -- "$out/ghost-$version.tar.gz" "$build/ghost/"
 (
   cd -- "$build/ghost"
@@ -93,13 +96,7 @@ cp -- "$out/ghost-$version.tar.gz" "$build/ghost/"
 )
 rm -rf -- "$work"
 
-# What ferdousbhai.com/ghost/install.sh fetches from the latest release, for an
-# owner ahead of Omarchy's sync: Omarchy's own recipe for this release, the
-# installer, and the Install menu's steps it ends with.
-recipe="$(mktemp -d)"
-bash "$source_root/packaging/omarchy/render-contribution.sh" "$recipe/ghost" "$version" "$source_sha"
-tar -czf "$out/ghost-recipe.tar.gz" -C "$recipe" --owner=0 --group=0 --sort=name ghost
-rm -rf -- "$recipe"
+# The installer itself, and the Install menu's steps it ends with.
 install -m 755 -- "$source_root/packaging/release/install.sh" "$out/install.sh"
 install -m 755 -- "$source_root/packaging/omarchy/bin/omarchy-install-ai-ghost" "$out/omarchy-install-ai-ghost"
 

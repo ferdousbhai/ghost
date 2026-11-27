@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Stages the package's files into <pkgdir> (the recipe's package()), then
+# checks what it staged.
 usage='install-payload.sh <source-root> <binaries> <pkgdir> <pkgname>'
 source_root="${1:?usage: $usage}"
 # Where cargo left the release build: ghostd, ghost and ghost-bar.
@@ -41,4 +43,33 @@ install -Dm644 "$source_root/THIRD_PARTY_NOTICES.md" \
 chown -hR 0:0 "$pkgdir"
 find "$pkgdir" \( -type f -o -type d \) -exec chmod go-w {} +
 
-bash "$source_root/packaging/arch/smoke.sh" "$pkgdir"
+refuse() {
+  printf 'ghost package: %s\n' "$*" >&2
+  exit 1
+}
+
+desktop-file-validate "$pkgdir/usr/share/applications/io.github.ferdousbhai.Ghost.desktop"
+
+# Without a display or a daemon: one release version from all three, and
+# printing it proves each binary loads its libraries.
+version="$("$pkgdir/usr/bin/ghostd" --version)"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || refuse "ghostd --version printed \"$version\""
+for name in ghost ghost-bar; do
+  [[ "$("$pkgdir/usr/bin/$name" --version)" == "$version" ]] || refuse "$name is not version $version"
+done
+
+# A Chromium the ghost starts in the unit's cgroup needs its sandbox's user
+# namespaces.
+if grep -Eq '^[[:space:]]*RestrictNamespaces=' "$pkgdir/usr/lib/systemd/user/ghostd.service"; then
+  refuse 'ghostd.service blocks the namespaces the Chromium sandbox needs'
+fi
+
+# The recipe's path remap held: no binary names the builder's cargo directory
+# or home in a panic message.
+builder_paths=("${CARGO_HOME:-$HOME/.cargo}/")
+[[ "$HOME" == / ]] || builder_paths+=("$HOME/")
+for name in ghostd ghost ghost-bar; do
+  for path in "${builder_paths[@]}"; do
+    ! grep -aqF -- "$path" "$pkgdir/usr/bin/$name" || refuse "$name contains the builder's path $path"
+  done
+done

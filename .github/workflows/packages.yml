@@ -2,7 +2,6 @@ name: Native packages
 on:
   push:
     branches: [master]
-  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,8 +19,6 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - uses: actions/cache@v6
         with:
           path: .cache/native/${{ matrix.arch }}
@@ -32,7 +29,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y arch-install-scripts zstd
-      - name: Test, then build the package
+      - name: Lint, then build and test the package
         run: sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
       - uses: actions/upload-artifact@v7
         with:

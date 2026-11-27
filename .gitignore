@@ -4,9 +4,6 @@ dist/
 .env
 .env.*
 
-packaging/arch/pkg/
-packaging/arch/ghost/
-
 # cargo's build output
 /target/
 

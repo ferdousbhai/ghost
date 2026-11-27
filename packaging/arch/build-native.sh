@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Called only inside arch-run's disposable native root: runs the workspace's
-# checks and tests, then builds the stable recipe from this commit's source
-# archive.
+# Called only inside arch-run's disposable native root: formats and lints the
+# workspace, then builds the recipe from this commit's source archive. The
+# recipe's check() runs the tests and the packaging checks, once.
 set -euo pipefail
 [[ ${GHOST_ARCH_ROOT:-} == 1 && $EUID == 0 ]] || { echo 'Use packaging/arch/arch-run.sh.' >&2; exit 1; }
 pacman -S --needed --noconfirm base-devel git
@@ -10,8 +10,8 @@ git config --global --add safe.directory /source/.git
 git clone --no-hardlinks /source /build
 commit=$(git -C /source rev-parse HEAD)
 [[ $(git -C /build rev-parse HEAD) == "$commit" ]]
-# Every depends/makedepends/checkdepends entry the recipe declares.
-mapfile -t constraints < <(bash -c 'source /build/packaging/omarchy/pkgbuilds/ghost/PKGBUILD.in; printf "%s\n" "${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}"' | sort -u)
+# Every depends and makedepends entry the recipe declares.
+mapfile -t constraints < <(bash -c 'source /build/packaging/omarchy/pkgbuilds/ghost/PKGBUILD.in; printf "%s\n" "${depends[@]}" "${makedepends[@]}"' | sort -u)
 pacman -S --needed --noconfirm "${constraints[@]%%[<>=]*}"
 pacman -T "${constraints[@]}"
 cargo --version
@@ -21,8 +21,6 @@ export CARGO_HOME=/cache/cargo
 cd /build
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-# The bar's scripted QA needs a display; .githooks/verify runs it.
-cargo test --workspace --release --locked
 version=\$(bash packaging/release/verify-release-version.sh .)
 recipe=\$(mktemp -d)/ghost
 bash packaging/release/make-source-archive.sh . \"\$recipe.tar.gz\" \"\$version\" HEAD

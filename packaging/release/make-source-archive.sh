@@ -15,7 +15,7 @@ temporary="${output}.tmp.$$"
 trap 'rm -f "$temporary"' EXIT
 
 if [[ "$ref" == --worktree ]]; then
-  epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct HEAD)}"
+  epoch="$(git -C "$source_root" show -s --format=%ct HEAD)"
   (
     cd "$source_root"
     git ls-files -co --exclude-standard -z \

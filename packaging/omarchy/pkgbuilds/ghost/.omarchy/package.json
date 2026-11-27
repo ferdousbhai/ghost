@@ -2,7 +2,7 @@
   "source": "local",
   "release_ring": "fast",
   "upstream": {
-    "github": "@@RELEASE_REPOSITORY@@",
+    "github": "ferdousbhai/ghost",
     "digests": true,
     "latest_only": true,
     "assets": {

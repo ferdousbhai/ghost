@@ -15,10 +15,13 @@
 {"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
 {"do":"wait","role":"label","name":"Sara is meeting you there.","visible":true,"timeout_ms":30000}
 {"do":"shot","path":"qa-bar-answer.png"}
+# The turn has ended and the conversation is read again: the answer area is named "Answer" ("Answering" until then),
+# and only then do Up and Down go through it.
+{"do":"wait","name":"Answer","visible":true,"timeout_ms":30000}
 
 # Up names the exchange on screen; Down from the last is the conversation's end, nothing on screen; Up brings it back.
 {"do":"key","keys":"Up"}
-{"do":"wait","role":"label","name":"1 of 1","visible":true,"timeout_ms":10000}
+{"do":"wait","role":"label","name":"1 of 1","visible":true}
 {"do":"key","keys":"Down"}
 {"do":"wait","role":"label","name":"When does the boat leave?","visible":false}
 {"do":"key","keys":"Up"}
