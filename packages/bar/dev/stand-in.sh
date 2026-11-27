@@ -19,7 +19,7 @@ stand_in_home() {
   export HOME=$root/home
   export XDG_CONFIG_HOME=$root/config XDG_STATE_HOME=$root/state XDG_DATA_HOME=$root/data XDG_CACHE_HOME=$root/cache
   export GHOST_HOME=$root/ghost
-  unset GHOSTD_CONFIG GHOSTD_HOOKS GHOSTD_API_TOKEN_FILE GHOSTD_PORT GHOST_SESSION XDG_DOCUMENTS_DIR
+  unset GHOSTD_CONFIG GHOSTD_HOOKS GHOSTD_API_TOKEN_FILE GHOSTD_PORT XDG_DOCUMENTS_DIR
 }
 
 stand_in_ghostd() {

@@ -41,10 +41,6 @@ pub const EXIT_CODES: &[(i32, &str)] = &[
     (EXIT_INTERRUPTED, "interrupted at the terminal (Ctrl-C)"),
 ];
 
-pub fn not_found(what: &str) -> CliError {
-    CliError::new(EXIT_NOT_FOUND, format!("{what} was not found"))
-}
-
 fn network_error(error: &io::Error) -> CliError {
     // A deadline that passed reads as the kernel's "resource temporarily unavailable"; say what happened instead.
     let why = match error.kind() {

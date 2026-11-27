@@ -1,5 +1,6 @@
 //! `ghostd` itself: its arguments, start-up, and the stop on SIGINT or SIGTERM.
 use crate::config::{DaemonConfig, Overrides, load_config};
+use crate::conversation_host::{ConversationHost, ConversationHostOptions};
 use crate::env::Env;
 use crate::ghosts::the_ghost;
 use crate::hooks::HookRunner;
@@ -8,7 +9,6 @@ use crate::log::{Level, Logger, stderr_is_journal};
 use crate::remote::{RemoteAccess, RemoteServe, tailscale_runner};
 use crate::running_source::{resolve_running_source, running_executable};
 use crate::server::{ApiToken, ServerOptions, start_daemon_server};
-use crate::session_host::{SessionHost, SessionHostOptions};
 use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -204,12 +204,12 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
     let remote_serve = Arc::new(RemoteServe::new(config.port, &config.remote, tailscale.clone()));
     let links = remote_serve.clone();
     let local_model = config.local.clone().map(|local| LocalModel::new(local, logger.child(json!({ "part": "local-model" })), env.clone()));
-    let host = SessionHost::new(SessionHostOptions {
+    let host = ConversationHost::new(ConversationHostOptions {
         ghost: ghost.clone(),
         owner_home: home.to_path_buf(),
         logger: logger.clone(),
         hooks: hooks.clone(),
-        conversation_url: Some(Box::new(move |id| links.conversation_url(id))),
+        app_url: Some(Box::new(move || links.machine_url())),
         local_model,
         answerer: None,
         coding_agent: None,

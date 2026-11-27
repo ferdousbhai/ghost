@@ -1,9 +1,7 @@
 //! `ghost say`: send a turn and print it as it streams, or queue a follow-up
 //! into a running one.
-use super::client::{DaemonClient, EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_SUCCESS};
-use super::common::{
-    conversation_id, id_of, latest_session, list_sessions, preferred_session_id, resolve_session, session_path, stdin_is_tty, stdin_text,
-};
+use super::client::{EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_SUCCESS};
+use super::common::{stdin_is_tty, stdin_text};
 use super::output::{Rendered, dim, text_of};
 use super::{CliError, Context};
 use crate::abort::Abort;
@@ -85,11 +83,6 @@ impl Drop for InterruptWatch {
 
 // ── The turn ────────────────────────────────────────────────────────────
 
-fn new_conversation_id() -> String {
-    let stamp = u64::try_from(crate::clock::now_ms()).unwrap_or(0);
-    format!("cli-{}-{}", crate::random::base36(stamp), crate::random::hex(&crate::random::bytes::<4>()))
-}
-
 /// The message: the words on the command line, or stdin when the only word
 /// is `-` or there are none and stdin is not a terminal.
 fn message_text(ctx: &mut Context) -> Result<String, CliError> {
@@ -121,17 +114,6 @@ fn tool_description(event: &Value) -> String {
         Some(command) => format!("$ {}", command.trim()),
         None => format!("⚙ {}: {}", tool_name(event), arguments.map_or_else(|| "{}".to_string(), Value::to_string)),
     }
-}
-
-/// Which conversation a fresh turn joins: `--new`, then `-s`/`$GHOST_SESSION`, then the latest.
-fn turn_conversation_id(client: &mut DaemonClient, start_new: bool, requested: Option<&str>) -> Result<String, CliError> {
-    if start_new {
-        return Ok(new_conversation_id());
-    }
-    if let Some(requested) = requested {
-        return conversation_id(client, requested);
-    }
-    Ok(latest_session(&list_sessions(client)?).map_or_else(new_conversation_id, |session| id_of(session).to_string()))
 }
 
 /// What one turn's events add up to, across the first stream and any resumed ones.
@@ -234,50 +216,34 @@ impl Turn {
 
 pub fn say_command(ctx: &mut Context) -> Result<i32, CliError> {
     let follow_up = ctx.parsed.boolean("follow-up");
-    let start_new = ctx.parsed.boolean("new");
-    if follow_up && start_new {
-        return Err(CliError::usage("--new and --follow-up are mutually exclusive"));
-    }
     let text = message_text(ctx)?;
     if text.trim().is_empty() {
         return Err(CliError::usage("Message text cannot be empty."));
     }
-    let requested = preferred_session_id(ctx);
     // The stream borrows the runtime for printing, so the client is this command's own from here.
     let mut client = ctx.client()?.clone();
 
-    // The conversation an idle --follow-up turns into a fresh turn of.
-    let mut idle_follow_up = None;
     if follow_up {
-        let id = match &requested {
-            Some(requested) => conversation_id(&mut client, requested)?,
-            None => id_of(&resolve_session(&mut client, None)?).to_string(),
-        };
-        match client.request("POST", &session_path(&id, "/queue"), Some(&json!({ "text": text }))) {
+        match client.request("POST", "/api/conversation/queue", Some(&json!({ "text": text }))) {
             Ok(response) => {
-                ctx.emit(&response, || Rendered::Secondary(format!("Queued for {id}.\n")));
+                ctx.emit(&response, || Rendered::Secondary("Queued.\n".to_string()));
                 return Ok(EXIT_SUCCESS);
             }
-            // A follow-up to an idle conversation is its next turn: this is how a
+            // A follow-up with no turn running is the next turn: this is how a
             // background command wakes the ghost that started it.
-            Err(error) if error.code.as_deref() == Some("session_not_streaming") => idle_follow_up = Some(id),
+            Err(error) if error.code.as_deref() == Some("conversation_not_streaming") => {}
             Err(error) => return Err(error),
         }
     }
-    let session_id = match idle_follow_up {
-        Some(id) => id,
-        None => turn_conversation_id(&mut client, start_new, requested.as_deref())?,
-    };
 
     let mut stopper = client.clone();
-    let stop_path = session_path(&session_id, "/stop");
     let watch = InterruptWatch::install(move || {
-        let _ = stopper.request("POST", &stop_path, Some(&json!({})));
+        let _ = stopper.request("POST", "/api/conversation/stop", Some(&json!({})));
     });
     let mut turn = Turn::default();
-    client.stream("/api/messages", Some(&json!({ "prompt": text, "sessionId": session_id })), &mut |event| turn.on_event(ctx, event))?;
+    client.stream("/api/messages", Some(&json!({ "prompt": text })), &mut |event| turn.on_event(ctx, event))?;
     while let Some((turn_id, from)) = turn.resume.take() {
-        let path = session_path(&session_id, &format!("/stream?turn={}&from={from}", percent_encode(&turn_id)));
+        let path = format!("/api/conversation/stream?turn={}&from={from}", percent_encode(&turn_id));
         client.stream(&path, None, &mut |event| turn.on_event(ctx, event))?;
     }
     let interrupted = watch.interrupted();

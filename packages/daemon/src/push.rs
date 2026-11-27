@@ -335,10 +335,8 @@ impl Push {
     pub fn test(&self, endpoint: &str, ghost: &str) -> Result<Sent, String> {
         let known = self.read().into_iter().find(|subscription| subscription.endpoint == endpoint);
         let subscription = known.ok_or_else(|| "That device is not subscribed here.".to_string())?;
-        let sent = (self.sender)(
-            &subscription,
-            &json!({ "title": ghost, "body": "Alerts from this machine reach this device.", "url": Value::Null, "tag": "ghost-test", "ghost": ghost }),
-        );
+        let sent =
+            (self.sender)(&subscription, &json!({ "title": ghost, "body": "Alerts from this machine reach this device.", "url": Value::Null }));
         if sent == Sent::Gone {
             let _ = self.unsubscribe(endpoint);
         }

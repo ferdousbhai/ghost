@@ -4,14 +4,14 @@
 //! home, and the XDG directories `gio trash`, the token file and the turn
 //! spill files resolve from.
 use super::*;
-use crate::conversation_log::{LOG_FILENAME, conversation_dir};
+use crate::conversation_host::ConversationHostOptions;
+use crate::conversation_log::LOG_FILENAME;
 use crate::ghosts::ghost_paths;
-use crate::http::{ClientRequest, ClientResponse, EventReader, percent_encode, send};
+use crate::http::{ClientRequest, ClientResponse, EventReader, send};
 use crate::local_turn::{Answerer, PassEvent, PassInput};
 use crate::process::{CommandFailure, CommandResult};
 use crate::remote::TailscaleRunner;
-use crate::session_host::SessionHostOptions;
-use crate::sidecars::SIDECAR_FILENAMES;
+use crate::sidecars::{question_path, read_path};
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 
@@ -149,7 +149,7 @@ fn replies(texts: &[&str]) -> Vec<FakeTurn> {
     texts.iter().map(|reply| FakeTurn { events: vec![text(reply)], ..FakeTurn::default() }).collect()
 }
 
-/// A first turn that holds until released, so "a conversation is answering"
+/// A first turn that holds until released, so "the conversation is answering"
 /// is a state the test owns rather than a race it has to win.
 fn held(after: &[&str]) -> (Vec<FakeTurn>, Gate) {
     let gate = Gate::default();
@@ -291,13 +291,13 @@ fn deltas(events: &[Value]) -> Vec<&str> {
     events.iter().filter(|event| event["type"] == "text_delta").map(|event| event["delta"].as_str().unwrap()).collect()
 }
 
-fn turn_body(session: &str, prompt: &str) -> Value {
-    json!({ "model": "ghost/casper", "prompt": prompt, "sessionId": session })
+fn turn_body(prompt: &str) -> Value {
+    json!({ "prompt": prompt })
 }
 
-/// The turn most tests send: "Who are you?" to `conv-1`.
+/// The turn most tests send: "Who are you?".
 fn first_turn() -> Value {
-    turn_body("conv-1", "Who are you?")
+    turn_body("Who are you?")
 }
 
 type Pushed = Arc<Mutex<Vec<(String, Value)>>>;
@@ -317,19 +317,19 @@ fn wait_for<T>(mut ready: impl FnMut() -> Option<T>) -> T {
 struct Daemon {
     root: PathBuf,
     ghost_dir: PathBuf,
-    session_dir: PathBuf,
+    conversation_dir: PathBuf,
     hooks_path: PathBuf,
     env: Env,
     fake: Arc<Fake>,
-    host: SessionHost,
+    host: ConversationHost,
     listening: ListeningServer,
-    /// One message per conversation change the host announces.
+    /// One message per change to the conversation the host announces.
     updates: mpsc::Receiver<()>,
     gates: Vec<Gate>,
     /// Every alert a device would have been sent: its endpoint and the alert.
     pushed: Pushed,
-    /// The conversations a turn was started in, which teardown waits out.
-    started: std::cell::RefCell<Vec<String>>,
+    /// The app's link to this machine, which an alert carries; none until a test sets one.
+    app_url: Arc<Mutex<Option<String>>>,
 }
 
 impl Daemon {
@@ -360,17 +360,21 @@ impl Daemon {
         ]);
         let ghost = Ghost { dir: ghost_dir.clone() };
         let pushed: Pushed = Arc::default();
+        let app_url: Arc<Mutex<Option<String>>> = Arc::default();
         let hooks_path = root.join(".hooks.json");
         let hooks = Arc::new(HookRunner::from_config(&hooks_path, Logger::silent(), env.clone()).unwrap());
         let gates = turns.iter().filter_map(|turn| turn.gate.clone()).collect();
         let fake =
             Arc::new(Fake { script: turns, calls: Mutex::new(Vec::new()), called: Condvar::new(), stops: Mutex::new(0), stopped: Condvar::new() });
-        let host = SessionHost::new(SessionHostOptions {
+        let host = ConversationHost::new(ConversationHostOptions {
             ghost: ghost.clone(),
             owner_home: owner_home.clone(),
             logger: Logger::silent(),
             hooks: hooks.clone(),
-            conversation_url: None,
+            app_url: Some(Box::new({
+                let app_url = app_url.clone();
+                move || app_url.lock().unwrap().clone()
+            })),
             local_model: None,
             answerer: Some(fake.clone()),
             coding_agent: Some(Box::new(|| None)),
@@ -402,11 +406,11 @@ impl Daemon {
         options.remote_serve = serve_over(fake_tailscale().1);
         configure(&mut options);
         let listening = start_daemon_server(options).unwrap();
-        let session_dir = ghost_paths(&ghost_dir).session_dir;
-        Self { root, ghost_dir, session_dir, hooks_path, env, fake, host, listening, updates, gates, pushed, started: Default::default() }
+        let conversation_dir = ghost_paths(&ghost_dir).conversation_dir;
+        Self { root, ghost_dir, conversation_dir, hooks_path, env, fake, host, listening, updates, gates, pushed, app_url }
     }
 
-    /// Whether `DELETE /api/sessions/:id` can work here; it moves the conversation to the scratch Trash with `gio`.
+    /// Whether `DELETE /api/conversation` can work here; it moves the conversation to the scratch Trash with `gio`.
     fn can_trash(&self) -> bool {
         let installed = crate::env::which("gio", &self.env).is_some();
         if !installed {
@@ -452,7 +456,6 @@ impl Daemon {
 
     /// Start a turn and return once its response has begun.
     fn open_turn(&self, body: &Value) -> ClientResponse {
-        self.started.borrow_mut().push(body["sessionId"].as_str().unwrap_or("default").to_string());
         self.open("POST", "/api/messages", &[JSON, ("accept", "text/event-stream")], Some(body.to_string().as_bytes()))
     }
 
@@ -461,28 +464,31 @@ impl Daemon {
         finish(self.open_turn(body))
     }
 
-    fn sessions(&self) -> Vec<Value> {
-        self.get("/api/sessions").json()["sessions"].as_array().expect("a sessions array").clone()
+    /// `GET /api/conversation`: the conversation as a client lists it.
+    fn conversation(&self) -> Value {
+        let response = self.get("/api/conversation");
+        assert_eq!(response.status, 200);
+        response.json()
     }
 
-    fn streaming(&self, id: &str) -> bool {
-        self.host.queued_messages(id).unwrap()["streaming"] == true
+    fn streaming(&self) -> bool {
+        self.host.queued_messages()["streaming"] == true
     }
 
-    /// Wait until the conversation's running turn has written all it will. The
-    /// host announces a conversation when its turn ends, so each announcement
-    /// is a reason to look again.
-    fn wait_settled(&self, id: &str) {
-        while self.streaming(id) {
+    /// Wait until the running turn has given the conversation back, a moment
+    /// after its terminal. The host announces the conversation when it has,
+    /// so each announcement is a reason to look again.
+    fn wait_settled(&self) {
+        while self.host.conversation().unwrap()["running"] == true {
             self.updates.recv_timeout(WAIT).expect("the turn settles");
         }
     }
 
     /// Every response of one turn: the first, then each continuation its `resume` frame names.
-    fn follow(&self, session: &str, first: &Reply) -> Vec<Vec<Value>> {
+    fn follow(&self, first: &Reply) -> Vec<Vec<Value>> {
         let mut responses = vec![first.events()];
         while let Some(last) = responses.last().and_then(|events| events.last()).filter(|last| last["type"] == "resume").cloned() {
-            let target = format!("/api/sessions/{session}/stream?turn={}&from={}", last["turn"].as_str().unwrap(), last["from"]);
+            let target = format!("/api/conversation/stream?turn={}&from={}", last["turn"].as_str().unwrap(), last["from"]);
             let response = self.get(&target);
             assert_eq!(response.status, 200);
             responses.push(response.events());
@@ -496,12 +502,10 @@ impl Drop for Daemon {
         for gate in &self.gates {
             gate.release();
         }
-        // A turn outlives its response, and writes its log as it ends: stop any
-        // still running and wait for each to give its conversation back, which
+        // A turn outlives its response, and writes its log as it ends: stop one
+        // still running and wait for it to give the conversation back, which
         // the host announces, before the scratch directory goes.
-        for id in self.started.borrow().iter() {
-            while self.host.stop_turn(id).is_ok() && self.updates.recv_timeout(WAIT).is_ok() {}
-        }
+        while self.host.stop_turn().is_ok() && self.updates.recv_timeout(WAIT).is_ok() {}
         self.host.dispose_all();
         self.listening.close();
         let _ = std::fs::remove_dir_all(&self.root);
@@ -510,6 +514,11 @@ impl Drop for Daemon {
 
 fn read_json(path: &Path) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+/// `GET /api/conversation` while nothing has been said.
+fn nothing_said() -> Value {
+    json!({ "preview": null, "updatedAt": null, "messageCount": 0, "unread": false, "running": false, "question": null })
 }
 
 // ── GET /api/ghost, hooks, character ────────────────────────────────────
@@ -596,50 +605,31 @@ fn character_still_serves_an_oversize_hand_edited_file_so_the_owner_can_shorten_
 // ── POST /api/messages ──────────────────────────────────────────────────
 
 #[test]
-fn refuses_a_second_turn_in_an_answering_conversation_before_the_stream_and_admits_it_after() {
+fn refuses_a_second_turn_while_one_is_answering_before_the_stream_and_admits_it_after() {
     let (turns, gate) = held(&["after"]);
     let daemon = Daemon::answering(turns);
-    let first = daemon.open_turn(&turn_body("conv-busy", "hold this turn"));
+    let first = daemon.open_turn(&turn_body("hold this turn"));
     daemon.fake.wait_for_calls(1);
 
-    let rejected = daemon.post_turn(&turn_body("conv-busy", "must fail before SSE"));
+    let rejected = daemon.post_turn(&turn_body("must fail before SSE"));
     assert_eq!(rejected.status, 409);
     assert_eq!(rejected.header("content-type"), Some("application/json; charset=utf-8"));
-    assert_eq!(rejected.code(), "session_busy");
-
-    // Another conversation of the same ghost is not held behind it.
-    let other = daemon.post_turn(&turn_body("conv-other", "a different conversation"));
-    assert_eq!(other.status, 200);
-    assert_eq!(other.events().last(), Some(&json!({ "type": "done" })));
+    assert_eq!(rejected.code(), "conversation_busy");
 
     gate.release();
     assert_eq!(finish(first).events().last(), Some(&json!({ "type": "done" })));
-    // The terminal is written just before the conversation is given back.
-    daemon.wait_settled("conv-busy");
-    let retried = retry_while_busy(&daemon, &turn_body("conv-busy", "after release"));
+    daemon.wait_settled();
+    let retried = daemon.post_turn(&turn_body("after release"));
     assert_eq!(retried.status, 200);
     assert_eq!(terminals(&retried.events()), [&json!({ "type": "done" })]);
     assert!(daemon.fake.calls().iter().all(|call| call.message != "must fail before SSE"));
-}
-
-/// Post a turn to a conversation whose last turn has sent its terminal. The
-/// host frees the conversation a moment after that terminal, and announces it
-/// when it has, so a refusal is retried on the next announcement.
-fn retry_while_busy(daemon: &Daemon, body: &Value) -> Reply {
-    loop {
-        let reply = daemon.post_turn(body);
-        if reply.status != 409 {
-            return reply;
-        }
-        daemon.updates.recv_timeout(WAIT).expect("the conversation is given back");
-    }
 }
 
 #[test]
 fn does_not_expose_live_voice_or_a_collaboration_host() {
     let daemon = Daemon::start();
     for route in ["live", "collab"] {
-        let target = format!("/api/sessions/conv-connect/{route}");
+        let target = format!("/api/conversation/{route}");
         assert_eq!(daemon.get(&target).status, 404);
         assert_eq!(daemon.post(&target, &json!({ "action": "start" })).status, 404);
     }
@@ -678,7 +668,7 @@ fn resumes_a_long_turn(size: usize) {
     let sent: Vec<String> = (0..60).map(|index| format!("{index:02}{}", "é".repeat(size))).collect();
     let turn = FakeTurn { events: sent.iter().map(|delta| text(delta)).collect(), ..FakeTurn::default() };
     let daemon = Daemon::with(vec![turn], |options| options.stream_cut_bytes = Some(2_000.max(size * 8)));
-    let responses = daemon.follow("conv-1", &daemon.post_turn(&first_turn()));
+    let responses = daemon.follow(&daemon.post_turn(&first_turn()));
 
     assert!(responses.len() > 2, "{} responses", responses.len());
     let events: Vec<Value> = responses.iter().flatten().filter(|event| event["type"] != "resume").cloned().collect();
@@ -714,9 +704,9 @@ fn terminates_cleanly_when_replay_storage_fails() {
     assert_eq!(terminals(&events), [&failure]);
     assert_eq!(events.last(), Some(&failure));
     // The turn nobody can follow any more is stopped.
-    daemon.wait_settled("conv-1");
-    assert_eq!(daemon.host.queued_messages("conv-1").unwrap(), json!({ "streaming": false, "followUp": [] }));
-    let transcript = daemon.get("/api/sessions/conv-1/transcript").text();
+    daemon.wait_settled();
+    assert_eq!(daemon.host.queued_messages(), json!({ "streaming": false, "followUp": [] }));
+    let transcript = daemon.get("/api/conversation/transcript").text();
     assert!(transcript.contains("Turn aborted."), "{}", &transcript[transcript.len().saturating_sub(300)..]);
 }
 
@@ -728,8 +718,8 @@ fn the_turn_completes_on_its_own_behind_a_client_that_is_not_reading() {
     let daemon = Daemon::with(vec![turn], |options| options.stream_cut_bytes = Some(usize::MAX));
     let response = daemon.open_turn(&first_turn());
     daemon.fake.wait_for_calls(1);
-    daemon.wait_settled("conv-1");
-    assert!(!daemon.streaming("conv-1"));
+    daemon.wait_settled();
+    assert!(!daemon.streaming());
 
     let events = finish(response).events();
     assert_eq!(events.last(), Some(&json!({ "type": "done" })));
@@ -746,28 +736,27 @@ fn refuses_to_resume_a_turn_it_does_not_know_or_past_where_the_turn_has_reached(
     let resume = events.last().unwrap();
     assert_eq!(resume["from"], 1);
     let turn = resume["turn"].as_str().unwrap();
-    let stream = |query: &str, session: &str| daemon.get(&format!("/api/sessions/{session}/stream?{query}"));
+    let stream = |query: &str| daemon.get(&format!("/api/conversation/stream?{query}"));
 
-    let unknown = stream("turn=nope&from=0", "conv-1");
+    let unknown = stream("turn=nope&from=0");
     assert_eq!(unknown.status, 404);
     assert_eq!(unknown.code(), "turn_not_found");
-    assert_eq!(stream(&format!("turn={turn}&from=0"), "conv-other").status, 404);
     for from in ["from=999", "from=-1", "from=1.5", "from=soon", "other=1"] {
-        let refused = stream(&format!("turn={turn}&{from}"), "conv-1");
+        let refused = stream(&format!("turn={turn}&{from}"));
         assert_eq!(refused.status, 400, "{from}");
         assert_eq!(refused.code(), "invalid_request", "{from}");
     }
 
     // Each continuation is cut the same way, one event a response, to the one terminal.
-    let responses = daemon.follow("conv-1", &first);
+    let responses = daemon.follow(&first);
     let all: Vec<Value> = responses.iter().flatten().filter(|event| event["type"] != "resume").cloned().collect();
     assert_eq!(types(&all), ["start", "pass", "text_start", "text_delta", "text_end", "done"]);
     assert!(responses[..responses.len() - 1].iter().all(|batch| batch.len() == 2));
     // An ended turn stays resumable for a while, from any event it reached.
-    let replayed = stream(&format!("turn={turn}&from=5"), "conv-1");
+    let replayed = stream(&format!("turn={turn}&from=5"));
     assert_eq!(replayed.events(), [json!({ "type": "done" })]);
-    assert_eq!(stream(&format!("turn={turn}&from=6"), "conv-1").events(), Vec::<Value>::new());
-    assert_eq!(stream(&format!("turn={turn}&from=7"), "conv-1").status, 400);
+    assert_eq!(stream(&format!("turn={turn}&from=6")).events(), Vec::<Value>::new());
+    assert_eq!(stream(&format!("turn={turn}&from=7")).status, 400);
 }
 
 #[test]
@@ -778,12 +767,12 @@ fn streams_reasoning_and_keeps_it_in_the_transcript() {
     }]);
     let events = daemon.post_turn(&first_turn()).events();
     assert!(events.contains(&json!({ "type": "thinking", "delta": "its reasoning" })), "{events:?}");
-    let transcript = daemon.get("/api/sessions/conv-1/transcript").json();
+    let transcript = daemon.get("/api/conversation/transcript").json();
     assert_eq!(
         transcript["messages"].as_array().unwrap().last().unwrap()["content"],
         json!([{ "type": "thinking", "text": "its reasoning" }, { "type": "text", "text": "Answer." }])
     );
-    assert!(std::fs::read_to_string(conversation_dir(&daemon.session_dir, "conv-1").join(LOG_FILENAME)).unwrap().contains("its reasoning"));
+    assert!(std::fs::read_to_string(daemon.conversation_dir.join(LOG_FILENAME)).unwrap().contains("its reasoning"));
 }
 
 #[test]
@@ -796,13 +785,20 @@ fn ignores_a_caller_supplied_turn_id_header() {
 }
 
 #[test]
-fn keeps_separate_conversations_in_separate_directories() {
+fn runs_every_turn_in_the_one_conversation_directory_whatever_else_the_body_names() {
     let daemon = Daemon::answering(replies(&["one", "two"]));
     daemon.post_turn(&first_turn());
-    daemon.post_turn(&turn_body("conv-2", "Who are you?"));
-    assert_eq!(daemon.sessions().len(), 2);
+    daemon.wait_settled();
+    // `prompt` is the whole body: a conversation named beside it names nothing.
+    let named = daemon.post_turn(&json!({ "prompt": "And then?", "sessionId": "conv-2" }));
+    assert_eq!(named.status, 200);
     let ran_in: Vec<PathBuf> = daemon.fake.calls().into_iter().map(|call| call.cwd).collect();
-    assert_eq!(ran_in, [conversation_dir(&daemon.session_dir, "conv-1"), conversation_dir(&daemon.session_dir, "conv-2")]);
+    assert_eq!(ran_in, [daemon.conversation_dir.clone(), daemon.conversation_dir.clone()]);
+    assert_eq!(daemon.conversation_dir, daemon.ghost_dir.join("conversation"));
+    assert_eq!(daemon.get("/api/conversation/transcript").json()["total"], 4);
+    // The home holds that one directory and no other conversation.
+    assert!(daemon.conversation_dir.join(LOG_FILENAME).exists());
+    assert!(!daemon.ghost_dir.join("sessions").exists());
 }
 
 #[test]
@@ -848,7 +844,7 @@ fn flushes_the_accepted_stream_before_a_silent_turn_says_anything() {
     let (turns, gate) = held(&[]);
     let daemon = Daemon::answering(turns);
     // The head arrives while the model is still silent.
-    let response = daemon.open_turn(&turn_body("silent-turn", "hello"));
+    let response = daemon.open_turn(&turn_body("hello"));
     assert_eq!(response.status, 200);
     assert_eq!(response.header("content-type"), Some("text/event-stream; charset=utf-8"));
     // And so does the opening comment, and what the turn has said so far.
@@ -861,7 +857,7 @@ fn flushes_the_accepted_stream_before_a_silent_turn_says_anything() {
     assert_eq!(next(), Some(json!({ "type": "start" })));
     assert_eq!(next(), Some(json!({ "type": "pass" })));
     daemon.fake.wait_for_calls(1);
-    assert!(daemon.streaming("silent-turn"));
+    assert!(daemon.streaming());
 
     gate.release();
     let mut rest = Vec::new();
@@ -875,9 +871,9 @@ fn flushes_the_accepted_stream_before_a_silent_turn_says_anything() {
 fn a_stopped_turn_ends_its_stream_aborted() {
     let (turns, _gate) = held(&[]);
     let daemon = Daemon::answering(turns);
-    let response = daemon.open_turn(&turn_body("conv-stop", "hold"));
+    let response = daemon.open_turn(&turn_body("hold"));
     daemon.fake.wait_for_calls(1);
-    let stopped = daemon.post("/api/sessions/conv-stop/stop", &json!({}));
+    let stopped = daemon.post("/api/conversation/stop", &json!({}));
     assert_eq!((stopped.status, stopped.json()), (200, json!({ "stopped": true })));
     let events = finish(response).events();
     assert_eq!(terminals(&events), [&json!({ "type": "error", "reason": "aborted", "errorMessage": "Turn aborted." })]);
@@ -888,7 +884,7 @@ fn a_stopped_turn_ends_its_stream_aborted() {
 fn closing_the_server_ends_an_open_turn_stream() {
     let (turns, _gate) = held(&[]);
     let daemon = Daemon::answering(turns);
-    let response = daemon.open_turn(&turn_body("conv-open", "hold"));
+    let response = daemon.open_turn(&turn_body("hold"));
     daemon.fake.wait_for_calls(1);
     daemon.listening.close();
     // The stream ends without a terminal: the turn is the host's to abort.
@@ -913,9 +909,10 @@ fn conversation_events_announce_a_change_and_the_stream_is_cut_for_a_reconnect()
     daemon.post_turn(&first_turn());
     let mut events = EventReader::new(body);
     let event: Value = serde_json::from_str(&events.next_event().unwrap().expect("an invalidation")).unwrap();
-    assert_eq!((&event["type"], &event["id"]), (&json!("conversation-updated"), &json!("conv-1")));
+    assert_eq!(event["type"], "conversation-updated");
     assert!(crate::clock::parse_iso(event["updatedAt"].as_str().unwrap()).is_some(), "{event}");
-    assert_eq!(event.as_object().map(Map::len), Some(3));
+    // There is one conversation, so a frame names none.
+    assert_eq!(event.as_object().map(Map::len), Some(2), "{event}");
     // Past the cut the response ends, and the client reconnects.
     assert_eq!(events.next_event().unwrap(), None);
 }
@@ -933,14 +930,14 @@ fn conversation_events_end_when_the_host_shuts_down() {
     assert_eq!(rest, "\n");
 }
 
-// ── /api/sessions/:id/queue ─────────────────────────────────────────────
+// ── /api/conversation/queue ─────────────────────────────────────────────
 
 #[test]
 fn queues_a_follow_up_during_a_live_turn_and_runs_it_as_the_next_pass_of_the_same_stream() {
     let (turns, gate) = held(&["Kept it understated."]);
     let daemon = Daemon::answering(turns);
-    let route = "/api/sessions/conv-queue/queue";
-    let turn = daemon.open_turn(&turn_body("conv-queue", "Set the type."));
+    let route = "/api/conversation/queue";
+    let turn = daemon.open_turn(&turn_body("Set the type."));
     daemon.fake.wait_for_calls(1);
 
     let queued = daemon.post(route, &json!({ "text": "  Keep the result understated. " }));
@@ -968,301 +965,194 @@ fn queues_a_follow_up_during_a_live_turn_and_runs_it_as_the_next_pass_of_the_sam
     assert_eq!(daemon.get(route).json(), json!({ "streaming": false, "followUp": [] }));
     let too_late = daemon.post(route, &json!({ "text": "Too late" }));
     assert_eq!(too_late.status, 409);
-    assert_eq!(too_late.code(), "session_not_streaming");
+    assert_eq!(too_late.code(), "conversation_not_streaming");
     assert_eq!(daemon.delete(route).status, 405);
     // The removed automatic-work endpoint is no longer exposed.
-    assert_eq!(daemon.delete("/api/sessions/conv-queue/continuation").status, 404);
+    assert_eq!(daemon.delete("/api/conversation/continuation").status, 404);
 }
 
-// ── GET /api/sessions ───────────────────────────────────────────────────
+// ── GET /api/conversation ───────────────────────────────────────────────
 
 #[test]
-fn sessions_are_empty_before_the_first_turn_and_list_it_after() {
-    let daemon = Daemon::start();
-    assert_eq!(daemon.get("/api/sessions").json(), json!({ "sessions": [] }));
-    daemon.post_turn(&first_turn());
-    let sessions = daemon.sessions();
-    assert_eq!(sessions.len(), 1);
-    let row = sessions[0].as_object().unwrap();
-    let mut keys: Vec<&str> = row.keys().map(String::as_str).collect();
-    keys.sort_unstable();
-    assert_eq!(keys, ["id", "messageCount", "pinned", "preview", "question", "running", "title", "unread", "updatedAt"]);
-    let mut row = sessions[0].clone();
-    assert!(crate::clock::parse_iso(row["updatedAt"].as_str().unwrap()).is_some());
-    row.as_object_mut().unwrap().remove("updatedAt");
-    assert_eq!(
-        row,
-        json!({
-            "id": "conv-1", "title": "Who are you", "preview": "Who are you?", "messageCount": 2,
-            "pinned": false, "unread": true, "running": false, "question": null,
-        })
-    );
+fn the_conversation_has_nothing_before_anything_is_said_and_describes_itself_after_a_turn() {
+    let (turns, gate) = held(&[]);
+    let daemon = Daemon::answering(turns);
+    assert_eq!(daemon.conversation(), nothing_said());
+
+    let turn = daemon.open_turn(&first_turn());
+    daemon.fake.wait_for_calls(1);
+    assert_eq!(daemon.conversation()["running"], true);
+    gate.release();
+    assert_eq!(finish(turn).events().last(), Some(&json!({ "type": "done" })));
+    daemon.wait_settled();
+
+    let mut row = daemon.conversation();
+    let updated_at = row.as_object_mut().unwrap().remove("updatedAt").expect("an updatedAt");
+    assert!(crate::clock::parse_iso(updated_at.as_str().unwrap()).is_some(), "{updated_at}");
+    // These fields and no others: no id, title, or pin.
+    assert_eq!(row, json!({ "preview": "Who are you?", "messageCount": 2, "unread": true, "running": false, "question": null }));
 }
 
+// ── The ghost's open question ───────────────────────────────────────────
+
+// A pass sets it (the model's `ask` tool); the API only shows it.
 #[test]
-fn accepts_a_128_character_id_and_rejects_any_other_shape_before_storage_on_every_route() {
-    let daemon = Daemon::answering(replies(&["boundary"]));
-    let boundary = "a".repeat(128);
-    assert_eq!(daemon.post_turn(&turn_body(&boundary, "Who are you?")).status, 200);
-    let listed: Vec<Value> = daemon.sessions().iter().map(|row| row["id"].clone()).collect();
-    assert_eq!(listed, [json!(boundary)]);
-    assert_eq!(daemon.get(&format!("/api/sessions/{boundary}/transcript")).status, 200);
-
-    // A pin writes pins.json beside the conversations; an id naming a sidecar is refused, not a 500.
-    assert_eq!(daemon.put(&format!("/api/sessions/{boundary}/pin"), &json!({ "pinned": true })).status, 200);
-    let pins = daemon.session_dir.join("pins.json");
-    assert!(pins.exists());
-    let too_long = "a".repeat(129);
-    let mut invalid = vec![too_long.as_str(), ".hidden", "folder/chat", "chat?draft", "\u{1f47b}"];
-    invalid.extend(SIDECAR_FILENAMES);
-    for id in invalid {
-        let rejected = daemon.post_turn(&turn_body(id, "Who are you?"));
-        assert_eq!(rejected.status, 400, "{id}");
-        assert_eq!(rejected.code(), "invalid_conversation_id", "{id}");
-        let segment = percent_encode(id);
-        let refusals = [
-            daemon.get(&format!("/api/sessions/{segment}/transcript")),
-            daemon.put(&format!("/api/sessions/{segment}/pin"), &json!({ "pinned": true })),
-            daemon.put(&format!("/api/sessions/{segment}/title"), &json!({ "title": "x" })),
-            daemon.delete(&format!("/api/sessions/{segment}")),
-        ];
-        for response in refusals {
-            assert_eq!(response.status, 400, "{id}");
-            assert_eq!(response.code(), "invalid_conversation_id", "{id}");
-        }
-    }
-    // A lone surrogate cannot be percent-encoded into a path, and JSON that
-    // escapes one is not JSON to serde_json, where it was a string to
-    // JavaScript: still a 400, as a body rather than as an id.
-    let surrogate = daemon.call("POST", "/api/messages", &[JSON], Some(br#"{"prompt":"Who are you?","sessionId":"\ud800"}"#));
-    assert_eq!((surrogate.status, surrogate.code().as_str()), (400, "invalid_request"));
-
-    assert_eq!(daemon.fake.calls().len(), 1);
-    assert!(!daemon.session_dir.join(".hidden").exists());
-    assert_eq!(read_json(&pins)["pinned"], json!([boundary]));
-}
-
-// ── PUT /api/sessions/:id/pin ───────────────────────────────────────────
-
-fn pin(daemon: &Daemon, id: &str, body: &Value) -> Reply {
-    daemon.put(&format!("/api/sessions/{id}/pin"), body)
-}
-
-fn listed(daemon: &Daemon) -> Vec<(String, bool)> {
-    daemon.sessions().iter().map(|row| (row["id"].as_str().unwrap().to_string(), row["pinned"] == true)).collect()
-}
-
-#[test]
-fn pins_a_conversation_lists_it_first_and_unpins_it_again() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    // Conversations are ordered by a millisecond timestamp, so the second
-    // starts in a later millisecond; the clock is the only thing to wait on.
-    let mark = crate::clock::now_ms();
-    while crate::clock::now_ms() <= mark {
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    daemon.post_turn(&turn_body("conv-2", "Who are you?"));
-    let rows = |pairs: &[(&str, bool)]| pairs.iter().map(|(id, pinned)| (id.to_string(), *pinned)).collect::<Vec<_>>();
-    assert_eq!(listed(&daemon), rows(&[("conv-2", false), ("conv-1", false)]));
-
-    let pinned = pin(&daemon, "conv-1", &json!({ "pinned": true }));
-    assert_eq!(pinned.status, 200);
-    assert_eq!(pinned.json(), json!({ "ok": true, "pinned": true }));
-    assert!(daemon.ghost_dir.join("sessions/pins.json").exists());
-    assert_eq!(listed(&daemon), rows(&[("conv-1", true), ("conv-2", false)]));
-
-    // Idempotent both ways.
-    assert_eq!(pin(&daemon, "conv-1", &json!({ "pinned": true })).status, 200);
-    assert_eq!(listed(&daemon), rows(&[("conv-1", true), ("conv-2", false)]));
-    let unpinned = pin(&daemon, "conv-1", &json!({ "pinned": false }));
-    assert_eq!(unpinned.json(), json!({ "ok": true, "pinned": false }));
-    assert_eq!(listed(&daemon), rows(&[("conv-2", false), ("conv-1", false)]));
-}
-
-#[test]
-fn pin_rejects_a_non_boolean_or_missing_pinned() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    for body in [json!({}), json!({ "pinned": "true" }), json!({ "pinned": 1 }), json!({ "pinned": null }), json!([])] {
-        let response = pin(&daemon, "conv-1", &body);
-        assert_eq!(response.status, 400, "{body}");
-        assert_eq!(response.code(), "invalid_request", "{body}");
-    }
-}
-
-#[test]
-fn pin_404s_an_unknown_conversation_and_405s_a_non_put() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    let missing = pin(&daemon, "nope", &json!({ "pinned": true }));
-    assert_eq!(missing.status, 404);
-    assert_eq!(missing.code(), "not_found");
-    let wrong_method = daemon.get("/api/sessions/conv-1/pin");
-    assert_eq!(wrong_method.status, 405);
-    assert_eq!(wrong_method.json(), json!({ "error": { "message": "GET is not allowed here.", "code": "method_not_allowed" } }));
-}
-
-#[test]
-fn drops_the_pin_when_the_conversation_is_deleted() {
-    let daemon = Daemon::start();
-    if !daemon.can_trash() {
-        return;
-    }
-    daemon.post_turn(&first_turn());
-    assert_eq!(pin(&daemon, "conv-1", &json!({ "pinned": true })).status, 200);
-    assert_eq!(daemon.delete("/api/sessions/conv-1").status, 200);
-    assert_eq!(read_json(&daemon.ghost_dir.join("sessions/pins.json")), json!({ "version": 2, "pinned": [] }));
-}
-
-// ── A ghost's open question ─────────────────────────────────────────────
-
-fn question_of(daemon: &Daemon, id: &str) -> Value {
-    daemon.sessions().iter().find(|row| row["id"] == id).expect("a listed conversation")["question"].clone()
-}
-
-// A pass sets it (the model's `ask` tool); the API only lists it.
-#[test]
-fn lists_the_question_until_the_owners_next_message_answers_it_or_its_conversation_goes() {
+fn shows_the_question_until_the_owners_next_message_answers_it_or_the_conversation_goes() {
     let daemon = Daemon::answering(replies(&["first", "second"]));
+    let file = question_path(&daemon.conversation_dir);
     daemon.post_turn(&first_turn());
-    assert_eq!(question_of(&daemon, "conv-1"), Value::Null);
+    daemon.wait_settled();
+    assert_eq!(daemon.conversation()["question"], Value::Null);
     // Turns that ask nothing write nothing.
-    assert!(!daemon.ghost_dir.join("sessions/questions.json").exists());
+    assert!(!file.exists());
 
-    let asked = daemon.host.set_question("conv-1", "  Ship it tonight? ", &["yes".to_string(), " yes".to_string(), "wait".to_string()]).unwrap();
+    let asked = daemon.host.set_question("  Ship it tonight? ", &["yes".to_string(), " yes".to_string(), "wait".to_string()]).unwrap();
     assert_eq!((&asked["text"], &asked["options"]), (&json!("Ship it tonight?"), &json!(["yes", "wait"])));
     assert!(crate::clock::parse_iso(asked["askedAt"].as_str().unwrap()).is_some(), "{asked}");
-    assert_eq!(question_of(&daemon, "conv-1"), asked);
+    assert_eq!(daemon.conversation()["question"], asked);
+    assert_eq!(read_json(&file), asked);
     // No route sets or withdraws one.
-    assert_eq!(daemon.put("/api/sessions/conv-1/question", &json!({ "text": "hi" })).status, 404);
+    assert_eq!(daemon.put("/api/conversation/question", &json!({ "text": "hi" })).status, 404);
 
-    daemon.post_turn(&turn_body("conv-1", "yes"));
-    assert_eq!(question_of(&daemon, "conv-1"), Value::Null);
+    assert_eq!(daemon.post_turn(&turn_body("yes")).status, 200);
+    daemon.wait_settled();
+    assert_eq!(daemon.conversation()["question"], Value::Null);
+    assert!(!file.exists());
 
     if !daemon.can_trash() {
         return;
     }
-    daemon.host.set_question("conv-1", "Still there?", &[]).unwrap();
-    daemon.delete("/api/sessions/conv-1");
-    assert_eq!(read_json(&daemon.ghost_dir.join("sessions/questions.json")), json!({ "version": 2, "questions": {} }));
+    daemon.host.set_question("Still there?", &[]).unwrap();
+    assert_eq!(daemon.delete("/api/conversation").status, 200);
+    assert_eq!(daemon.conversation()["question"], Value::Null);
+    assert!(!file.exists());
 }
 
-// ── PUT /api/sessions/:id/title ─────────────────────────────────────────
-
-fn rename(daemon: &Daemon, id: &str, body: &Value) -> Reply {
-    daemon.put(&format!("/api/sessions/{id}/title"), body)
-}
+// ── PUT /api/conversation/read ──────────────────────────────────────────
 
 #[test]
-fn names_a_conversation_and_trims_it() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    let named = rename(&daemon, "conv-1", &json!({ "title": "  The Vandercook  " }));
-    assert_eq!(named.status, 200);
-    assert_eq!(named.json(), json!({ "ok": true, "title": "The Vandercook" }));
-    assert_eq!(daemon.sessions()[0]["title"], "The Vandercook");
-}
+fn marks_the_conversation_read_through_a_time_no_later_than_now_and_never_back() {
+    let daemon = Daemon::answering(replies(&["one", "two"]));
+    let route = "/api/conversation/read";
+    let file = read_path(&daemon.conversation_dir);
+    // Before anything is said there is nothing to have read.
+    let early = daemon.put(route, &json!({}));
+    assert_eq!((early.status, early.code().as_str()), (404, "not_found"));
+    assert!(!file.exists());
 
-#[test]
-fn rejects_an_empty_non_string_non_printable_or_overlong_title() {
-    let daemon = Daemon::start();
     daemon.post_turn(&first_turn());
-    for body in [
-        json!({}),
-        json!({ "title": null }),
-        json!({ "title": 7 }),
-        json!({ "title": ["a"] }),
-        json!({ "title": "" }),
-        json!({ "title": "   " }),
-        json!({ "title": "\u{1}\u{7f}" }),
-        json!({ "title": "x".repeat(121) }),
-        json!([]),
-    ] {
-        let response = rename(&daemon, "conv-1", &body);
-        assert_eq!(response.status, 400, "{body}");
-        assert_eq!(response.code(), "invalid_request", "{body}");
-    }
-    // Exactly at the cap is fine.
-    assert_eq!(rename(&daemon, "conv-1", &json!({ "title": "x".repeat(120) })).status, 200);
-}
-
-#[test]
-fn title_404s_an_unknown_conversation_and_405s_a_non_put() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    let missing = rename(&daemon, "nope", &json!({ "title": "Anything" }));
-    assert_eq!(missing.status, 404);
-    assert_eq!(missing.code(), "not_found");
-    assert_eq!(daemon.get("/api/sessions/conv-1/title").status, 405);
-}
-
-// ── PUT /api/sessions/:id/read ──────────────────────────────────────────
-
-#[test]
-fn marks_a_conversation_read_through_a_time_no_later_than_now() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    assert_eq!(daemon.sessions()[0]["unread"], true);
-    let route = "/api/sessions/conv-1/read";
-    for body in [json!({ "readThrough": "soon" }), json!({ "readThrough": 7 }), json!({ "readThrough": "2999-01-01T00:00:00.000Z" })] {
+    daemon.wait_settled();
+    assert_eq!(daemon.conversation()["unread"], true);
+    for body in [json!({ "readThrough": "soon" }), json!({ "readThrough": 7 }), json!({ "readThrough": "2999-01-01T00:00:00.000Z" }), json!([])] {
         let refused = daemon.put(route, &body);
         assert_eq!(refused.status, 400, "{body}");
         assert_eq!(refused.code(), "invalid_request", "{body}");
     }
-    let read_through = daemon.get("/api/sessions/conv-1/transcript").json()["readThrough"].clone();
+    assert_eq!(daemon.conversation()["unread"], true);
+
+    let read_through = daemon.get("/api/conversation/transcript").json()["readThrough"].clone();
     let read = daemon.put(route, &json!({ "readThrough": read_through }));
     assert_eq!((read.status, read.json()), (200, json!({ "ok": true, "readAt": read_through })));
-    assert_eq!(daemon.sessions()[0]["unread"], false);
-    assert_eq!(daemon.put("/api/sessions/nope/read", &json!({})).status, 404);
+    assert_eq!(read_json(&file), json!({ "readAt": read_through }));
+    assert_eq!(daemon.conversation()["unread"], false);
+
+    // An earlier time leaves the mark where it is.
+    let earlier = daemon.put(route, &json!({ "readThrough": "2020-01-01T00:00:00.000Z" }));
+    assert_eq!((earlier.status, earlier.json()), (200, json!({ "ok": true, "readAt": read_through })));
+    assert_eq!(read_json(&file), json!({ "readAt": read_through }));
+    assert_eq!(daemon.conversation()["unread"], false);
+
+    // A reply later than the mark is unread again. Both are millisecond
+    // timestamps, so the next turn starts in a later millisecond; the clock
+    // is the only thing to wait on.
+    let mark = crate::clock::parse_iso(read_through.as_str().unwrap()).unwrap();
+    while crate::clock::now_ms() <= mark {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(daemon.post_turn(&turn_body("And then?")).status, 200);
+    daemon.wait_settled();
+    assert_eq!(daemon.conversation()["unread"], true);
+
+    // With no `readThrough` the mark is now.
+    let before = crate::clock::now_ms();
+    let now = daemon.put(route, &json!({}));
+    assert_eq!(now.status, 200);
+    let body = now.json();
+    let read_at = crate::clock::parse_iso(body["readAt"].as_str().unwrap()).expect("a timestamp");
+    assert!((before..=crate::clock::now_ms()).contains(&read_at), "{body}");
+    assert_eq!(body, json!({ "ok": true, "readAt": body["readAt"] }));
+    assert_eq!(daemon.conversation()["unread"], false);
 }
 
-// ── DELETE /api/sessions/:id ────────────────────────────────────────────
+// ── DELETE /api/conversation ────────────────────────────────────────────
 
 #[test]
-fn moves_a_stored_conversation_to_recoverable_trash() {
-    let daemon = Daemon::start();
+fn starting_over_moves_the_conversation_to_recoverable_trash_and_the_next_message_starts_a_new_log() {
+    let daemon = Daemon::answering(replies(&["one", "two"]));
     if !daemon.can_trash() {
         return;
     }
-    daemon.post_turn(&first_turn());
+    let log = daemon.conversation_dir.join(LOG_FILENAME);
+    // Before anything is said there is nothing to start over from.
+    let nothing = daemon.delete("/api/conversation");
+    assert_eq!((nothing.status, nothing.code().as_str()), (404, "not_found"));
 
-    let deleted = daemon.delete("/api/sessions/conv-1");
+    daemon.post_turn(&turn_body("the first conversation"));
+    daemon.wait_settled();
+    assert!(log.exists());
+
+    let deleted = daemon.delete("/api/conversation");
     assert_eq!(deleted.status, 200);
     assert_eq!(deleted.json(), json!({ "ok": true }));
     // The whole conversation directory moves, its log with it, into the scratch Trash.
-    assert!(!conversation_dir(&daemon.session_dir, "conv-1").exists());
-    assert!(daemon.root.join(".data/Trash/files/conv-1").join(LOG_FILENAME).exists());
-    assert_eq!(daemon.get("/api/sessions").json(), json!({ "sessions": [] }));
+    assert!(!daemon.conversation_dir.exists());
+    let trashed = daemon.root.join(".data/Trash/files/conversation").join(LOG_FILENAME);
+    assert!(std::fs::read_to_string(&trashed).unwrap().contains("the first conversation"));
+    assert_eq!(daemon.conversation(), nothing_said());
+    let transcript = daemon.get("/api/conversation/transcript").json();
+    assert_eq!((&transcript["messages"], &transcript["total"], &transcript["truncated"]), (&json!([]), &json!(0), &json!(false)));
+    let again = daemon.delete("/api/conversation");
+    assert_eq!((again.status, again.code().as_str()), (404, "not_found"));
 
-    let missing = daemon.delete("/api/sessions/conv-1");
-    assert_eq!(missing.status, 404);
-    assert_eq!(missing.code(), "not_found");
+    // The next message starts a new log, which holds nothing of the one in Trash.
+    assert_eq!(daemon.post_turn(&turn_body("the second conversation")).status, 200);
+    daemon.wait_settled();
+    let started = std::fs::read_to_string(&log).unwrap();
+    let header: Value = serde_json::from_str(started.lines().next().expect("a header")).unwrap();
+    assert_eq!(header["type"], "conversation");
+    assert!(!started.contains("the first conversation"));
+    let transcript = daemon.get("/api/conversation/transcript").json();
+    assert_eq!(transcript["total"], 2);
+    assert_eq!(transcript["messages"][0]["content"], json!([{ "type": "text", "text": "the second conversation" }]));
+    assert_eq!(daemon.conversation()["preview"], "the second conversation");
 }
 
 #[test]
-fn refuses_to_delete_a_conversation_that_is_answering() {
+fn refuses_to_start_over_while_a_turn_is_running() {
     let (turns, gate) = held(&[]);
     let daemon = Daemon::answering(turns);
-    let turn = daemon.open_turn(&turn_body("conv-live", "hold"));
+    let turn = daemon.open_turn(&turn_body("hold"));
     daemon.fake.wait_for_calls(1);
-    let refused = daemon.delete("/api/sessions/conv-live");
-    assert_eq!((refused.status, refused.code().as_str()), (409, "session_busy"));
+    let refused = daemon.delete("/api/conversation");
+    assert_eq!((refused.status, refused.code().as_str()), (409, "conversation_busy"));
     gate.release();
     assert_eq!(finish(turn).events().last(), Some(&json!({ "type": "done" })));
-    assert!(conversation_dir(&daemon.session_dir, "conv-live").join(LOG_FILENAME).exists());
+    assert!(daemon.conversation_dir.join(LOG_FILENAME).exists());
 }
 
-// ── GET /api/sessions/:id/transcript ────────────────────────────────────
+// ── GET /api/conversation/transcript ────────────────────────────────────
 
 #[test]
 fn returns_the_conversations_renderable_messages() {
     let daemon = Daemon::answering(replies(&["I set type for a living."]));
     daemon.post_turn(&first_turn());
-    let response = daemon.get("/api/sessions/conv-1/transcript");
+    let response = daemon.get("/api/conversation/transcript");
     assert_eq!(response.status, 200);
     let transcript = response.json();
-    assert_eq!((&transcript["id"], &transcript["total"], &transcript["truncated"]), (&json!("conv-1"), &json!(2), &json!(false)));
+    let mut keys: Vec<&str> = transcript.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["messages", "readThrough", "total", "truncated"]);
+    assert_eq!((&transcript["total"], &transcript["truncated"]), (&json!(2), &json!(false)));
     let messages: Vec<(&Value, &Value)> =
         transcript["messages"].as_array().unwrap().iter().map(|message| (&message["role"], &message["content"])).collect();
     assert_eq!(
@@ -1277,32 +1167,33 @@ fn returns_the_conversations_renderable_messages() {
 #[test]
 fn pages_with_limit_and_offset_and_rejects_a_non_numeric_one() {
     let daemon = Daemon::answering(replies(&["one", "two"]));
-    daemon.post_turn(&turn_body("conv-1", "first"));
-    daemon.post_turn(&turn_body("conv-1", "second"));
-    let page = daemon.get("/api/sessions/conv-1/transcript?limit=1&offset=2").json();
+    daemon.post_turn(&turn_body("first"));
+    daemon.wait_settled();
+    daemon.post_turn(&turn_body("second"));
+    let page = daemon.get("/api/conversation/transcript?limit=1&offset=2").json();
     assert_eq!((&page["total"], &page["truncated"]), (&json!(4), &json!(true)));
     let messages = page["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!((&messages[0]["role"], &messages[0]["content"]), (&json!("user"), &json!([{ "type": "text", "text": "second" }])));
     for (query, key) in [("limit=many", "limit"), ("offset=later", "offset"), ("limit=Infinity", "limit"), ("offset=NaN", "offset")] {
-        let response = daemon.get(&format!("/api/sessions/conv-1/transcript?{query}"));
+        let response = daemon.get(&format!("/api/conversation/transcript?{query}"));
         assert_eq!(response.status, 400, "{query}");
         assert_eq!(response.json(), json!({ "error": { "message": format!("\"{key}\" must be a number."), "code": "invalid_request" } }));
     }
 }
 
 #[test]
-fn reads_a_conversation_with_no_log_yet_as_empty_and_404s_an_unknown_ghost() {
+fn reads_the_conversation_with_no_log_yet_as_empty_and_404s_an_unknown_ghost() {
     let daemon = Daemon::start();
     let before = crate::clock::now_ms();
-    let response = daemon.get("/api/sessions/nope/transcript");
+    let response = daemon.get("/api/conversation/transcript");
     assert_eq!(response.status, 200);
     let mut transcript = response.json();
     let read_through = transcript.as_object_mut().unwrap().remove("readThrough").expect("a readThrough");
     let read_through = crate::clock::parse_iso(read_through.as_str().unwrap()).expect("a timestamp");
     assert!((before..=crate::clock::now_ms()).contains(&read_through));
-    assert_eq!(transcript, json!({ "id": "nope", "messages": [], "total": 0, "truncated": false }));
-    assert_eq!(daemon.get("/api/ghosts/nobody/sessions/nope/transcript").status, 404);
+    assert_eq!(transcript, json!({ "messages": [], "total": 0, "truncated": false }));
+    assert_eq!(daemon.get("/api/ghosts/nobody/conversation/transcript").status, 404);
 }
 
 // ── Routing and transport ───────────────────────────────────────────────
@@ -1315,20 +1206,115 @@ fn binds_a_free_loopback_port() {
     assert_eq!(daemon.get("/api/ghost").status, 200);
 }
 
+const METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
+
+/// The route table of CONTRACTS.md "Daemon HTTP API": every path the daemon
+/// answers, and the methods it answers there.
+const ROUTE_TABLE: &[(&str, &[&str])] = &[
+    ("/api/remote/whoami", &["GET"]),
+    ("/api/remote/machines", &["GET"]),
+    ("/api/remote", &["GET"]),
+    ("/api/hooks/config", &["GET", "PUT"]),
+    ("/api/status", &["GET"]),
+    ("/api/push/subscription", &["PUT", "DELETE"]),
+    ("/api/push/test", &["POST"]),
+    ("/api/ghost", &["GET"]),
+    ("/api/character", &["GET", "PUT"]),
+    ("/api/complete", &["POST"]),
+    ("/api/messages", &["POST"]),
+    ("/api/events", &["GET"]),
+    ("/api/conversation", &["GET", "DELETE"]),
+    ("/api/conversation/read", &["PUT"]),
+    ("/api/conversation/attachments", &["POST"]),
+    ("/api/conversation/attachments/:file", &["GET"]),
+    ("/api/conversation/stream", &["GET"]),
+    ("/api/conversation/transcript", &["GET"]),
+    ("/api/conversation/stop", &["POST"]),
+    ("/api/conversation/queue", &["GET", "POST"]),
+];
+
+fn plain_404() -> Value {
+    json!({ "error": { "message": "Not found.", "code": "not_found" } })
+}
+
 #[test]
 fn it_404s_anything_outside_the_contract_and_405s_the_wrong_method() {
     let daemon = Daemon::start();
-    for path in ["/nothing", "/api/other", "/api/ghosts/casper", "/api/nothing", "/", "//", "/api", "/api/sessions/conv-1/transcript/more"] {
+    for path in ["/nothing", "/api/other", "/api/ghosts/casper", "/api/nothing", "/", "//", "/api", "/api/conversation/transcript/more"] {
         let response = daemon.get(path);
         assert_eq!(response.status, 404, "{path}");
-        assert_eq!(response.json(), json!({ "error": { "message": "Not found.", "code": "not_found" } }), "{path}");
+        assert_eq!(response.json(), plain_404(), "{path}");
     }
-    let posted = daemon.call("POST", "/api/sessions", &[], None);
+    let posted = daemon.call("POST", "/api/conversation", &[], None);
     assert_eq!(posted.status, 405);
     assert_eq!(posted.json(), json!({ "error": { "message": "POST is not allowed here.", "code": "method_not_allowed" } }));
     assert_eq!(daemon.get("/api/messages").status, 405);
     // A trailing slash and a query name the same route.
     assert_eq!(daemon.get("/api/ghost/?x=1").json(), json!({ "name": "casper" }));
+}
+
+#[test]
+fn answers_exactly_the_contracts_route_table_and_405s_every_other_method_on_it() {
+    // The table the server routes by is this one, route for route.
+    let contract: std::collections::BTreeSet<(String, &str)> =
+        ROUTE_TABLE.iter().flat_map(|(path, methods)| methods.iter().map(move |method| (path.to_string(), *method))).collect();
+    let served: std::collections::BTreeSet<(String, &str)> =
+        ROUTES.iter().flat_map(|(methods, pattern, _)| methods.split(' ').map(move |method| (format!("/{pattern}"), method))).collect();
+    assert_eq!(served, contract);
+
+    let daemon = Daemon::start();
+    for (path, allowed) in ROUTE_TABLE {
+        let target = path.replace(":file", "x.png");
+        for method in METHODS {
+            let response = daemon.open(method, &target, &[JSON], (method != "GET").then_some(b"{}"));
+            let status = response.status;
+            if allowed.contains(&method) {
+                // Reached its handler, whatever that makes of an empty request:
+                // the router's two refusals are not among its answers. An event
+                // stream that opened is left unread.
+                assert_ne!(status, 405, "{method} {target}");
+                if status == 404 {
+                    assert_ne!(finish(response).json(), plain_404(), "{method} {target}");
+                }
+            } else {
+                assert_eq!(status, 405, "{method} {target}");
+                let refusal = json!({ "error": { "message": format!("{method} is not allowed here."), "code": "method_not_allowed" } });
+                assert_eq!(finish(response).json(), refusal, "{method} {target}");
+            }
+        }
+    }
+    // Nothing above was a message, so nothing was said.
+    assert!(daemon.fake.calls().is_empty());
+    assert_eq!(daemon.conversation(), nothing_said());
+}
+
+#[test]
+fn the_routes_of_many_conversations_are_plain_404s() {
+    let daemon = Daemon::start();
+    daemon.post_turn(&first_turn());
+    for path in [
+        "/api/sessions",
+        "/api/sessions/x",
+        "/api/sessions/x/transcript",
+        "/api/sessions/x/pin",
+        "/api/sessions/x/title",
+        "/api/sessions/x/read",
+        "/api/sessions/x/stream",
+        "/api/sessions/x/stop",
+        "/api/sessions/x/queue",
+        "/api/sessions/x/attachments",
+        "/api/sessions/x/attachments/y.png",
+        "/api/conversations",
+        "/api/conversation/x",
+        "/api/conversation/pin",
+        "/api/conversation/title",
+    ] {
+        for method in METHODS {
+            let response = daemon.call(method, path, &[JSON], (method != "GET").then_some(b"{}"));
+            assert_eq!(response.status, 404, "{method} {path}");
+            assert_eq!(response.json(), plain_404(), "{method} {path}");
+        }
+    }
 }
 
 #[test]
@@ -1344,7 +1330,7 @@ fn has_no_route_that_makes_renames_or_removes_a_ghost() {
 #[test]
 fn returns_a_typed_400_for_malformed_percent_encoding_in_dynamic_path_segments() {
     let daemon = Daemon::start();
-    for path in ["/api/sessions/%/transcript", "/api/sessions/%zz/transcript", "/api/sessions/%ff/transcript"] {
+    for path in ["/api/conversation/attachments/%", "/api/conversation/attachments/%zz", "/api/conversation/attachments/%ff"] {
         let response = daemon.get(path);
         assert_eq!(response.status, 400, "{path}");
         assert_eq!(
@@ -1356,12 +1342,14 @@ fn returns_a_typed_400_for_malformed_percent_encoding_in_dynamic_path_segments()
 }
 
 #[test]
-fn decodes_valid_conversation_ids() {
+fn decodes_a_percent_encoded_attachment_name() {
     let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    let transcript = daemon.get("/api/sessions/conv%2D1/transcript");
-    assert_eq!(transcript.status, 200);
-    assert_eq!(transcript.json()["id"], "conv-1");
+    let saved = daemon.call("POST", "/api/conversation/attachments", &[("content-type", "image/png")], Some(PNG));
+    let path = saved.json()["path"].as_str().unwrap().to_string();
+    let encoded = path.replace('-', "%2D");
+    assert_ne!(encoded, path);
+    let served = daemon.get(&format!("/api/conversation/{encoded}"));
+    assert_eq!((served.status, served.body.as_slice()), (200, PNG));
 }
 
 #[test]
@@ -1462,7 +1450,7 @@ fn an_unexpected_failure_is_a_500_that_says_nothing_of_its_cause_and_is_logged()
 #[test]
 fn stores_an_image_in_the_conversation_directory_before_its_first_turn_and_serves_it_back() {
     let daemon = Daemon::start();
-    let route = "/api/sessions/app-new/attachments";
+    let route = "/api/conversation/attachments";
     let saved = daemon.call("POST", route, &[("content-type", "image/png")], Some(PNG));
     assert_eq!(saved.status, 201);
     let body = saved.json();
@@ -1473,9 +1461,10 @@ fn stores_an_image_in_the_conversation_directory_before_its_first_turn_and_serve
     assert_eq!(extension, "png");
     assert!(!time.is_empty() && time.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()), "{name}");
     assert!(random.len() == 8 && random.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{name}");
-    assert_eq!(std::fs::read(conversation_dir(&daemon.session_dir, "app-new").join(path)).unwrap(), PNG);
-    // A directory holding only attachments is not a conversation yet.
-    assert_eq!(daemon.get("/api/sessions").json(), json!({ "sessions": [] }));
+    assert_eq!(std::fs::read(daemon.conversation_dir.join(path)).unwrap(), PNG);
+    // A directory holding only attachments is not a conversation yet: nothing is said in it, and there is nothing to start over from.
+    assert_eq!(daemon.conversation(), nothing_said());
+    assert_eq!(daemon.delete("/api/conversation").status, 404);
 
     let served = daemon.get(&format!("{route}/{name}"));
     assert_eq!(served.status, 200);
@@ -1489,7 +1478,7 @@ fn stores_an_image_in_the_conversation_directory_before_its_first_turn_and_serve
 #[test]
 fn refuses_what_is_not_an_image_and_serves_only_a_stored_one() {
     let daemon = Daemon::start();
-    let route = "/api/sessions/c1/attachments";
+    let route = "/api/conversation/attachments";
     let text = daemon.call("POST", route, &[("content-type", "image/png")], Some(b"not an image"));
     assert_eq!((text.status, text.code().as_str()), (415, "unsupported_media_type"));
     assert_eq!(daemon.call("POST", route, &[("content-type", "image/png")], None).status, 400);
@@ -1574,7 +1563,7 @@ fn accepts_the_scheme_case_insensitively_as_rfc_7235_requires() {
 #[test]
 fn guards_every_route_not_just_the_mutating_ones() {
     let daemon = guarded();
-    for path in ["/api/ghost", "/api/sessions", "/api/hooks/config", "/api/nonsense", "/api", "/api/events", "/api/status"] {
+    for path in ["/api/ghost", "/api/conversation", "/api/hooks/config", "/api/nonsense", "/api", "/api/events", "/api/status"] {
         assert_eq!(daemon.get(path).status, 401, "{path}");
     }
     let turn = daemon.post("/api/messages", &first_turn());
@@ -1665,7 +1654,8 @@ fn leaves_get_and_delete_alone_since_a_bodyless_request_has_nothing_to_smuggle()
     let daemon = guarded();
     let authorization = bearer(&token());
     assert_eq!(daemon.get_as("/api/ghost", &[("authorization", &authorization), ("content-type", "text/plain")]).status, 200);
-    let deleted = daemon.call("DELETE", "/api/sessions/nope", &[("authorization", &authorization), ("content-type", "text/plain")], None);
+    // Nothing has been said, so there is nothing to start over from: the handler's answer, not the gate's.
+    let deleted = daemon.call("DELETE", "/api/conversation", &[("authorization", &authorization), ("content-type", "text/plain")], None);
     assert_eq!(deleted.status, 404);
 }
 
@@ -1699,7 +1689,7 @@ fn admits_the_owner_and_no_one_else_on_the_tailnet() {
     assert_eq!(daemon.get("/api/ghost").status, 401);
 
     // Anyone else on the tailnet is not admitted at all.
-    for (method, path) in [("GET", "/api/remote/whoami"), ("GET", "/api/ghost"), ("GET", "/api/sessions"), ("DELETE", "/api/sessions/remote-1")] {
+    for (method, path) in [("GET", "/api/remote/whoami"), ("GET", "/api/ghost"), ("GET", "/api/conversation"), ("DELETE", "/api/conversation")] {
         assert_eq!(daemon.call(method, path, &[OTHER], None).status, 401, "{method} {path}");
     }
     let write = daemon.call("PUT", "/api/character", &[OTHER, JSON], Some(json!({ "body": "# Intruder\n" }).to_string().as_bytes()));
@@ -1888,7 +1878,6 @@ fn answers_each_route_the_app_calls_admitted_by_tailnet_identity_alone() {
     let json_headers = [FROM_APP, OWNER, JSON];
     let get = |path: &str| daemon.get_as(&format!("/api{path}"), &owner);
     let send = |method: &str, path: &str, body: Value| daemon.call(method, &format!("/api{path}"), &json_headers, Some(body.to_string().as_bytes()));
-    let conversation = "/sessions/app-1";
 
     assert_eq!(get("/remote/whoami").json(), json!({ "role": "owner" }));
     assert_eq!(get("/remote/machines").status, 200);
@@ -1900,29 +1889,29 @@ fn answers_each_route_the_app_calls_admitted_by_tailnet_identity_alone() {
     assert_eq!(stream.header("access-control-allow-origin"), Some(APP));
     drop(stream);
 
-    let turn = send("POST", "/messages", json!({ "prompt": "hi", "sessionId": "app-1" }));
+    let turn = send("POST", "/messages", json!({ "prompt": "hi" }));
     assert_eq!(turn.status, 200);
     assert_eq!(turn.header("access-control-allow-origin"), Some(APP));
     assert_eq!(deltas(&turn.events()), ["hello"]);
-    assert_eq!(get("/sessions").json()["sessions"][0]["id"], "app-1");
-    let transcript = get(&format!("{conversation}/transcript")).json();
-    assert_eq!(get(&format!("{conversation}/transcript?offset=0")).status, 200);
-    assert_eq!(send("PUT", &format!("{conversation}/read"), json!({ "readThrough": transcript["readThrough"] })).status, 200);
-    assert_eq!(send("PUT", &format!("{conversation}/pin"), json!({ "pinned": true })).status, 200);
-    let attached = daemon.call("POST", &format!("/api{conversation}/attachments"), &[FROM_APP, OWNER, ("content-type", "image/png")], Some(PNG));
+    assert_eq!(get("/conversation").json()["preview"], "hi");
+    let transcript = get("/conversation/transcript").json();
+    assert_eq!(get("/conversation/transcript?offset=0").status, 200);
+    assert_eq!(send("PUT", "/conversation/read", json!({ "readThrough": transcript["readThrough"] })).status, 200);
+    let attached = daemon.call("POST", "/api/conversation/attachments", &[FROM_APP, OWNER, ("content-type", "image/png")], Some(PNG));
     assert_eq!(attached.status, 201);
     let path = attached.json()["path"].as_str().unwrap().to_string();
-    assert_eq!(get(&format!("{conversation}/{path}")).status, 200);
-    assert_eq!(get(&format!("{conversation}/queue")).json()["streaming"], false);
+    assert_eq!(get(&format!("/conversation/{path}")).status, 200);
+    assert_eq!(get("/conversation/queue").json()["streaming"], false);
     // Idle, so these answer the contract's idle refusal rather than an auth or routing one.
+    daemon.wait_settled();
     for (path, body) in [("/queue", json!({ "text": "more" })), ("/stop", json!({}))] {
-        let response = send("POST", &format!("{conversation}{path}"), body);
-        assert_eq!((response.status, response.code().as_str()), (409, "session_not_streaming"), "{path}");
+        let response = send("POST", &format!("/conversation{path}"), body);
+        assert_eq!((response.status, response.code().as_str()), (409, "conversation_not_streaming"), "{path}");
     }
-    let gone = get(&format!("{conversation}/stream?turn=gone&from=0"));
+    let gone = get("/conversation/stream?turn=gone&from=0");
     assert_eq!((gone.status, gone.code().as_str()), (404, "turn_not_found"));
     if daemon.can_trash() {
-        assert_eq!(daemon.call("DELETE", &format!("/api{conversation}"), &owner, None).status, 200);
+        assert_eq!(daemon.call("DELETE", "/api/conversation", &owner, None).status, 200);
     }
 }
 
@@ -1972,23 +1961,27 @@ fn a_subscribed_device_is_alerted_when_a_turn_ends_and_forgotten_when_it_unsubsc
     assert_eq!((subscribed.status, subscribed.json()), (200, json!({ "ok": true })));
     // A device its push service has dropped is forgotten at the first alert.
     daemon.put("/api/push/subscription", &device("gone"));
+    let link = format!("{APP}/#/{FAKE_HOSTNAME}");
+    *daemon.app_url.lock().unwrap() = Some(link.clone());
 
     daemon.post_turn(&first_turn());
     let pushed = wait_for(|| Some(daemon.pushed.lock().unwrap().clone()).filter(|pushed| pushed.len() == 2));
     let (endpoint, alert) = &pushed[0];
     assert_eq!(endpoint, "https://fcm.googleapis.com/fcm/send/phone");
-    assert_eq!((&alert["body"], &alert["tag"], &alert["ghost"]), (&json!("The report is done."), &json!("conv-1"), &json!("casper")));
+    // The ghost's name, the reply, and the app's link to this machine; nothing names a conversation.
+    assert_eq!(alert, &json!({ "title": "casper", "body": "The report is done.", "url": link }));
 
     let tested = daemon.post("/api/push/test", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
     assert_eq!((tested.status, tested.json()), (200, json!({ "ok": true, "delivered": true })));
-    assert_eq!(daemon.pushed.lock().unwrap().last().unwrap().1["tag"], "ghost-test");
+    let test_alert = json!({ "title": "casper", "body": "Alerts from this machine reach this device.", "url": null });
+    assert_eq!(daemon.pushed.lock().unwrap().last().unwrap().1, test_alert);
     // The dropped device is no longer known.
     assert_eq!(daemon.post("/api/push/test", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/gone" })).status, 400);
 
     let removed = daemon.send_json("DELETE", "/api/push/subscription", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
     assert_eq!((removed.status, removed.json()), (200, json!({ "ok": true, "removed": true })));
     let sent = daemon.pushed.lock().unwrap().len();
-    daemon.post_turn(&turn_body("conv-1", "more"));
+    daemon.post_turn(&turn_body("more"));
     assert_eq!(daemon.pushed.lock().unwrap().len(), sent);
 }
 

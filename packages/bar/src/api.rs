@@ -95,7 +95,7 @@ fn error_of(error: ureq::Error) -> ApiError {
     }
 }
 
-/// A path segment, percent-encoded so an id holding `/` or `:` stays one segment.
+/// A value percent-encoded, to stand in a URL.
 pub fn segment(value: &str) -> String {
     urlencoding::encode(value).into_owned()
 }

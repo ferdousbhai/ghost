@@ -4,7 +4,7 @@
 use crate::abort::Abort;
 use crate::attachments::MAX_ATTACHMENT_BYTES;
 use crate::config::RemoteConfig;
-use crate::conversation_log::require_conversation_id;
+use crate::conversation_host::{ConversationHost, Emit};
 use crate::env::Env;
 use crate::error::{GhostError, Result};
 use crate::ghosts::Ghost;
@@ -15,7 +15,6 @@ use crate::log::Logger;
 use crate::persona::MAX_CHARACTER_BODY_LENGTH;
 use crate::remote::{RemoteAccess, RemoteServe};
 use crate::running_source::{RunningSource, replaced_since_start};
-use crate::session_host::{Emit, SessionHost};
 use crate::token::{api_token_path, ensure_api_token, token_matches};
 use crate::turn_buffer::{DEFAULT_MEMORY_LIMIT, TurnBuffer, spill_dir};
 use serde_json::{Map, Value, json};
@@ -49,7 +48,7 @@ pub enum ApiToken {
 pub struct ServerOptions {
     /// The machine's one ghost.
     pub ghost: Ghost,
-    pub host: SessionHost,
+    pub host: ConversationHost,
     /// What runs this daemon, as `GET /api/status` reports it.
     pub running_source: RunningSource,
     /// The owner's `hooks.json`, as `HookRunner::from_config` admitted it.
@@ -74,7 +73,7 @@ pub struct ServerOptions {
 
 impl ServerOptions {
     /// What a test needs: no authentication, no remote callers, any free port.
-    pub fn for_test(ghost: Ghost, host: SessionHost, hooks: Arc<HookRunner>, env: Env, home: &Path) -> Self {
+    pub fn for_test(ghost: Ghost, host: ConversationHost, hooks: Arc<HookRunner>, env: Env, home: &Path) -> Self {
         let runner: crate::remote::TailscaleRunner = Arc::new(|_| Err(crate::process::CommandFailure::Missing));
         Self {
             ghost,
@@ -114,7 +113,6 @@ struct TurnState {
 /// One turn's events, kept while it runs (and briefly after) so a cut response can resume.
 struct TurnLog {
     id: String,
-    conversation: String,
     state: Mutex<TurnState>,
     changed: Condvar,
 }
@@ -162,14 +160,12 @@ enum Route {
     Complete,
     Messages,
     Events,
-    Sessions,
-    SessionDelete,
-    Pin,
+    Conversation,
+    ConversationDelete,
     PushPut,
     PushDelete,
     PushTest,
     Read,
-    Title,
     AttachmentSave,
     AttachmentRead,
     Stream,
@@ -179,7 +175,7 @@ enum Route {
     QueuePost,
 }
 
-/// `"GET PUT"`, `"api/sessions/:id/pin"`: a `:name` segment is a parameter.
+/// `"GET PUT"`, `"api/conversation/attachments/:file"`: a `:name` segment is a parameter.
 const ROUTES: &[(&str, &str, Route)] = &[
     ("GET", "api/remote/whoami", Route::Whoami),
     ("GET", "api/remote/machines", Route::Machines),
@@ -195,18 +191,16 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("POST", "api/complete", Route::Complete),
     ("POST", "api/messages", Route::Messages),
     ("GET", "api/events", Route::Events),
-    ("GET", "api/sessions", Route::Sessions),
-    ("DELETE", "api/sessions/:id", Route::SessionDelete),
-    ("PUT", "api/sessions/:id/pin", Route::Pin),
-    ("PUT", "api/sessions/:id/read", Route::Read),
-    ("PUT", "api/sessions/:id/title", Route::Title),
-    ("POST", "api/sessions/:id/attachments", Route::AttachmentSave),
-    ("GET", "api/sessions/:id/attachments/:file", Route::AttachmentRead),
-    ("GET", "api/sessions/:id/stream", Route::Stream),
-    ("GET", "api/sessions/:id/transcript", Route::Transcript),
-    ("POST", "api/sessions/:id/stop", Route::Stop),
-    ("GET", "api/sessions/:id/queue", Route::QueueGet),
-    ("POST", "api/sessions/:id/queue", Route::QueuePost),
+    ("GET", "api/conversation", Route::Conversation),
+    ("DELETE", "api/conversation", Route::ConversationDelete),
+    ("PUT", "api/conversation/read", Route::Read),
+    ("POST", "api/conversation/attachments", Route::AttachmentSave),
+    ("GET", "api/conversation/attachments/:file", Route::AttachmentRead),
+    ("GET", "api/conversation/stream", Route::Stream),
+    ("GET", "api/conversation/transcript", Route::Transcript),
+    ("POST", "api/conversation/stop", Route::Stop),
+    ("GET", "api/conversation/queue", Route::QueueGet),
+    ("POST", "api/conversation/queue", Route::QueuePost),
 ];
 
 enum Matched {
@@ -279,16 +273,10 @@ fn string_field<'a>(body: &'a Map<String, Value>, key: &str) -> Result<&'a str> 
     body.get(key).and_then(Value::as_str).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a string.")))
 }
 
-fn boolean_field(body: &Map<String, Value>, key: &str) -> Result<bool> {
-    body.get(key).and_then(Value::as_bool).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a boolean.")))
-}
-
 struct Context<'a> {
     shared: &'a Arc<Shared>,
     request: Request,
     params: HashMap<&'static str, String>,
-    /// The route's `:id`, validated; empty where it has none.
-    id: String,
 }
 
 impl Context<'_> {
@@ -311,7 +299,7 @@ impl Context<'_> {
 }
 
 impl Shared {
-    fn host(&self) -> &SessionHost {
+    fn host(&self) -> &ConversationHost {
         &self.options.host
     }
 
@@ -349,7 +337,7 @@ impl Shared {
     }
 
     /// The daemon serves no web page. Only a `remote.apps` origin is answered,
-    /// so a page on any other origin cannot read a ghost's conversations
+    /// so a page on any other origin cannot read a ghost's conversation
     /// through the owner's own browser. An app is identified by Tailscale,
     /// never by the token, so it is not offered `authorization`. Chrome's
     /// private-network preflight is answered for it: a public origin calling
@@ -366,10 +354,9 @@ impl Shared {
     }
 
     /// Run an admitted turn into a new log, which ends in exactly one terminal event.
-    fn start_turn_log(self: &Arc<Self>, admission: crate::session_host::TurnAdmission) -> Arc<TurnLog> {
+    fn start_turn_log(self: &Arc<Self>, admission: crate::conversation_host::TurnAdmission) -> Arc<TurnLog> {
         let log = Arc::new(TurnLog {
             id: crate::random::uuid(),
-            conversation: admission.session_id.clone(),
             state: Mutex::new(TurnState {
                 frames: TurnBuffer::new(DEFAULT_MEMORY_LIMIT, spill_dir(&self.options.env)),
                 ended: false,
@@ -403,7 +390,7 @@ impl Shared {
             if let Some(error) = stored_badly {
                 shared.options.logger.error("turn replay storage failed", json!({ "error": error.to_string() }));
                 // The turn may already have settled.
-                let _ = shared.host().stop_turn(&appended.conversation);
+                let _ = shared.host().stop_turn();
             }
         };
         let emit: Emit = Arc::new(append);
@@ -497,7 +484,7 @@ impl Shared {
         }
     }
 
-    /// Passive conversation-list invalidations. This subscription never opens a
+    /// Passive invalidations of the conversation. This subscription never opens a
     /// turn; a client that goes away, or stops reading, drops its listener.
     fn conversation_events(&self, responder: Responder) {
         let Ok(mut stream) = responder.event_stream() else { return };
@@ -583,8 +570,7 @@ impl Shared {
                 let body = context.body()?;
                 let prompt = body.get("prompt").and_then(Value::as_str).map(str::trim).filter(|prompt| !prompt.is_empty());
                 let prompt = prompt.ok_or_else(|| GhostError::invalid("\"prompt\" must be non-empty text."))?;
-                let session = body.get("sessionId").and_then(Value::as_str).filter(|id| !id.is_empty());
-                let admission = host.admit_turn(session, prompt)?;
+                let admission = host.admit_turn(prompt)?;
                 let log = self.start_turn_log(admission);
                 let shared = self.clone();
                 Ok(Reply::Stream(Box::new(move |responder| shared.follow_turn(responder, &log, 0))))
@@ -593,19 +579,11 @@ impl Shared {
                 let shared = self.clone();
                 Ok(Reply::Stream(Box::new(move |responder| shared.conversation_events(responder))))
             }
-            Route::Sessions => ok(json!({ "sessions": host.list_sessions()? })),
-            Route::SessionDelete => {
-                host.delete_session(&context.id)?;
+            Route::Conversation => ok(host.conversation()?),
+            Route::ConversationDelete => {
+                host.delete_conversation()?;
                 ok(json!({ "ok": true }))
             }
-            // Idempotent, so a client sends the state it wants rather than a toggle.
-            Route::Pin => {
-                let pinned = boolean_field(&context.body()?, "pinned")?;
-                host.set_pinned(&context.id, pinned)?;
-                ok(json!({ "ok": true, "pinned": pinned }))
-            }
-            // A ghost asking the owner something (`ghost ask`); the owner's next
-            // message to the conversation answers it, DELETE withdraws it unanswered.
             // The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
             Route::PushPut | Route::PushDelete | Route::PushTest => {
                 let push = host.push().ok_or_else(|| GhostError::new("push_unavailable", "This ghostd keeps no devices to alert.", 501))?;
@@ -639,19 +617,15 @@ impl Shared {
                     Some(_) => crate::clock::parse_iso(string_field(&body, "readThrough")?).filter(|at| *at <= now),
                 };
                 let read_at = read_at.ok_or_else(|| GhostError::invalid("readThrough must be a valid timestamp no later than now."))?;
-                ok(json!({ "ok": true, "readAt": host.mark_read(&context.id, read_at)? }))
-            }
-            Route::Title => {
-                let body = context.body()?;
-                ok(json!({ "ok": true, "title": host.rename_conversation(&context.id, string_field(&body, "title")?)? }))
+                ok(json!({ "ok": true, "readAt": host.mark_read(read_at)? }))
             }
             // An image body, from any owner.
             Route::AttachmentSave => {
                 let bytes = context.request.read_body(MAX_ATTACHMENT_BYTES)?;
-                Ok(Reply::Json(201, json!({ "path": host.save_attachment(&context.id, &bytes)? })))
+                Ok(Reply::Json(201, json!({ "path": host.save_attachment(&bytes)? })))
             }
             Route::AttachmentRead => {
-                let attachment = host.read_attachment(&context.id, context.param("file"))?;
+                let attachment = host.read_attachment(context.param("file"))?;
                 Ok(Reply::Bytes {
                     content_type: attachment.content_type,
                     cache: "private, max-age=31536000, immutable",
@@ -662,7 +636,7 @@ impl Shared {
             // The rest of a cut turn response; see CONTRACTS.md, "Turn wire".
             Route::Stream => {
                 let log = self.turn_logs.lock().unwrap().get(context.request.query("turn").unwrap_or("")).cloned();
-                let Some(log) = log.filter(|log| log.conversation == context.id) else {
+                let Some(log) = log else {
                     return Err(GhostError::new("turn_not_found", "That turn is no longer resumable; read the transcript.", 404));
                 };
                 let reached = log.state.lock().unwrap().frames.len();
@@ -673,21 +647,20 @@ impl Shared {
             }
             Route::Transcript => {
                 let read_through = crate::clock::now_iso();
-                let mut transcript =
-                    host.read_transcript(&context.id, number_param(&context.request, "limit")?, number_param(&context.request, "offset")?)?;
+                let mut transcript = host.read_transcript(number_param(&context.request, "limit")?, number_param(&context.request, "offset")?)?;
                 transcript["readThrough"] = json!(read_through);
                 ok(transcript)
             }
             Route::Stop => {
-                host.stop_turn(&context.id)?;
+                host.stop_turn()?;
                 ok(json!({ "stopped": true }))
             }
-            Route::QueueGet => ok(host.queued_messages(&context.id)?),
+            Route::QueueGet => ok(host.queued_messages()),
             Route::QueuePost => {
                 let body = context.body()?;
                 let text = body.get("text").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
                 let text = text.ok_or_else(|| GhostError::invalid("\"text\" must be a non-empty string."))?;
-                ok(host.queue_message(&context.id, text)?)
+                ok(host.queue_message(text)?)
             }
         }
     }
@@ -704,11 +677,7 @@ impl Shared {
             let decoded = percent_decode(&segment).ok_or_else(|| GhostError::invalid("URL path segments must use valid percent-encoding."))?;
             params.insert(name, decoded);
         }
-        let id = match params.get("id") {
-            Some(id) => require_conversation_id(id)?.to_string(),
-            None => String::new(),
-        };
-        self.handle(route, Context { shared: self, request, params, id }, responder)
+        self.handle(route, Context { shared: self, request, params }, responder)
     }
 
     /// Nothing a request carries may take the process down: every failure is

@@ -27,7 +27,7 @@ answers every turn, so the owner's data stays on the machine; Ghost runs no
 turn on a cloud model. A coding agent the owner has (Claude Code, Codex,
 Antigravity) is a command the model runs from its shell, with that agent's
 own sign-in, tools, and limits.
-`ghostd` owns sessions and state transitions; the bar and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no web page; remote
+`ghostd` owns the conversation and its state transitions; the bar and CLI are clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no web page; remote
 access is the summonghost.com app over an explicit Tailscale Serve address. The
 app is a static page, not a backend: it has no server, accounts, or storage;
 the browser calls each machine's Serve address directly, admitted by Tailscale
@@ -37,8 +37,8 @@ remote client at all. The app's code is [`packages/web`](packages/web/README.md)
 
 Durable state has three scopes:
 
-- **Ghost-private:** character, conversations, and their
-  sidecars live in one ghost home.
+- **Ghost-private:** the character and the conversation live in one ghost
+  home.
 - **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
   folder of the owner's XDG Documents directory, and the owner's to-do list
   in its `Reminders` folder; the ghost reads and writes both ([Character and
@@ -66,27 +66,27 @@ owner-visible plans and tasks belong in the owner's documents. Background work i
 
 ### Mobile links and completion delivery
 
-The summonghost.com app keeps the selected conversation in its URL,
-`<origin>/#/<hostname>/<id>` (each segment URI-encoded). Transcript
+The summonghost.com app keeps the selected machine in its URL,
+`<origin>/#/<hostname>` (URI-encoded). Transcript
 responses carry a server-side `readThrough` timestamp, accepted by
-`PUT …/read` to cap acknowledgement at the read start; read timestamps never
-regress. A client marks a displayed owner's reply read only while the page is
-visible and focused. Failed
+`PUT /api/conversation/read` to cap acknowledgement at the read start; read
+timestamps never regress. A client marks a displayed reply read only while the
+page is visible and focused. Failed
 navigation keeps the requested URL and shows an error instead of silently
-opening a different conversation. A completed turn does not imply its result
-was read; reopening the right conversation does.
+opening a different machine. A completed turn does not imply its result
+was read; opening that machine's conversation does.
 
 ### Push alerts
 
-When a whole conversation turn or owner `!command` settles, including in
+When a whole turn or owner `!command` settles, including in
 failure (a cancelled one is quiet), ghostd alerts the owner's devices itself
 ([`push.rs`](packages/daemon/src/push.rs)): Web Push, since summonghost.com
 has no backend to send one. A device that turns alerts on in the app hands
 this machine its push subscription and a P-256 signing key its browser made
 for it; they are kept in `$XDG_STATE_HOME/ghost/push.json` (private, at most
-20 devices, newest kept). Each alert is `{ title, body, url, tag, ghost }`:
-the conversation's title, a 280-character excerpt of the reply (`Failed: …`
-for a failed turn), the app link, and the conversation id. It is encrypted
+20 devices, newest kept). Each alert is `{ title, body, url }`:
+the ghost's name, a 280-character excerpt of the reply (`Failed: …`
+for a failed turn), and the app's link to this machine. It is encrypted
 for that browser (RFC 8291), signed with that device's key (RFC 8292), and
 posted with `curl` to the subscription's endpoint, which must be `https` on a
 browser's push service (a host under Google's, Apple's, Mozilla's or
@@ -96,7 +96,7 @@ service holds an alert up to a day for an offline device); a `404` or `410`
 forgets the device. A cancelled turn alerts no one, and no subscribed device
 means no outbound request.
 
-## Ghost home (`ghost-home/v3`)
+## Ghost home (`ghost-home/v4`)
 
 A machine has one ghost, and its home is one fixed directory,
 `$XDG_DATA_HOME/ghost` (default `~/.local/share/ghost`; `home` in the config,
@@ -105,7 +105,7 @@ A machine has one ghost, and its home is one fixed directory,
 ```text
 ~/.local/share/ghost/
   character.md
-  sessions/<id>/       (one directory per conversation)
+  conversation/        (the one conversation)
 ```
 
 A daemon start that finds no `character.md` there makes one, seeded
@@ -121,8 +121,7 @@ Machine credentials, owner documents, screenshots, and downloads are not in it.
 
 The checkout a ghost may edit is the clone the daemon was built from
 (`GET /api/status` `source.root`). A packaged install has no checkout. No setting
-names one; the checkout's own rules, MCP, and skills never enter a session.
-Every conversation runs in its own directory.
+names one; the checkout's own rules, MCP, and skills never enter a turn.
 
 ### Character and notes
 
@@ -132,8 +131,8 @@ with a heading naming the persona. Its complete body, bounded by
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
-There is no ghost-private memory store. A ghost's state across
-conversations is the `Notes` folder of the owner's Documents directory, which it
+There is no ghost-private memory store. A ghost's lasting state is the
+`Notes` folder of the owner's Documents directory, which it
 keeps current unasked (it reads the note that covers a task before starting,
 updates it in the same turn as a fact arrives or the task advances, and
 merges notes on one subject as it goes and tidies a cluttered folder after
@@ -162,39 +161,38 @@ which installs its own skill; `ghost help browser` adds the owner-wide session
 and task-tab locking recipe to agent-browser's own skills), and the model
 reads the owner's skills under `~/.agents/skills`. Ghost connects no MCP
 servers. A ghost home carries no executable extension code; the only hooks
-are the owner's `hooks.json` commands. A conversation directory holds Ghost's
-log and whatever the model's commands write there; Ghost writes no
-instruction file there, so a coding agent run in a project's directory reads
+are the owner's `hooks.json` commands. The conversation directory holds Ghost's
+log, its attachments and sidecars, and whatever the model's commands write
+there; Ghost writes no instruction file there, so a coding agent run in a project's directory reads
 that project's instructions and nothing of Ghost's.
 
-### Conversations
+### The conversation
 
-A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
-`[A-Za-z0-9._-]` not starting with `.` and not a sidecar's name
-(`pins.json`, `reads.json`, `questions.json`); clients mint ids (the CLI `cli-…`); the bar
-writes to `default` alone. The directory is
-the directory the model's commands run in and holds Ghost's log, `.conversation.jsonl`
-([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)): one JSON
+A ghost has exactly one conversation: no threads, no ids, no titles, on any
+surface. It is one directory, `conversation/`: the directory the model's
+commands run in, holding Ghost's log, `.conversation.jsonl`
+([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)), the
+images the owner attached (`attachments/`), and two sidecars
+([`sidecars.rs`](packages/daemon/src/sidecars.rs)). The log is one JSON
 object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's parts in the order they happened (`thinking`, its
 reasoning; `handoff`, the note that stands for the conversation before it;
 `text`; `toolCall` with its `arguments`, `output`, the whole of
 what it returned as the model was given it, and `failed` on one that
-failed; a failed turn carries `error`), the owner's `!` commands, and title
-records. A torn last line is skipped, and so is any record or part ghostd does not write; logs are never rewritten. Until 1.0 the log's shape may change without a way to read an earlier one. ghostd is the log's
+failed; a failed turn carries `error`), and the owner's `!` commands. A torn
+last line is skipped, and so is any record or part ghostd does not write; logs are never rewritten. Until 1.0 the log's shape may change without a way to read an earlier one. ghostd is the log's
 only writer and only appends; an in-place edit by anything else is unsupported.
-The log is the history
-every client reads. A conversation is listed once a message lands or the owner
-names it; each row carries `preview`, the first owner text, and `title`,
-the owner's name for it or else one extracted from that text without a model
-(`derivedTitle`), null when nothing substantive is left. Pins, read
-timestamps, and open owner questions are bounded sidecars beside the
-directories. A row's `question` is what the ghost asked the owner there with
-its `ask` tool
+The log is the history every client reads. `GET /api/conversation` summarises
+it: `preview` is the first owner text. The sidecars are `.question.json`, what
+the ghost asked the owner with its `ask` tool
 (`{ text, options, askedAt }`, at most 2000 characters and six suggested
-answers of 120) or null; the owner's next message to the conversation
-answers it, and its deletion drops it. Deletion moves the
-directory to recoverable Trash in one rename; there is no fork.
+answers of 120), which the owner's next message answers and removes, and
+`.read.json`, when the owner last read the conversation (`{ readAt }`), which
+the app's unread mark and nothing else reads. Starting over
+(`DELETE /api/conversation`, `ghost new --yes`) moves the whole directory to
+recoverable Trash in one rename, sidecars included; the next message makes a
+new one. Restoring it from Trash, with ghostd stopped and no `conversation/`
+in the way, is the way back. There is no fork.
 
 ### Machine-owned artifacts
 
@@ -217,7 +215,7 @@ ghost home directory, which the owner may rename while ghostd is stopped.
 | State | Daemon restart | Home renamed by the owner | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
 | --- | --- | --- | --- | --- | --- |
 | `character.md` | survives | moves with the home, byte for byte | unchanged | unchanged | preserved |
-| Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | unchanged | unchanged | preserved |
+| The conversation and its sidecars under `conversation/` | survives; the log is the durable history | moves with the home | unchanged | unchanged | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved or renamed | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
@@ -258,25 +256,24 @@ A turn runs on the [local model](#local-model), and on nothing else: with no
 `local.model` configured it ends in an error that says so. Each pass is
 handed the ghost's persona and the conversation so far, replayed from the log
 as the chat messages it was, since the model keeps no session of its own. Its
-commands run in the conversation directory with the conversation's identity
-(`GHOST_SESSION`) in their environment, beside the daemon's resolved
-`GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOST_HOME`, and `GHOSTD_HOOKS`, which every
-child of ghostd (a command, a hook, `ghost`) inherits, so a daemon started
-with flags is the one they address. Ghost has no screen control: desktop work goes through
+commands run in the conversation directory with the daemon's resolved
+`GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOST_HOME`, and `GHOSTD_HOOKS` in their
+environment, which every child of ghostd (a command, a hook, `ghost`)
+inherits, so a daemon started with flags is the one they address. Ghost has no screen control: desktop work goes through
 Omarchy's commands, app CLIs, and config files, on the bet that Omarchy's
 command line keeps growing toward full coverage.
 
-The owner's `!command` runs in the owner home with the conversation's
-identity and is logged; `!!command` is logged but never handed on. A message
+The owner's `!command` runs in the owner home and is logged; `!!command` is
+logged but never handed on. A message
 that opens with an attached photo, `![image](…)`, is a prompt, not a command.
 
-A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
---follow-up`) runs as the next pass in the same stream. A
+A turn takes no input mid-run: text queued while it runs
+(`POST /api/conversation/queue`, `ghost say --follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation. Nor is one
 asked while the ghost's open question (its `ask` tool) waits on the owner.
 A turn outlives its client: a dropped stream stops only the listening, and
-`POST /sessions/:id/stop` or daemon shutdown cancels it; an internal runtime
+`POST /api/conversation/stop` or daemon shutdown cancels it; an internal runtime
 or replay-storage failure ends it in error.
 Aborting a turn ends the model's request and signals the process group of
 its running command, SIGTERM then SIGKILL, and nothing else. Ghost only
@@ -289,9 +286,8 @@ low-priority transient unit (`systemd-run --user --scope -p CPUWeight=20
 setsid -f`), so it yields to the owner's apps, outlives a daemon restart, and
 stops by unit name; it logs to a file under `$XDG_RUNTIME_DIR`, outside the
 daemon's private `/tmp`, and ends it with `ghost say --follow-up`, which
-queues after a live turn or, when the conversation is idle, starts its next
-turn. `GHOST_SESSION` is in the Bash environment so
-the CLI addresses the right conversation without flags. Ghost keeps no job
+queues after a live turn or, when none is running, starts the next
+turn. Ghost keeps no job
 table, no jobs API, and cannot cancel what it did not start;
 the Ghost section (`GHOST_POLICY` in
 [`prompt_policy.rs`](packages/daemon/src/prompt_policy.rs)) points at the recipe,
@@ -301,7 +297,7 @@ There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. For work on code the model runs the owner's coding agent from
 its shell, in the project's directory ([Local model](#local-model)); that agent runs
 with the owner's own settings for it — its full tool set, project discovery,
-auth, and session semantics. Ghost adds no command of its own around it and
+auth, and its own sessions. Ghost adds no command of its own around it and
 keeps no record of the run.
 
 Ghost's one hook is `session_stop`, run by ghostd and awaited after each pass.
@@ -317,7 +313,7 @@ and explicit owner command hooks initiate work.
 
 ## Daemon HTTP API
 
-`ghostd` is the only session owner. All `/api/*` routes require the bearer token
+`ghostd` alone owns the conversation. All `/api/*` routes require the bearer token
 from Ghost's mode-0600 XDG-state token file or an authenticated tailnet
 request; every path outside `/api` is `404`. A browser origin is admitted only
 when it is loopback or in `remote.apps`. Loopback CORS allows only the exact
@@ -346,40 +342,38 @@ Route parsing, validation, status codes, and reverse states are executable in
 [`server.rs`](packages/daemon/src/server.rs) and
 [`server_tests.rs`](packages/daemon/src/server_tests.rs). Stable route families:
 
-Rows beginning `/sessions/` are relative to `/api`.
-
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/status` | `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
-| `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev2)). |
+| `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev4)). |
 | `GET\|PUT /api/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `POST /api/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the local model, with no persona, conversation, or tools (`409 no_local_model` with none configured; `502 completion_failed` for an empty answer). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. |
-| `POST /api/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
-| `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
-| `GET /api/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
-| `GET /api/sessions` | Conversation rows `{ id, title, preview, updatedAt, messageCount, pinned, unread, running, question }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `updatedAt` is the last owner or ghost entry; `question` is the ghost's open question there, or null. |
-| `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
+| `POST /api/messages` | `{ prompt }` → one turn of the conversation as the turn wire below; `409 conversation_busy` while another runs. |
+| `GET /api/conversation/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
+| `GET /api/events` | Conversation invalidation SSE, each event `{ type: "conversation-updated", updatedAt }`; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
+| `GET /api/conversation` | The conversation, `{ preview, updatedAt, messageCount, unread, running, question }`: `preview` and `updatedAt` are null until a message lands (an owner `!command` the transcript shows counts); `updatedAt` is the last owner or ghost entry; `unread` is true when that is later than the read mark; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/api/events`; `question` is the ghost's open question, or null. |
+| `PUT /api/conversation/read` | `{ readThrough? }` (a timestamp no later than now; now when absent) → `{ ok, readAt }`: the read mark, which never moves back. `404` before there is a conversation. |
 | `PUT\|DELETE /api/push/subscription` | PUT `{ endpoint, p256dh, auth, vapidKey }` (base64url: the browser's 65-byte public key, its 16-byte secret, and the 32-byte private scalar of the signing key it made) subscribes a device to [push alerts](#push-alerts), replacing what was kept for that endpoint → `{ ok }`; `400 invalid_request` for an endpoint that is not a browser's push service or keys of the wrong kind. DELETE `{ endpoint }` → `{ ok, removed }`. |
 | `POST /api/push/test` | `{ endpoint }` → `{ ok, delivered, reason? }`: one alert to that subscribed device, waited for. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, for a conversation with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
-| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
-| `GET /sessions/:id/attachments/:file` | The stored image. |
-| `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
-| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
-| `DELETE /sessions/:id` | Move the conversation directory to Trash. A running turn refuses it with `409 session_busy`. |
+| `GET /api/conversation/transcript` | Paged renderable history projected from the conversation log, `{ messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `POST /api/conversation/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
+| `GET /api/conversation/attachments/:file` | The stored image. |
+| `POST /api/conversation/stop` | Abort the running turn or `!command`; its stream ends `aborted`. With none running, `409 conversation_not_streaming`. |
+| `GET\|POST /api/conversation/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. With none running, `409 conversation_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 conversation_busy`. |
+| `DELETE /api/conversation` | Start over: move the conversation directory to Trash. A running turn refuses it with `409 conversation_busy`; `404` when there is no conversation. |
 | `GET /api/remote/whoami` | `{ role: "owner" }`: anyone admitted is the owner. |
 | `GET /api/remote` | What Tailscale Serve exposes of this daemon, read from Tailscale on each call: `{ state, hostname, owner, app, command, problem }`. `state` is `on` while Serve proxies HTTPS on 443 to the daemon, `off` otherwise, and `unavailable` while Tailscale is missing, stopped, or logged out, when `problem` is `{ code, message, action? }`. `command` is Tailscale's own command that turns Serve on (`tailscale serve --bg --https=443 http://127.0.0.1:<port>`); `tailscale serve --https=443 off` turns it off. The owner or the ghost runs them: no route or `ghost` verb changes Serve. `app` is `{ origin, url }`, the first of `remote.apps` and its link adding this machine, `url` null while Serve is off. |
 | `GET /api/remote/machines` | `{ machines: [{ hostname, online }] }`: the other tailnet nodes signed in as the owner's login, tagged ones excluded, from `tailscale status`; the app probes each with `GET https://<hostname>/api/remote/whoami`. `503 tailscale_unavailable` when Tailscale does not answer. |
 
-There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
-routes: Ghost ships no live-voice controller and no collaboration host, and
+There are intentionally no `/sessions`, `/plan`, `/todo`, `/live`, or `/collab`
+routes: a ghost has one conversation, Ghost ships no live-voice controller and no collaboration host, and
 remote access is the summonghost.com app.
 
 ### Turn wire
 
 The event union is the contract; clients must ignore unknown future event
-types. See [`session_host.rs`](packages/daemon/src/session_host.rs), which builds the events, and [`server.rs`](packages/daemon/src/server.rs), which encodes them. A turn
+types. See [`conversation_host.rs`](packages/daemon/src/conversation_host.rs), which builds the events, and [`server.rs`](packages/daemon/src/server.rs), which encodes them. A turn
 emits `start`, then ordered `pass` (the model starting on a prompt), `text_*`, `thinking` (the model's reasoning, as
 far as it shows it), `tool_execution_*` (`start`, `end`, and between them `update` with the latest of what a running owner `!command` or model command has printed), `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `session_stop` command hook
@@ -397,7 +391,7 @@ one `bash` tool card, then `done`.
 A turn response is cut after about 1 MB of events so no client has to hold
 one ever-growing body: its last frame is then `resume` `{ turn, from }`, not a
 terminal, and the turn runs on. The client continues by opening
-`GET /sessions/:id/stream?turn=…&from=…`, which is itself cut the same way;
+`GET /api/conversation/stream?turn=…&from=…`, which is itself cut the same way;
 counting `start` as event 0, the events across all responses are each sent
 once, in order, ending in the one terminal. Large turn replay buffers spill to private,
 unlinked files under `$XDG_CACHE_HOME/ghost` (default `~/.cache/ghost`), rather
@@ -409,25 +403,22 @@ period (once attached readers finish) or server shutdown, and are not history.
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/mod.rs`](packages/daemon/src/cli/mod.rs). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
-named verb there (character, sessions
-and their title/pin/read/delete/stop, hooks, and status), so a
-ghost can drive and verify itself from Bash without raw HTTP. `-q` keeps only
+named verb there (character, the conversation's say, show, stop and
+starting over, hooks, and status, which also says what the conversation is
+doing), so a
+ghost can drive and verify itself from Bash without raw HTTP. Marking the
+conversation read is the app's alone. `-q` keeps only
 a verb's primary output: what a read prints (a transcript without its paging
-note, a character, ids or names, `ok` for status), and nothing for a change.
+note, a character, names, `ok` for status), and nothing for a change.
 A change acknowledges in one capitalised sentence ending in a full stop; an
-empty list prints a sentence saying so (`No conversations.`), and nothing under `-q`.
+empty list prints a sentence saying so (`No hooks configured.`), and nothing under `-q`.
 `ghost help
 <topic>` prints the recipes the Ghost section indexes, every one of them
 ([`help_topics.rs`](packages/daemon/src/help_topics.rs)),
 needing no daemon; they
-are prompt-visible contract text like the policy sections. Addressing is
-`-s`, then
-`$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
-owner's `!` commands in a conversation, carry that variable. No verb takes a ghost's name; `ghost status` prints it. A session is an
-id or unique prefix of a listed conversation; `say` also takes an
-unlisted id as given, since one no message has landed in yet is not listed.
-`-s` exists only on the verbs whose usage lists it; elsewhere it
-is an unknown option. Ghost has no login or model
+are prompt-visible contract text like the policy sections. No verb takes a
+conversation id or a ghost's name: there is one of each, and `ghost status`
+prints the name. Ghost has no login or model
 commands. There are no plan or todo commands.
 
 ## Limits and credentials
@@ -449,7 +440,7 @@ icons. It replaces the `ghost-runtime` package that 0.11.9 and earlier split
 the daemon into. Removing it preserves owner data.
 
 - [`packages/daemon`](packages/daemon/src/daemon.rs) owns ghost homes and the
-  persona prompt, configuration, authentication, conversations, the local model and its loop, hooks, lifecycle,
+  persona prompt, configuration, authentication, the conversation, the local model and its loop, hooks, lifecycle,
   HTTP, and the `ghost` CLI. It is a native Rust binary.
 - [`packages/bar`](packages/bar/src/main.rs) is Ghost's bar
   (`ghost-bar`, app id `io.github.ferdousbhai.Ghost`): a prompt pinned to
@@ -460,7 +451,7 @@ the daemon into. Removing it preserves owner data.
   current theme, followed live) is [omui](https://github.com/ferdousbhai/omui)'s;
   [`style.css`](packages/bar/src/style.css) holds only Ghost's own rules,
   on omui's `@om_*` colours. It is a client of the
-  API and keeps no data. It shows one conversation, `default`, a caption at a
+  API and keeps no data. It shows the conversation a caption at a
   time: each thing the ghost says takes the caption from the one before, a
   full caption gives way to the next, a running command is one status line,
   and Up and Down go back and forth through the whole conversation, which it
@@ -512,7 +503,7 @@ Hooks have one detailed document:
 Browser automation belongs to the installed `agent-browser` CLI and its skill,
 invoked from the model's shell. Ghost exposes no browser MCP tool,
 relay, pairing API, or browser lifecycle manager. One owner-wide session
-(`owner`) shares the signed-in Chromium over loopback CDP. Conversations use
+(`owner`) shares the signed-in Chromium over loopback CDP. Tasks use
 separate tabs; cooperating callers lock tab selection and each operation with
 one owner-wide `flock`. Tab selection invalidates snapshot refs; separate
 operations use semantic or CSS selectors. Ref-based sequences hold the lock
@@ -556,7 +547,7 @@ then the prompt. Nothing in it changes between turns, the time included (the
 model runs `date`), so llama-server reuses what it has already read and only
 the new message costs time. Nothing is searched ahead of the model.
 
-A conversation grows as long as the context permits, by the server's own
+The conversation grows as long as the context permits, by the server's own
 count of each request. When a turn ends past three quarters of the context,
 a handoff starts in the background: the ghost is asked, as the conversation's
 own next message, to write a note of it (`HANDOFF_PROMPT`). The note is
@@ -580,7 +571,7 @@ It offers two tools ([`local_turn.rs`](packages/daemon/src/local_turn.rs)).
 `ask(question, options)` puts a question to the owner: 2 to 4 ways forward
 the model has worked out, the one it recommends first (fewer is refused, said
 to the model). It records the conversation's open question
-(`question` in `GET /api/sessions`), says the question in the reply with its answers
+(`question` in `GET /api/conversation`), says the question in the reply with its answers
 numbered, so the transcript keeps them and the next turn is handed them, and
 ends the turn; the bar and the app also show the answers as buttons, the
 first marked, and any other answer is typed.
@@ -615,22 +606,22 @@ is answered with what was wrong, and nothing runs.
   Canary daemons isolate Ghost config and owner hooks.
   Tests use scratch homes, and the bar's scripted QA a private
   HOME, XDG directories and display.
-- One daemon process owns a conversation, and one turn runs in it at a time;
+- One daemon process owns the conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
-- Conversation deletion reserves its conversation and publishes only durable
+- Starting over reserves the conversation and publishes only durable
   state.
 - Control files are bounded (1 MiB), validated, and replaced atomically by
   rename; malformed bytes are refused, and a symlinked file is followed like
   any other. Every process involved runs as the owner, so ghostd defends
   against corruption, not against the owner's own processes.
-- Session/process teardown tracks exact captured owners and PIDs: a
+- Process teardown tracks exact captured owners and PIDs: a
   turn's command is the process group ghostd spawned. Settled passes close
   inherited pipes and emit no late events; cancellation kills surviving members
   of that group even after its leader exits. Normal completion leaves detached
   background jobs alone. No cleanup may kill by
   pattern or remove a broad directory.
 - Logs redact secrets and private payloads. A log line's structured fields,
-  ghost and conversation included, are JSON in its journal `MESSAGE`.
+  the ghost's name included, are JSON in its journal `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
   CLI, or machine skill is required before enabling the services.
 - Package removal preserves the ghost home, XDG config/state, and owner documents.

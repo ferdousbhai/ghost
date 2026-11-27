@@ -127,21 +127,17 @@ struct Command {
     doc: CommandDocumentation,
     /// The fewest and the most positionals after the verb.
     positionals: (usize, usize),
-    /// Flags this verb alone accepts, on top of the common ones and the `-s` its usage lists.
+    /// Flags this verb alone accepts, on top of the common ones.
     boolean: &'static [&'static str],
     value: &'static [&'static str],
     run: Run,
 }
 
 impl Command {
-    /// The common flags plus this verb's own; `-s` only where its usage lists
-    /// it, so a stray one is the unknown option it is, not silently ignored.
+    /// The common flags plus this verb's own.
     fn args(&self) -> ArgsSpec {
         let mut spec = ArgsSpec { boolean: vec!["version"], value: Vec::new() };
         spec.boolean.extend(self.boolean);
-        if self.doc.usage.contains("-s <id>") {
-            spec.value.push("session");
-        }
         spec.value.extend(self.value);
         spec
     }
@@ -160,65 +156,34 @@ fn commands() -> Vec<Command> {
     vec![
         command(
             "say",
-            "say [text] [--new|--follow-up] [-s <id>] [--json] [-q]",
-            "Send a turn, or follow up on one.",
-            "ghost say --new \"Start fresh\"",
+            "say [text] [--follow-up] [--json] [-q]",
+            "Send a turn, or follow up on the running one.",
+            "ghost say \"What is on today?\"",
             (0, usize::MAX),
-            &["new", "follow-up"],
+            &["follow-up"],
             none,
             say::say_command as Run,
         ),
-        command(
-            "stop",
-            "stop [-s <id>] [--json] [-q]",
-            "Stop a conversation's running turn.",
-            "ghost stop -s cli-abc",
-            (0, 0),
-            none,
-            none,
-            commands::stop_command,
-        ),
-        command(
-            "rm",
-            "rm -s <id> --yes [--json] [-q]",
-            "Move a conversation to recoverable Trash.",
-            "ghost rm -s cli-abc --yes",
-            (0, 0),
-            &["yes"],
-            none,
-            commands::remove_command,
-        ),
-        command("sessions", "sessions [--json] [-q]", "List conversations.", "ghost sessions --json", (0, 0), none, none, commands::sessions_command),
+        command("stop", "stop [--json] [-q]", "Stop the running turn.", "ghost stop", (0, 0), none, none, commands::stop_command),
         command(
             "show",
-            "show [-s <id>] [--limit <n>] [--offset <n>] [--json] [-q]",
-            "Print a conversation transcript as Markdown: its newest page, or the page from --offset (counted from the oldest).",
-            "ghost show -s cli-abc",
+            "show [--limit <n>] [--offset <n>] [--json] [-q]",
+            "Print the conversation as Markdown: its newest page, or the page from --offset (counted from the oldest).",
+            "ghost show --limit 20",
             (0, 0),
             none,
             &["limit", "offset"],
             commands::show_command,
         ),
         command(
-            "title",
-            "title <text> [-s <id>] [--json] [-q]",
-            "Rename a conversation.",
-            "ghost title \"Release notes\" -s cli-abc",
-            (1, 1),
-            none,
-            none,
-            commands::title_command,
-        ),
-        command("pin", "pin [-s <id>] [--json] [-q]", "Pin a conversation.", "ghost pin -s cli-abc", (0, 0), none, none, commands::pin_command),
-        command(
-            "unpin",
-            "unpin [-s <id>] [--json] [-q]",
-            "Unpin a conversation.",
-            "ghost unpin -s cli-abc",
+            "new",
+            "new --yes [--json] [-q]",
+            "Start over: move the conversation to recoverable Trash.",
+            "ghost new --yes",
             (0, 0),
+            &["yes"],
             none,
-            none,
-            commands::unpin_command,
+            commands::new_command,
         ),
         command(
             "hooks",
@@ -241,19 +206,9 @@ fn commands() -> Vec<Command> {
             commands::character_command,
         ),
         command(
-            "read",
-            "read [-s <id>] [--json] [-q]",
-            "Mark a conversation read.",
-            "ghost read -s cli-abc",
-            (0, 0),
-            none,
-            none,
-            commands::read_command,
-        ),
-        command(
             "status",
             "status [--json] [-q]",
-            "Check daemon connectivity and authentication.",
+            "Check the daemon, and say what the conversation is doing.",
             "ghost status --json",
             (0, 0),
             none,

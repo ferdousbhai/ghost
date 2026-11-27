@@ -12,7 +12,7 @@ pub const GHOST_POLICY: &str = "## Ghost\nAsk, with the ask tool, when a choice 
 /// The owner's own directory: deliverables and the ghost's notes.
 pub fn render_owner_context_policy(documents_dir: &Path) -> String {
     format!(
-        "## Owner context\n{} is the owner's documents directory: a file made for them goes where they asked, else here. Its `Notes` folder (Markdown, shared with the owner) is your state across conversations, kept current unasked: read the note that covers a task before starting, and update it in the same turn a fact arrives or the task advances, rather than add a second. `Reminders/<List>.md` (`- [ ] text 📅 YYYY-MM-DD`) is the owner's to-do list: add what now waits on them, tick what they say is done; your own later work is a timer (background). Store no secrets there.",
+        "## Owner context\n{} is the owner's documents directory: a file made for them goes where they asked, else here. Its `Notes` folder (Markdown, shared with the owner) is your lasting state, kept current unasked: read the note that covers a task before starting, and update it in the same turn a fact arrives or the task advances, rather than add a second. `Reminders/<List>.md` (`- [ ] text 📅 YYYY-MM-DD`) is the owner's to-do list: add what now waits on them, tick what they say is done; your own later work is a timer (background). Store no secrets there.",
         quoted_path(documents_dir)
     )
 }
@@ -58,7 +58,7 @@ mod tests {
 
     // A size ratchet over the stable system-prompt policy text.
     //
-    // Every section below is rendered into every session. The system prompt is
+    // Every section below is rendered into every turn. The system prompt is
     // a budget, not a place to put things: growth has to be a deliberate
     // decision rather than the accumulated residue of unrelated commits.
     //
@@ -73,8 +73,8 @@ mod tests {
     const DOCUMENTS: &str = "/home/owner/Documents";
 
     /// The exact rendered size of each section when its ceiling was last set.
-    const CEILINGS: [(&str, usize); 4] = [("Character file", 369), ("Ghost", 360), ("Owner context", 588), ("First meeting", 321)];
-    const TOTAL_CEILING: usize = 1638;
+    const CEILINGS: [(&str, usize); 4] = [("Character file", 369), ("Ghost", 360), ("Owner context", 575), ("First meeting", 321)];
+    const TOTAL_CEILING: usize = 1625;
 
     /// The character-file section is internal to the prompt builder, so it is
     /// measured where it is shipped: in a prompt built with an unwritten
@@ -99,7 +99,7 @@ mod tests {
         sections.into_iter().find(|section| section.starts_with(heading)).unwrap_or_else(|| panic!("The system prompt no longer renders {heading}."))
     }
 
-    /// Every stable section's size by its heading: the list the session host renders, at its largest (first meeting).
+    /// Every stable section's size by its heading: the list the conversation host renders, at its largest (first meeting).
     fn measure_stable_policy() -> Vec<(String, usize)> {
         let mut sections = vec![prompt_section("## Character file")];
         sections.extend(stable_policy_sections(Path::new(DOCUMENTS), true));

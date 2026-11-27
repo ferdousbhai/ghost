@@ -1,7 +1,7 @@
 # `ghostd`
 
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
-conversations, the local model and its loop, hooks,
+the conversation, the local model and its loop, hooks,
 authenticated HTTP/SSE, and the `ghost` terminal client. Each turn runs on a
 model on this machine, whose tools are a shell and a question to the owner.
 
@@ -25,4 +25,4 @@ Never point a development daemon at `~/.local/share/ghost`, never contact the li
 ## Runtime notes
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
-the authenticated HTTP API, and reaches the same conversations as the bar. Run `ghost help` for the current command catalog.
+the authenticated HTTP API, and reaches the same conversation as the bar. Run `ghost help` for the current command catalog.

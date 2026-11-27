@@ -19,7 +19,7 @@ pub fn read_character(dir: &Path, enforce_limit: bool) -> Result<Option<Characte
         return Err(GhostError::new(
             "limit_exceeded",
             format!(
-                "{CHARACTER_FILENAME} may be at most {MAX_CHARACTER_BODY_LENGTH} characters; it contains {}. Shorten the file before starting a session.",
+                "{CHARACTER_FILENAME} may be at most {MAX_CHARACTER_BODY_LENGTH} characters; it contains {}. Shorten the file before the next turn.",
                 text::len(&body)
             ),
             400,
@@ -29,7 +29,7 @@ pub fn read_character(dir: &Path, enforce_limit: bool) -> Result<Option<Characte
 }
 
 /// The owner's persona edits land here so an oversize body is refused at
-/// write time, not discovered when the next cold session fails to start.
+/// write time, not discovered when the next turn fails to start.
 pub fn write_character(dir: &Path, body: &str) -> Result<()> {
     if character_body_too_long(body) {
         return Err(GhostError::new(
@@ -106,7 +106,7 @@ You are Casper, the ghost of a working typographer and letterpress printer.
         std::fs::write(fixture.dir.join(CHARACTER_FILENAME), &oversized).unwrap();
         let refusal = read_character(&fixture.dir, true).unwrap_err();
         assert_eq!((refusal.code.as_str(), refusal.status), ("limit_exceeded", 400));
-        assert_eq!(refusal.message, "character.md may be at most 20000 characters; it contains 20001. Shorten the file before starting a session.");
+        assert_eq!(refusal.message, "character.md may be at most 20000 characters; it contains 20001. Shorten the file before the next turn.");
         assert_eq!(read_character(&fixture.dir, false).unwrap().unwrap().body, oversized);
     }
 

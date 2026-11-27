@@ -1,11 +1,11 @@
-//! The session host over a scripted answerer: what a turn hands a pass
+//! The conversation host over a scripted answerer: what a turn hands a pass
 //! (persona, cwd, env), what it streams back, what the conversation log keeps,
 //! and what the owner's hooks are told.
 use super::*;
 use crate::config::LocalModelConfig;
 use crate::hooks::{HookCommandResult, parse_hooks_document};
 use crate::local_turn::Answerer;
-use crate::sidecars::{read_pins, read_reads};
+use crate::sidecars::{question_path, read_path};
 use std::sync::{Condvar, OnceLock};
 use std::thread::JoinHandle;
 
@@ -96,7 +96,8 @@ struct FakeCall {
     /// The conversation before it, as the chat messages the pass was handed.
     history: Vec<Value>,
     cwd: PathBuf,
-    session: Option<String>,
+    /// The environment its commands run with.
+    env: Env,
     persona: String,
     coding_agent_command: Option<String>,
 }
@@ -146,7 +147,7 @@ impl Answerer for Fake {
             message: input.prompt.clone(),
             history: input.history.clone(),
             cwd: input.cwd.clone(),
-            session: input.env.get("GHOST_SESSION").cloned(),
+            env: input.env.clone(),
             persona: input.persona.clone(),
             coding_agent_command: input.coding_agent_command.clone(),
         });
@@ -168,7 +169,7 @@ impl Answerer for Fake {
             message: prompt.to_string(),
             history: Vec::new(),
             cwd: PathBuf::new(),
-            session: None,
+            env: Env::new(),
             persona: String::new(),
             coding_agent_command: None,
         };
@@ -210,7 +211,7 @@ impl Home {
     }
 
     fn with_character(character: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("ghostd-session-host-{}", crate::random::uuid()));
+        let root = std::env::temp_dir().join(format!("ghostd-conversation-host-{}", crate::random::uuid()));
         let home = Self { root };
         std::fs::create_dir_all(home.ghost().dir).unwrap();
         std::fs::create_dir_all(home.owner_home()).unwrap();
@@ -231,8 +232,9 @@ impl Home {
         self.root.join(".data/Trash")
     }
 
-    fn session_dir(&self) -> PathBuf {
-        ghost_paths(&self.ghost().dir).session_dir
+    /// The one conversation's directory: the model's cwd, its log and its sidecars.
+    fn conversation_dir(&self) -> PathBuf {
+        ghost_paths(&self.ghost().dir).conversation_dir
     }
 
     fn env(&self) -> Env {
@@ -244,13 +246,13 @@ impl Home {
     }
 
     /// The options of a host over this home: no hooks, no coding agent, and `answerer` in place of the model.
-    fn options(&self, answerer: Option<Arc<Fake>>) -> SessionHostOptions {
-        SessionHostOptions {
+    fn options(&self, answerer: Option<Arc<Fake>>) -> ConversationHostOptions {
+        ConversationHostOptions {
             ghost: self.ghost(),
             owner_home: self.owner_home(),
             logger: Logger::silent(),
             hooks: Arc::new(HookRunner::new(Vec::new(), Logger::silent(), self.env())),
-            conversation_url: None,
+            app_url: None,
             local_model: None,
             answerer: answerer.map(|fake| fake as Arc<dyn Answerer>),
             coding_agent: Some(Box::new(|| None)),
@@ -259,12 +261,12 @@ impl Home {
         }
     }
 
-    fn host(&self, fake: &Arc<Fake>) -> SessionHost {
-        SessionHost::new(self.options(Some(fake.clone())))
+    fn host(&self, fake: &Arc<Fake>) -> ConversationHost {
+        ConversationHost::new(self.options(Some(fake.clone())))
     }
 
-    fn host_with_hooks(&self, fake: &Arc<Fake>, hooks: HookRunner) -> SessionHost {
-        SessionHost::new(SessionHostOptions { hooks: Arc::new(hooks), ..self.options(Some(fake.clone())) })
+    fn host_with_hooks(&self, fake: &Arc<Fake>, hooks: HookRunner) -> ConversationHost {
+        ConversationHost::new(ConversationHostOptions { hooks: Arc::new(hooks), ..self.options(Some(fake.clone())) })
     }
 }
 
@@ -282,21 +284,17 @@ fn emitter(events: &Arc<Seen<Value>>) -> Emit {
 }
 
 /// Run a turn to its end and return what it streamed.
-fn turn_in(host: &SessionHost, id: &str, prompt: &str) -> Vec<Value> {
+fn turn(host: &ConversationHost, prompt: &str) -> Vec<Value> {
     let events = Seen::new();
-    host.run_turn(Some(id), prompt, emitter(&events)).unwrap();
+    host.run_turn(prompt, emitter(&events)).unwrap();
     events.all()
 }
 
-fn turn(host: &SessionHost, prompt: &str) -> Vec<Value> {
-    turn_in(host, "c1", prompt)
-}
-
 /// Start a turn on its own thread: its stream so far, and the thread to join for its end.
-fn start(host: &SessionHost, id: &str, prompt: &str) -> (Arc<Seen<Value>>, JoinHandle<()>) {
+fn start(host: &ConversationHost, prompt: &str) -> (Arc<Seen<Value>>, JoinHandle<()>) {
     let events = Seen::new();
-    let (host, id, prompt, emit) = (host.clone(), id.to_string(), prompt.to_string(), emitter(&events));
-    (events, std::thread::spawn(move || host.run_turn(Some(&id), &prompt, emit).unwrap()))
+    let (host, prompt, emit) = (host.clone(), prompt.to_string(), emitter(&events));
+    (events, std::thread::spawn(move || host.run_turn(&prompt, emit).unwrap()))
 }
 
 fn wait_for_event(events: &Seen<Value>, kind: &str) {
@@ -327,16 +325,27 @@ fn assert_has(events: &[Value], expected: Value) {
     assert!(events.iter().any(|event| carries(event, &expected)), "no event carries {expected} in {events:?}");
 }
 
-fn messages(host: &SessionHost, id: &str) -> Vec<Value> {
-    host.read_transcript(id, None, None).unwrap()["messages"].as_array().unwrap().clone()
+fn messages(host: &ConversationHost) -> Vec<Value> {
+    host.read_transcript(None, None).unwrap()["messages"].as_array().unwrap().clone()
 }
 
-fn roles(host: &SessionHost, id: &str) -> Vec<String> {
-    messages(host, id).iter().map(|message| message["role"].as_str().unwrap().to_string()).collect()
+fn roles(host: &ConversationHost) -> Vec<String> {
+    messages(host).iter().map(|message| message["role"].as_str().unwrap().to_string()).collect()
 }
 
-fn sessions(host: &SessionHost) -> Vec<Value> {
-    host.list_sessions().unwrap().as_array().unwrap().clone()
+/// The conversation as `GET /api/conversation` gives it.
+fn conversation(host: &ConversationHost) -> Value {
+    host.conversation().unwrap()
+}
+
+/// The conversation before anything is said.
+fn nothing_said() -> Value {
+    json!({ "preview": null, "updatedAt": null, "messageCount": 0, "unread": false, "running": false, "question": null })
+}
+
+/// A sidecar as it is on disk, or None when there is no such file.
+fn stored(path: &std::path::Path) -> Option<Value> {
+    std::fs::read_to_string(path).ok().map(|text| serde_json::from_str(&text).unwrap())
 }
 
 fn code<T>(result: Result<T>) -> String {
@@ -392,7 +401,7 @@ impl StopHook {
 // ── A turn ─────────────────────────────────────────────────────────────
 
 #[test]
-fn a_turn_runs_in_the_conversations_directory_with_the_ghosts_persona_and_identity() {
+fn a_turn_runs_in_the_conversation_directory_with_the_ghosts_persona() {
     let home = Home::new();
     let fake = Fake::new(replies(&["I set type."]));
     let host = home.host(&fake);
@@ -403,12 +412,14 @@ fn a_turn_runs_in_the_conversations_directory_with_the_ghosts_persona_and_identi
     assert_eq!(events.last().unwrap(), &json!({ "type": "done" }));
     let call = &fake.calls()[0];
     assert_eq!(call.prompt, "What do you do?");
-    assert_eq!(call.cwd, conversation_dir(&home.session_dir(), "c1"));
-    assert_eq!(call.session.as_deref(), Some("c1"));
+    assert_eq!(call.cwd, home.conversation_dir());
+    // Nothing names the conversation to a command: there is only the one.
+    assert_eq!(call.env.get("GHOST_SESSION"), None);
+    assert_eq!(call.env, home.env());
     assert!(call.persona.contains("You are Casper, a letterpress printer."));
     assert!(call.persona.contains("## Character file"));
     // The persona reaches the model directly: no file of it is left for a coding agent run there to read.
-    assert!(!conversation_dir(&home.session_dir(), "c1").join("CLAUDE.md").exists());
+    assert!(!home.conversation_dir().join("CLAUDE.md").exists());
 }
 
 #[test]
@@ -451,7 +462,7 @@ fn a_later_turn_is_handed_the_conversation_so_far_and_both_are_in_the_log() {
     assert_eq!(fake.prompts(), ["ping", "again"]);
     assert_eq!(fake.calls()[0].history, Vec::<Value>::new());
     assert_eq!(fake.calls()[1].history, vec![json!({ "role": "user", "content": "ping" }), json!({ "role": "assistant", "content": "pong" })]);
-    let transcript: Vec<Value> = messages(&host, "c1").iter().map(|message| json!([message["role"], message["content"]])).collect();
+    let transcript: Vec<Value> = messages(&host).iter().map(|message| json!([message["role"], message["content"]])).collect();
     assert_eq!(
         transcript,
         vec![
@@ -477,7 +488,7 @@ fn tool_calls_stream_as_cards_and_a_failed_one_stays_marked_in_the_log() {
     let host = home.host(&fake);
     let events = turn(&host, "run false");
 
-    let cwd = conversation_dir(&home.session_dir(), "c1");
+    let cwd = home.conversation_dir();
     let cards = of_type(&events, &["tool_execution_start", "tool_execution_end"]);
     assert_eq!(
         cards,
@@ -486,7 +497,7 @@ fn tool_calls_stream_as_cards_and_a_failed_one_stays_marked_in_the_log() {
             json!({ "type": "tool_execution_end", "id": "t1", "toolName": "Bash", "isError": true, "summary": "exit 1", "output": "exit 1" }),
         ]
     );
-    let logged = messages(&host, "c1");
+    let logged = messages(&host);
     let assistant = logged.iter().find(|message| message["role"] == "assistant").unwrap();
     assert_eq!(
         assistant["content"],
@@ -529,7 +540,7 @@ fn reasoning_streams_and_is_logged_and_a_running_tool_shows_the_tail_of_its_outp
             json!({ "type": "thinking", "delta": "Let me " }),
             json!({ "type": "thinking", "delta": "see." }),
             json!({ "type": "thinking", "delta": "\nNext." }),
-            json!({ "type": "tool_execution_start", "id": "t1", "toolName": "bash", "arguments": { "command": "make" }, "cwd": conversation_dir(&home.session_dir(), "c1").to_string_lossy() }),
+            json!({ "type": "tool_execution_start", "id": "t1", "toolName": "bash", "arguments": { "command": "make" }, "cwd": home.conversation_dir().to_string_lossy() }),
             json!({ "type": "tool_execution_update", "id": "t1", "summary": format!("…{}", "x".repeat(800)) }),
             json!({ "type": "tool_execution_end", "id": "t1", "toolName": "bash", "isError": false }),
             json!({ "type": "text_start", "contentIndex": 0 }),
@@ -538,7 +549,7 @@ fn reasoning_streams_and_is_logged_and_a_running_tool_shows_the_tail_of_its_outp
         ]
     );
     assert_eq!(
-        messages(&host, "c1").last().unwrap()["content"],
+        messages(&host).last().unwrap()["content"],
         json!([
             { "type": "thinking", "text": "Let me see.\nNext." },
             { "type": "toolCall", "id": "t1", "name": "bash", "arguments": { "command": "make" } },
@@ -551,10 +562,12 @@ fn reasoning_streams_and_is_logged_and_a_running_tool_shows_the_tail_of_its_outp
 fn a_transcript_is_read_a_page_at_a_time() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["one", "two"])));
+    // Before anything is said it reads as empty.
+    assert_eq!(host.read_transcript(None, None).unwrap(), json!({ "messages": [], "total": 0, "truncated": false }));
     turn(&host, "first");
     turn(&host, "second");
     let page = |limit: Option<f64>, offset: Option<f64>| {
-        let read = host.read_transcript("c1", limit, offset).unwrap();
+        let read = host.read_transcript(limit, offset).unwrap();
         (read["messages"].as_array().unwrap().len(), read["total"].clone(), read["truncated"].clone())
     };
     assert_eq!(page(None, None), (4, json!(4), json!(false)));
@@ -564,9 +577,6 @@ fn a_transcript_is_read_a_page_at_a_time() {
     assert_eq!(page(Some(0.0), Some(-2.0)), (1, json!(4), json!(true)));
     assert_eq!(page(None, Some(1.0)), (3, json!(4), json!(true)));
     assert_eq!(page(None, Some(9.0)), (0, json!(4), json!(true)));
-    // A conversation nobody has written to reads as empty, and a bad id is refused.
-    assert_eq!(host.read_transcript("fresh", None, None).unwrap(), json!({ "id": "fresh", "messages": [], "total": 0, "truncated": false }));
-    assert_eq!(code(host.read_transcript("../c1", None, None)), "invalid_conversation_id");
 }
 
 #[test]
@@ -577,7 +587,7 @@ fn a_turn_ends_in_an_error_that_keeps_what_was_said_before_it() {
     let events = turn(&host, "hello");
 
     assert_eq!(events.last().unwrap(), &json!({ "type": "error", "reason": "error", "errorMessage": "connection reset" }));
-    let logged = messages(&host, "c1");
+    let logged = messages(&host);
     let assistant = logged.iter().find(|message| message["role"] == "assistant").unwrap();
     assert_carries(assistant, json!({ "errorMessage": "connection reset", "content": [{ "type": "text", "text": "partial" }] }));
 }
@@ -586,8 +596,10 @@ fn a_turn_ends_in_an_error_that_keeps_what_was_said_before_it() {
 fn the_pass_is_named_the_coding_agent_the_owner_chose() {
     let home = Home::new();
     let fake = Fake::new(replies(&["ok"]));
-    let host =
-        SessionHost::new(SessionHostOptions { coding_agent: Some(Box::new(|| Some("codex".to_string()))), ..home.options(Some(fake.clone())) });
+    let host = ConversationHost::new(ConversationHostOptions {
+        coding_agent: Some(Box::new(|| Some("codex".to_string()))),
+        ..home.options(Some(fake.clone()))
+    });
     turn(&host, "hi");
     let command = coding_agent_command("codex").expect("codex is a coding agent");
     assert_eq!(fake.calls()[0].coding_agent_command.as_deref(), Some(command));
@@ -602,7 +614,7 @@ fn the_pass_is_named_the_coding_agent_the_owner_chose() {
 #[test]
 fn a_turn_fails_plainly_when_no_local_model_is_configured() {
     let home = Home::new();
-    let host = SessionHost::new(home.options(None));
+    let host = ConversationHost::new(home.options(None));
     let events = turn(&host, "hi");
     let last = events.last().unwrap();
     assert_eq!(last["type"], "error");
@@ -619,10 +631,10 @@ fn a_follow_up_queued_during_a_pass_runs_right_after_it_in_the_same_stream() {
     let gate = Gate::default();
     let fake = Fake::new([vec![FakeTurn { gate: Some(gate.clone()), ..says("first") }], replies(&["second"])].concat());
     let host = home.host(&fake);
-    let (events, running) = start(&host, "c1", "one");
+    let (events, running) = start(&host, "one");
     fake.wait_for_calls(1);
-    assert_eq!(host.queued_messages("c1").unwrap(), json!({ "streaming": true, "followUp": [] }));
-    assert_eq!(host.queue_message("c1", "two").unwrap(), json!({ "streaming": true, "followUp": ["two"] }));
+    assert_eq!(host.queued_messages(), json!({ "streaming": true, "followUp": [] }));
+    assert_eq!(host.queue_message("two").unwrap(), json!({ "streaming": true, "followUp": ["two"] }));
     gate.release();
     running.join().unwrap();
     let events = events.all();
@@ -645,7 +657,7 @@ fn a_follow_up_queued_during_a_pass_runs_right_after_it_in_the_same_stream() {
     let last_lines: Vec<String> = fake.prompts().iter().map(|prompt| prompt.rsplit('\n').next().unwrap().to_string()).collect();
     assert_eq!(last_lines, ["one", "two"]);
     assert_eq!(of_type(&events, &["done", "error"]).len(), 1);
-    assert_eq!(host.queued_messages("c1").unwrap(), json!({ "streaming": false, "followUp": [] }));
+    assert_eq!(host.queued_messages(), json!({ "streaming": false, "followUp": [] }));
 }
 
 #[test]
@@ -659,7 +671,7 @@ fn a_turns_start_is_announced_with_its_prompt_already_in_the_transcript() {
     let (reader, kept) = (host.clone(), seen.clone());
     let subscription = host.subscribe(
         move |_event| {
-            let said = messages(&reader, "c1");
+            let said = messages(&reader);
             let owner = said
                 .iter()
                 .filter(|message| message["role"] == "user")
@@ -668,7 +680,7 @@ fn a_turns_start_is_announced_with_its_prompt_already_in_the_transcript() {
         },
         || {},
     );
-    let (_events, running) = start(&host, "c1", "check the issues");
+    let (_events, running) = start(&host, "check the issues");
     fake.wait_for_calls(1);
     assert_eq!(seen.all()[0], ["check the issues"]);
     gate.release();
@@ -690,7 +702,7 @@ fn text_after_a_tool_call_is_logged_as_its_own_part_when_the_block_key_is_reused
     }]);
     let host = home.host(&fake);
     let events = turn(&host, "check it");
-    let logged = messages(&host, "c1");
+    let logged = messages(&host);
     let parts: Vec<&str> =
         logged.last().unwrap()["content"].as_array().unwrap().iter().map(|part| part["text"].as_str().unwrap_or("toolCall")).collect();
     assert_eq!(parts, ["Let me check.", "toolCall", "Done: X"]);
@@ -723,15 +735,15 @@ fn a_follow_up_queued_behind_a_pass_that_failed_still_runs() {
     let failing = FakeTurn { fail: Some("crashed".to_string()), gate: Some(gate.clone()), ..says("half") };
     let fake = Fake::new([vec![failing], replies(&["second"])].concat());
     let host = home.host(&fake);
-    let (events, running) = start(&host, "c1", "one");
+    let (events, running) = start(&host, "one");
     fake.wait_for_calls(1);
-    host.queue_message("c1", "two").unwrap();
+    host.queue_message("two").unwrap();
     gate.release();
     running.join().unwrap();
 
     assert_eq!(fake.messages(), ["one", "two"]);
     assert_eq!(events.all().last().unwrap(), &json!({ "type": "done" }));
-    let logged: Vec<Value> = messages(&host, "c1").iter().map(|message| json!([message["role"], message["errorMessage"]])).collect();
+    let logged: Vec<Value> = messages(&host).iter().map(|message| json!([message["role"], message["errorMessage"]])).collect();
     assert_eq!(logged, vec![json!(["user", null]), json!(["assistant", "crashed"]), json!(["user", null]), json!(["assistant", null])]);
 }
 
@@ -739,16 +751,16 @@ fn a_follow_up_queued_behind_a_pass_that_failed_still_runs() {
 fn a_stop_is_refused_when_nothing_is_running() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["x"])));
-    let refusal = host.stop_turn("c1").unwrap_err();
-    assert_eq!((refusal.code.as_str(), refusal.status), ("session_not_streaming", 409));
+    let refusal = host.stop_turn().unwrap_err();
+    assert_eq!((refusal.code.as_str(), refusal.status), ("conversation_not_streaming", 409));
 }
 
 #[test]
 fn a_queued_message_is_refused_when_nothing_is_streaming() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["x"])));
-    let refusal = host.queue_message("c1", "late").unwrap_err();
-    assert_eq!((refusal.code.as_str(), refusal.status), ("session_not_streaming", 409));
+    let refusal = host.queue_message("late").unwrap_err();
+    assert_eq!((refusal.code.as_str(), refusal.status), ("conversation_not_streaming", 409));
 }
 
 #[test]
@@ -756,18 +768,21 @@ fn a_stop_stops_the_pass_and_ends_the_turn_aborted() {
     let home = Home::new();
     let fake = Fake::new(vec![FakeTurn { gate: Some(Gate::default()), ..Default::default() }]);
     let host = home.host(&fake);
-    let (events, running) = start(&host, "c1", "wait");
+    let (events, running) = start(&host, "wait");
     fake.wait_for_calls(1);
-    assert_carries(&sessions(&host)[0], json!({ "id": "c1", "running": true }));
-    // The conversation is held: a second turn in it is refused, and so is deleting it.
-    assert_eq!(code(host.admit_turn(Some("c1"), "again")), "session_busy");
-    assert_eq!(code(host.delete_session("c1")), "session_busy");
-    host.stop_turn("c1").unwrap();
+    assert_eq!(conversation(&host)["running"], true);
+    // The conversation is held: a second turn is refused, and so is starting over.
+    let refusal = host.admit_turn("again").err().expect("a second turn is refused");
+    assert_eq!((refusal.code.as_str(), refusal.status), ("conversation_busy", 409));
+    let refusal = host.delete_conversation().unwrap_err();
+    assert_eq!((refusal.code.as_str(), refusal.status), ("conversation_busy", 409));
+    assert!(log_path(&home.conversation_dir()).exists());
+    host.stop_turn().unwrap();
     running.join().unwrap();
     assert_eq!(events.all().last().unwrap(), &json!({ "type": "error", "reason": "aborted", "errorMessage": "Turn aborted." }));
-    assert_carries(&sessions(&host)[0], json!({ "id": "c1", "running": false }));
+    assert_eq!(conversation(&host)["running"], false);
     // What the stopped pass leaves in the log says so.
-    assert_eq!(messages(&host, "c1").last().unwrap()["errorMessage"], "Turn aborted.");
+    assert_eq!(messages(&host).last().unwrap()["errorMessage"], "Turn aborted.");
 }
 
 // ── Owner commands ─────────────────────────────────────────────────────
@@ -777,25 +792,26 @@ fn an_owner_command_runs_in_the_owner_home_and_its_output_is_handed_to_the_next_
     let home = Home::new();
     let fake = Fake::new(replies(&["seen"]));
     let host = home.host(&fake);
-    let events = turn(&host, "!echo printed-$GHOST_SESSION");
+    // It prints what its environment names the conversation, which is nothing.
+    let events = turn(&host, "!echo printed-${GHOST_SESSION-unnamed}");
     assert_has(
         &events,
-        json!({ "type": "tool_execution_start", "toolName": "bash", "arguments": { "command": "echo printed-$GHOST_SESSION" }, "cwd": home.owner_home().to_string_lossy() }),
+        json!({ "type": "tool_execution_start", "toolName": "bash", "arguments": { "command": "echo printed-${GHOST_SESSION-unnamed}" }, "cwd": home.owner_home().to_string_lossy() }),
     );
-    assert_has(&events, json!({ "type": "tool_execution_end", "toolName": "bash", "isError": false, "summary": "printed-c1" }));
+    assert_has(&events, json!({ "type": "tool_execution_end", "toolName": "bash", "isError": false, "summary": "printed-unnamed" }));
     assert_eq!(events.last().unwrap(), &json!({ "type": "done" }));
     assert!(fake.calls().is_empty());
     // Read back as the live turn showed it: the owner's `!command`, then its output.
-    let logged = messages(&host, "c1");
+    let logged = messages(&host);
     let read: Vec<Value> = logged.iter().map(|message| json!([message["role"], message["entryId"]])).collect();
     assert_eq!(read, vec![json!(["user", "e1"]), json!(["assistant", "e1o"])]);
-    assert_eq!(logged[0]["content"], json!([{ "type": "text", "text": "!echo printed-$GHOST_SESSION" }]));
+    assert_eq!(logged[0]["content"], json!([{ "type": "text", "text": "!echo printed-${GHOST_SESSION-unnamed}" }]));
 
     turn(&host, "what did I run?");
     let prompt = &fake.calls()[0].prompt;
-    assert!(prompt.starts_with("I ran this myself:\n$ echo printed-$GHOST_SESSION\n"), "{prompt}");
+    assert!(prompt.starts_with("I ran this myself:\n$ echo printed-${GHOST_SESSION-unnamed}\n"), "{prompt}");
     assert!(prompt.ends_with("\n\nwhat did I run?"), "{prompt}");
-    assert!(prompt.contains("printed-c1"), "{prompt}");
+    assert!(prompt.contains("printed-unnamed"), "{prompt}");
 }
 
 #[test]
@@ -806,11 +822,11 @@ fn a_command_that_fails_is_a_failed_card_and_an_empty_one_is_refused() {
     assert_has(&events, json!({ "type": "tool_execution_end", "toolName": "bash", "isError": true, "summary": "Exit 3" }));
     assert_eq!(events.last().unwrap(), &json!({ "type": "done" }));
     for empty in ["!", "!!", " !!  "] {
-        let refusal = host.admit_turn(Some("c1"), empty).err().expect("an empty command is refused");
+        let refusal = host.admit_turn(empty).err().expect("an empty command is refused");
         assert_eq!((refusal.code.as_str(), refusal.message.as_str()), ("invalid_request", "Write a command after ! or !!."));
     }
     // A refused command holds nothing: the conversation takes the next turn.
-    assert!(host.admit_turn(Some("c1"), "!true").is_ok());
+    assert!(host.admit_turn("!true").is_ok());
 }
 
 #[test]
@@ -818,7 +834,7 @@ fn a_newline_free_commands_output_is_bounded_and_keeps_its_actual_trailing_bytes
     let home = Home::new();
     let host = home.host(&Fake::new(Vec::new()));
     turn(&host, "!printf '%0600000d' 0; printf tail");
-    let entries = read_log(&home.session_dir(), "c1").unwrap().unwrap();
+    let entries = read_log(&home.conversation_dir()).unwrap().unwrap();
     let Some(LogEntry::Command { output, .. }) = entries.iter().find(|entry| matches!(entry, LogEntry::Command { .. })) else {
         panic!("Owner command was not logged.");
     };
@@ -831,38 +847,39 @@ fn a_newline_free_commands_output_is_bounded_and_keeps_its_actual_trailing_bytes
 fn a_running_command_is_stopped() {
     let home = Home::new();
     let host = home.host(&Fake::new(Vec::new()));
-    let (events, running) = start(&host, "c1", "!sleep 30");
+    let (events, running) = start(&host, "!sleep 30");
     wait_for_event(&events, "tool_execution_start");
     // A command has no passes to queue after; it is busy, not idle.
-    assert_eq!(code(host.queue_message("c1", "after")), "session_busy");
-    assert_eq!(host.queued_messages("c1").unwrap(), json!({ "streaming": false, "followUp": [] }));
-    host.stop_turn("c1").unwrap();
+    assert_eq!(code(host.queue_message("after")), "conversation_busy");
+    assert_eq!(host.queued_messages(), json!({ "streaming": false, "followUp": [] }));
+    host.stop_turn().unwrap();
     running.join().unwrap();
     assert_eq!(events.all().last().unwrap(), &json!({ "type": "error", "reason": "aborted", "errorMessage": "Command aborted." }));
 }
 
 #[test]
-fn a_conversation_of_owner_commands_is_listed_while_one_runs_and_after() {
+fn the_conversation_shows_an_owner_command_while_it_runs_and_after() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["on it"])));
-    let (events, running) = start(&host, "c9", "!sleep 30");
+    let (events, running) = start(&host, "!sleep 30");
     wait_for_event(&events, "tool_execution_start");
-    let listed = sessions(&host);
-    assert_eq!(listed.len(), 1);
-    assert_carries(&listed[0], json!({ "id": "c9", "running": true, "messageCount": 0 }));
-    host.stop_turn("c9").unwrap();
+    // A command is logged when it ends: until then only `running` says it is there.
+    let mut only_running = nothing_said();
+    only_running["running"] = json!(true);
+    assert_eq!(conversation(&host), only_running);
+    host.stop_turn().unwrap();
     running.join().unwrap();
-    let listed = sessions(&host);
-    assert_eq!(listed.len(), 1);
-    assert_carries(&listed[0], json!({ "id": "c9", "running": false, "messageCount": 2, "preview": "!sleep 30" }));
+    assert_carries(&conversation(&host), json!({ "running": false, "messageCount": 2, "preview": "!sleep 30" }));
 
-    // The first owner message still titles it; the command keeps the preview.
-    turn_in(&host, "c9", "fix the failing build please");
-    assert_carries(&sessions(&host)[0], json!({ "id": "c9", "title": "Fix the failing build please", "preview": "!sleep 30" }));
+    // The command keeps the preview when the owner's first words come after it.
+    turn(&host, "fix the failing build please");
+    assert_carries(&conversation(&host), json!({ "messageCount": 4, "preview": "!sleep 30" }));
 
-    // `!!` output is kept from the transcript too, so it alone is no conversation.
-    turn_in(&host, "c8", "!!echo hidden");
-    assert!(sessions(&host).iter().all(|row| row["id"] != "c8"));
+    // `!!` output is kept from the transcript too, so it alone leaves nothing said.
+    let other = Home::new();
+    let host = other.host(&Fake::new(Vec::new()));
+    turn(&host, "!!echo hidden");
+    assert_eq!(conversation(&host), nothing_said());
 }
 
 #[test]
@@ -870,7 +887,7 @@ fn a_commands_output_is_fenced_so_a_fence_line_inside_stays_code() {
     let home = Home::new();
     let host = home.host(&Fake::new(Vec::new()));
     turn(&host, "!printf '# Readme\\n```sh\\nls\\n```\\n'");
-    assert_eq!(messages(&host, "c1").last().unwrap()["content"], json!([{ "type": "text", "text": "````\n# Readme\n```sh\nls\n```\n````" }]));
+    assert_eq!(messages(&host).last().unwrap()["content"], json!([{ "type": "text", "text": "````\n# Readme\n```sh\nls\n```\n````" }]));
 }
 
 #[test]
@@ -883,9 +900,10 @@ fn a_message_that_is_only_a_photo_goes_to_the_model_not_to_bash() {
     assert!(fake.calls()[0].prompt.contains("![image](attachments/k1-photo.jpg)"));
 
     // `!!` keeps a command whose text opens with `[` out of the ghost's context.
-    let kept = turn_in(&host, "c2", "!![ -d / ] && echo kept");
+    let before = messages(&host);
+    let kept = turn(&host, "!![ -d / ] && echo kept");
     assert_has(&kept, json!({ "type": "tool_execution_end", "toolName": "bash", "isError": false, "summary": "kept" }));
-    assert_eq!(messages(&host, "c2"), Vec::<Value>::new());
+    assert_eq!(messages(&host), before);
 }
 
 #[test]
@@ -926,7 +944,7 @@ fn the_turn_continues_while_a_session_stop_hook_asks_it_to() {
         ]
     );
     assert_eq!(fake.calls()[1].message, "Stop hook feedback:\nverify it");
-    assert_eq!(roles(&host, "c1"), ["user", "assistant", "hook", "assistant"]);
+    assert_eq!(roles(&host), ["user", "assistant", "hook", "assistant"]);
     let inputs = stop.inputs();
     let [first, continued] = inputs.as_slice() else { panic!("the hook ran {} times", inputs.len()) };
     assert!(first["turn_id"].is_string());
@@ -937,16 +955,18 @@ fn the_turn_continues_while_a_session_stop_hook_asks_it_to() {
     assert_carries(
         first,
         json!({
-            "session_id": "c1",
-            "conversation_id": "c1",
             "ghost_name": "Casper",
             "ghost_home": home.ghost().dir.to_string_lossy(),
-            "cwd": conversation_dir(&home.session_dir(), "c1").to_string_lossy(),
-            "transcript_path": log_path(&home.session_dir(), "c1").to_string_lossy(),
+            "cwd": home.conversation_dir().to_string_lossy(),
+            "transcript_path": log_path(&home.conversation_dir()).to_string_lossy(),
             "messages": [said],
             "last_assistant_message": said,
         }),
     );
+    // There is one conversation, so no event names one.
+    for input in &inputs {
+        assert_eq!((input.get("session_id"), input.get("conversation_id")), (None, None), "{input}");
+    }
 }
 
 // A question ends the turn on the owner: a stop hook's "keep going" must
@@ -959,11 +979,11 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     let asking = FakeTurn { gate: Some(gate.clone()), ..says("Write this as my character file?") };
     let fake = Fake::new([vec![asking], replies(&["written"])].concat());
     let host = home.host_with_hooks(&fake, hooks);
-    let (events, running) = start(&host, "c1", "draft your character");
+    let (events, running) = start(&host, "draft your character");
     fake.wait_for_calls(1);
     // The ghost asks during its pass.
     let options = ["Write it".to_string(), "Change something first".to_string()];
-    let asked = host.set_question("c1", "Write this as my character file?", &options).unwrap();
+    let asked = host.set_question("Write this as my character file?", &options).unwrap();
     gate.release();
     running.join().unwrap();
     let events = events.all();
@@ -971,11 +991,38 @@ fn no_session_stop_hook_runs_while_the_ghosts_question_waits_on_the_owner() {
     assert!(of_type(&events, &["hook_start"]).is_empty());
     assert!(stop.inputs().is_empty());
     assert_eq!(events.last().unwrap(), &json!({ "type": "done" }));
-    // The question is listed with the conversation until the owner's next message answers it.
-    assert_eq!(sessions(&host)[0]["question"], asked);
+    // The question is the conversation's until the owner's next message answers it.
+    assert_eq!(conversation(&host)["question"], asked);
     assert_carries(&asked, json!({ "text": "Write this as my character file?", "options": options }));
     turn(&host, "Write it");
-    assert_eq!(sessions(&host)[0]["question"], Value::Null);
+    assert_eq!(conversation(&host)["question"], Value::Null);
+}
+
+// A hook's feedback is not the owner's answer: the question it finds open stays
+// open, and ends the turn on the owner as any question does.
+#[test]
+fn a_hook_continuation_leaves_the_open_question_for_the_owners_next_message_to_answer() {
+    let home = Home::new();
+    let (stop, hooks) = StopHook::new(&home, true);
+    let fake = Fake::new(replies(&["done", "verified", "noted"]));
+    let host = home.host_with_hooks(&fake, hooks);
+    let (events, running) = start(&host, "do it");
+    // The hook is running, and answers only once it is let go: the question is asked before its continuation.
+    wait_for_event(&events, "hook_start");
+    let asked = host.set_question("Ship it?", &["Yes".to_string()]).unwrap();
+    stop.go();
+    running.join().unwrap();
+
+    assert_eq!(fake.messages(), ["do it", "Stop hook feedback:\nverify it"]);
+    assert_eq!(roles(&host), ["user", "assistant", "hook", "assistant"]);
+    assert_eq!(conversation(&host)["question"], asked);
+    assert_eq!(stored(&question_path(&home.conversation_dir())), Some(asked));
+    // The continuation's own pass is not reviewed while the question waits.
+    assert_eq!(stop.inputs().len(), 1);
+
+    turn(&host, "Yes");
+    assert_eq!(conversation(&host)["question"], Value::Null);
+    assert!(!question_path(&home.conversation_dir()).exists());
 }
 
 // A conversation grows as long as the model's context permits; past the
@@ -999,7 +1046,7 @@ fn a_conversation_near_the_models_context_is_handed_off_in_the_background_and_a_
     assert_eq!(calls[1].history, vec![json!({ "role": "user", "content": "hello" }), json!({ "role": "assistant", "content": long })]);
 
     // The model answers one request at a time: a turn that arrives meanwhile waits, saying why.
-    let (events, running) = start(&host, "c1", "are you there?");
+    let (events, running) = start(&host, "are you there?");
     wait_for_event(&events, "thinking");
     assert_eq!(fake.calls().len(), 2);
     gate.release();
@@ -1014,7 +1061,7 @@ fn a_conversation_near_the_models_context_is_handed_off_in_the_background_and_a_
         "The conversation before this was handed off. Its note:\n\nThe owner said hello; I answered at length.\n\nare you there?"
     );
     // The log keeps everything, the note among it and saying what it covers, and the owner reads it all.
-    let logged = messages(&host, "c1");
+    let logged = messages(&host);
     let contents: Vec<&Value> = logged.iter().map(|message| &message["content"][0]).collect();
     assert_eq!(contents[2], &json!({ "type": "handoff", "text": "The owner said hello; I answered at length.", "covers": 3 }));
     assert_eq!(contents[3], &json!({ "type": "text", "text": "are you there?" }));
@@ -1065,16 +1112,23 @@ fn a_conversation_that_outgrew_the_context_mid_turn_is_handed_off_from_what_stil
 
 // The model's `ask` tool reaches the same open question a pass is handed the way to set.
 #[test]
-fn a_pass_puts_its_question_to_the_owner_in_its_own_conversation() {
+fn a_pass_puts_its_question_to_the_owner_and_the_owners_next_message_removes_it() {
     let home = Home::new();
     let options = vec!["North pier".to_string(), "South pier".to_string()];
     let asking = FakeTurn { ask: Some(("Which pier?".to_string(), options.clone())), ..says("Which pier?") };
     let fake = Fake::new([vec![asking], replies(&["booked"])].concat());
     let host = home.host(&fake);
     turn(&host, "book the boat");
-    assert_carries(&sessions(&host)[0]["question"], json!({ "text": "Which pier?", "options": options }));
+    let asked = conversation(&host)["question"].clone();
+    assert_carries(&asked, json!({ "text": "Which pier?", "options": options }));
+    assert!(clock::parse_iso(asked["askedAt"].as_str().unwrap()).is_some(), "{asked}");
+    // It is kept beside the log, as the conversation gives it.
+    let file = question_path(&home.conversation_dir());
+    assert_eq!(file, home.conversation_dir().join(".question.json"));
+    assert_eq!(stored(&file), Some(asked));
     turn(&host, "North pier");
-    assert_eq!(sessions(&host)[0]["question"], Value::Null);
+    assert_eq!(conversation(&host)["question"], Value::Null);
+    assert!(!file.exists());
     // The answer's pass is handed the question, as the reply said it.
     assert!(json!(fake.calls()[1].history).to_string().contains("Which pier?"));
 }
@@ -1101,9 +1155,9 @@ fn the_stop_hook_is_not_asked_while_the_owners_follow_up_waits() {
     let gate = Gate::default();
     let fake = Fake::new([vec![FakeTurn { gate: Some(gate.clone()), ..says("first") }], replies(&["second", "verified"])].concat());
     let host = home.host_with_hooks(&fake, hooks);
-    let (events, running) = start(&host, "c1", "one");
+    let (events, running) = start(&host, "one");
     fake.wait_for_calls(1);
-    host.queue_message("c1", "two").unwrap();
+    host.queue_message("two").unwrap();
     gate.release();
     running.join().unwrap();
     let events = events.all();
@@ -1125,10 +1179,10 @@ fn a_follow_up_sent_while_the_stop_hook_runs_wins_over_its_continuation() {
     let (stop, hooks) = StopHook::new(&home, true);
     let fake = Fake::new(replies(&["first", "second"]));
     let host = home.host_with_hooks(&fake, hooks);
-    let (events, running) = start(&host, "c1", "one");
+    let (events, running) = start(&host, "one");
     // The hook is running, and answers only once it is let go.
     wait_for_event(&events, "hook_start");
-    host.queue_message("c1", "two").unwrap();
+    host.queue_message("two").unwrap();
     stop.go();
     running.join().unwrap();
     let events = events.all();
@@ -1144,90 +1198,82 @@ fn a_follow_up_sent_while_the_stop_hook_runs_wins_over_its_continuation() {
     assert_ne!(reviewed["turn_id"], first["turn_id"]);
 }
 
-// ── Conversation metadata ──────────────────────────────────────────────
+// ── The conversation's state ───────────────────────────────────────────
 
 #[test]
-fn concurrent_pin_and_read_changes_to_different_conversations_are_both_kept() {
+fn the_conversation_has_no_preview_and_no_time_until_something_is_said() {
     let home = Home::new();
-    let host = home.host(&Fake::new(replies(&["one", "two"])));
-    turn_in(&host, "c1", "first");
-    turn_in(&host, "c2", "second");
+    let host = home.host(&Fake::new(replies(&["hi"])));
+    assert_eq!(conversation(&host), nothing_said());
+    // Asking for it makes nothing.
+    assert!(!home.conversation_dir().exists());
 
-    std::thread::scope(|scope| {
-        for id in ["c1", "c2"] {
-            let host = &host;
-            scope.spawn(move || host.set_pinned(id, true).unwrap());
-        }
-    });
-    let mut pins = read_pins(&home.session_dir());
-    pins.sort();
-    assert_eq!(pins, ["c1", "c2"]);
+    let before = clock::now_ms();
+    turn(&host, "Plan the zine\nwith details");
+    let row = conversation(&host);
+    assert_carries(&row, json!({ "preview": "Plan the zine", "messageCount": 2, "unread": true, "running": false, "question": null }));
+    assert!(clock::parse_iso(row["updatedAt"].as_str().unwrap()).is_some_and(|at| at >= before), "{row}");
+    assert_eq!(row.as_object().unwrap().len(), 6);
 
-    std::thread::scope(|scope| {
-        for id in ["c1", "c2"] {
-            let host = &host;
-            scope.spawn(move || host.mark_read(id, clock::now_ms()).unwrap());
-        }
-    });
-    assert_eq!(read_reads(&home.session_dir()).into_keys().collect::<Vec<_>>(), ["c1", "c2"]);
+    host.mark_read(clock::now_ms() + 60_000).unwrap();
+    assert_carries(&conversation(&host), json!({ "preview": "Plan the zine", "messageCount": 2, "unread": false }));
 }
 
 #[test]
-fn a_conversation_is_listed_titled_pinned_read_and_trashed() {
+fn starting_over_moves_the_whole_conversation_directory_to_trash() {
     let home = Home::new();
-    let host = home.host(&Fake::new(replies(&["hi"])));
-    turn(&host, "Plan the zine\nwith details");
-    assert_carries(
-        &sessions(&host)[0],
-        json!({ "id": "c1", "title": "Plan the zine", "preview": "Plan the zine", "messageCount": 2, "pinned": false, "unread": true, "running": false, "question": null }),
-    );
-
-    assert_eq!(host.rename_conversation("c1", " Zine ").unwrap(), "Zine");
-    host.set_pinned("c1", true).unwrap();
-    host.mark_read("c1", clock::now_ms() + 60_000).unwrap();
-    assert_carries(&sessions(&host)[0], json!({ "title": "Zine", "pinned": true, "unread": false }));
-
-    // Pin has its way out.
-    host.set_pinned("c1", false).unwrap();
-    assert_carries(&sessions(&host)[0], json!({ "pinned": false }));
-    host.set_pinned("c1", true).unwrap();
-
+    let fake = Fake::new(replies(&["hi", "hello again"]));
+    let host = home.host(&fake);
     if crate::env::which("gio", &home.env()).is_none() {
-        eprintln!("skipped the trashing half: gio is not installed");
+        eprintln!("skipped: gio is not installed");
         return;
     }
-    host.delete_session("c1").unwrap();
-    let dir = conversation_dir(&home.session_dir(), "c1");
-    assert!(home.trash_dir().join("files").join(dir.file_name().unwrap()).exists());
+    turn(&host, "Plan the zine");
+    let photo = host.save_attachment(b"\x89PNG\r\n\x1a\nrest").unwrap();
+    host.set_question("Which paper?", &[]).unwrap();
+    host.mark_read(clock::now_ms()).unwrap();
+    let dir = home.conversation_dir();
+    let kept = [log_path(&dir), dir.join(&photo), question_path(&dir), read_path(&dir)];
+    for path in &kept {
+        assert!(path.exists(), "{}", path.display());
+    }
+    let photo_name = photo.strip_prefix("attachments/").unwrap();
+    assert!(host.read_attachment(photo_name).is_ok());
+
+    host.delete_conversation().unwrap();
     assert!(!dir.exists());
-    assert_eq!(sessions(&host), Vec::<Value>::new());
-    // Its pin goes with it.
-    assert_eq!(read_pins(&home.session_dir()), Vec::<String>::new());
-    assert_eq!(code(host.delete_session("c1")), "not_found");
+    let trashed = home.trash_dir().join("files").join(dir.file_name().unwrap());
+    for path in &kept {
+        let moved = trashed.join(path.strip_prefix(&dir).unwrap());
+        assert!(moved.exists(), "{}", moved.display());
+    }
+    // Nothing of it is left to read: not its messages, its question, its read mark, or its photo.
+    assert_eq!(conversation(&host), nothing_said());
+    assert_eq!(host.read_transcript(None, None).unwrap(), json!({ "messages": [], "total": 0, "truncated": false }));
+    assert_eq!(code(host.read_attachment(photo_name)), "not_found");
+    let refusal = host.delete_conversation().unwrap_err();
+    assert_eq!((refusal.code.as_str(), refusal.status), ("not_found", 404));
+
+    // The next message makes a new one, handed nothing of the old.
+    turn(&host, "Start again");
+    assert_eq!(fake.calls()[1].history, Vec::<Value>::new());
+    assert_carries(&conversation(&host), json!({ "preview": "Start again", "messageCount": 2, "unread": true, "question": null }));
 }
 
 #[test]
-fn a_conversation_that_does_not_exist_takes_no_metadata() {
+fn nothing_is_marked_asked_or_trashed_before_there_is_a_conversation() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["hi"])));
-    let missing = "This ghost has no conversation \"nope\".";
-    for refusal in [
-        host.set_pinned("nope", true).unwrap_err(),
-        host.mark_read("nope", 0).unwrap_err(),
-        host.rename_conversation("nope", "A name").unwrap_err(),
-        host.set_question("nope", "Well?", &[]).unwrap_err(),
-        host.delete_session("nope").unwrap_err(),
-    ] {
-        assert_eq!((refusal.code.as_str(), refusal.status, refusal.message.as_str()), ("not_found", 404, missing));
+    for refusal in [host.mark_read(0).unwrap_err(), host.set_question("Well?", &[]).unwrap_err(), host.delete_conversation().unwrap_err()] {
+        assert_eq!((refusal.code.as_str(), refusal.status, refusal.message.as_str()), ("not_found", 404, "There is no conversation yet."));
     }
+    // A sidecar is written beside a log, never into a directory that has none.
+    assert!(!home.conversation_dir().exists());
     turn(&host, "hello");
-    for title in ["", "   ", &"x".repeat(121), "\u{200b}"] {
-        assert_eq!(code(host.rename_conversation("c1", title)), "invalid_request", "{title:?}");
-    }
-    assert_eq!(code(host.set_question("c1", "  ", &[])), "invalid_request");
+    assert_eq!(code(host.set_question("  ", &[])), "invalid_request");
     // A question is trimmed, and its answers deduplicated.
-    host.set_question("c1", " Shall I? ", &[" Yes ".to_string(), "Yes".to_string(), String::new()]).unwrap();
-    assert_carries(&sessions(&host)[0]["question"], json!({ "text": "Shall I?", "options": ["Yes"] }));
+    host.set_question(" Shall I? ", &[" Yes ".to_string(), "Yes".to_string(), String::new()]).unwrap();
+    assert_carries(&conversation(&host)["question"], json!({ "text": "Shall I?", "options": ["Yes"] }));
 }
 
 #[test]
@@ -1235,10 +1281,10 @@ fn a_torn_last_log_line_is_skipped() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["hi"])));
     turn(&host, "hello");
-    let path = log_path(&home.session_dir(), "c1");
-    let before = read_log(&home.session_dir(), "c1").unwrap().unwrap().len();
+    let path = log_path(&home.conversation_dir());
+    let before = read_log(&home.conversation_dir()).unwrap().unwrap().len();
     std::fs::write(&path, format!("{}{{\"type\":\"us", std::fs::read_to_string(&path).unwrap())).unwrap();
-    assert_eq!(read_log(&home.session_dir(), "c1").unwrap().unwrap().len(), before);
+    assert_eq!(read_log(&home.conversation_dir()).unwrap().unwrap().len(), before);
 }
 
 #[test]
@@ -1247,31 +1293,47 @@ fn a_late_read_receipt_does_not_move_the_read_watermark_backwards() {
     let host = home.host(&Fake::new(replies(&["done"])));
     turn(&host, "Do it");
     let latest = clock::now_ms();
-    assert_eq!(host.mark_read("c1", latest).unwrap(), clock::iso(latest));
-    assert_eq!(host.mark_read("c1", 0).unwrap(), clock::iso(latest));
-    assert_eq!(read_reads(&home.session_dir()).get("c1"), Some(&clock::iso(latest)));
+    assert_eq!(host.mark_read(latest).unwrap(), clock::iso(latest));
+    assert_eq!(host.mark_read(0).unwrap(), clock::iso(latest));
+    // The mark is kept beside the log.
+    assert_eq!(stored(&home.conversation_dir().join(".read.json")), Some(json!({ "readAt": clock::iso(latest) })));
+}
+
+#[test]
+fn read_marks_that_race_leave_the_latest() {
+    let home = Home::new();
+    let host = home.host(&Fake::new(replies(&["done"])));
+    turn(&host, "Do it");
+    let latest = clock::now_ms();
+    std::thread::scope(|scope| {
+        for earlier in 0..8 {
+            let host = &host;
+            scope.spawn(move || host.mark_read(latest - earlier * 1_000).unwrap());
+        }
+    });
+    assert_eq!(stored(&read_path(&home.conversation_dir())), Some(json!({ "readAt": clock::iso(latest) })));
 }
 
 // ── Conversation events and unread state ───────────────────────────────
 
 #[test]
-fn a_conversation_starts_unread_is_marked_read_then_is_unread_after_a_newer_turn() {
+fn the_conversation_starts_unread_is_marked_read_then_is_unread_after_a_newer_turn() {
     let home = Home::new();
     let host = home.host(&Fake::new(replies(&["hello"])));
-    turn_in(&host, "conv-1", "first");
-    let row = sessions(&host)[0].clone();
+    turn(&host, "first");
+    let row = conversation(&host);
     assert_eq!(row["unread"], true);
 
     let read_at = clock::parse_iso(row["updatedAt"].as_str().unwrap()).unwrap() + 1;
-    host.mark_read("conv-1", read_at).unwrap();
-    assert_eq!(sessions(&host)[0]["unread"], false);
+    host.mark_read(read_at).unwrap();
+    assert_eq!(conversation(&host)["unread"], false);
 
     // A newer turn is one the clock has moved on for: time has no signal to wait on.
     while clock::now_ms() <= read_at {
         std::thread::sleep(Duration::from_millis(1));
     }
-    turn_in(&host, "conv-1", "second");
-    assert_carries(&sessions(&host)[0], json!({ "id": "conv-1", "unread": true }));
+    turn(&host, "second");
+    assert_eq!(conversation(&host)["unread"], true);
 }
 
 #[test]
@@ -1297,28 +1359,28 @@ fn subscribers_hear_small_invalidations_for_turns_and_read_changes_until_they_le
         || panic!("a subscriber that left is not closed"),
     );
 
-    turn_in(&host, "conv-1", "Who are you?");
+    turn(&host, "Who are you?");
     // Its prompt was logged, and it ended: each a change to read again.
     let turned = heard.all();
     assert_eq!(turned.len(), 2);
     for event in &turned {
-        assert_carries(event, json!({ "type": "conversation-updated", "id": "conv-1" }));
+        assert_eq!(event["type"], "conversation-updated");
         assert!(clock::parse_iso(event["updatedAt"].as_str().unwrap()).is_some(), "{event}");
-        assert_eq!(event.as_object().unwrap().len(), 3);
+        assert_eq!(event.as_object().unwrap().len(), 2);
     }
     assert_eq!(left.all(), turned);
 
     host.unsubscribe(leaving);
-    host.mark_read("conv-1", clock::now_ms()).unwrap();
+    host.mark_read(clock::now_ms()).unwrap();
     assert_eq!(heard.all().len(), 3);
     assert_eq!(left.all().len(), 2);
 
     // Shutdown ends the streams still open and refuses another turn.
     host.dispose_all();
     assert_eq!(closed.all().len(), 1);
-    host.mark_read("conv-1", clock::now_ms()).unwrap();
+    host.mark_read(clock::now_ms()).unwrap();
     assert_eq!(heard.all().len(), 3);
-    let refusal = host.admit_turn(Some("conv-1"), "again").err().expect("a stopping daemon admits no turn");
+    let refusal = host.admit_turn("again").err().expect("a stopping daemon admits no turn");
     assert_eq!((refusal.code.as_str(), refusal.status), ("shutting_down", 503));
 }
 
@@ -1327,7 +1389,7 @@ fn shutdown_aborts_the_turn_that_is_running() {
     let home = Home::new();
     let fake = Fake::new(vec![FakeTurn { gate: Some(Gate::default()), ..Default::default() }]);
     let host = home.host(&fake);
-    let (events, running) = start(&host, "c1", "wait");
+    let (events, running) = start(&host, "wait");
     fake.wait_for_calls(1);
     host.dispose_all();
     running.join().unwrap();
@@ -1338,7 +1400,7 @@ fn shutdown_aborts_the_turn_that_is_running() {
 
 /// A host whose one subscribed device's alerts are kept in the returned list
 /// instead of being sent; `hold` keeps each send waiting until released.
-fn alerting(home: &Home, fake: &Arc<Fake>, link: bool, hold: Option<Gate>) -> (SessionHost, Arc<Seen<Value>>) {
+fn alerting(home: &Home, fake: &Arc<Fake>, link: bool, hold: Option<Gate>) -> (ConversationHost, Arc<Seen<Value>>) {
     let alerts = Seen::new();
     let kept = alerts.clone();
     let push = crate::push::Push::with_sender(
@@ -1362,27 +1424,25 @@ fn alerting(home: &Home, fake: &Arc<Fake>, link: bool, hold: Option<Gate>) -> (S
         .unwrap(),
     )
     .unwrap();
-    let host = SessionHost::new(SessionHostOptions {
+    let host = ConversationHost::new(ConversationHostOptions {
         push: Some(push),
-        conversation_url: link.then(|| Box::new(|id: &str| Some(format!("https://summonghost.com/#/ghost.example.ts.net/{id}"))) as ConversationUrl),
+        app_url: link.then(|| Box::new(|| Some("https://summonghost.com/#/ghost.example.ts.net".to_string())) as AppUrl),
         ..home.options(Some(fake.clone()))
     });
     (host, alerts)
 }
 
 #[test]
-fn a_turn_that_ends_alerts_the_owners_devices_once_with_a_bounded_excerpt_and_its_link() {
+fn a_turn_that_ends_alerts_the_owners_devices_once_with_the_ghosts_name_a_bounded_excerpt_and_the_apps_link() {
     let home = Home::new();
     let fake = Fake::new(replies(&[&format!("Finished.\n{}", "a".repeat(400))]));
     let (host, alerts) = alerting(&home, &fake, true, None);
     let events = turn(&host, "Make the report");
     let sent = alerts.wait("the alert", |seen| !seen.is_empty());
     assert_eq!(sent.len(), 1);
-    assert_carries(
-        &sent[0],
-        json!({ "title": "Make the report", "url": "https://summonghost.com/#/ghost.example.ts.net/c1", "tag": "c1", "ghost": "Casper" }),
-    );
     let body = sent[0]["body"].as_str().unwrap();
+    // The whole alert: nothing in it names a conversation.
+    assert_eq!(sent[0], json!({ "title": "Casper", "body": body, "url": "https://summonghost.com/#/ghost.example.ts.net" }));
     assert_eq!(text::len(body), 280);
     assert!(body.starts_with("Finished. aaaa"), "{body}");
     assert_eq!(events.last().unwrap()["type"], "done");
@@ -1407,7 +1467,7 @@ fn a_failed_turn_alerts_with_what_failed() {
     let (host, alerts) = alerting(&home, &failing, false, None);
     let events = turn(&host, "Try it");
     let sent = alerts.wait("the alert", |seen| !seen.is_empty());
-    assert_carries(&sent[0], json!({ "body": "Failed: service unavailable", "url": null }));
+    assert_eq!(sent[0], json!({ "title": "Casper", "body": "Failed: service unavailable", "url": null }));
     assert_carries(events.last().unwrap(), json!({ "type": "error" }));
 }
 
@@ -1419,7 +1479,7 @@ fn a_turn_that_fails_outside_its_passes_still_alerts() {
     turn(&host, "hello");
     alerts.wait("the first turn's alert", |seen| seen.len() == 1);
     // The owner command runs, and then cannot be logged.
-    let log = log_path(&home.session_dir(), "c1");
+    let log = log_path(&home.conversation_dir());
     std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o400)).unwrap();
     if std::fs::OpenOptions::new().append(true).open(&log).is_ok() {
         eprintln!("skipped: this user writes to a read-only file");
@@ -1440,9 +1500,9 @@ fn a_cancelled_turn_is_kept_quiet() {
     let home = Home::new();
     let fake = Fake::new(vec![FakeTurn { gate: Some(Gate::default()), ..Default::default() }]);
     let (host, alerts) = alerting(&home, &fake, false, None);
-    let (events, running) = start(&host, "c1", "wait");
+    let (events, running) = start(&host, "wait");
     fake.wait_for_calls(1);
-    host.stop_turn("c1").unwrap();
+    host.stop_turn().unwrap();
     running.join().unwrap();
     assert_carries(events.all().last().unwrap(), json!({ "type": "error", "reason": "aborted" }));
     // A turn that ends after it alerts first, so an alert for the cancelled one would be here by then.
@@ -1458,8 +1518,8 @@ fn no_link_is_looked_up_when_no_device_gets_alerts() {
     let home = Home::new();
     let lookups = Seen::new();
     let counted = lookups.clone();
-    let host = SessionHost::new(SessionHostOptions {
-        conversation_url: Some(Box::new(move |_id| {
+    let host = ConversationHost::new(ConversationHostOptions {
+        app_url: Some(Box::new(move || {
             counted.push(());
             None
         })),
@@ -1489,7 +1549,7 @@ fn complete_returns_the_trimmed_text_and_refuses_an_empty_prompt_or_an_empty_ans
 #[test]
 fn complete_answers_a_session_stop_hook_while_the_turn_awaiting_it_holds_its_admission() {
     let home = Home::new();
-    let asked: Arc<OnceLock<SessionHost>> = Arc::new(OnceLock::new());
+    let asked: Arc<OnceLock<ConversationHost>> = Arc::new(OnceLock::new());
     let reviews = Seen::new();
     let (asking, kept) = (asked.clone(), reviews.clone());
     let hooks = hooks_run_by(json!({ "hooks": { "session_stop": [{ "hooks": [{ "type": "command", "command": "review" }] }] } }), move |_event| {
@@ -1539,7 +1599,7 @@ fn complete_runs_on_the_daemons_own_local_model_with_no_persona_or_tools() {
     let log = home.root.join(".llama-requests.jsonl");
     let server = home.root.join(".llama-server");
     let script = format!(
-        "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --port ] && port=$2; shift; done\nGHOST_TEST_LLAMA_PORT=$port GHOST_TEST_LLAMA_LOG='{}' exec '{}' --exact session_host::tests::stand_in_llama_server --ignored\n",
+        "#!/bin/sh\nwhile [ $# -gt 0 ]; do [ \"$1\" = --port ] && port=$2; shift; done\nGHOST_TEST_LLAMA_PORT=$port GHOST_TEST_LLAMA_LOG='{}' exec '{}' --exact conversation_host::tests::stand_in_llama_server --ignored\n",
         log.display(),
         std::env::current_exe().unwrap().display(),
     );
@@ -1556,7 +1616,7 @@ fn complete_runs_on_the_daemons_own_local_model_with_no_persona_or_tools() {
         reasoning_effort: "low".to_string(),
     };
     let model = LocalModel::new(config, Logger::silent(), home.env());
-    let host = SessionHost::new(SessionHostOptions { local_model: Some(model), ..home.options(None) });
+    let host = ConversationHost::new(ConversationHostOptions { local_model: Some(model), ..home.options(None) });
 
     // A script just written can be "busy" for the instant another test's
     // fork still holds it open for writing; that start is simply made again.

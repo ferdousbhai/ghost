@@ -329,7 +329,7 @@ impl HookRunner {
     }
 
     fn run_fail_open(&self, hook: &CommandHook, event: &HookEvent) -> Option<StopResult> {
-        let logger = self.logger.child(json!({ "ghost": event.payload["ghost_name"], "conversation": event.payload["conversation_id"] }));
+        let logger = self.logger.child(json!({ "ghost": event.payload["ghost_name"] }));
         match (self.runner)(hook, event) {
             Ok(result) => parse_command_result(hook, &result, &|message, details| logger.warn(message, details)),
             Err(_) => {

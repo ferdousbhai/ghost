@@ -10,7 +10,8 @@ pub struct Ghost {
     pub dir: PathBuf,
 }
 
-pub const GHOST_SESSIONS_DIRNAME: &str = "sessions";
+/// The ghost's one conversation: the directory its commands run in, holding its log.
+pub const CONVERSATION_DIRNAME: &str = "conversation";
 /// The name of a ghost whose persona has no title yet, and of the persona a first start seeds.
 const FIRST_GHOST_NAME: &str = "ghost";
 const MAX_NAME_CHARS: usize = 64;
@@ -39,13 +40,13 @@ pub fn is_ghost_home(dir: &Path) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GhostPaths {
-    pub session_dir: PathBuf,
+    pub conversation_dir: PathBuf,
     pub character_file: PathBuf,
 }
 
 pub fn ghost_paths(dir: &Path) -> GhostPaths {
     let home = absolute(dir);
-    GhostPaths { session_dir: home.join(GHOST_SESSIONS_DIRNAME), character_file: home.join(CHARACTER_FILENAME) }
+    GhostPaths { conversation_dir: home.join(CONVERSATION_DIRNAME), character_file: home.join(CHARACTER_FILENAME) }
 }
 
 /// The machine's one ghost, whose home is `dir`: made with a seeded persona
@@ -73,7 +74,7 @@ mod tests {
 
     /// A ghost home with a persona.
     fn seed(dir: &Path, name: &str) {
-        std::fs::create_dir_all(dir.join("sessions/c1")).unwrap();
+        std::fs::create_dir_all(dir.join("conversation")).unwrap();
         std::fs::write(dir.join("character.md"), format!("# {name}\n\nYou are {name}, a letterpress printer.\n")).unwrap();
     }
 

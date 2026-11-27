@@ -53,7 +53,7 @@ Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
 `ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
 document with the file, which must be the document itself (`hooks` at its top level), so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
-awaited command hooks. They run for every conversation,
+awaited command hooks. They run for every turn,
 and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.
@@ -74,7 +74,7 @@ command/error payload.
 ## `session_stop` protocol
 
 A command receives JSON on stdin. `messages` contains only the current assistant
-pass, not the session history or prior tool results; `last_assistant_message`
+pass, not the conversation's history or prior tool results; `last_assistant_message`
 contains the same message directly:
 
 ```json
@@ -90,13 +90,11 @@ contains the same message directly:
     "role": "assistant",
     "content": [{ "type": "text", "text": "The answer." }]
   },
-  "session_id": "conversation-a",
-  "transcript_path": "/home/me/.local/share/ghost/sessions/conversation-a/.conversation.jsonl",
+  "transcript_path": "/home/me/.local/share/ghost/conversation/.conversation.jsonl",
   "stop_hook_active": false,
   "ghost_name": "casper",
   "ghost_home": "/home/me/.local/share/ghost",
-  "cwd": "/home/me/.local/share/ghost/sessions/conversation-a",
-  "conversation_id": "conversation-a"
+  "cwd": "/home/me/.local/share/ghost/conversation"
 }
 ```
 

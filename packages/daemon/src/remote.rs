@@ -281,13 +281,13 @@ impl RemoteServe {
         Ok(Value::Array(machines))
     }
 
-    /// The app's deep link to one conversation on this machine,
-    /// `<origin>/#/<hostname>/<id>`, None while there is no app link.
-    pub fn conversation_url(&self, id: &str) -> Option<String> {
+    /// The app's link to this machine's conversation, `<origin>/#/<hostname>`,
+    /// None while there is no app link.
+    pub fn machine_url(&self) -> Option<String> {
         let status = self.status();
         let (origin, url) = status.app?;
         url?;
-        Some(format!("{origin}/#/{}/{}", percent_encode(&status.hostname?), percent_encode(id)))
+        Some(format!("{origin}/#/{}", percent_encode(&status.hostname?)))
     }
 
     pub fn status(&self) -> RemoteStatus {

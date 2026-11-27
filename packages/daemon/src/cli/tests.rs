@@ -3,7 +3,6 @@
 //! and points the CLI at it through the runtime's environment.
 use super::args::{ArgsSpec, Flag, parse_args};
 use super::client::EXIT_CODES;
-use super::common::{latest_session, resolve_session_prefix};
 use super::output::relative_time;
 use super::{CliRuntime, Stdin, commands, ghost_cli, hook_complete_command, parse_hook_complete_input};
 use crate::abort::Abort;
@@ -130,6 +129,11 @@ impl Fake {
         self.seen().iter().map(Seen::line).collect()
     }
 
+    /// Every request in order, each as its line and the JSON it carried.
+    fn requests(&self) -> Vec<(String, Option<Value>)> {
+        self.seen().into_iter().map(|request| (request.line(), request.body)).collect()
+    }
+
     fn token_file(&self) -> PathBuf {
         self.dir.join("api-token")
     }
@@ -153,108 +157,101 @@ fn events(responder: Responder, events: &[Value]) {
     }
 }
 
-fn session(id: &str) -> Value {
-    json!({ "id": id, "title": null, "preview": null, "updatedAt": "2026-01-01T00:00:00.000Z", "messageCount": 0, "pinned": false, "unread": false, "running": false, "question": null })
+/// The conversation's row as ghostd sends it before anything is said.
+fn empty_conversation() -> Value {
+    json!({ "preview": null, "updatedAt": null, "messageCount": 0, "unread": false, "running": false, "question": null })
 }
 
-fn two_sessions() -> Value {
-    json!({ "sessions": [session("conv-other"), session("conv-mine")] })
+fn sent(line: &str, body: Value) -> (String, Option<Value>) {
+    (line.to_string(), Some(body))
 }
-
-const MINE: &[(&str, &str)] = &[("GHOST_SESSION", "conv-mine")];
 
 fn write_token(path: &Path, letter: char) {
     std::fs::write(path, format!("{}\n", letter.to_string().repeat(64))).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
 }
 
-// ── A ghost's own shell addresses its conversation ──────────────────────
+// ── The conversation ────────────────────────────────────────────────────
 
 #[test]
-fn reads_ghost_session_in_place_of_s() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/transcript") => {
-            responder.json(200, &json!({ "id": "conv-mine", "title": null, "messages": [], "total": 0, "truncated": false }))
-        }
+fn stop_stops_the_running_turn_in_a_sentence_and_q_prints_nothing() {
+    let daemon = fake(|request, responder| match request.line().as_str() {
+        "POST /api/conversation/stop" => responder.json(200, &json!({ "stopped": true })),
         _ => unexpected(responder),
     });
-    assert_eq!(daemon.run_env(&["show", "--json"], MINE).code, 0);
-    assert!(daemon.lines().contains(&"GET /api/sessions/conv-mine/transcript".to_string()));
+    let said = daemon.run(&["stop"]);
+    assert_eq!((said.code, said.stdout.as_str()), (0, "Stopped.\n"));
+    let quiet = daemon.run(&["stop", "-q"]);
+    assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""));
+    let json = daemon.run(&["stop", "--json"]);
+    assert_eq!((json.code, json.stdout.as_str()), (0, "{\"stopped\":true}\n"));
+    assert_eq!(daemon.requests(), vec![sent("POST /api/conversation/stop", json!({})); 3]);
+}
+
+// Starting over is the one verb that discards something, so it asks nothing of the daemon until --yes is given.
+#[test]
+fn new_starts_over_only_behind_yes() {
+    let daemon = fake(|request, responder| match request.line().as_str() {
+        "DELETE /api/conversation" => responder.json(200, &json!({ "ok": true })),
+        _ => unexpected(responder),
+    });
+    let unconfirmed = daemon.run(&["new"]);
+    assert_eq!((unconfirmed.code, unconfirmed.stdout.as_str(), unconfirmed.stderr.as_str()), (2, "", "ghost: ghost new requires --yes\n"));
+    assert_eq!(daemon.run(&["new", "--json", "-q"]).code, 2);
+    assert_eq!(daemon.run(&["new", "casper", "--yes"]).stderr, "ghost: Usage: ghost new --yes [--json] [-q]\n");
+    assert!(daemon.seen().is_empty());
+    let started = daemon.run(&["new", "--yes"]);
+    assert_eq!((started.code, started.stdout.as_str()), (0, "Started over; the conversation so far is in Trash.\n"));
+    let quiet = daemon.run(&["new", "--yes", "-q"]);
+    assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""));
+    let json = daemon.run(&["new", "--yes", "--json"]);
+    assert_eq!((json.code, json.stdout.as_str()), (0, "{\"ok\":true}\n"));
+    assert_eq!(daemon.requests(), vec![("DELETE /api/conversation".to_string(), None); 3]);
 }
 
 #[test]
-fn a_change_verb_acknowledges_in_a_sentence_and_q_prints_nothing() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/title") => responder.json(200, &json!({ "ok": true, "title": request.body.as_ref().unwrap()["title"] })),
-        path if path.ends_with("/pin") || path.ends_with("/stop") || path.ends_with("/read") => responder.json(200, &json!({ "ok": true })),
-        _ => unexpected(responder),
-    });
-    let cases: [(&[&str], &str); 5] = [
-        (&["title", "Release notes"], "Conversation conv-mine is now titled \"Release notes\".\n"),
-        (&["pin"], "Pinned conv-mine.\n"),
-        (&["unpin"], "Unpinned conv-mine.\n"),
-        (&["stop"], "Stopped conv-mine.\n"),
-        (&["read"], "Marked conv-mine read.\n"),
-    ];
-    for (args, sentence) in cases {
-        let said = daemon.run_env(args, MINE);
-        assert_eq!((said.code, said.stdout.as_str()), (0, sentence), "{args:?}");
-        let quiet = daemon.run_env(&[args, &["-q"]].concat(), MINE);
-        assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""), "{args:?}");
-    }
-    let bodies: Vec<Value> = daemon.seen().into_iter().filter(|request| request.path.ends_with("/pin")).filter_map(|request| request.body).collect();
-    assert_eq!(bodies, [json!({ "pinned": true }), json!({ "pinned": true }), json!({ "pinned": false }), json!({ "pinned": false })]);
+fn new_exits_5_with_nothing_to_start_over_and_6_while_a_turn_runs() {
+    let refusing = |status: u16, code: &'static str, message: &'static str| {
+        let daemon = fake(move |_, responder| responder.json(status, &json!({ "error": { "code": code, "message": message } })));
+        let result = daemon.run(&["new", "--yes"]);
+        assert_eq!(daemon.lines(), ["DELETE /api/conversation"]);
+        (result.code, result.stdout, result.stderr)
+    };
+    assert_eq!(refusing(404, "not_found", "There is no conversation."), (5, String::new(), "ghost: There is no conversation.\n".to_string()));
+    assert_eq!(refusing(409, "conversation_busy", "A turn is running."), (6, String::new(), "ghost: A turn is running.\n".to_string()));
 }
 
 #[test]
-fn stop_targets_the_running_turn() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/stop") => responder.json(200, &json!({ "stopped": true })),
+fn turns_a_follow_up_with_no_turn_running_into_the_next_turn() {
+    let daemon = fake(|request, responder| match request.line().as_str() {
+        "POST /api/conversation/queue" => responder.json(409, &json!({ "error": { "code": "conversation_not_streaming", "message": "idle" } })),
+        "POST /api/messages" => events(responder, &[json!({ "type": "text_delta", "delta": "Noted." }), json!({ "type": "done" })]),
         _ => unexpected(responder),
     });
-    assert_eq!(daemon.run_env(&["stop"], MINE).code, 0);
-    assert!(daemon.lines().contains(&"POST /api/sessions/conv-mine/stop".to_string()));
-}
-
-#[test]
-fn turns_a_follow_up_to_an_idle_conversation_into_its_next_turn() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/queue") => responder.json(409, &json!({ "error": { "code": "session_not_streaming", "message": "idle" } })),
-        "/api/messages" => events(responder, &[json!({ "type": "text_delta", "delta": "Noted." }), json!({ "type": "done" })]),
-        _ => unexpected(responder),
-    });
-    let result = daemon.run_env(&["say", "--follow-up", "-q", "job finished"], MINE);
+    let result = daemon.run(&["say", "--follow-up", "-q", "job finished"]);
     assert_eq!((result.code, result.stdout.as_str()), (0, "Noted.\n"));
-    let seen = daemon.seen();
-    let queued = seen.iter().find(|request| request.path == "/api/sessions/conv-mine/queue").unwrap();
-    assert_eq!((queued.method.as_str(), &queued.body), ("POST", &Some(json!({ "text": "job finished" }))));
-    let turn = seen.iter().find(|request| request.path == "/api/messages").unwrap();
-    assert_eq!(turn.body, Some(json!({ "prompt": "job finished", "sessionId": "conv-mine" })));
+    assert_eq!(
+        daemon.requests(),
+        [sent("POST /api/conversation/queue", json!({ "text": "job finished" })), sent("POST /api/messages", json!({ "prompt": "job finished" }))]
+    );
 }
 
 #[test]
 fn acknowledges_a_follow_up_queued_into_a_live_turn_and_q_prints_nothing() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/queue") => responder.json(200, &json!({ "streaming": true, "followUp": ["job finished"] })),
+    let daemon = fake(|request, responder| match request.line().as_str() {
+        "POST /api/conversation/queue" => responder.json(200, &json!({ "streaming": true, "followUp": ["job finished"] })),
         _ => unexpected(responder),
     });
-    let human = daemon.run_env(&["say", "--follow-up", "job finished"], MINE);
-    assert_eq!((human.code, human.stdout.as_str()), (0, "Queued for conv-mine.\n"));
-    let quiet = daemon.run_env(&["say", "--follow-up", "-q", "job finished"], MINE);
+    let human = daemon.run(&["say", "--follow-up", "job finished"]);
+    assert_eq!((human.code, human.stdout.as_str()), (0, "Queued.\n"));
+    let quiet = daemon.run(&["say", "--follow-up", "-q", "job finished"]);
     assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""));
+    assert_eq!(daemon.requests(), vec![sent("POST /api/conversation/queue", json!({ "text": "job finished" })); 2]);
 }
 
 #[test]
 fn show_prints_a_long_conversations_newest_page_and_says_which_messages_it_is() {
     let daemon = fake(|request, responder| {
-        if request.path == "/api/sessions" {
-            return responder.json(200, &two_sessions());
-        }
         let parameter = |key: &str, fallback: i64| {
             request.query.split('&').find_map(|pair| pair.strip_prefix(&format!("{key}="))).map_or(fallback, |value| value.parse().unwrap())
         };
@@ -262,87 +259,80 @@ fn show_prints_a_long_conversations_newest_page_and_says_which_messages_it_is() 
         let messages: Vec<Value> = (offset..(offset + limit).min(total))
             .map(|index| json!({ "role": "user", "entryId": format!("e{index}"), "content": [{ "type": "text", "text": format!("message {}", index + 1) }] }))
             .collect();
-        responder.json(
-            200,
-            &json!({ "id": "conv-mine", "truncated": (messages.len() as i64) < total, "messages": messages, "total": total, "readThrough": null }),
-        );
+        responder.json(200, &json!({ "truncated": (messages.len() as i64) < total, "messages": messages, "total": total, "readThrough": null }));
     });
     let queries = |daemon: &Fake| -> Vec<String> {
-        let all = daemon.seen().into_iter().filter(|request| request.path.ends_with("/transcript")).map(|request| request.query).collect();
-        daemon.seen.lock().unwrap().clear();
-        all
+        let seen = std::mem::take(&mut *daemon.seen.lock().unwrap());
+        seen.into_iter()
+            .map(|request| {
+                assert_eq!(request.line(), "GET /api/conversation/transcript");
+                request.query
+            })
+            .collect()
     };
-    let newest = daemon.run_env(&["show", "--limit", "2"], MINE);
+    let newest = daemon.run(&["show", "--limit", "2"]);
     assert_eq!(newest.code, 0);
     assert_eq!(queries(&daemon), ["limit=2", "limit=2&offset=3"]);
     assert_eq!(newest.stdout, "**you:**\n\nmessage 4\n\n**you:**\n\nmessage 5\n\n(messages 4–5 of 5; --offset/--limit for others)\n");
 
-    let oldest = daemon.run_env(&["show", "--limit", "2", "--offset", "0"], MINE);
+    let oldest = daemon.run(&["show", "--limit", "2", "--offset", "0"]);
     assert_eq!(queries(&daemon), ["limit=2&offset=0"]);
     assert!(oldest.stdout.contains("message 1"));
     assert!(oldest.stdout.contains("(messages 1–2 of 5; --offset/--limit for others)"));
 
-    let whole = daemon.run_env(&["show"], MINE);
+    let whole = daemon.run(&["show"]);
     assert_eq!(queries(&daemon), [""]);
     assert!(!whole.stdout.contains("(messages"));
 
-    let past = daemon.run_env(&["show", "--offset", "9"], MINE);
+    let past = daemon.run(&["show", "--offset", "9"]);
     assert_eq!((past.code, past.stdout.as_str()), (0, "(no messages from 10; 5 in all)\n"));
-    let quiet = daemon.run_env(&["show", "--offset", "9", "-q"], MINE);
+    let quiet = daemon.run(&["show", "--offset", "9", "-q"]);
     assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""));
 }
 
 #[test]
 fn show_renders_tool_calls_hook_messages_and_an_empty_conversation() {
-    let daemon = fake(|request, responder| {
-        match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        "/api/sessions/conv-mine/transcript" => responder.json(
-            200,
-            &json!({ "total": 2, "truncated": false, "messages": [
-                { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "thinking", "text": "List it.\nThen say." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" }, "output": "a.txt\n" }, { "type": "text", "text": "" }, { "type": "toolCall", "name": "ask", "arguments": { "question": "Which?", "options": ["A", "B"] } }, { "type": "text", "text": "Which?\n\n1. A\n2. B" }] },
-                { "role": "hook", "content": [{ "type": "text", "text": "Not done." }] },
-            ] }),
-        ),
-        _ => responder.json(200, &json!({ "total": 0, "truncated": false, "messages": [] })),
-    }
-    });
-    let shown = daemon.run_env(&["show"], MINE);
+    let daemon = answering(json!({ "total": 2, "truncated": false, "readThrough": null, "messages": [
+        { "role": "assistant", "content": [{ "type": "text", "text": "On it." }, { "type": "thinking", "text": "List it.\nThen say." }, { "type": "toolCall", "name": "bash", "arguments": { "command": "ls" }, "output": "a.txt\n" }, { "type": "text", "text": "" }, { "type": "toolCall", "name": "ask", "arguments": { "question": "Which?", "options": ["A", "B"] } }, { "type": "text", "text": "Which?\n\n1. A\n2. B" }] },
+        { "role": "hook", "content": [{ "type": "text", "text": "Not done." }] },
+    ] }));
+    let shown = daemon.run(&["show"]);
     assert_eq!(
         shown.stdout,
         "**ghost:**\n\nOn it.\n> List it.\n> Then say.\n```\n$ ls\na.txt\n```\n> ⚙ ask\nWhich?\n\n1. A\n2. B\n\n**Stop hook:**\n\nNot done.\n"
     );
-    let empty = daemon.run(&["show", "-s", "conv-other"]);
+    assert_eq!(daemon.lines(), ["GET /api/conversation/transcript"]);
+    let empty = answering(json!({ "total": 0, "truncated": false, "readThrough": null, "messages": [] })).run(&["show"]);
     assert_eq!((empty.code, empty.stdout.as_str()), (0, "No messages.\n"));
 }
 
 #[test]
 fn q_keeps_a_read_verbs_primary_output() {
     let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
         "/api/character" => responder.json(200, &json!({ "body": "# Casper\nFriendly.\n" })),
-        _ => {
+        "/api/conversation/transcript" => {
             let offset: i64 = request.query.split('&').find_map(|pair| pair.strip_prefix("offset=")).map_or(0, |value| value.parse().unwrap());
             let message = json!({ "role": "user", "entryId": format!("e{offset}"), "content": [{ "type": "text", "text": format!("message {}", offset + 1) }] });
-            responder.json(200, &json!({ "id": "conv-mine", "messages": [message], "total": 3, "truncated": true, "readThrough": null }));
+            responder.json(200, &json!({ "messages": [message], "total": 3, "truncated": true, "readThrough": null }));
         }
+        _ => unexpected(responder),
     });
-    let show = daemon.run_env(&["show", "-q", "--limit", "1"], MINE);
+    let show = daemon.run(&["show", "-q", "--limit", "1"]);
     assert_eq!((show.code, show.stdout.as_str()), (0, "**you:**\n\nmessage 3\n"));
-    let character = daemon.run_env(&["character", "show", "-q"], MINE);
+    let character = daemon.run(&["character", "show", "-q"]);
     assert_eq!((character.code, character.stdout.as_str()), (0, "# Casper\nFriendly.\n"));
 }
 
 #[test]
 fn still_fails_a_follow_up_on_any_other_conflict() {
-    let daemon = fake(|request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &two_sessions()),
-        path if path.ends_with("/queue") => responder.json(409, &json!({ "error": { "code": "session_busy", "message": "busy" } })),
+    let daemon = fake(|request, responder| match request.line().as_str() {
+        "POST /api/conversation/queue" => responder.json(409, &json!({ "error": { "code": "conversation_busy", "message": "busy" } })),
         _ => unexpected(responder),
     });
-    let result = daemon.run_env(&["say", "--follow-up", "x"], MINE);
+    let result = daemon.run(&["say", "--follow-up", "x"]);
     assert_eq!(Some(&(result.code, "busy or conflict")), EXIT_CODES.iter().find(|(_, meaning)| *meaning == "busy or conflict"));
     assert_eq!(result.stderr, "ghost: busy\n");
+    assert_eq!(daemon.lines(), ["POST /api/conversation/queue"]);
 }
 
 // ── Offline: help, usage, the parser, the helpers ───────────────────────
@@ -369,14 +359,11 @@ fn help_renders_every_recipe_without_a_daemon() {
 }
 
 #[test]
-fn parses_long_equals_short_value_boolean_and_terminator_forms() {
-    let spec = ArgsSpec { boolean: vec![], value: vec!["harness", "session"] };
-    let parsed = parse_args(&strings(&["--harness=claude", "-s", "abc", "--json", "--", "--literal"]), &spec).unwrap();
+fn parses_long_equals_long_value_boolean_and_terminator_forms() {
+    let spec = ArgsSpec { boolean: vec![], value: vec!["limit", "offset"] };
+    let parsed = parse_args(&strings(&["--offset=3", "--limit", "5", "--json", "--", "--literal"]), &spec).unwrap();
     assert_eq!(parsed.positionals, ["--literal"]);
-    assert_eq!(
-        parsed.flags,
-        [("harness".to_string(), Flag::Text("claude".into())), ("session".into(), Flag::Text("abc".into())), ("json".into(), Flag::On)]
-    );
+    assert_eq!(parsed.flags, [("offset".to_string(), Flag::Text("3".into())), ("limit".into(), Flag::Text("5".into())), ("json".into(), Flag::On)]);
 }
 
 fn parse_error(args: &[&str], value: &[&'static str]) -> String {
@@ -389,9 +376,9 @@ fn parse_error(args: &[&str], value: &[&'static str]) -> String {
 fn keeps_a_lone_dash_positional_and_rejects_unknown_flags() {
     assert_eq!(parse_args(&strings(&["-"]), &ArgsSpec::default()).unwrap().positionals, ["-"]);
     assert!(parse_error(&["--wat"], &[]).starts_with("Unknown option '--wat'"));
-    assert!(parse_error(&["--session", "--json"], &["session"]).contains("'--session' argument is ambiguous"));
-    assert!(parse_error(&["--session"], &["session"]).contains("argument missing"));
-    assert_eq!(parse_error(&["--session="], &["session"]), "--session requires a value.");
+    assert!(parse_error(&["--limit", "--json"], &["limit"]).contains("'--limit' argument is ambiguous"));
+    assert!(parse_error(&["--limit"], &["limit"]).contains("argument missing"));
+    assert_eq!(parse_error(&["--limit="], &["limit"]), "--limit requires a value.");
     let parsed = parse_args(&strings(&["--q", "model", "-q"]), &ArgsSpec { boolean: vec![], value: vec!["q"] }).unwrap();
     assert!(parsed.positionals.is_empty());
     assert_eq!(parsed.flags, [("q".to_string(), Flag::Text("model".into())), ("quiet".into(), Flag::On)]);
@@ -400,37 +387,29 @@ fn keeps_a_lone_dash_positional_and_rejects_unknown_flags() {
 /// The parser's established sentences, which scripts have seen.
 #[test]
 fn words_every_parse_error_as_the_first_cli_did() {
-    let session = &["session", "limit"];
+    let paging = &["limit", "offset"];
     assert_eq!(
-        parse_error(&["-g", "x"], session),
+        parse_error(&["-g", "x"], paging),
         "Unknown option '-g'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"-g\""
     );
     assert_eq!(
-        parse_error(&["--wat=1"], session),
+        parse_error(&["--wat=1"], paging),
         "Unknown option '--wat'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--wat\""
     );
-    assert!(parse_error(&["-qg"], session).starts_with("Unknown option 'g'."));
+    assert!(parse_error(&["-qg"], paging).starts_with("Unknown option 'g'."));
     assert_eq!(
-        parse_error(&["-s", "--json"], session),
-        "Option '-s' argument is ambiguous.\nDid you forget to specify the option argument for '-s'?\nTo specify an option argument starting with a dash use '--session=-XYZ' or '-s-XYZ'."
-    );
-    assert_eq!(
-        parse_error(&["--limit", "-5"], session),
+        parse_error(&["--limit", "-5"], paging),
         "Option '--limit' argument is ambiguous.\nDid you forget to specify the option argument for '--limit'?\nTo specify an option argument starting with a dash use '--limit=-XYZ'."
     );
-    assert_eq!(parse_error(&["-s"], session), "Option '-s, --session <value>' argument missing");
-    assert_eq!(parse_error(&["-qs"], session), "Option '-s, --session <value>' argument missing");
-    assert_eq!(parse_error(&["--limit"], session), "Option '--limit <value>' argument missing");
-    assert_eq!(parse_error(&["--help=x"], session), "Option '-h, --help' does not take an argument");
-    assert_eq!(parse_error(&["--json=true"], session), "Option '--json' does not take an argument");
-    let parse = |args: &[&str]| parse_args(&strings(args), &ArgsSpec { boolean: vec![], value: session.to_vec() }).unwrap();
-    let grouped = parse(&["-qhsabc", "word", "--limit=-5", "-s", "-", "-s", "last"]);
+    assert_eq!(parse_error(&["--limit"], paging), "Option '--limit <value>' argument missing");
+    assert_eq!(parse_error(&["--help=x"], paging), "Option '-h, --help' does not take an argument");
+    assert_eq!(parse_error(&["--json=true"], paging), "Option '--json' does not take an argument");
+    let parse = |args: &[&str]| parse_args(&strings(args), &ArgsSpec { boolean: vec![], value: paging.to_vec() }).unwrap();
+    let grouped = parse(&["-qh", "word", "--limit=-5", "--offset", "-", "--offset", "9"]);
     assert_eq!(grouped.positionals, ["word"]);
     assert!(grouped.boolean("quiet") && grouped.boolean("help"));
-    assert_eq!((grouped.text("session"), grouped.text("limit")), (Some("last"), Some("-5")));
-    assert_eq!(parse(&["-s=x"]).text("session"), Some("=x"));
-    assert_eq!(parse(&["-qs", "x"]).text("session"), Some("x"));
-    assert_eq!(parse(&["--session=a=b"]).text("session"), Some("a=b"));
+    assert_eq!((grouped.text("offset"), grouped.text("limit")), (Some("9"), Some("-5")));
+    assert_eq!(parse(&["--limit=a=b"]).text("limit"), Some("a=b"));
 }
 
 #[test]
@@ -444,28 +423,6 @@ fn formats_relative_times() {
 }
 
 #[test]
-fn resolves_exact_and_unique_prefixes_and_refuses_ambiguity() {
-    let rows = [session("alpha"), session("alpine")];
-    assert_eq!(resolve_session_prefix(&rows, "alpha").unwrap()["id"], "alpha");
-    assert_eq!(resolve_session_prefix(&rows, "alph").unwrap()["id"], "alpha");
-    let ambiguous = resolve_session_prefix(&rows, "al").unwrap_err();
-    assert_eq!((ambiguous.exit_code, ambiguous.message.as_str()), (2, "Session prefix \"al\" is ambiguous: alpha, alpine"));
-    let missing = resolve_session_prefix(&rows, "beta").unwrap_err();
-    assert_eq!((missing.exit_code, missing.message.as_str()), (5, "session \"beta\" was not found"));
-}
-
-#[test]
-fn selects_the_newest_update() {
-    let mut pinned = session("older");
-    pinned["pinned"] = json!(true);
-    let mut recent = session("recent");
-    recent["updatedAt"] = json!("2026-01-02T00:00:00.000Z");
-    assert_eq!(latest_session(&[pinned.clone(), recent.clone()]), Some(&recent));
-    assert_eq!(latest_session(&[pinned.clone(), session("tied")]), Some(&pinned));
-    assert_eq!(latest_session(&[]), None);
-}
-
-#[test]
 fn help_is_available_without_contacting_the_daemon_for_every_command() {
     for command in commands() {
         let result = offline(&[command.doc.verb, "--help"], &[]);
@@ -475,7 +432,12 @@ fn help_is_available_without_contacting_the_daemon_for_every_command() {
     let say = offline(&["say", "-h"], &[]);
     assert_eq!(
         say.stdout,
-        "Usage: ghost say [text] [--new|--follow-up] [-s <id>] [--json] [-q]\n\nSend a turn, or follow up on one.\n\nExample: ghost say --new \"Start fresh\"\n"
+        "Usage: ghost say [text] [--follow-up] [--json] [-q]\n\nSend a turn, or follow up on the running one.\n\nExample: ghost say \"What is on today?\"\n"
+    );
+    let new = offline(&["new", "--help"], &[]);
+    assert_eq!(
+        new.stdout,
+        "Usage: ghost new --yes [--json] [-q]\n\nStart over: move the conversation to recoverable Trash.\n\nExample: ghost new --yes\n"
     );
 }
 
@@ -487,11 +449,14 @@ fn prints_the_usage_screen_with_no_verb() {
     assert!(bare.stdout.starts_with("ghost — talk to your ghost through ghostd\n\nUsage:\n  ghost <verb> [args] [flags]\n"));
     // Every summary starts in one column, two spaces past the longest usage (`help`, which lists the topics).
     let widest = format!("help [command|exit-codes|{}]", HELP_TOPICS.join("|")).len();
-    assert!(bare.stdout.contains(&format!("\n  {:<widest$}  List conversations.\n", "sessions [--json] [-q]")), "{}", bare.stdout);
+    assert!(bare.stdout.contains(&format!("\n  {:<widest$}  Stop the running turn.\n", "stop [--json] [-q]")), "{}", bare.stdout);
     assert!(
-        bare.stdout
-            .contains(&format!("\n  {:<widest$}  Send a turn, or follow up on one.\n", "say [text] [--new|--follow-up] [-s <id>] [--json] [-q]"))
+        bare.stdout.contains(&format!("\n  {:<widest$}  Send a turn, or follow up on the running one.\n", "say [text] [--follow-up] [--json] [-q]"))
     );
+    assert!(bare.stdout.contains(&format!("\n  {:<widest$}  Start over: move the conversation to recoverable Trash.\n", "new --yes [--json] [-q]")));
+    let listed = bare.stdout.split_once("\nCommands:\n").unwrap().1.split_once("\n\n").unwrap().0;
+    let verbs: Vec<&str> = listed.lines().map(|line| line.split_whitespace().next().unwrap()).collect();
+    assert_eq!(verbs, ["say", "stop", "show", "new", "hooks", "character", "status", "help"]);
     assert!(bare.stdout.contains("\n  -v, --version            Show the ghost package version\n"));
     assert!(bare.stdout.ends_with("answered by a model on this machine); ghost talks to the ghost.\n"));
 }
@@ -499,7 +464,7 @@ fn prints_the_usage_screen_with_no_verb() {
 #[test]
 fn refuses_a_malformed_verb_before_asking_the_daemon_anything() {
     let daemon = fake(|_, responder| unexpected(responder));
-    let cases: [&[&str]; 9] = [
+    let cases: [&[&str]; 12] = [
         &["ask"],
         &["ask", "--clear", "Ship it?"],
         &["character", "edit"],
@@ -507,29 +472,60 @@ fn refuses_a_malformed_verb_before_asking_the_daemon_anything() {
         &["hooks", "show", "extra"],
         &["character", "show", "extra"],
         &["say", "hello", "-m", "world"],
-        &["say", "--new", "--follow-up", "hello"],
+        &["say", "--follow-up"],
         &["say"],
+        &["show", "extra"],
+        &["new", "extra", "--yes"],
+        &["status", "extra"],
     ];
     for args in cases {
-        let result = daemon.run_env(args, &[("GHOST_SESSION", "conv-1")]);
+        let result = daemon.run(args);
         assert_eq!(result.code, 2, "{args:?}: {}", result.stderr);
     }
     assert!(daemon.seen().is_empty());
-    assert_eq!(daemon.run(&["title"]).stderr, "ghost: Usage: ghost title <text> [-s <id>] [--json] [-q]\n");
+    assert_eq!(daemon.run(&["stop", "now"]).stderr, "ghost: Usage: ghost stop [--json] [-q]\n");
     assert_eq!(daemon.run(&["say"]).stderr, "ghost: Message text cannot be empty.\n");
     assert_eq!(daemon.run(&["hooks", "edit"]).stderr, "ghost: ghost hooks does not know \"edit\"; use status, show, or set.\n");
 }
 
+// There is one conversation and one ghost, so no verb takes a flag naming either.
 #[test]
-fn refuses_s_on_a_verb_whose_usage_does_not_list_it_and_g_everywhere() {
+fn refuses_s_session_new_and_g_as_unknown_options_on_every_verb() {
     let daemon = fake(|_, responder| unexpected(responder));
-    let stray_session = ["sessions", "character", "status"].map(|verb| vec![verb, "-s", "conv-1"]);
-    let stray_ghost =
-        ["say hi", "sessions", "show", "hooks", "status", "help memory"].map(|verb| [verb.split(' ').collect(), vec!["-g", "casper"]].concat());
-    for args in stray_session.iter().chain(&stray_ghost) {
-        let result = daemon.run_env(args, &[("GHOST_SESSION", "conv-1")]);
+    let verbs = ["say hi", "stop", "show", "new --yes", "hooks", "character", "status", "help memory"];
+    let flags: [&[&str]; 5] = [&["-s", "conv-1"], &["--session", "conv-1"], &["--session=conv-1"], &["--new"], &["-g", "casper"]];
+    for (verb, flag) in verbs.iter().flat_map(|verb| flags.iter().map(move |flag| (verb, flag))) {
+        let args = [verb.split(' ').collect(), flag.to_vec()].concat();
+        let result = daemon.run(&args);
+        let named = flag[0].split('=').next().unwrap();
         assert_eq!(result.code, 2, "{args:?}");
-        assert!(result.stderr.contains("Unknown option"), "{args:?}: {}", result.stderr);
+        assert!(result.stderr.starts_with(&format!("ghost: Unknown option '{named}'. ")), "{args:?}: {}", result.stderr);
+    }
+    assert!(daemon.seen().is_empty());
+    assert_eq!(
+        daemon.run(&["say", "hi", "-s", "conv-1"]).stderr,
+        "ghost: Unknown option '-s'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"-s\"\n"
+    );
+    assert_eq!(
+        daemon.run(&["say", "--new", "hi"]).stderr,
+        "ghost: Unknown option '--new'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- \"--new\"\n"
+    );
+}
+
+#[test]
+fn refuses_another_verbs_flag_on_a_verb_whose_usage_does_not_list_it() {
+    let daemon = fake(|_, responder| unexpected(responder));
+    let cases: [(&[&str], &str); 5] = [
+        (&["stop", "--yes"], "--yes"),
+        (&["status", "--follow-up"], "--follow-up"),
+        (&["say", "hi", "--limit", "5"], "--limit"),
+        (&["character", "--offset=2"], "--offset"),
+        (&["show", "--yes"], "--yes"),
+    ];
+    for (args, flag) in cases {
+        let result = daemon.run(args);
+        assert_eq!(result.code, 2, "{args:?}");
+        assert!(result.stderr.starts_with(&format!("ghost: Unknown option '{flag}'. ")), "{args:?}: {}", result.stderr);
     }
     assert!(daemon.seen().is_empty());
 }
@@ -569,7 +565,20 @@ fn lists_the_recipes_in_its_usage() {
 fn refuses_a_topic_or_a_verb_it_does_not_know() {
     let topic = offline(&["help", "memor"], &[]);
     assert_eq!((topic.code, topic.stdout.as_str(), topic.stderr.as_str()), (2, "", "ghost: Unknown help topic: memor\n"));
-    for verb in [&["list"][..], &["new", "probe"], &["use", "casper"], &["rename", "wisp"], &["browser"], &["browser", "allow"]] {
+    let verbs: [&[&str]; 11] = [
+        &["list"],
+        &["use", "casper"],
+        &["rename", "wisp"],
+        &["browser"],
+        &["browser", "allow"],
+        &["sessions"],
+        &["rm", "--yes"],
+        &["title", "Release notes"],
+        &["pin"],
+        &["unpin"],
+        &["read"],
+    ];
+    for verb in verbs {
         let result = offline(verb, &[]);
         assert_eq!((result.code, result.stderr), (2, format!("ghost: Unknown command: {}\n", verb[0])));
     }
@@ -579,38 +588,6 @@ fn refuses_a_topic_or_a_verb_it_does_not_know() {
 
 fn answering(body: Value) -> Fake {
     fake(move |_, responder| responder.json(200, &body))
-}
-
-#[test]
-fn an_empty_list_says_so_in_a_sentence_and_q_prints_nothing() {
-    let daemon = answering(json!({ "sessions": [] }));
-    let human = daemon.run(&["sessions"]);
-    assert_eq!((human.code, human.stdout.as_str()), (0, "No conversations.\n"));
-    let quiet = daemon.run(&["sessions", "-q"]);
-    assert_eq!((quiet.code, quiet.stdout.as_str()), (0, ""));
-}
-
-#[test]
-fn sessions_prints_a_table_of_titles_ages_counts_and_states() {
-    let mut asking = session("conv-asking");
-    asking["title"] = json!("A title that is far longer than the forty-two units the column holds");
-    asking["question"] = json!({ "text": "Ship?" });
-    asking["pinned"] = json!(true);
-    asking["messageCount"] = json!(12);
-    asking["updatedAt"] = json!(crate::clock::now_iso());
-    let mut previewed = session("c2");
-    previewed["preview"] = json!("hello");
-    previewed["running"] = json!(true);
-    previewed["unread"] = json!(true);
-    previewed["updatedAt"] = json!("never");
-    let daemon = answering(json!({ "sessions": [asking, previewed] }));
-    assert_eq!(
-        daemon.run(&["sessions"]).stdout,
-        "ID           TITLE                                       UPDATED  MESSAGES  STATE\n\
-         conv-asking  A title that is far longer than the forty…  now      12        asking,pinned\n\
-         c2           hello                                       —        0         running,unread\n"
-    );
-    assert_eq!(daemon.run(&["sessions", "-q"]).stdout, "conv-asking\nc2\n");
 }
 
 fn hooks_document() -> Value {
@@ -686,20 +663,21 @@ fn hooks_set_acknowledges_in_words_json_keeps_the_api_body_and_q_prints_nothing(
     }
 }
 
-/// A daemon answering `ghost status`'s three reads, `/api/status` with `daemon`.
 const SERVE_COMMAND: &str = "tailscale serve --bg --https=443 http://127.0.0.1:7717";
 
-fn status_daemon(ghost: Value, daemon: Value) -> Fake {
+/// A daemon answering `ghost status`'s four reads, `/api/status` with `daemon`, while Tailscale is stopped.
+fn status_daemon(ghost: Value, daemon: Value, conversation: Value) -> Fake {
     let stopped = json!({ "state": "unavailable", "hostname": null, "guests": "read-only", "owner": null, "app": null, "command": SERVE_COMMAND,
         "problem": { "code": "tailscale_stopped", "message": "Tailscale is not running." } });
-    status_daemon_with(ghost, daemon, stopped)
+    status_daemon_with(ghost, daemon, stopped, conversation)
 }
 
-fn status_daemon_with(ghost: Value, daemon: Value, remote: Value) -> Fake {
-    fake(move |request, responder| match request.path.as_str() {
-        "/api/ghost" => responder.json(200, &ghost),
-        "/api/status" => responder.json(200, &daemon),
-        "/api/remote" => responder.json(200, &remote),
+fn status_daemon_with(ghost: Value, daemon: Value, remote: Value, conversation: Value) -> Fake {
+    fake(move |request, responder| match request.line().as_str() {
+        "GET /api/ghost" => responder.json(200, &ghost),
+        "GET /api/status" => responder.json(200, &daemon),
+        "GET /api/remote" => responder.json(200, &remote),
+        "GET /api/conversation" => responder.json(200, &conversation),
         _ => responder.json(404, &json!({ "error": { "code": "not_found", "message": "Not found." } })),
     })
 }
@@ -712,19 +690,22 @@ fn status_names_tailscales_command_while_serve_is_off_and_the_app_link_once_it_i
         json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
     let app = |url: Value| json!({ "origin": "https://summonghost.com", "url": url });
     let off = json!({ "state": "off", "hostname": "box.tail.ts.net", "app": app(Value::Null), "command": SERVE_COMMAND, "problem": null });
-    let stdout = status_daemon_with(json!({ "name": "casper" }), running.clone(), off).run(&["status"]).stdout;
-    assert!(stdout.ends_with(&format!("\nremote         off; turn on: {SERVE_COMMAND}\n")), "{stdout}");
+    let stdout = status_daemon_with(json!({ "name": "casper" }), running.clone(), off, empty_conversation()).run(&["status"]).stdout;
+    assert!(stdout.ends_with(&format!("\nremote         off; turn on: {SERVE_COMMAND}\nconversation   empty\n")), "{stdout}");
     let on = json!({ "state": "on", "hostname": "box.tail.ts.net", "app": app(json!("https://summonghost.com/#add=box.tail.ts.net")),
         "command": SERVE_COMMAND, "problem": null });
-    let stdout = status_daemon_with(json!({ "name": "casper" }), running, on).run(&["status"]).stdout;
-    assert!(stdout.ends_with("\nremote         on box.tail.ts.net\napp            https://summonghost.com/#add=box.tail.ts.net\n"), "{stdout}");
+    let stdout = status_daemon_with(json!({ "name": "casper" }), running, on, empty_conversation()).run(&["status"]).stdout;
+    assert!(
+        stdout.ends_with("\nremote         on box.tail.ts.net\napp            https://summonghost.com/#add=box.tail.ts.net\nconversation   empty\n"),
+        "{stdout}"
+    );
 }
 
 #[test]
 fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
     let source = json!({ "commit": "0123456789abcdef0123456789abcdef01234567", "root": "/home/owner/src/ghost" });
     let running = json!({ "version": "1.4.0", "source": source, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
-    let daemon = status_daemon(json!({ "name": "casper" }), running);
+    let daemon = status_daemon(json!({ "name": "casper" }), running, empty_conversation());
     let response = daemon.run_env(&["status"], &[("GHOSTD_VERSION", "3.2.1")]);
     let (url, token) = (format!("http://127.0.0.1:{}", daemon.server.address.port()), daemon.token_file().display().to_string());
     assert_eq!(
@@ -732,19 +713,24 @@ fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
         format!(
             "daemon         {url}\ntoken file     {token}\nghost          casper\nversion        3.2.1\ndaemon version 1.4.0\n\
              daemon commit  0123456789abcdef0123456789abcdef01234567\ndaemon source  /home/owner/src/ghost\n\
-             daemon started 2026-10-28T12:40:53.000Z\nremote         unavailable (Tailscale is not running.)\n"
+             daemon started 2026-10-28T12:40:53.000Z\nremote         unavailable (Tailscale is not running.)\nconversation   empty\n"
         )
     );
+    assert_eq!(daemon.lines(), ["GET /api/ghost", "GET /api/remote", "GET /api/status", "GET /api/conversation"]);
     assert_eq!(daemon.run(&["status", "-q"]).stdout, "ok\n");
     let json: Value = serde_json::from_str(&daemon.run_env(&["status", "--json"], &[("GHOSTD_VERSION", "3.2.1")]).stdout).unwrap();
     let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
-    assert_eq!(keys, ["daemon", "tokenFile", "ghost", "version", "daemonVersion", "source", "daemonStartedAt", "restartNeeded", "remote"]);
+    assert_eq!(
+        keys,
+        ["daemon", "tokenFile", "ghost", "version", "daemonVersion", "source", "daemonStartedAt", "restartNeeded", "remote", "conversation"]
+    );
     assert_eq!(
         (&json["daemon"], &json["tokenFile"], &json["ghost"], &json["version"]),
         (&json!(url), &json!(token), &json!("casper"), &json!("3.2.1"))
     );
     assert_eq!((&json["daemonVersion"], &json["source"], &json["restartNeeded"]), (&json!("1.4.0"), &source, &json!(false)));
     assert_eq!(json["remote"]["state"], "unavailable");
+    assert_eq!(json["conversation"], empty_conversation());
 }
 
 // An update that was not restarted into still answers under the same
@@ -753,20 +739,53 @@ fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
 fn says_when_the_code_on_disk_is_newer_than_the_running_daemon() {
     let running =
         json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": true });
-    let stdout = status_daemon(json!([]), running).run(&["status"]).stdout;
+    let stdout = status_daemon(json!([]), running, empty_conversation()).run(&["status"]).stdout;
     assert!(stdout.contains("\nghost          —\n"), "{stdout}");
     assert!(stdout.contains("\ndaemon commit  unknown\ndaemon source  packaged install\ndaemon started 2026-10-28T12:40:53.000Z\n"), "{stdout}");
     assert!(stdout.contains("\nrestart needed code on disk is newer than this daemon (ghost help self)\n"), "{stdout}");
 }
 
+// The last line is the conversation: its length, then when it last moved,
+// then what it waits on, running before asking before unread.
+#[test]
+fn status_says_how_long_the_conversation_is_when_it_moved_and_what_it_waits_on() {
+    let running =
+        json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
+    let status = |conversation: &Value, args: &[&str]| {
+        let result = status_daemon(json!({ "name": "casper" }), running.clone(), conversation.clone()).run(args);
+        assert_eq!((result.code, result.stderr.as_str()), (0, ""));
+        result.stdout
+    };
+    let last_line = |conversation: &Value| {
+        let stdout = status(conversation, &["status"]);
+        let (before, line) = stdout.trim_end_matches('\n').rsplit_once('\n').unwrap();
+        assert!(before.ends_with("\nremote         unavailable (Tailscale is not running.)"), "{stdout}");
+        line.to_string()
+    };
+    let ago = |minutes: i64| json!(crate::clock::iso(crate::clock::now_ms() - minutes * 60_000));
+    let row = |count: u64, updated: Value, running: bool, question: Value, unread: bool| json!({ "preview": "Ship it?", "updatedAt": updated, "messageCount": count, "unread": unread, "running": running, "question": question });
+    let question = json!({ "text": "Ship it?", "options": ["Yes", "No"], "askedAt": "2026-11-26T09:00:00.000Z" });
+
+    assert_eq!(last_line(&empty_conversation()), "conversation   empty");
+    assert_eq!(last_line(&row(1, ago(0), false, Value::Null, false)), "conversation   1 message, updated now");
+    let busy = row(12, ago(150), true, question.clone(), true);
+    assert_eq!(last_line(&busy), "conversation   12 messages, updated 2h, running, asking, unread");
+    assert_eq!(last_line(&row(2, ago(3 * 24 * 60 + 5), false, Value::Null, true)), "conversation   2 messages, updated 3d, unread");
+    assert_eq!(last_line(&row(4, ago(7), false, question, false)), "conversation   4 messages, updated 7m, asking");
+    assert_eq!(last_line(&row(3, ago(0), true, Value::Null, false)), "conversation   3 messages, updated now, running");
+
+    // --json carries the row as ghostd sent it; -q stays the one word.
+    assert_eq!(serde_json::from_str::<Value>(&status(&busy, &["status", "--json"])).unwrap()["conversation"], busy);
+    assert_eq!(status(&busy, &["status", "-q"]), "ok\n");
+}
+
 // ── ghost say ───────────────────────────────────────────────────────────
 
-/// A daemon with no conversations that plays `first` for a turn and `resumed` for a resumed stream.
+/// A daemon that plays `first` for a turn and `resumed` for a resumed stream.
 fn turn_daemon(first: Vec<Value>, resumed: Vec<Value>) -> Fake {
-    fake(move |request, responder| match (request.method.as_str(), request.path.as_str()) {
-        ("GET", path) if path.ends_with("/stream") => events(responder, &resumed),
-        ("GET", "/api/sessions") => responder.json(200, &json!({ "sessions": [] })),
-        ("POST", "/api/messages") => events(responder, &first),
+    fake(move |request, responder| match request.line().as_str() {
+        "GET /api/conversation/stream" => events(responder, &resumed),
+        "POST /api/messages" => events(responder, &first),
         _ => unexpected(responder),
     })
 }
@@ -788,12 +807,6 @@ fn posted(daemon: &Fake) -> Value {
     daemon.seen().into_iter().find(|request| request.path == "/api/messages").unwrap().body.unwrap()
 }
 
-fn is_new_cli_id(id: &str) -> bool {
-    let parts: Vec<&str> = id.split('-').collect();
-    let lower = |text: &str, digits: &str| !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit() || digits.as_bytes().contains(&b));
-    matches!(parts[..], ["cli", stamp, random] if lower(stamp, "abcdefghijklmnopqrstuvwxyz") && random.len() == 8 && lower(random, "abcdef"))
-}
-
 fn json_lines(text: &str) -> Vec<Value> {
     text.trim().split('\n').map(|line| serde_json::from_str(line).unwrap()).collect()
 }
@@ -811,45 +824,17 @@ fn say_prints_a_question_and_its_answers_as_the_reply() {
         ],
         vec![],
     );
-    let result = daemon.run(&["say", "book the boat", "--new"]);
+    let result = daemon.run(&["say", "book the boat"]);
     assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "Which pier?\n\n1. North\n2. South\n", "⚙ ask\n"));
 }
 
+// The turn is the only request: nothing is listed first and no conversation is named, there being one.
 #[test]
-fn say_streams_text_reports_tool_activity_and_sends_a_new_raw_cli_id() {
+fn say_streams_text_reports_tool_activity_and_posts_the_prompt_alone() {
     let daemon = turn_daemon(success_events(), vec![]);
-    let result = daemon.run(&["say", "hello", "--new"]);
+    let result = daemon.run(&["say", "hello", "there"]);
     assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "hello there\n", "$ pwd\nwhoami\n"));
-    let sent = posted(&daemon);
-    assert_eq!(sent["prompt"], "hello");
-    assert!(is_new_cli_id(sent["sessionId"].as_str().unwrap()), "{sent}");
-    assert_eq!(daemon.lines(), ["POST /api/messages"]);
-}
-
-#[test]
-fn say_joins_the_latest_conversation_or_starts_one_when_there_is_none() {
-    let none = turn_daemon(success_events(), vec![]);
-    assert_eq!(none.run(&["say", "hello", "there"]).code, 0);
-    assert_eq!(none.lines(), ["GET /api/sessions", "POST /api/messages"]);
-    assert_eq!(posted(&none)["prompt"], "hello there");
-    assert!(is_new_cli_id(posted(&none)["sessionId"].as_str().unwrap()));
-
-    let mut recent = session("conv-recent");
-    recent["updatedAt"] = json!("2026-02-01T00:00:00.000Z");
-    let listed = json!({ "sessions": [session("conv-old"), recent] });
-    let some = fake(move |request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &listed),
-        _ => events(responder, &[json!({ "type": "done" })]),
-    });
-    assert_eq!(some.run(&["say", "hi"]).code, 0);
-    assert_eq!(posted(&some)["sessionId"], "conv-recent");
-    assert_eq!(some.run(&["say", "hi", "-s", "conv-o"]).code, 0);
-    assert_eq!(some.seen().last().unwrap().body.as_ref().unwrap()["sessionId"], "conv-old");
-    // One no message has landed in yet is not listed, and is addressed as given.
-    assert_eq!(some.run(&["say", "-s", "fresh-1", "-q", "hi"]).code, 0);
-    assert_eq!(some.seen().last().unwrap().body.as_ref().unwrap()["sessionId"], "fresh-1");
-    let ambiguous = some.run(&["say", "hi", "-s", "conv-"]);
-    assert_eq!((ambiguous.code, ambiguous.stderr.as_str()), (2, "ghost: Session prefix \"conv-\" is ambiguous: conv-old, conv-recent\n"));
+    assert_eq!(daemon.requests(), [sent("POST /api/messages", json!({ "prompt": "hello there" }))]);
 }
 
 #[test]
@@ -861,11 +846,10 @@ fn say_follows_a_cut_turn_into_its_resumed_stream() {
     ];
     let resumed = vec![json!({ "type": "text_delta", "contentIndex": 0, "delta": "lo" }), json!({ "type": "done" })];
     let daemon = turn_daemon(first, resumed);
-    let result = daemon.run(&["say", "hi", "--new"]);
+    let result = daemon.run(&["say", "hi"]);
     assert_eq!((result.code, result.stdout.as_str()), (0, "hello\n"));
-    let resume = daemon.seen().into_iter().find(|request| request.path.ends_with("/stream")).unwrap();
-    let id = posted(&daemon)["sessionId"].as_str().unwrap().to_string();
-    assert_eq!((resume.method.as_str(), resume.path, resume.query.as_str()), ("GET", format!("/api/sessions/{id}/stream"), "turn=turn-1&from=2"));
+    assert_eq!(daemon.requests(), [sent("POST /api/messages", json!({ "prompt": "hi" })), ("GET /api/conversation/stream".to_string(), None)]);
+    assert_eq!(daemon.seen()[1].query, "turn=turn-1&from=2");
 }
 
 #[test]
@@ -880,10 +864,10 @@ fn say_prints_an_owner_commands_output_the_turns_whole_answer() {
         ],
         vec![],
     );
-    let result = daemon.run(&["say", "!ls", "--new"]);
+    let result = daemon.run(&["say", "!ls"]);
     assert_eq!((result.code, result.stdout.as_str()), (0, "a\nb\nls: c: No such file\n"));
     assert!(!result.stderr.contains('✗'));
-    assert_eq!(daemon.run(&["say", "!ls", "--new", "-q"]).stdout, "a\nb\nls: c: No such file\n");
+    assert_eq!(daemon.run(&["say", "!ls", "-q"]).stdout, "a\nb\nls: c: No such file\n");
 }
 
 #[test]
@@ -901,11 +885,11 @@ fn say_reports_a_failed_tool_and_the_other_secondary_lines() {
         ],
         vec![],
     );
-    let result = daemon.run(&["say", "go", "--new"]);
+    let result = daemon.run(&["say", "go"]);
     assert_eq!(result.stdout, "and another thing\nStop hook · tests are red\n");
     // Nothing is held back: the reasoning, the whole command, and all it printed.
     assert_eq!(result.stderr, "It should be there.\n$ cat /x\nls /\ncat: /x: no such file\n(exit 1)\n✗ bash\n");
-    let quiet = daemon.run(&["say", "go", "--new", "-q"]);
+    let quiet = daemon.run(&["say", "go", "-q"]);
     assert_eq!((quiet.code, quiet.stdout.as_str(), quiet.stderr.as_str()), (0, "", ""));
 }
 
@@ -925,8 +909,8 @@ fn say_starts_each_text_block_on_its_own_paragraph() {
         ],
         vec![],
     );
-    assert_eq!(daemon.run(&["say", "why", "--new", "-q"]).stdout, "I'll check the log.\n\nIt failed at 3am.\n");
-    assert_eq!(daemon.run(&["say", "why", "--new"]).stdout, "I'll check the log.\n\nIt failed at 3am.\n");
+    assert_eq!(daemon.run(&["say", "why", "-q"]).stdout, "I'll check the log.\n\nIt failed at 3am.\n");
+    assert_eq!(daemon.run(&["say", "why"]).stdout, "I'll check the log.\n\nIt failed at 3am.\n");
 }
 
 #[test]
@@ -947,7 +931,7 @@ fn say_stops_the_turn_in_ghostd_on_ctrl_c_and_exits_interrupted() {
         }
     });
     let result = std::thread::scope(|scope| {
-        let running = scope.spawn(|| run_unlocked(ghost_cli, &["say", "hold on", "--new"], &daemon.env, &daemon.dir, terminal()));
+        let running = scope.spawn(|| run_unlocked(ghost_cli, &["say", "hold on"], &daemon.env, &daemon.dir, terminal()));
         // The stream is open, so the command's handler is in place: the signal sets its flag and kills nothing.
         assert!(opened.wait(Duration::from_secs(20)));
         // SAFETY: raises a signal this process is handling.
@@ -955,27 +939,13 @@ fn say_stops_the_turn_in_ghostd_on_ctrl_c_and_exits_interrupted() {
         running.join().unwrap()
     });
     assert_eq!((result.code, result.stderr.as_str()), (130, "ghost: Turn aborted.\n"));
-    let id = posted(&daemon)["sessionId"].as_str().unwrap().to_string();
-    let stop = daemon.seen().into_iter().find(|request| request.path.ends_with("/stop")).unwrap();
-    assert_eq!((stop.line(), stop.body), (format!("POST /api/sessions/{id}/stop"), Some(json!({}))));
-}
-
-#[test]
-fn stops_a_conversations_running_turn_with_ghost_stop() {
-    let row = json!({ "id": "remote-1", "title": "Photo", "updatedAt": crate::clock::now_iso(), "messageCount": 2, "pinned": false, "unread": false, "running": true });
-    let daemon = fake(move |request, responder| match request.path.as_str() {
-        "/api/sessions" => responder.json(200, &json!({ "sessions": [row] })),
-        _ => responder.json(200, &json!({ "stopped": true })),
-    });
-    let result = daemon.run(&["stop", "-s", "remote-1"]);
-    assert_eq!((result.code, result.stdout.as_str()), (0, "Stopped remote-1.\n"));
-    assert!(daemon.lines().contains(&"POST /api/sessions/remote-1/stop".to_string()));
+    assert_eq!(daemon.requests(), [sent("POST /api/messages", json!({ "prompt": "hold on" })), sent("POST /api/conversation/stop", json!({}))]);
 }
 
 #[test]
 fn say_emits_every_event_as_one_json_line() {
     let daemon = turn_daemon(success_events(), vec![]);
-    let result = daemon.run(&["say", "hello", "--new", "--json"]);
+    let result = daemon.run(&["say", "hello", "--json"]);
     assert_eq!((result.code, result.stderr.as_str()), (0, ""));
     assert_eq!(json_lines(&result.stdout), success_events());
 }
@@ -983,11 +953,11 @@ fn say_emits_every_event_as_one_json_line() {
 #[test]
 fn say_reads_piped_stdin() {
     let daemon = turn_daemon(success_events(), vec![]);
-    let piped = run_with(&["say", "--new", "-q"], &daemon.env, &daemon.dir, Stdin::Text("from stdin".into()));
+    let piped = run_with(&["say", "-q"], &daemon.env, &daemon.dir, Stdin::Text("from stdin".into()));
     assert_eq!(piped.code, 0);
     assert_eq!(posted(&daemon)["prompt"], "from stdin");
     let stream = Stdin::Stream { reader: Box::new(&b"from a pipe"[..]), is_tty: false };
-    assert_eq!(run_with(&["say", "--new", "-q", "-"], &daemon.env, &daemon.dir, stream).code, 0);
+    assert_eq!(run_with(&["say", "-q", "-"], &daemon.env, &daemon.dir, stream).code, 0);
     assert_eq!(daemon.seen().last().unwrap().body.as_ref().unwrap()["prompt"], "from a pipe");
 }
 
@@ -995,29 +965,30 @@ fn say_reads_piped_stdin() {
 fn say_returns_one_for_an_error_event() {
     let failing = vec![json!({ "type": "start" }), json!({ "type": "error", "reason": "model", "errorMessage": "broken", "usage": {} })];
     let daemon = turn_daemon(failing.clone(), vec![]);
-    let result = daemon.run(&["say", "hello", "--new"]);
+    let result = daemon.run(&["say", "hello"]);
     assert_eq!((result.code, result.stderr.as_str()), (1, "ghost: broken\n"));
     // JSON error events stay machine-readable, and the failure is still reported on stderr.
-    let json = daemon.run(&["say", "hello", "--new", "--json"]);
+    let json = daemon.run(&["say", "hello", "--json"]);
     assert_eq!((json.code, json.stderr.as_str()), (1, "ghost: broken\n"));
     assert_eq!(json_lines(&json.stdout), failing);
 }
 
 #[test]
 fn say_fails_a_stream_that_ends_without_a_terminal_event_or_is_refused() {
-    let cut = turn_daemon(vec![json!({ "type": "text_delta", "delta": "half" })], vec![]).run(&["say", "hello", "--new"]);
+    let cut = turn_daemon(vec![json!({ "type": "text_delta", "delta": "half" })], vec![]).run(&["say", "hello"]);
     assert_eq!((cut.code, cut.stdout.as_str(), cut.stderr.as_str()), (1, "half", "ghost: turn stream ended without a terminal event\n"));
-    let busy = fake(|_, responder| responder.json(409, &json!({ "error": { "code": "session_busy", "message": "A turn is already running." } })));
-    let refused = busy.run(&["say", "hello", "--new"]);
+    let busy =
+        fake(|_, responder| responder.json(409, &json!({ "error": { "code": "conversation_busy", "message": "A turn is already running." } })));
+    let refused = busy.run(&["say", "hello"]);
     assert_eq!((refused.code, refused.stderr.as_str()), (6, "ghost: A turn is already running.\n"));
     let garbled = fake(|_, responder| responder.event_stream().unwrap().write("data: {not json\n\n").unwrap());
-    let invalid = garbled.run(&["say", "hello", "--new"]);
+    let invalid = garbled.run(&["say", "hello"]);
     assert_eq!((invalid.code, invalid.stderr.as_str()), (1, "ghost: daemon sent invalid SSE JSON\n"));
 }
 
 // ── The daemon's verbs, its token, and a daemon that is gone ────────────
 
-/// A daemon holding one conversation and a character, which checks the bearer token like ghostd.
+/// A daemon holding a character and an empty conversation, which checks the bearer token like ghostd.
 fn guarded_daemon() -> Fake {
     let character = Mutex::new("# Casper\n".to_string());
     let daemon = fake(move |request, responder| {
@@ -1025,18 +996,17 @@ fn guarded_daemon() -> Fake {
             return responder.json(401, &json!({ "error": { "code": "unauthorized", "message": "Unauthorized." } }));
         }
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", "/api/sessions") => responder.json(200, &json!({ "sessions": [session("conv-1")] })),
             ("GET", "/api/ghost") => responder.json(200, &json!({ "name": "casper", "dir": "/tmp/casper" })),
             ("GET", "/api/status") => {
                 responder.json(200, &json!({ "version": "1", "source": { "commit": null, "root": null }, "startedAt": "x", "restartNeeded": false }))
             }
             ("GET", "/api/remote") => responder.json(200, &json!({ "state": "off", "hostname": null, "app": null, "problem": null })),
+            ("GET", "/api/conversation") => responder.json(200, &empty_conversation()),
             ("GET", "/api/character") => responder.json(200, &json!({ "body": *character.lock().unwrap() })),
             ("PUT", "/api/character") => {
                 *character.lock().unwrap() = request.body.as_ref().unwrap()["body"].as_str().unwrap().to_string();
                 responder.json(200, &json!({ "ok": true }));
             }
-            ("PUT", "/api/sessions/conv-1/read") | ("DELETE", "/api/sessions/conv-1") => responder.json(200, &json!({ "ok": true })),
             _ => responder.json(404, &json!({ "error": { "code": "not_found", "message": "Not found." } })),
         }
     });
@@ -1045,17 +1015,12 @@ fn guarded_daemon() -> Fake {
 }
 
 #[test]
-fn lists_sessions_and_reports_status_with_the_token() {
+fn reports_status_with_the_token() {
     let daemon = guarded_daemon();
-    let sessions = daemon.run(&["sessions", "--json"]);
-    assert_eq!(sessions.code, 0, "{}", sessions.stderr);
-    assert_eq!(serde_json::from_str::<Value>(&sessions.stdout).unwrap(), json!({ "sessions": [session("conv-1")] }));
-    let quiet = daemon.run(&["sessions", "-q"]);
-    assert_eq!((quiet.code, quiet.stdout.as_str()), (0, "conv-1\n"));
-    let unknown = daemon.run(&["sessions", "--ghost", "casper"]);
+    let unknown = daemon.run(&["status", "--ghost", "casper"]);
     assert_eq!(unknown.code, 2);
     assert!(unknown.stderr.contains("Unknown option '--ghost'"));
-    let kept = daemon.run(&["sessions", "--keep"]);
+    let kept = daemon.run(&["status", "--keep"]);
     assert_eq!(kept.code, 2);
     assert!(kept.stderr.contains("keep"));
 
@@ -1063,10 +1028,11 @@ fn lists_sessions_and_reports_status_with_the_token() {
     assert_eq!(status["daemon"], format!("http://127.0.0.1:{}", daemon.server.address.port()));
     assert_eq!(status["tokenFile"], daemon.token_file().display().to_string());
     assert_eq!((&status["ghost"], &status["version"]), (&json!("casper"), &json!(crate::VERSION)));
+    assert_eq!(status["conversation"], empty_conversation());
 }
 
 #[test]
-fn reaches_ghost_admin_and_conversation_state_through_named_verbs() {
+fn prints_and_replaces_the_character_through_its_verb() {
     let daemon = guarded_daemon();
     assert_eq!(daemon.run(&["character"]).stdout, "# Casper\n");
     let file = daemon.dir.join("character.md").display().to_string();
@@ -1075,27 +1041,8 @@ fn reaches_ghost_admin_and_conversation_state_through_named_verbs() {
     assert_eq!(daemon.run(&["character", "set", &file]).stdout, "Character replaced.\n");
     assert_eq!(daemon.run(&["character"]).stdout, "# Casper\n\nA quiet ghost.\n");
 
-    let read = daemon.run(&["read", "-s", "conv", "--json"]);
-    assert_eq!((read.code, read.stdout.as_str()), (0, "{\"ok\":true}\n"));
-    assert!(daemon.lines().contains(&"PUT /api/sessions/conv-1/read".to_string()));
-    let missing = daemon.run(&["read", "-s", "nope"]);
-    assert_eq!((missing.code, missing.stderr.as_str()), (5, "ghost: session \"nope\" was not found\n"));
-    let refused = daemon.run(&["title", "x", "-s", "conv-1"]);
+    let refused = daemon.run(&["hooks"]);
     assert_eq!((refused.code, refused.stderr.as_str()), (5, "ghost: Not found.\n"));
-}
-
-#[test]
-fn trashes_a_conversation_only_when_named_with_s_behind_yes() {
-    let daemon = guarded_daemon();
-    let unconfirmed = daemon.run(&["rm", "-s", "conv-1"]);
-    assert_eq!((unconfirmed.code, unconfirmed.stderr.as_str()), (2, "ghost: ghost rm requires --yes\n"));
-    let unnamed = daemon.run_env(&["rm", "--yes"], &[("GHOST_SESSION", "conv-1")]);
-    assert_eq!((unnamed.code, unnamed.stderr.as_str()), (2, "ghost: ghost rm needs -s <id>\n"));
-    assert_eq!(daemon.run(&["rm", "casper", "--yes"]).code, 2);
-    assert!(daemon.seen().is_empty());
-    let trashed = daemon.run(&["rm", "-s", "conv-1", "--yes"]);
-    assert_eq!((trashed.code, trashed.stdout.as_str()), (0, "Trashed conv-1.\n"));
-    assert_eq!(daemon.lines(), ["GET /api/sessions", "DELETE /api/sessions/conv-1"]);
 }
 
 #[test]
@@ -1117,14 +1064,14 @@ fn re_reads_a_rotated_token_once_after_a_401() {
     let rotate = token_file.clone();
     let daemon = fake(move |request, responder| {
         if request.authorization.as_deref() == Some(&format!("Bearer {}", "a".repeat(64))) {
-            return responder.json(200, &json!({ "sessions": [session("conv-1")] }));
+            return responder.json(200, &json!({ "body": "# Casper\n" }));
         }
         write_token(&rotate, 'a');
         responder.json(401, &json!({ "error": { "code": "unauthorized", "message": "Unauthorized." } }));
     });
-    let result = daemon.run_env(&["sessions", "-q"], &[("GHOSTD_API_TOKEN_FILE", token_file.to_str().unwrap())]);
-    assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "conv-1\n", ""));
-    assert_eq!(daemon.seen().len(), 2);
+    let result = daemon.run_env(&["character", "-q"], &[("GHOSTD_API_TOKEN_FILE", token_file.to_str().unwrap())]);
+    assert_eq!((result.code, result.stdout.as_str(), result.stderr.as_str()), (0, "# Casper\n", ""));
+    assert_eq!(daemon.lines(), ["GET /api/character"; 2]);
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -1134,11 +1081,10 @@ fn maps_a_closed_daemon_to_exit_3_and_other_refusals_to_their_codes() {
     assert_eq!(gone.code, 3);
     assert!(gone.stderr.starts_with("ghost: cannot reach ghostd: "), "{}", gone.stderr);
     for (status, code) in [(403, 4), (404, 5), (409, 6), (400, 1), (500, 1)] {
-        let refused =
-            fake(move |_, responder| responder.json(status, &json!({ "error": { "code": "x", "message": "Refused." } }))).run(&["sessions"]);
+        let refused = fake(move |_, responder| responder.json(status, &json!({ "error": { "code": "x", "message": "Refused." } }))).run(&["stop"]);
         assert_eq!((refused.code, refused.stderr.as_str()), (code, "ghost: Refused.\n"), "{status}");
     }
-    let bare = fake(|_, responder| responder.empty(502)).run(&["sessions"]);
+    let bare = fake(|_, responder| responder.empty(502)).run(&["stop"]);
     assert_eq!((bare.code, bare.stderr.as_str()), (1, "ghost: daemon returned HTTP 502\n"));
     let config = offline(&["status"], &[("GHOSTD_PORT", "70000")]);
     assert_eq!(config.code, 2);

@@ -33,14 +33,14 @@ allows alerts for a Home Screen app.
 Each machine sends its own alerts, straight to your browser's push service
 (Apple, Google, Mozilla or Microsoft), encrypted so that only your device can
 read them. summonghost.com is not involved and stores nothing. An alert
-carries the conversation's title and a short excerpt of the reply, and opens
-that conversation, `https://summonghost.com/#/<hostname>/<conversation>`.
+carries the ghost's name and a short excerpt of the reply, and opens
+that machine's conversation, `https://summonghost.com/#/<hostname>`.
 Cancelled turns stay quiet. The machine must be awake and online to send one;
 a device that is offline gets it within a day. A failed delivery is logged
 and is not retried. Turn the switch off to stop them.
 
 The app marks a reply read only after displaying its transcript while visible
-and focused. Opening an unrelated conversation does not acknowledge it.
+and focused. Opening another machine does not acknowledge it.
 
 ## Remote desktop is separate
 

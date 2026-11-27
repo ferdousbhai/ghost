@@ -123,15 +123,15 @@ fn links_the_first_app_to_this_machine_only_once_serve_is_on_https() {
 }
 
 #[test]
-fn links_a_conversation_in_the_first_app_only_while_there_is_an_app_link() {
+fn links_this_machine_in_the_first_app_only_while_there_is_an_app_link() {
     let linked = FakeTailscale::new().https().serve_with(None, &[APP]);
-    assert_eq!(linked.conversation_url("c 1").as_deref(), Some("https://summonghost.com/#/ghostbox.example.ts.net/c%201"));
+    assert_eq!(linked.machine_url().as_deref(), Some("https://summonghost.com/#/ghostbox.example.ts.net"));
     for serve in [
         FakeTailscale::new().https().serve_with(None, &[]),
         FakeTailscale::new().no_certs().serve_with(None, &[APP]),
         FakeTailscale::new().serve_with(None, &[APP]),
     ] {
-        assert_eq!(serve.conversation_url("c1"), None);
+        assert_eq!(serve.machine_url(), None);
     }
 }
 

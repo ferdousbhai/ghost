@@ -163,16 +163,16 @@ mod tests {
     #[test]
     fn merges_bound_fields_below_call_site_fields() {
         let (root, records) = Logger::recording();
-        let logger = root.child(json!({ "ghost": "casper", "conversation": "first", "inherited": true }));
-        logger.info("opened", json!({ "conversation": "second", "local": true }));
+        let logger = root.child(json!({ "ghost": "casper", "turn": "first", "inherited": true }));
+        logger.info("opened", json!({ "turn": "second", "local": true }));
         // A child of a child keeps what its parent bound; the parent is unchanged by it.
         logger.child(json!({ "part": "hooks", "ghost": "wraith" })).error("failed", Value::Null);
         root.warn("bare", Value::Null);
         let records = records.lock().unwrap();
         let fields = |index: usize| Value::Object(records[index].fields.clone());
         assert_eq!((records[0].level, records[0].message.as_str()), (Level::Info, "opened"));
-        assert_eq!(fields(0), json!({ "ghost": "casper", "conversation": "second", "inherited": true, "local": true }));
-        assert_eq!(fields(1), json!({ "ghost": "wraith", "conversation": "first", "inherited": true, "part": "hooks" }));
+        assert_eq!(fields(0), json!({ "ghost": "casper", "turn": "second", "inherited": true, "local": true }));
+        assert_eq!(fields(1), json!({ "ghost": "wraith", "turn": "first", "inherited": true, "part": "hooks" }));
         assert_eq!((records[2].level, fields(2)), (Level::Warn, json!({})));
     }
 

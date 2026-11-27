@@ -1,13 +1,10 @@
-//! A conversation's own record, `sessions/<id>/.conversation.jsonl` in the
-//! ghost home: what the owner said, what the ghost answered, the tools it ran,
-//! the owner's `!` commands. The bar, `ghost show` and the phone read it,
-//! and each turn is handed its newest part: the model keeps no session of its
-//! own.
+//! The conversation's record, `conversation/.conversation.jsonl` in the ghost
+//! home: what the owner said, what the ghost answered, the tools it ran, the
+//! owner's `!` commands. The bar, `ghost show` and the phone read it, and each
+//! turn is handed it: the model keeps no session of its own.
 //!
 //! The file is one JSON object per line, appended only. Lengths and limits
 //! are in characters, and a cut never lands inside one.
-use crate::error::{GhostError, Result};
-use crate::sidecars::SIDECAR_FILENAMES;
 use crate::text;
 use regex::Regex;
 use serde_json::{Map, Value, json};
@@ -15,7 +12,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 const LOG_VERSION: i64 = 1;
 /// A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`.
@@ -122,7 +119,6 @@ impl Origin {
 pub enum LogEntry {
     Conversation {
         v: i64,
-        id: String,
         created_at: String,
     },
     /// `origin` is None for an owner message.
@@ -144,10 +140,6 @@ pub enum LogEntry {
         exit_code: Option<i32>,
         excluded: bool,
     },
-    Title {
-        at: String,
-        title: Option<String>,
-    },
 }
 
 impl LogEntry {
@@ -160,14 +152,14 @@ impl LogEntry {
     pub fn at(&self) -> Option<&str> {
         match self {
             Self::Conversation { .. } => None,
-            Self::User { at, .. } | Self::Assistant { at, .. } | Self::Command { at, .. } | Self::Title { at, .. } => Some(at),
+            Self::User { at, .. } | Self::Assistant { at, .. } | Self::Command { at, .. } => Some(at),
         }
     }
 
     /// The line's JSON, keys in the order every version has written them.
     pub fn to_json(&self) -> Value {
         match self {
-            Self::Conversation { v, id, created_at } => json!({ "type": "conversation", "v": v, "id": id, "createdAt": created_at }),
+            Self::Conversation { v, created_at } => json!({ "type": "conversation", "v": v, "createdAt": created_at }),
             Self::User { at, text, origin } => {
                 let mut entry = json!({ "type": "user", "at": at, "text": text });
                 if let Some(origin) = origin {
@@ -185,7 +177,6 @@ impl LogEntry {
             Self::Command { at, command, output, exit_code, excluded } => {
                 json!({ "type": "command", "at": at, "command": command, "output": output, "exitCode": exit_code, "excluded": excluded })
             }
-            Self::Title { at, title } => json!({ "type": "title", "at": at, "title": title }),
         }
     }
 
@@ -197,9 +188,7 @@ impl LogEntry {
         let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
         let at = || text("at");
         Some(match entry.get("type")?.as_str()? {
-            "conversation" => {
-                Self::Conversation { v: entry.get("v").and_then(Value::as_i64).unwrap_or(LOG_VERSION), id: text("id"), created_at: text("createdAt") }
-            }
+            "conversation" => Self::Conversation { v: entry.get("v").and_then(Value::as_i64).unwrap_or(LOG_VERSION), created_at: text("createdAt") },
             "user" => {
                 let origin = match entry.get("origin") {
                     None => None,
@@ -225,41 +214,13 @@ impl LogEntry {
                 exit_code: entry.get("exitCode").and_then(Value::as_i64).and_then(|code| i32::try_from(code).ok()),
                 excluded: entry.get("excluded").and_then(Value::as_bool).unwrap_or(false),
             },
-            "title" => Self::Title { at: at(), title: entry.get("title").and_then(Value::as_str).map(str::to_string) },
             _ => return None,
         })
     }
 }
 
-/// Conversation ids are directory names in `sessions/`: letters, digits, `.`,
-/// `_`, `-`; at most 128; not starting with `.`; not a sidecar's name.
-pub fn is_valid_conversation_id(id: &str) -> bool {
-    let bytes = id.as_bytes();
-    (1..=128).contains(&bytes.len())
-        && bytes[0] != b'.'
-        && bytes.iter().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(b))
-        && !SIDECAR_FILENAMES.contains(&id)
-}
-
-pub fn require_conversation_id(id: &str) -> Result<&str> {
-    if is_valid_conversation_id(id) {
-        return Ok(id);
-    }
-    Err(GhostError::new(
-        "invalid_conversation_id",
-        format!("Conversation ids are 1-128 letters, digits, '.', '_' or '-', and not {}.", SIDECAR_FILENAMES.join(", ")),
-        400,
-    ))
-}
-
-/// The conversation's directory: its commands run there, and its log lives
-/// there, so one rename moves or trashes the whole conversation.
-pub fn conversation_dir(session_dir: &Path, id: &str) -> PathBuf {
-    session_dir.join(id)
-}
-
-pub fn log_path(session_dir: &Path, id: &str) -> PathBuf {
-    conversation_dir(session_dir, id).join(LOG_FILENAME)
+pub fn log_path(conversation_dir: &Path) -> PathBuf {
+    conversation_dir.join(LOG_FILENAME)
 }
 
 /// `text` within the stored limit. A cut that would split a character ends in
@@ -280,24 +241,24 @@ fn bounded_entry(entry: &LogEntry) -> LogEntry {
                 }
             }
         }
-        LogEntry::Conversation { .. } | LogEntry::Title { .. } => {}
+        LogEntry::Conversation { .. } => {}
     }
     entry
 }
 
 /// Add entries to the conversation's log in one write, making its directory (0700) and the file (0600) when new.
-pub fn append_log(session_dir: &Path, id: &str, entries: &[LogEntry]) -> io::Result<()> {
+pub fn append_log(conversation_dir: &Path, entries: &[LogEntry]) -> io::Result<()> {
     if entries.is_empty() {
         return Ok(());
     }
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(conversation_dir(session_dir, id))?;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(conversation_dir)?;
     let lines: String = entries.iter().map(|entry| format!("{}\n", bounded_entry(entry).to_json())).collect();
-    std::fs::OpenOptions::new().append(true).create(true).mode(0o600).open(log_path(session_dir, id))?.write_all(lines.as_bytes())
+    std::fs::OpenOptions::new().append(true).create(true).mode(0o600).open(log_path(conversation_dir))?.write_all(lines.as_bytes())
 }
 
 /// Every well-formed entry, or None when the conversation has no log; a torn last line from a crash is skipped.
-pub fn read_log(session_dir: &Path, id: &str) -> io::Result<Option<Vec<LogEntry>>> {
-    let bytes = match std::fs::read(log_path(session_dir, id)) {
+pub fn read_log(conversation_dir: &Path) -> io::Result<Option<Vec<LogEntry>>> {
+    let bytes = match std::fs::read(log_path(conversation_dir)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error),
@@ -306,29 +267,25 @@ pub fn read_log(session_dir: &Path, id: &str) -> io::Result<Option<Vec<LogEntry>
     Ok(Some(bytes.split(|byte| *byte == b'\n').filter_map(parse_entry).collect()))
 }
 
-/// The first line of a new conversation's log.
-pub fn new_conversation_entry(id: &str, now_ms: i64) -> LogEntry {
-    LogEntry::Conversation { v: LOG_VERSION, id: id.to_string(), created_at: crate::clock::iso(now_ms) }
+/// The first line of a new log.
+pub fn new_conversation_entry(now_ms: i64) -> LogEntry {
+    LogEntry::Conversation { v: LOG_VERSION, created_at: crate::clock::iso(now_ms) }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LogState {
-    /// The owner's title, else one derived from the first owner message.
-    pub title: Option<String>,
+    /// The first line of the first thing the owner wrote.
     pub preview: Option<String>,
     pub message_count: usize,
     /// When the owner or the ghost last added to the conversation.
     pub active_at: Option<String>,
 }
 
-fn pattern(cell: &'static OnceLock<Regex>, source: &str) -> &'static Regex {
-    cell.get_or_init(|| Regex::new(source).expect("a valid pattern"))
-}
-
 /// The owner's words without attachment markers: an imported `[Attachment: …]` or an attached image's line.
 fn owner_words(text: &str) -> String {
     static MARKERS: OnceLock<Regex> = OnceLock::new();
-    let markers = pattern(&MARKERS, r"(?mR)\[Attachment:[^\]]*\]|^!\[[^\]]*\]\(attachments/[^)\s\x{feff}]+\)$");
+    let markers =
+        MARKERS.get_or_init(|| Regex::new(r"(?mR)\[Attachment:[^\]]*\]|^!\[[^\]]*\]\(attachments/[^)\s\x{feff}]+\)$").expect("a valid pattern"));
     markers.replace_all(text, " ").trim().to_string()
 }
 
@@ -337,89 +294,10 @@ fn first_line(text: &str) -> Option<String> {
     Some(if text::len(line) > PREVIEW_MAX { text::prefix(line, PREVIEW_MAX).trim_end().to_string() } else { line.to_string() })
 }
 
-/// Words a title does not end on.
-const TITLE_TAIL: &[&str] = &[
-    "a", "an", "the", "to", "of", "and", "or", "for", "with", "in", "on", "at", "from", "by", "about", "as", "but", "if", "that", "this", "my",
-    "your", "our", "so", "then", "is", "are", "be", "i", "me",
-];
-const TITLE_WORDS: usize = 7;
-
-/// Where the first clause of `plain` ends: before white space that follows
-/// `.`, `?` or `!`, or before a line break, `;`, `: `, a spaced dash, or a
-/// comma that starts a new request.
-fn first_clause(plain: &str) -> &str {
-    static BREAK: OnceLock<Regex> = OnceLock::new();
-    let breaks =
-        pattern(&BREAK, r"(?i)\n|;|:[\s\x{feff}]|[\s\x{feff}][-–—][\s\x{feff}]|,[\s\x{feff}](?:and |but |so |then )?(?:i |can |could |please )");
-    let mut end = breaks.find(plain).map_or(plain.len(), |found| found.start());
-    let mut previous = '\0';
-    for (at, character) in plain[..end].char_indices() {
-        if character.is_whitespace() && matches!(previous, '.' | '?' | '!') {
-            end = at;
-            break;
-        }
-        previous = character;
-    }
-    &plain[..end]
-}
-
-/// A title extracted from the first owner message, with no model: a quoted
-/// name the message gives (`called "Coffee Ideas"`), else its first clause
-/// without greeting or request frame, cut to a few words that do not end on
-/// a filler word. None when nothing substantive is left (a bare "hey").
-pub fn derived_title(text: &str) -> Option<String> {
-    static NAMED: OnceLock<Regex> = OnceLock::new();
-    static LEAD: OnceLock<Regex> = OnceLock::new();
-    static FOR_ME: OnceLock<Regex> = OnceLock::new();
-    let plain = owner_words(text);
-    let named = pattern(&NAMED, r#"(?i)(?-u:\b)(?:called|named|titled)[\s\x{feff}]+["“]([^"”]{2,60})["”]"#)
-        .captures(&plain)
-        .map(|found| (found[1].trim_start_matches('#').trim_start()).trim().to_string())
-        .filter(|name| !name.is_empty());
-    if named.is_some() {
-        return named;
-    }
-    // Openers that say nothing about the subject: greetings and request frames.
-    let lead = pattern(
-        &LEAD,
-        r"(?i)^(?:(?:hey|hi|hello|yo|ok(?:ay)?|so|well|please|pls)(?-u:\b)[\s\x{feff},!.:-]*|(?:can|could|would|will) you[\s\x{feff}]+(?:please[\s\x{feff}]+)?|(?:i(?:'d| would) like (?:you )?to|i (?:want|need) (?:you )?to|help me(?: to)?|let'?s|tell me)[\s\x{feff}]+)",
-    );
-    let mut clause = first_clause(&plain).to_string();
-    loop {
-        let stripped = lead.replace(&clause, "").trim().to_string();
-        if stripped == clause {
-            break;
-        }
-        clause = stripped;
-    }
-    let clause = pattern(&FOR_ME, r"(?i)^(?:for )?me[\s\x{feff}]+").replace(&clause, "");
-    let mut words: Vec<&str> = clause.trim_end_matches(['?', '!', '.', ',', ':', ';']).split_whitespace().take(TITLE_WORDS).collect();
-    while words.len() > 1 {
-        let last: String = words[words.len() - 1].to_lowercase().chars().filter(|c| c.is_ascii_lowercase() || *c == '\'').collect();
-        if !TITLE_TAIL.contains(&last.as_str()) {
-            break;
-        }
-        words.pop();
-    }
-    if words.len() < 2 {
-        return None;
-    }
-    let title = words.join(" ");
-    let title = title.trim_end_matches([',', ':', ';']);
-    let mut rest = title.chars();
-    Some(match rest.next() {
-        Some(first) => first.to_uppercase().chain(rest).collect(),
-        None => title.to_string(),
-    })
-}
-
-/// A conversation's summary, built one entry at a time so an index can carry on from where it stopped.
+/// The conversation's summary, built one entry at a time so an index can carry on from where it stopped.
 #[derive(Debug, Clone, Default)]
 struct LogStateAccumulator {
-    title: Option<String>,
     preview: Option<String>,
-    derived: Option<String>,
-    owner_wrote: bool,
     count: usize,
     active_at: Option<String>,
 }
@@ -431,15 +309,9 @@ impl LogStateAccumulator {
             self.active_at = (!at.is_empty()).then(|| at.to_string());
         }
         match entry {
-            LogEntry::Title { title, .. } => self.title = title.clone(),
-            LogEntry::User { text, origin: None, .. } if !self.owner_wrote => {
-                // The first owner message titles the conversation, even after a `!command` previewed it.
-                self.owner_wrote = true;
-                if self.preview.is_none() {
-                    // A message of attachments alone still says what it was.
-                    self.preview = first_line(&owner_words(text)).or_else(|| (!text.trim().is_empty()).then(|| "Photo".to_string()));
-                }
-                self.derived = derived_title(text);
+            LogEntry::User { text, origin: None, .. } if self.preview.is_none() => {
+                // A message of attachments alone still says what it was.
+                self.preview = first_line(&owner_words(text)).or_else(|| (!text.trim().is_empty()).then(|| "Photo".to_string()));
             }
             LogEntry::Command { command, excluded: false, .. } if self.preview.is_none() => self.preview = first_line(&format!("!{command}")),
             _ => {}
@@ -447,12 +319,7 @@ impl LogStateAccumulator {
     }
 
     fn value(&self) -> LogState {
-        LogState {
-            title: self.title.clone().or_else(|| self.derived.clone()),
-            preview: self.preview.clone(),
-            message_count: self.count,
-            active_at: self.active_at.clone(),
-        }
+        LogState { preview: self.preview.clone(), message_count: self.count, active_at: self.active_at.clone() }
     }
 }
 
@@ -566,7 +433,7 @@ pub fn message_count(entry: &LogEntry) -> usize {
             }
         }
         LogEntry::User { .. } | LogEntry::Assistant { .. } => 1,
-        LogEntry::Conversation { .. } | LogEntry::Title { .. } => 0,
+        LogEntry::Conversation { .. } => 0,
     }
 }
 
@@ -593,10 +460,8 @@ struct IndexedEntry {
     count: usize,
 }
 
-/// What is known of a log as far as it was read.
+/// What is known of the log as far as it was read.
 struct LogIndex {
-    /// Names this index, so offsets kept apart from it are known to be its own.
-    generation: u64,
     device: u64,
     inode: u64,
     size: u64,
@@ -605,60 +470,21 @@ struct LogIndex {
     total: usize,
     newline_ended: bool,
     summary: LogStateAccumulator,
+    /// Every entry with messages, in order.
+    entries: Vec<IndexedEntry>,
 }
 
-/// Disposable lookup results by path; the one read longest ago is dropped past the limit.
-struct Recent<V> {
-    limit: usize,
-    entries: Vec<(PathBuf, V)>,
-}
-
-impl<V> Recent<V> {
-    const fn new(limit: usize) -> Self {
-        Self { limit, entries: Vec::new() }
-    }
-
-    fn take(&mut self, path: &Path) -> Option<V> {
-        let at = self.entries.iter().position(|(known, _)| known == path)?;
-        Some(self.entries.remove(at).1)
-    }
-
-    fn put(&mut self, path: &Path, value: V) {
-        self.take(path);
-        self.entries.push((path.to_path_buf(), value));
-        if self.entries.len() > self.limit {
-            self.entries.remove(0);
-        }
-    }
-}
-
-struct Indexes {
-    generations: u64,
-    logs: Recent<LogIndex>,
-    offsets: Recent<(u64, Vec<IndexedEntry>)>,
-}
-
-// Summaries remain cheap for long lists; only sixteen logs retain historical offsets.
-static INDEXES: Mutex<Indexes> = Mutex::new(Indexes { generations: 0, logs: Recent::new(256), offsets: Recent::new(16) });
-
-/// The indexes are disposable, so a panic while they were held costs nothing: carry on with what is there.
-fn indexes() -> MutexGuard<'static, Indexes> {
-    INDEXES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// Read `index`'s file from `from` to its recorded size, adding each entry to the summary and, when kept, its offsets.
-fn scan_index(file: &File, index: &mut LogIndex, from: u64, mut entries: Option<&mut Vec<IndexedEntry>>) -> io::Result<()> {
+/// Read `index`'s file from `from` to its recorded size, adding each entry to the summary and the offsets.
+fn scan_index(file: &File, index: &mut LogIndex, from: u64) -> io::Result<()> {
     let mut buffer = vec![0u8; 64 * 1024];
     let mut position = from;
     let mut line_start = from;
     let mut tail: Vec<u8> = Vec::new();
-    let mut accept = |index: &mut LogIndex, bytes: &[u8], start: u64, end: u64| {
+    let accept = |index: &mut LogIndex, bytes: &[u8], start: u64, end: u64| {
         let Some(entry) = parse_entry(bytes) else { return };
         let count = message_count(&entry);
-        if count > 0
-            && let Some(entries) = entries.as_deref_mut()
-        {
-            entries.push(IndexedEntry { start, end, ordinal: index.ordinal, first: index.total, count });
+        if count > 0 {
+            index.entries.push(IndexedEntry { start, end, ordinal: index.ordinal, first: index.total, count });
         }
         index.ordinal += 1;
         index.total += count;
@@ -702,109 +528,11 @@ struct IndexedLogSnapshot {
     records: Vec<IndexedEntry>,
 }
 
-/// Bring the log's index up to date and answer from it. `page` is the
-/// messages wanted, `(offset, limit)`; None when only the summary is.
-/// One log is indexed at a time, so concurrent readers share one scan.
-fn indexed_log(path: &Path, page: Option<(usize, usize)>) -> io::Result<Option<IndexedLogSnapshot>> {
-    let mut indexes = indexes();
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) => {
-            indexes.logs.take(path);
-            return if error.kind() == io::ErrorKind::NotFound { Ok(None) } else { Err(error) };
-        }
-    };
-    let info = file.metadata()?;
-    let cached = indexes.logs.take(path);
-    let offsets = match (indexes.offsets.take(path), &cached) {
-        (Some((generation, entries)), Some(index)) if generation == index.generation => Some(entries),
-        _ => None,
-    };
-    // ghostd only ever appends, so the same file grown past a whole last
-    // line is read from where the index stopped; anything else is reindexed.
-    let (mut index, mut entries, from) = match cached {
-        Some(index)
-            if index.inode == info.ino()
-                && index.device == info.dev()
-                && info.len() >= index.size
-                && index.newline_ended
-                && (page.is_none() || offsets.is_some()) =>
-        {
-            let from = index.size;
-            (index, offsets, from)
-        }
-        _ => {
-            indexes.generations += 1;
-            let index = LogIndex {
-                generation: indexes.generations,
-                device: info.dev(),
-                inode: info.ino(),
-                size: 0,
-                modified_ms: 0,
-                ordinal: 0,
-                total: 0,
-                newline_ended: true,
-                summary: LogStateAccumulator::default(),
-            };
-            (index, Some(Vec::new()), 0)
-        }
-    };
-    if from == 0 || info.len() != index.size {
-        index.size = info.len();
-        index.modified_ms = info.mtime() * 1000 + info.mtime_nsec() / 1_000_000;
-        // A failed scan leaves no index behind: the next read starts over.
-        scan_index(&file, &mut index, from, entries.as_mut())?;
-    }
-    let records = match (page, &entries) {
-        (Some((offset, limit)), Some(entries)) => {
-            let end = offset.saturating_add(limit);
-            let low = entries.partition_point(|entry| entry.first + entry.count <= offset);
-            entries[low..].iter().take_while(|entry| entry.first < end).copied().collect()
-        }
-        _ => Vec::new(),
-    };
-    let snapshot = IndexedLogSnapshot { modified_ms: index.modified_ms, state: index.summary.value(), total: index.total, records };
-    if let Some(entries) = entries {
-        indexes.offsets.put(path, (index.generation, entries));
-    }
-    indexes.logs.put(path, index);
-    Ok(Some(snapshot))
-}
-
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TranscriptPage {
     pub messages: Vec<TranscriptMessage>,
     /// Every message in the conversation, not only this page's.
     pub total: usize,
-}
-
-/// Messages `offset..offset + limit` of the conversation. Only those are
-/// read from the file once the disposable index is current.
-pub fn read_transcript_page(session_dir: &Path, id: &str, offset: usize, limit: usize) -> io::Result<TranscriptPage> {
-    let path = log_path(session_dir, id);
-    let Some(index) = indexed_log(&path, Some((offset, limit)))? else { return Ok(TranscriptPage::default()) };
-    // Indexed records stay where they are while the log grows, so a page reads
-    // them in place; a log trashed since it was indexed reads as empty.
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(TranscriptPage::default()),
-        Err(error) => return Err(error),
-    };
-    let end = offset.saturating_add(limit);
-    let mut messages = Vec::new();
-    for record in index.records {
-        let mut bytes = vec![0u8; (record.end - record.start) as usize];
-        let mut read = 0;
-        while read < bytes.len() {
-            match file.read_at(&mut bytes[read..], record.start + read as u64)? {
-                0 => break,
-                more => read += more,
-            }
-        }
-        let Some(entry) = parse_entry(&bytes[..read]) else { continue };
-        messages.extend(entry_messages(&entry, &format!("e{}", record.ordinal), offset.saturating_sub(record.first), end - offset.max(record.first)));
-    }
-    Ok(TranscriptPage { messages, total: index.total })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -814,20 +542,113 @@ pub struct ListedLog {
     pub updated_at: String,
 }
 
-/// The conversation's summary, or None when it has no log. Summary reads and
-/// transcript pages share one disposable file index.
-pub fn listed_log(session_dir: &Path, id: &str) -> io::Result<Option<ListedLog>> {
-    Ok(indexed_log(&log_path(session_dir, id), None)?.map(|indexed| {
-        let updated_at = indexed.state.active_at.clone().unwrap_or_else(|| crate::clock::iso(indexed.modified_ms));
-        ListedLog { state: indexed.state, updated_at }
-    }))
+/// The log as its readers see it, through a disposable index of how far it was
+/// read: a summary reads only what was appended since, and a page only its own
+/// records.
+pub struct IndexedLog {
+    path: PathBuf,
+    index: Mutex<Option<LogIndex>>,
 }
 
-/// How a shell command started in a conversation names it: the variables the
-/// `ghost` CLI reads to address this conversation. Every tool the model runs
-/// and every owner `!` command runs with them.
-pub fn conversation_environment(id: &str) -> [(String, String); 1] {
-    [("GHOST_SESSION".to_string(), id.to_string())]
+impl IndexedLog {
+    pub fn new(conversation_dir: &Path) -> Self {
+        Self { path: log_path(conversation_dir), index: Mutex::new(None) }
+    }
+
+    /// Bring the index up to date and answer from it. `page` is the messages
+    /// wanted, `(offset, limit)`; None when only the summary is. The log is
+    /// indexed under one lock, so concurrent readers share one scan.
+    fn refresh(&self, page: Option<(usize, usize)>) -> io::Result<Option<IndexedLogSnapshot>> {
+        // The index is disposable, so a panic while it was held costs nothing: carry on with what is there.
+        let mut held = self.index.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Taken out while it is brought up to date: a failed scan leaves no index behind, and the next read starts over.
+        let cached = held.take();
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let info = file.metadata()?;
+        // ghostd only ever appends, so the same file grown past a whole last
+        // line is read from where the index stopped; anything else is reindexed.
+        let (mut index, from) = match cached {
+            Some(index) if index.inode == info.ino() && index.device == info.dev() && info.len() >= index.size && index.newline_ended => {
+                let from = index.size;
+                (index, from)
+            }
+            _ => {
+                let index = LogIndex {
+                    device: info.dev(),
+                    inode: info.ino(),
+                    size: 0,
+                    modified_ms: 0,
+                    ordinal: 0,
+                    total: 0,
+                    newline_ended: true,
+                    summary: LogStateAccumulator::default(),
+                    entries: Vec::new(),
+                };
+                (index, 0)
+            }
+        };
+        if from == 0 || info.len() != index.size {
+            index.size = info.len();
+            index.modified_ms = info.mtime() * 1000 + info.mtime_nsec() / 1_000_000;
+            scan_index(&file, &mut index, from)?;
+        }
+        let records = match page {
+            Some((offset, limit)) => {
+                let end = offset.saturating_add(limit);
+                let low = index.entries.partition_point(|entry| entry.first + entry.count <= offset);
+                index.entries[low..].iter().take_while(|entry| entry.first < end).copied().collect()
+            }
+            None => Vec::new(),
+        };
+        let snapshot = IndexedLogSnapshot { modified_ms: index.modified_ms, state: index.summary.value(), total: index.total, records };
+        *held = Some(index);
+        Ok(Some(snapshot))
+    }
+
+    /// Messages `offset..offset + limit` of the conversation. Only those are
+    /// read from the file once the index is current.
+    pub fn page(&self, offset: usize, limit: usize) -> io::Result<TranscriptPage> {
+        let Some(index) = self.refresh(Some((offset, limit)))? else { return Ok(TranscriptPage::default()) };
+        // Indexed records stay where they are while the log grows, so a page reads
+        // them in place; a log trashed since it was indexed reads as empty.
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(TranscriptPage::default()),
+            Err(error) => return Err(error),
+        };
+        let end = offset.saturating_add(limit);
+        let mut messages = Vec::new();
+        for record in index.records {
+            let mut bytes = vec![0u8; (record.end - record.start) as usize];
+            let mut read = 0;
+            while read < bytes.len() {
+                match file.read_at(&mut bytes[read..], record.start + read as u64)? {
+                    0 => break,
+                    more => read += more,
+                }
+            }
+            let Some(entry) = parse_entry(&bytes[..read]) else { continue };
+            messages.extend(entry_messages(
+                &entry,
+                &format!("e{}", record.ordinal),
+                offset.saturating_sub(record.first),
+                end - offset.max(record.first),
+            ));
+        }
+        Ok(TranscriptPage { messages, total: index.total })
+    }
+
+    /// The conversation's summary, or None when it has no log.
+    pub fn listed(&self) -> io::Result<Option<ListedLog>> {
+        Ok(self.refresh(None)?.map(|indexed| {
+            let updated_at = indexed.state.active_at.clone().unwrap_or_else(|| crate::clock::iso(indexed.modified_ms));
+            ListedLog { state: indexed.state, updated_at }
+        }))
+    }
 }
 
 #[cfg(test)]

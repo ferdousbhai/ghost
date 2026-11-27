@@ -51,12 +51,12 @@ const BACKGROUND_LINES: &[&str] = &[
     r#"systemd-run --user --scope --quiet --unit="ghost-job-<name>-$(date +%s)" -p CPUWeight=20 \"#,
     r#"  setsid -f bash -c 'cmd > "$XDG_RUNTIME_DIR/<name>.log" 2>&1; ghost say --follow-up -q "Background job finished (exit $?), log $XDG_RUNTIME_DIR/<name>.log" >/dev/null 2>&1'"#,
     r"```",
-    r"`$GHOST_SESSION` is set in your shell, so `ghost` verbs address this conversation without `-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
+    r"`--follow-up` runs after your current turn, or starts your next one when none is running.",
     r"The job is its own low-priority unit: it yields the CPU to the owner's apps, survives a daemon restart (so its log is outside your private /tmp), and `systemctl --user stop <unit>` ends it. Nothing else watches it: read its log.",
-    r"Later, not now: your own work for a later time is a timer, the way Omarchy's own reminders are kept, which wakes this conversation with what to do:",
+    r"Later, not now: your own work for a later time is a timer, the way Omarchy's own reminders are kept, which wakes you with what to do:",
     r"```sh",
     r#"systemd-run --user --quiet --on-calendar='YYYY-MM-DD HH:MM' --unit="ghost-later-<name>-$(date +%s)" \"#,
-    r#"  ghost say --follow-up -q -s "$GHOST_SESSION" "<what to do then, with what you will need to know>""#,
+    r#"  ghost say --follow-up -q "<what to do then, with what you will need to know>""#,
     r"```",
     r#"`--on-active=2h` counts from now instead. `systemctl --user list-timers 'ghost-later-*'` lists them and `systemctl --user stop <unit>.timer` cancels one. A timer is forgotten by a reboot or a logout, so also write what is planned, and when, in the note that covers it; and the computer must be on at that time. To nudge the owner on this desktop instead, `omarchy reminder <minutes> "<text>"`."#,
 ];
@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    fn background_is_the_detached_recipe_that_wakes_the_conversation() {
+    fn background_is_the_detached_recipe_that_wakes_the_ghost() {
         let text = topic("background");
         for kept in [
             "systemd-run --user --scope --quiet --unit=\"ghost-job-<name>-$(date +%s)\" -p CPUWeight=20",
@@ -140,17 +140,19 @@ mod tests {
             "$XDG_RUNTIME_DIR/<name>.log",
             "`systemctl --user stop <unit>` ends it",
             "ghost say --follow-up",
-            "`$GHOST_SESSION` is set",
+            "starts your next one when none is running",
             "A command you start ends when this turn does.",
             "--on-calendar='YYYY-MM-DD HH:MM' --unit=\"ghost-later-<name>-$(date +%s)\"",
-            "ghost say --follow-up -q -s \"$GHOST_SESSION\"",
+            "  ghost say --follow-up -q \"<what to do then",
             "`systemctl --user stop <unit>.timer` cancels one",
             "A timer is forgotten by a reboot or a logout",
             "`omarchy reminder <minutes> \"<text>\"`",
         ] {
             assert!(text.contains(kept), "{kept}");
         }
-        assert!(!text.contains("/tmp/job.log"));
+        for gone in ["/tmp/job.log", "GHOST_SESSION", " -s "] {
+            assert!(!text.contains(gone), "{gone}");
+        }
     }
 
     #[test]

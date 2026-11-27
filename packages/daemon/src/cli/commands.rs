@@ -1,43 +1,12 @@
 //! Every verb but `say`: each asks the daemon one thing and prints the answer
 //! as a table, a transcript, or one acknowledging sentence.
 use super::client::EXIT_SUCCESS;
-use super::common::{id_of, list_sessions, read_argument_file, read_argument_json, resolve_target};
+use super::common::{read_argument_file, read_argument_json};
 use super::output::{Rendered, present, primary, relative_time, table, text_of, truncate, truthy};
 use super::{CliError, Context};
 use serde_json::{Map, Value, json};
 
-// ── Conversations ───────────────────────────────────────────────────────
-
-/// `ghost sessions`: every conversation; `-q` prints the ids alone.
-pub fn sessions_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let sessions = list_sessions(ctx.client()?)?;
-    let now = crate::clock::now_ms();
-    ctx.emit(&json!({ "sessions": sessions }), || {
-        let rows: Vec<Vec<String>> = sessions
-            .iter()
-            .map(|session| {
-                let label = present(session, "title").or_else(|| present(session, "preview"));
-                let states = [("question", "asking"), ("running", "running"), ("unread", "unread"), ("pinned", "pinned")];
-                vec![
-                    id_of(session).to_string(),
-                    truncate(&label.map_or_else(|| "—".to_string(), |label| text_of(Some(label))), 42),
-                    relative_time(session.get("updatedAt").and_then(Value::as_str).unwrap_or(""), now),
-                    text_of(session.get("messageCount")),
-                    states.iter().filter(|(key, _)| truthy(session.get(*key))).map(|(_, word)| *word).collect::<Vec<_>>().join(","),
-                ]
-            })
-            .collect();
-        Rendered::Both {
-            human: if rows.is_empty() {
-                "No conversations.\n".to_string()
-            } else {
-                format!("{}\n", table(&rows, Some(&["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])))
-            },
-            quiet: sessions.iter().map(|session| format!("{}\n", id_of(session))).collect(),
-        }
-    });
-    Ok(EXIT_SUCCESS)
-}
+// ── The conversation ────────────────────────────────────────────────────
 
 fn items<'a>(value: &'a Value, key: &str) -> &'a [Value] {
     value.get(key).and_then(Value::as_array).map_or(&[], Vec::as_slice)
@@ -95,11 +64,10 @@ fn form_encode(text: &str) -> String {
     out
 }
 
-/// `ghost show`: a transcript as Markdown. Without --offset, the newest page:
-/// the daemon pages from the oldest, so a conversation longer than one page
-/// is fetched again from its last page.
+/// `ghost show`: the conversation as Markdown. Without --offset, the newest
+/// page: the daemon pages from the oldest, so a conversation longer than one
+/// page is fetched again from its last page.
 pub fn show_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let (_, path) = resolve_target(ctx)?;
     let limit = ctx.parsed.text("limit").map(str::to_string);
     let offset = ctx.parsed.text("offset").map(str::to_string);
     let page = |ctx: &mut Context, from: Option<&str>| {
@@ -108,7 +76,7 @@ pub fn show_command(ctx: &mut Context) -> Result<i32, CliError> {
             .filter_map(|(key, value)| Some(format!("{key}={}", form_encode((*value)?))))
             .collect();
         let query = if pairs.is_empty() { String::new() } else { format!("?{}", pairs.join("&")) };
-        ctx.request("GET", &format!("{path}/transcript{query}"), None)
+        ctx.request("GET", &format!("/api/conversation/transcript{query}"), None)
     };
     let count = |body: &Value| items(body, "messages").len() as i64;
     let total = |body: &Value| body.get("total").and_then(Value::as_i64).unwrap_or(0);
@@ -143,55 +111,21 @@ pub fn show_command(ctx: &mut Context) -> Result<i32, CliError> {
     Ok(EXIT_SUCCESS)
 }
 
-/// One request about the addressed conversation, acknowledged in one sentence.
-fn session_action(
-    ctx: &mut Context,
-    method: &str,
-    suffix: &str,
-    body: Option<Value>,
-    sentence: impl FnOnce(&str, &Value) -> String,
-) -> Result<i32, CliError> {
-    let (id, path) = resolve_target(ctx)?;
-    let response = ctx.request(method, &format!("{path}{suffix}"), body.as_ref())?;
-    ctx.emit(&response, || Rendered::Secondary(sentence(&id, &response)));
+/// `ghost stop`: stop the running turn, whichever client started it.
+pub fn stop_command(ctx: &mut Context) -> Result<i32, CliError> {
+    let response = ctx.request("POST", "/api/conversation/stop", Some(&json!({})))?;
+    ctx.emit(&response, || Rendered::Secondary("Stopped.\n".to_string()));
     Ok(EXIT_SUCCESS)
 }
 
-/// `ghost stop`: stop a conversation's running turn, whichever client started it.
-pub fn stop_command(ctx: &mut Context) -> Result<i32, CliError> {
-    session_action(ctx, "POST", "/stop", Some(json!({})), |id, _| format!("Stopped {id}.\n"))
-}
-
-/// `ghost read`: mark a conversation read.
-pub fn read_command(ctx: &mut Context) -> Result<i32, CliError> {
-    session_action(ctx, "PUT", "/read", Some(json!({})), |id, _| format!("Marked {id} read.\n"))
-}
-
-/// `ghost title <text>`: rename a conversation; the sentence quotes the title the daemon kept.
-pub fn title_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let asked = Value::String(ctx.parsed.positionals[0].clone());
-    session_action(ctx, "PUT", "/title", Some(json!({ "title": asked })), |id, body| {
-        format!("Conversation {id} is now titled {}.\n", present(body, "title").unwrap_or(&asked))
-    })
-}
-
-pub fn pin_command(ctx: &mut Context) -> Result<i32, CliError> {
-    session_action(ctx, "PUT", "/pin", Some(json!({ "pinned": true })), |id, _| format!("Pinned {id}.\n"))
-}
-
-pub fn unpin_command(ctx: &mut Context) -> Result<i32, CliError> {
-    session_action(ctx, "PUT", "/pin", Some(json!({ "pinned": false })), |id, _| format!("Unpinned {id}.\n"))
-}
-
-/// `ghost rm -s <id> --yes`: move one conversation to recoverable Trash.
-pub fn remove_command(ctx: &mut Context) -> Result<i32, CliError> {
+/// `ghost new --yes`: start over, the conversation so far moved to recoverable Trash.
+pub fn new_command(ctx: &mut Context) -> Result<i32, CliError> {
     if !ctx.parsed.boolean("yes") {
-        return Err(CliError::usage("ghost rm requires --yes"));
+        return Err(CliError::usage("ghost new requires --yes"));
     }
-    if ctx.parsed.text("session").is_none() {
-        return Err(CliError::usage("ghost rm needs -s <id>"));
-    }
-    session_action(ctx, "DELETE", "", None, |id, _| format!("Trashed {id}.\n"))
+    let response = ctx.request("DELETE", "/api/conversation", None)?;
+    ctx.emit(&response, || Rendered::Secondary("Started over; the conversation so far is in Trash.\n".to_string()));
+    Ok(EXIT_SUCCESS)
 }
 
 // ── The persona, remote access, status ──────────────────────────────────
@@ -222,11 +156,14 @@ pub fn character_command(ctx: &mut Context) -> Result<i32, CliError> {
 }
 
 /// `ghost status`: that the daemon answers and accepts the token, what it
-/// runs, and whether the code on disk has changed under it.
+/// runs, whether the code on disk has changed under it, and what the
+/// conversation is doing.
 pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
     let ghost = ctx.request("GET", "/api/ghost", None)?.get("name").cloned();
     let remote = ctx.request("GET", "/api/remote", None)?;
     let daemon = ctx.request("GET", "/api/status", None)?;
+    let conversation = ctx.request("GET", "/api/conversation", None)?;
+    let now = crate::clock::now_ms();
     let client = ctx.client()?;
     let (base_url, token_file) = (client.base_url.clone(), client.token_path.display().to_string());
     let version = ctx.version.clone();
@@ -241,6 +178,7 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         ("daemonStartedAt", daemon.get("startedAt").cloned()),
         ("restartNeeded", daemon.get("restartNeeded").cloned()),
         ("remote", Some(remote.clone())),
+        ("conversation", Some(conversation.clone())),
     ];
     for (key, value) in fields {
         if let Some(value) = value {
@@ -276,6 +214,18 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         {
             lines.push(format!("app            {}", text_of(app.get("url"))));
         }
+        // The conversation: how long it is, when it last moved, and what it waits on.
+        let mut said = match conversation.get("messageCount").and_then(Value::as_u64).unwrap_or(0) {
+            0 => vec!["empty".to_string()],
+            1 => vec!["1 message".to_string()],
+            count => vec![format!("{count} messages")],
+        };
+        if let Some(updated) = conversation.get("updatedAt").and_then(Value::as_str) {
+            said.push(format!("updated {}", relative_time(updated, now)));
+        }
+        let states = [("running", "running"), ("question", "asking"), ("unread", "unread")];
+        said.extend(states.iter().filter(|(key, _)| truthy(conversation.get(*key))).map(|(_, word)| word.to_string()));
+        lines.push(format!("conversation   {}", said.join(", ")));
         Rendered::Both { human: format!("{}\n", lines.join("\n")), quiet: "ok\n".to_string() }
     });
     Ok(EXIT_SUCCESS)

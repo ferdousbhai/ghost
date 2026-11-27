@@ -137,13 +137,12 @@ Commands:
 {}
 
 Common flags:
-  -s, --session <id>       Select by id or unique prefix (verbs that list it)
       --json               Emit API JSON (streams use one object per line)
   -q, --quiet              Suppress secondary output
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd runs the machine (tokens, remote access, and conversations, each turn
+ghostd runs the machine (tokens, remote access, and the conversation, each turn
 answered by a model on this machine); ghost talks to the ghost.
 ",
         rows.join("\n")

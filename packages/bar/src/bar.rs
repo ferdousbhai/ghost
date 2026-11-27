@@ -1,6 +1,5 @@
 //! The bar: a prompt pinned to the bottom of the screen, with what the owner asked and what the ghost says above it
-//! as captions, over whatever else is on screen. There is one conversation, the daemon's `default`, and it is shown
-//! a caption at a time: Up and Down go back and forth through all of it.
+//! as captions, over whatever else is on screen. The conversation is shown a caption at a time: Up and Down go back and forth through all of it.
 //!
 //! It is a layer-shell surface where the compositor has them, and a plain undecorated window where it has not
 //! (scripted QA's broadway display). Text is typed into it by whatever types into the focused field, so Omarchy's
@@ -17,8 +16,6 @@ use serde_json::{Value, json};
 
 use crate::api::{Api, Cancel, Frame, segment};
 
-/// The conversation `POST /api/messages` writes to when it names none.
-const SESSION: &str = "default";
 /// As much as one caption holds: about three lines at the bar's width.
 const CAPTION_CHARS: usize = 240;
 const WIDTH: i32 = 880;
@@ -78,7 +75,7 @@ pub fn captions(text: &str) -> Vec<String> {
     pages
 }
 
-/// A transcript (`GET /sessions/:id/transcript`) as captions: each thing the ghost said, under what it answered.
+/// The transcript (`GET /api/conversation/transcript`) as captions: each thing the ghost said, under what it answered.
 /// Its reasoning, its commands and what they printed are `ghost show`'s to list.
 fn pages_of(transcript: &Value) -> Vec<Page> {
     let mut pages = Vec::new();
@@ -268,8 +265,8 @@ impl Bar {
         if self.live.borrow().is_some() {
             return;
         }
-        let transcript = self.api.get(format!("/api/sessions/{SESSION}/transcript?limit=2000")).await;
-        let sessions = self.api.get("/api/sessions".to_string()).await.unwrap_or(Value::Null);
+        let transcript = self.api.get("/api/conversation/transcript?limit=2000".to_string()).await;
+        let conversation = self.api.get("/api/conversation".to_string()).await.unwrap_or(Value::Null);
         if self.live.borrow().is_some() {
             return;
         }
@@ -277,9 +274,8 @@ impl Bar {
             Ok(transcript) => *self.pages.borrow_mut() = pages_of(&transcript),
             Err(error) => return self.note(&error.message, true),
         }
-        let open = sessions["sessions"].as_array().into_iter().flatten().find(|session| session["id"] == SESSION);
-        let offered: Vec<String> = open
-            .and_then(|session| session["question"]["options"].as_array())
+        let offered: Vec<String> = conversation["question"]["options"]
+            .as_array()
             .map(|options| options.iter().filter_map(Value::as_str).map(String::from).collect())
             .unwrap_or_default();
         omui::clear(&self.options);
@@ -330,7 +326,7 @@ impl Bar {
                         // A long turn's stream is cut; its last frame says where the rest is.
                         Frame::Event(event) if event["type"] == "resume" => {
                             let path = format!(
-                                "/api/sessions/{SESSION}/stream?turn={}&from={}",
+                                "/api/conversation/stream?turn={}&from={}",
                                 segment(event["turn"].as_str().unwrap_or_default()),
                                 event["from"].as_u64().unwrap_or(0)
                             );
@@ -385,7 +381,7 @@ impl Bar {
     fn stop(self: &Rc<Self>) {
         let this = self.clone();
         glib::spawn_future_local(async move {
-            if let Err(error) = this.api.call("POST", format!("/api/sessions/{SESSION}/stop"), Some(json!({}))).await {
+            if let Err(error) = this.api.call("POST", "/api/conversation/stop".to_string(), Some(json!({}))).await {
                 // Nothing to stop on the daemon: end the reading instead.
                 if let Some(cancel) = this.live.borrow().as_ref() {
                     cancel.stop();

@@ -120,7 +120,7 @@ impl Home {
         let notes = scratch.0.join("Documents").join("Notes");
         std::fs::create_dir_all(&notes).unwrap();
         std::fs::write(notes.join("trip.md"), "The boat leaves at nine from the north pier.").unwrap();
-        let cwd = scratch.0.join("ghosts").join("casper").join("sessions").join("c1");
+        let cwd = scratch.0.join("ghost").join("conversation");
         std::fs::create_dir_all(&cwd).unwrap();
         Self { scratch, cwd, asked: Default::default() }
     }
@@ -228,7 +228,7 @@ fn answers_a_conversation_running_the_commands_it_asks_for_until_it_answers() {
         })
     );
     // A command acts as the owner, in the conversation's directory.
-    assert!(last_message(&requests[2])["content"].as_str().unwrap().ends_with("sessions/c1\n</output>"));
+    assert!(last_message(&requests[2])["content"].as_str().unwrap().ends_with("ghost/conversation\n</output>"));
     assert_eq!(
         std::fs::read_to_string(home.scratch.0.join("Documents/Notes/trip.md")).unwrap(),
         "The boat leaves at nine from the north pier.Packed\n"
@@ -633,7 +633,7 @@ fn ran(id: &str, command: &str, output: Option<&str>) -> AssistantPart {
 #[test]
 fn replays_each_side_and_each_call_with_its_output_in_the_shapes_they_were_sent_in() {
     let entries = [
-        LogEntry::Conversation { v: 2, id: "c1".into(), created_at: "2026-11-25T08:21:00.000Z".into() },
+        LogEntry::Conversation { v: 2, created_at: "2026-11-25T08:21:00.000Z".into() },
         said_by_owner("When does the boat leave?"),
         pass(vec![
             AssistantPart::Thinking { text: "Read the note.".into() },

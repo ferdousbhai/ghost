@@ -15,7 +15,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, a bar at t
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
 - **ghost** — a machine's one persona, reached from elsewhere over Tailscale; **ghost home** — its directory, `~/.local/share/ghost/` (layout in `CONTRACTS.md`).
 - **local model** — the GGUF model ghostd runs and loops over; every turn runs on it. **coding agent** — an agent CLI the owner already has (claude, codex, agy), which the model runs from its shell.
-- **daemon** (`ghostd`) — the HTTP API that owns conversations; **bar** (`ghost-bar`) — the prompt and captions at the bottom of the screen, a client of it. Ghost has no window.
+- **daemon** (`ghostd`) — the HTTP API that owns the conversation; **bar** (`ghost-bar`) — the prompt and captions at the bottom of the screen, a client of it. Ghost has no window.
 
 ## Taste
 
@@ -38,7 +38,7 @@ The common defect here is a change that works on the path you tested and is miss
 
 - **Surfaces.** Daemon API, `ghost` CLI, the bar, the summonghost.com page (`packages/web`, rules in its README), the local model's tools. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
-- **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
+- **Reverse states.** If you added a way in, add the way out and the way to see it. Starting over needs Trash. A one-way door is a bug.
 - **Prompt-visible policy.** The system prompt's policy sections and the `ghost help <topic>` recipes its Ghost section indexes (`help_topics.rs`) are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in the budget test in `packages/daemon/src/prompt_policy.rs` to its exact new size so growth is always a decision.
 - **Docs.** Protocol changes land in `docs/hooks.md`.
 

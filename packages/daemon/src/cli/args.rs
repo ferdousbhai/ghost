@@ -57,7 +57,6 @@ fn short_of(name: &str) -> Option<char> {
     match name {
         "help" => Some('h'),
         "quiet" => Some('q'),
-        "session" => Some('s'),
         "version" => Some('v'),
         _ => None,
     }
@@ -68,7 +67,7 @@ struct Token {
     name: String,
     raw: String,
     value: Option<String>,
-    /// The value came in the same word (`--limit=5`, `-sabc`), so it cannot be a forgotten argument.
+    /// The value came in the same word (`--limit=5`), so it cannot be a forgotten argument.
     inline: bool,
 }
 
@@ -99,9 +98,8 @@ impl Parser {
             && value.starts_with('-')
         {
             let raw = &token.raw;
-            let example = if raw.starts_with("--") { format!("'{raw}=-XYZ'") } else { format!("'--{}=-XYZ' or '{raw}-XYZ'", token.name) };
             return Err(CliError::usage(format!(
-                "Option '{raw}' argument is ambiguous.\nDid you forget to specify the option argument for '{raw}'?\nTo specify an option argument starting with a dash use {example}."
+                "Option '{raw}' argument is ambiguous.\nDid you forget to specify the option argument for '{raw}'?\nTo specify an option argument starting with a dash use '{raw}=-XYZ'."
             )));
         }
         let Some(option) = self.option(&token.name) else {
@@ -144,31 +142,10 @@ pub fn parse_args(argv: &[String], spec: &ArgsSpec) -> Result<ParsedArgs, CliErr
         }
         let letters: Vec<char> = arg.chars().collect();
         if letters.len() >= 2 && letters[0] == '-' && letters[1] != '-' {
-            let first = parser.long_for(letters[1]);
-            if letters.len() == 2 {
-                // `-s abc`, `-q`.
-                let value = if parser.takes_value(&first) { rest.pop_front().cloned() } else { None };
-                parser.accept(Token { name: first, raw: arg.clone(), value, inline: false })?;
-            } else if parser.takes_value(&first) {
-                // `-sabc`.
-                let value = letters[2..].iter().collect();
-                parser.accept(Token { name: first, raw: format!("-{}", letters[1]), value: Some(value), inline: true })?;
-            } else {
-                // `-qh`, `-qsabc`: letters until one takes the rest (or the next word) as its value.
-                for (index, letter) in letters.iter().enumerate().skip(1) {
-                    let name = parser.long_for(*letter);
-                    let takes_value = parser.takes_value(&name);
-                    let (value, inline) = match (takes_value, index + 1 < letters.len()) {
-                        (false, _) => (None, false),
-                        (true, true) => (Some(letters[index + 1..].iter().collect()), true),
-                        (true, false) => (rest.pop_front().cloned(), false),
-                    };
-                    // A letter inside a group is quoted bare.
-                    parser.accept(Token { name, raw: letter.to_string(), value, inline })?;
-                    if takes_value {
-                        break;
-                    }
-                }
+            // `-q`, `-qh`: no short flag takes a value. A letter inside a group is quoted bare.
+            for letter in &letters[1..] {
+                let raw = if letters.len() == 2 { arg.clone() } else { letter.to_string() };
+                parser.accept(Token { name: parser.long_for(*letter), raw, value: None, inline: false })?;
             }
         } else if letters.len() > 2 && arg.starts_with("--") {
             match letters.iter().skip(3).position(|letter| *letter == '=') {

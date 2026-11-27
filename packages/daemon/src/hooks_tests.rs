@@ -46,12 +46,10 @@ fn base(kind: &str, cwd: &Path) -> Value {
     json!({
         "type": kind,
         "turn_id": "turn-1",
-        "session_id": "session-1",
         "transcript_path": here().join(".conversation.jsonl").to_string_lossy(),
         "ghost_name": "casper",
         "ghost_home": here().to_string_lossy(),
         "cwd": cwd.to_string_lossy(),
-        "conversation_id": "session-1",
     })
 }
 
@@ -624,7 +622,7 @@ fn logs_categorical_command_failures_without_stdout_or_stderr_detail() {
     let logged: Vec<(Level, &str, Value)> =
         records.iter().map(|record| (record.level, record.message.as_str(), Value::Object(record.fields.clone()))).collect();
     let bound = |fields: Value| {
-        let mut all = json!({ "ghost": "casper", "conversation": "session-1" });
+        let mut all = json!({ "ghost": "casper" });
         all.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
         all
     };

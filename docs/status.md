@@ -17,16 +17,25 @@ What they said it must be:
 
 Done since:
 
+- 2026-11-27, one conversation, at the owner's word ("what if there's one
+  continuous conversation - not separate threads"): the daemon, the `ghost`
+  command and the bar hold exactly one, with no ids, titles, pins or list.
+  It is `conversation/` in the ghost home (`sessions/<id>/` before), the
+  routes are `/api/conversation…`, `-s` and `$GHOST_SESSION` are gone, and
+  `ghost new --yes` starts over by moving it to Trash. An upgraded machine
+  keeps its old `sessions/` unread; with ghostd stopped,
+  `mv sessions/<id> conversation` carries one over by hand (its log and
+  attachments; an open question and the read mark are not carried). The
+  page (`packages/web`) still calls the old routes until it is redone.
+  Still to come: handoff keeping a document per topic.
 - 2026-11-27, the window is gone, at the owner's word ("the ghost should
   literally feel like it lives in the computer, not an app"): `ghost-bar`
   (`packages/bar`, formerly `packages/window`) is a prompt pinned to the
-  bottom of the screen with captions above it, one conversation (`default`),
+  bottom of the screen with captions above it, one conversation,
   Up and Down through it, `--listen` to start Omarchy's dictation with it.
   The window's chat list, Markdown rendering, and its showing of reasoning
   and command output went with it; `ghost show` still lists those.
-  Still to come, agreed in outline: one conversation in the daemon, CLI and
-  page too (no thread list anywhere), with handoff keeping a document per
-  topic. Not checked on a real desktop yet: dictation into the bar, and
+  Not checked on a real desktop yet: dictation into the bar, and
   Escape then summoning again.
 - 2026-11-26, a second cleanup, agreed with the owner: the turn_end hook
   (push alerts replaced its one use), the read-only guest role (only the

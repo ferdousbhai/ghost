@@ -35,6 +35,6 @@ pub mod xdg;
 
 /// The release version, the one in this crate's manifest.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub mod conversation_host;
 pub mod daemon;
 pub mod server;
-pub mod session_host;

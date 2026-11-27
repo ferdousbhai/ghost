@@ -1,4 +1,4 @@
-//! Images the owner attaches to a conversation. They live in the conversation
+//! Images the owner attaches to the conversation. They live in the conversation
 //! directory, the model's working directory, so a message names one by its
 //! relative path and the model opens it from its shell.
 use crate::error::{GhostError, Result};
