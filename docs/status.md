@@ -27,16 +27,34 @@ Done since:
   `mv sessions/<id> conversation` carries one over by hand (its log and
   attachments; an open question and the read mark are not carried). The
   page (`packages/web`) still calls the old routes until it is redone.
-  Still to come: handoff keeping a document per topic.
+- 2026-11-27, handoff keeps a document per topic, at the owner's word ("The
+  ghost makes use of handoff to maintain documents for context and
+  continuity as conversation topics change"): at a handoff the ghost first
+  brings `topics/` in the ghost home up to date with its shell (one Markdown
+  file per topic, its first line a summary), then writes only a short note
+  of where things stand; a note of a note no longer lets old topics fade.
+  A turn's first message lists the documents (ghostd derives the list from
+  the directory when a conversation starts and when a note is written, and
+  the log keeps it, so nothing the model has read changes between turns) and
+  the ghost `cat`s one when the conversation returns to its topic. They
+  outlive `ghost new`; the owner reads, edits and deletes them as files, and
+  `ghost status` says where they are and how many. `ghost stop` now stops a
+  handoff too, since one runs commands. Not tried on a real model: whether
+  Inkling 2 Mini keeps good documents, and whether a quarter of the context
+  is room enough to write them, are unproven.
 - 2026-11-27, the window is gone, at the owner's word ("the ghost should
   literally feel like it lives in the computer, not an app"): `ghost-bar`
   (`packages/bar`, formerly `packages/window`) is a prompt pinned to the
-  bottom of the screen with captions above it, one conversation,
+  bottom of the screen with the whole answer above it, one conversation,
   Up and Down through it, `--listen` to start Omarchy's dictation with it.
-  The window's chat list, Markdown rendering, and its showing of reasoning
-  and command output went with it; `ghost show` still lists those.
-  Not checked on a real desktop yet: dictation into the bar, and
-  Escape then summoning again.
+  The owner tried it the same day and set how it behaves: the prompt goes
+  on Enter and the shortcut brings it back; the whole answer stays until
+  Escape or turning to another window, neither of which stops the ghost;
+  Ctrl+C stops a turn, as in a terminal; the bar sits above Voxtype's
+  indicator, which had covered it. The window's chat list and its showing
+  of reasoning and command output went with it; `ghost show` still lists
+  those. Not checked on a real desktop yet: dictation into the bar, and
+  turning to another window putting it away.
 - 2026-11-26, a second cleanup, agreed with the owner: the turn_end hook
   (push alerts replaced its one use), the read-only guest role (only the
   owner reaches Ghost), the ghosts root (the home is

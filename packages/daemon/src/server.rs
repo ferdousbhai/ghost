@@ -548,7 +548,11 @@ impl Shared {
                     "restartNeeded": replaced_since_start(running),
                 }))
             }
-            Route::GhostName => ok(json!({ "name": options.ghost.name() })),
+            Route::GhostName => {
+                // The topic documents are the owner's to read, edit and delete: where they are, and how many.
+                let topics = crate::ghosts::ghost_paths(&options.ghost.dir).topics_dir;
+                ok(json!({ "name": options.ghost.name(), "topics": { "path": topics.to_string_lossy(), "count": crate::topics::count(&topics) } }))
+            }
             Route::CharacterGet => {
                 let character = read_character(&options.ghost.dir, false)?;
                 ok(json!({ "body": character.map(|character| character.body).unwrap_or_default(), "limit": MAX_CHARACTER_BODY_LENGTH }))

@@ -23,8 +23,16 @@ machine.
 
 ## Why files own durable context
 
-A ghost home keeps its character and its conversation together
-in one directory the owner can move or trash. Notes and plans live in the `Notes`
+A ghost home keeps its character, its conversation and its topic documents
+together in one directory the owner can move or trash. The conversation is
+one and continuous, longer than the model's context, so when it nears that
+the ghost hands off: it brings `topics/` up to date, one Markdown document
+per topic the conversation has dealt with, and writes a short note of where
+things stand. A later turn is handed the note and a list of the documents,
+and the ghost reads one when the conversation returns to its topic. A note
+of a note would let old topics fade; a document per topic does not. They
+are plain files: read, edit or delete them, and the ghost works from what
+is there. Starting over clears the conversation and leaves them. Notes and plans live in the `Notes`
 folder of the owner's Documents directory, shared by the owner and the ghost,
 and the owner's to-do list as checklists in its `Reminders` folder: Markdown editable with ordinary
 file tools, and synced by iCloud only if you connect it. Ghost names that
@@ -35,8 +43,8 @@ stay authoritative.
 
 The conversation has its own working directory. A coding agent run in
 a project's directory discovers that project's instructions normally.
-Ghost adds no trusted-project registry, private memory database, plan mode,
-or todo API.
+Ghost adds no trusted-project registry, private memory database or index,
+plan mode, or todo API.
 
 ## Why existing machine facilities own the rest
 
@@ -49,8 +57,7 @@ or todo API.
 - Dictation is Omarchy's, typing into Ghost as into any app. Ghost adds no speech stack.
 - Background work is a shell command. Ghost has no scheduler, job table, or
   worker manager.
-- Hooks are explicit owner commands. Ghost starts no automatic handoff or
-  next-work turns and has no built-in review or training loop.
+- Hooks are explicit owner commands. Ghost starts no idle or next-work turns and has no built-in review or training loop.
 - Omarchy owns package updates. Git, journald, systemd, and Trash provide code
   history, diagnostics, restart, and recovery; Ghost duplicates none of them.
 

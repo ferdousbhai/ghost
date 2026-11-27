@@ -76,7 +76,24 @@ fn texts(page: &TranscriptPage) -> Vec<Value> {
 fn writes_each_entry_with_the_keys_and_key_order_every_version_has_written() {
     let at = "2026-11-25T08:21:20.123Z";
     let written = [
-        (new_conversation_entry(1_795_594_880_123), r#"{"type":"conversation","v":1,"createdAt":"2026-11-25T08:21:20.123Z"}"#),
+        (new_conversation_entry(1_795_594_880_123, None), r#"{"type":"conversation","v":1,"createdAt":"2026-11-25T08:21:20.123Z"}"#),
+        // A conversation that started with topic documents records what it was told of them.
+        (
+            new_conversation_entry(1_795_594_880_123, Some("In \"/g/topics\":\n- boat.md: Heron".into())),
+            r#"{"type":"conversation","v":1,"createdAt":"2026-11-25T08:21:20.123Z","topics":"In \"/g/topics\":\n- boat.md: Heron"}"#,
+        ),
+        // A handoff: what it did to the topic documents, then its note, what the note covers, and the documents as they then stood.
+        (
+            LogEntry::Assistant {
+                at: at.into(),
+                content: vec![
+                    AssistantPart::Handoff { text: "Waiting on the pier.".into(), covers: 4, topics: Some("- boat.md: Heron".into()) },
+                    AssistantPart::Handoff { text: "Nothing open.".into(), covers: 9, topics: None },
+                ],
+                error: None,
+            },
+            r#"{"type":"assistant","at":"2026-11-25T08:21:20.123Z","content":[{"type":"handoff","text":"Waiting on the pier.","covers":4,"topics":"- boat.md: Heron"},{"type":"handoff","text":"Nothing open.","covers":9}]}"#,
+        ),
         (user_at(at, "hé \"you\"\n🐈"), r#"{"type":"user","at":"2026-11-25T08:21:20.123Z","text":"hé \"you\"\n🐈"}"#),
         (
             LogEntry::User { at: at.into(), text: "next".into(), origin: Some(Origin::FollowUp) },
@@ -243,8 +260,13 @@ fn the_preview_ignores_messages_the_owner_did_not_type() {
 #[test]
 fn pages_preserve_message_ids_split_command_pairs_totals_and_out_of_range_pages() {
     let ran = command("now", "pwd", "```\n/tmp", Some(1), false);
-    let entries =
-        [new_conversation_entry(0), user_at("now", "hello"), ran.clone(), command("now", "pwd", "```\n/tmp", Some(1), true), answer("now", "answer")];
+    let entries = [
+        new_conversation_entry(0, None),
+        user_at("now", "hello"),
+        ran.clone(),
+        command("now", "pwd", "```\n/tmp", Some(1), true),
+        answer("now", "answer"),
+    ];
     let all = whole(&entries);
     assert_eq!(all.total, 4);
     assert_eq!(all.messages.iter().map(|message| message.entry_id.as_str()).collect::<Vec<_>>(), ["e1", "e2", "e2o", "e4"]);
@@ -329,7 +351,7 @@ fn skips_records_it_does_not_write() {
 fn a_log_with_no_dated_entry_is_as_new_as_its_file() {
     let root = Scratch::new();
     let path = log_path(&root.0);
-    std::fs::write(&path, lines(&[new_conversation_entry(0)])).unwrap();
+    std::fs::write(&path, lines(&[new_conversation_entry(0, None)])).unwrap();
     let modified = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_795_594_880_123);
     File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
     let listed = root.1.listed().unwrap().unwrap();
@@ -358,7 +380,7 @@ fn refreshes_a_replaced_log_even_if_its_size_and_mtime_match_the_cached_file() {
 fn preserves_every_page_and_entry_id_through_incremental_appends() {
     let root = Scratch::new();
     let entries = [
-        LogEntry::Conversation { v: 1, created_at: AT.into() },
+        LogEntry::Conversation { v: 1, created_at: AT.into(), topics: None },
         user("Explain the new feature"),
         command(AT, "printf hello", "hello", Some(0), false),
         answer(AT, "answer"),

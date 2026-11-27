@@ -633,7 +633,7 @@ fn ran(id: &str, command: &str, output: Option<&str>) -> AssistantPart {
 #[test]
 fn replays_each_side_and_each_call_with_its_output_in_the_shapes_they_were_sent_in() {
     let entries = [
-        LogEntry::Conversation { v: 2, created_at: "2026-11-25T08:21:00.000Z".into() },
+        LogEntry::Conversation { v: 2, created_at: "2026-11-25T08:21:00.000Z".into(), topics: None },
         said_by_owner("When does the boat leave?"),
         pass(vec![
             AssistantPart::Thinking { text: "Read the note.".into() },
@@ -682,7 +682,7 @@ fn an_earlier_output_is_replayed_whole_and_a_handoff_note_stands_for_all_before_
         said_by_owner("old question"),
         pass(vec![AssistantPart::text("old answer")]),
         said_by_owner("meanwhile"),
-        pass(vec![AssistantPart::Handoff { text: "The boat is Heron.".into(), covers: 2 }]),
+        pass(vec![AssistantPart::Handoff { text: "The boat is Heron.".into(), covers: 2, topics: None }]),
         pass(vec![AssistantPart::text("noted")]),
         said_by_owner("and the pier?"),
     ];
@@ -698,11 +698,74 @@ fn an_earlier_output_is_replayed_whole_and_a_handoff_note_stands_for_all_before_
     // The newest note is the one that counts.
     let again = [
         &entries[..],
-        &[pass(vec![AssistantPart::text("north")]), pass(vec![AssistantPart::Handoff { text: "Heron, north pier.".into(), covers: 7 }])],
+        &[
+            pass(vec![AssistantPart::text("north")]),
+            pass(vec![AssistantPart::Handoff { text: "Heron, north pier.".into(), covers: 7, topics: None }]),
+        ],
     ]
     .concat();
     assert_eq!(conversation_messages(&again, "").len(), 1);
     assert!(conversation_messages(&again, "")[0]["content"].as_str().unwrap().ends_with("Heron, north pier."));
+}
+
+// The index of topic documents is handed on as the log recorded it, where
+// the conversation opens: its first line, or the newest handoff.
+#[test]
+fn the_conversation_opens_with_the_topic_documents_as_recorded_and_a_handoffs_own_pass_is_not_handed_on() {
+    let started =
+        LogEntry::Conversation { v: 1, created_at: "2026-11-27T08:00:00.000Z".into(), topics: Some("In \"/g/topics\":\n- boat.md: Heron".into()) };
+    let entries = [started, said_by_owner("and the pier?"), pass(vec![AssistantPart::text("North.")])];
+    assert_eq!(
+        conversation_messages(&entries, ""),
+        vec![
+            json!({ "role": "user", "content": "In \"/g/topics\":\n- boat.md: Heron\n\nand the pier?" }),
+            json!({ "role": "assistant", "content": "North." })
+        ]
+    );
+
+    // A handoff: its commands kept the documents, and what it said after the last of them is the note.
+    let handed_off = [
+        &entries[..],
+        &[
+            pass(vec![
+                AssistantPart::text("Writing it down."),
+                ran("c1", "cat ../topics/boat.md", Some("Heron")),
+                AssistantPart::Handoff {
+                    text: "Nothing is open.".into(),
+                    covers: 3,
+                    topics: Some("In \"/g/topics\":\n- boat.md: Heron, north pier".into()),
+                },
+            ]),
+            said_by_owner("thanks"),
+        ],
+    ]
+    .concat();
+    assert_eq!(
+        conversation_messages(&handed_off, ""),
+        vec![json!({
+            "role": "user",
+            "content": "The conversation before this was handed off. Its note:\n\nNothing is open.\n\nIn \"/g/topics\":\n- boat.md: Heron, north pier\n\nthanks",
+        })]
+    );
+}
+
+// Contract text the ghost acts on, word for word: paid for once at each handoff.
+#[test]
+fn the_handoff_asks_for_the_topic_documents_first_and_then_a_short_note() {
+    let dir = Path::new("/home/owner/.local/share/ghost/topics");
+    let asked = handoff_prompt(dir, None);
+    assert_eq!(
+        asked,
+        "This conversation is about to outgrow your context; your topic documents and the note you write now replace it. First, with bash, bring the topic documents in \"/home/owner/.local/share/ghost/topics\" up to date: one Markdown file for each topic this conversation dealt with, named for the topic, its first line a one-line summary, then what the owner asked for and decided; what you did and found, with the commands that mattered and their results; what is still open; and anything you were told to remember. Be exact about names, paths, numbers and dates. Update a topic's file rather than write a second for it. Then reply with only a short note of where things stand now: what you were in the middle of, and what the owner is waiting for."
+    );
+    assert_eq!(crate::text::len(&asked), 740);
+    // The documents there are, so none is written twice.
+    let again = handoff_prompt(dir, Some("- boat.md: Heron\n- taxes.md: Filed"));
+    assert!(
+        again
+            .contains(" rather than write a second for it; those you have:\n- boat.md: Heron\n- taxes.md: Filed\nThen reply with only a short note "),
+        "{again}"
+    );
 }
 
 #[test]

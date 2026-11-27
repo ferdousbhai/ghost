@@ -142,10 +142,19 @@ fn tool_message(id: &str, output: &str) -> Value {
 }
 
 /// What the ghost is asked, in the background, once the conversation nears
-/// the model's context: the note that replaces it. It is sent as the
-/// conversation's next message, so the server has already read everything
-/// before it.
-pub const HANDOFF_PROMPT: &str = "This conversation is about to outgrow your context, and the note you write now replaces all of it. Write that handoff note: what the owner asked for and decided; what you did and found, with the commands that mattered and their results; what is still open or waiting; and anything you were told to remember. Be exact about names, paths, numbers and dates. Write only the note, and run no command.";
+/// the model's context: to bring its topic documents (`topics.rs`) up to
+/// date with its shell, then to write the note that, with them, replaces the
+/// conversation. It is sent as the conversation's next message, so the
+/// server has already read everything before it. `index` is the documents
+/// there are, so none is written twice.
+pub fn handoff_prompt(topics_dir: &Path, index: Option<&str>) -> String {
+    let have = index.map_or_else(String::new, |index| format!("; those you have:\n{index}\n"));
+    let then = if have.is_empty() { ". Then" } else { "Then" };
+    format!(
+        "This conversation is about to outgrow your context; your topic documents and the note you write now replace it. First, with bash, bring the topic documents in {} up to date: one Markdown file for each topic this conversation dealt with, named for the topic, its first line a one-line summary, then what the owner asked for and decided; what you did and found, with the commands that mattered and their results; what is still open; and anything you were told to remember. Be exact about names, paths, numbers and dates. Update a topic's file rather than write a second for it{have}{then} reply with only a short note of where things stand now: what you were in the middle of, and what the owner is waiting for.",
+        crate::persona::quoted_path(topics_dir)
+    )
+}
 const HANDOFF_OPENING: &str = "The conversation before this was handed off. Its note:\n\n";
 
 /// The conversation so far as chat messages, for the turn that continues it:
@@ -153,6 +162,9 @@ const HANDOFF_OPENING: &str = "The conversation before this was handed off. Its 
 /// whole, in the shapes they were first sent in, so the server recognises
 /// them and reads only what is new. It grows as long as the model's context
 /// permits; a handoff note, once written, stands for everything before it.
+/// The first message says what topic documents there are, as the log recorded
+/// them when the conversation started or the note was written: never as they
+/// are now, which would change what the server has already read.
 /// A hook's message starts with `hook_prefix`. Reasoning is not handed on.
 /// Nothing says what time it is (a model runs `date` unprompted), so no
 /// message changes between turns.
@@ -161,17 +173,23 @@ pub fn conversation_messages(entries: &[LogEntry], hook_prefix: &str) -> Vec<Val
     // The newest handoff note, then everything it does not cover: what was said while it was being written, and since.
     let note = entries.iter().enumerate().rev().find_map(|(index, entry)| match entry {
         LogEntry::Assistant { content, .. } => content.iter().find_map(|part| match part {
-            AssistantPart::Handoff { text, covers } => Some(((*covers).min(index), text.as_str())),
+            AssistantPart::Handoff { text, covers, topics } => Some(((*covers).min(index), text.as_str(), topics.as_deref())),
             _ => None,
         }),
         _ => None,
     });
     let entries = match note {
-        Some((covers, text)) => {
-            messages.push(json!({ "role": "user", "content": format!("{HANDOFF_OPENING}{text}") }));
+        Some((covers, text, topics)) => {
+            let topics = topics.map_or_else(String::new, |topics| format!("\n\n{topics}"));
+            messages.push(json!({ "role": "user", "content": format!("{HANDOFF_OPENING}{text}{topics}") }));
             &entries[covers..]
         }
-        None => entries,
+        None => {
+            if let Some(LogEntry::Conversation { topics: Some(topics), .. }) = entries.first() {
+                messages.push(json!({ "role": "user", "content": topics }));
+            }
+            entries
+        }
     };
     let say = |messages: &mut Vec<Value>, role: &str, text: String| {
         // Two messages in a row from one side are one message: some chat templates refuse anything else.
@@ -188,6 +206,8 @@ pub fn conversation_messages(entries: &[LogEntry], hook_prefix: &str) -> Vec<Val
             LogEntry::Command { command, output, excluded: false, .. } => {
                 say(&mut messages, "user", format!("I ran this myself:\n$ {command}\n{output}"))
             }
+            // A handoff's own pass is not handed on: the note stands for it, and its commands only kept the topic documents.
+            LogEntry::Assistant { content, .. } if content.iter().any(|part| matches!(part, AssistantPart::Handoff { .. })) => {}
             LogEntry::Assistant { content, .. } => {
                 // One pass may hold several rounds: text, then the calls it made, then text again.
                 let mut text = String::new();

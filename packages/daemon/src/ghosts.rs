@@ -12,6 +12,8 @@ pub struct Ghost {
 
 /// The ghost's one conversation: the directory its commands run in, holding its log.
 pub const CONVERSATION_DIRNAME: &str = "conversation";
+/// The ghost's topic documents (`topics.rs`), which outlive the conversation.
+pub const TOPICS_DIRNAME: &str = "topics";
 /// The name of a ghost whose persona has no title yet, and of the persona a first start seeds.
 const FIRST_GHOST_NAME: &str = "ghost";
 const MAX_NAME_CHARS: usize = 64;
@@ -41,12 +43,17 @@ pub fn is_ghost_home(dir: &Path) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GhostPaths {
     pub conversation_dir: PathBuf,
+    pub topics_dir: PathBuf,
     pub character_file: PathBuf,
 }
 
 pub fn ghost_paths(dir: &Path) -> GhostPaths {
     let home = absolute(dir);
-    GhostPaths { conversation_dir: home.join(CONVERSATION_DIRNAME), character_file: home.join(CHARACTER_FILENAME) }
+    GhostPaths {
+        conversation_dir: home.join(CONVERSATION_DIRNAME),
+        topics_dir: home.join(TOPICS_DIRNAME),
+        character_file: home.join(CHARACTER_FILENAME),
+    }
 }
 
 /// The machine's one ghost, whose home is `dir`: made with a seeded persona

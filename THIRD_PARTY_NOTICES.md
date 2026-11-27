@@ -107,7 +107,7 @@ The bar (`ghost-bar`):
   gdk-pixbuf, gdk-pixbuf-sys, gdk4, gdk4-sys, gio, gio-sys, glib, glib-sys,
   gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
   pango, pango-sys
-- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, slab, urlencoding, zmij
+- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab, urlencoding, zmij
 - MIT or Apache-2.0: async-channel, base64, bitflags, concurrent-queue,
   crossbeam-utils, equivalent, event-listener, event-listener-strategy,
   field-offset, form_urlencoded, futures-channel, futures-core,

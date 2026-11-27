@@ -528,7 +528,12 @@ fn names_the_machines_one_ghost() {
     let daemon = Daemon::start();
     let response = daemon.get("/api/ghost");
     assert_eq!(response.status, 200);
-    assert_eq!(response.json(), json!({ "name": "casper" }));
+    // With where its topic documents are, the owner's to read, edit and delete, and how many there are.
+    let topics = daemon.ghost_dir.join("topics");
+    assert_eq!(response.json(), json!({ "name": "casper", "topics": { "path": topics.to_string_lossy(), "count": 0 } }));
+    std::fs::create_dir_all(&topics).unwrap();
+    std::fs::write(topics.join("boat-trip.md"), "The Heron leaves at nine.\n").unwrap();
+    assert_eq!(daemon.get("/api/ghost").json()["topics"]["count"], 1);
     assert_eq!(response.header("content-type"), Some("application/json; charset=utf-8"));
     assert_eq!(response.header("cache-control"), Some("no-store"));
     assert_eq!(response.header("connection"), Some("close"));
@@ -1250,7 +1255,7 @@ fn it_404s_anything_outside_the_contract_and_405s_the_wrong_method() {
     assert_eq!(posted.json(), json!({ "error": { "message": "POST is not allowed here.", "code": "method_not_allowed" } }));
     assert_eq!(daemon.get("/api/messages").status, 405);
     // A trailing slash and a query name the same route.
-    assert_eq!(daemon.get("/api/ghost/?x=1").json(), json!({ "name": "casper" }));
+    assert_eq!(daemon.get("/api/ghost/?x=1").json()["name"], "casper");
 }
 
 #[test]
@@ -1323,7 +1328,7 @@ fn has_no_route_that_makes_renames_or_removes_a_ghost() {
     assert_eq!(daemon.post("/api/ghost", &json!({ "name": "wisp" })).status, 405);
     assert_eq!(daemon.put("/api/name", &json!({ "name": "wisp" })).status, 404);
     assert_eq!(daemon.call("DELETE", "/api/ghosts/casper?confirm=casper", &[JSON], None).status, 404);
-    assert_eq!(daemon.get("/api/ghost").json(), json!({ "name": "casper" }));
+    assert_eq!(daemon.get("/api/ghost").json()["name"], "casper");
     assert!(daemon.ghost_dir.join("character.md").exists());
 }
 
@@ -1548,7 +1553,7 @@ fn lets_the_real_token_through() {
     let daemon = guarded();
     let response = daemon.get_as("/api/ghost", &[("authorization", &bearer(&token()))]);
     assert_eq!(response.status, 200);
-    assert_eq!(response.json(), json!({ "name": "casper" }));
+    assert_eq!(response.json()["name"], "casper");
     assert_eq!(response.header("www-authenticate"), None);
 }
 

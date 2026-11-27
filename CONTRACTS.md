@@ -37,8 +37,8 @@ remote client at all. The app's code is [`packages/web`](packages/web/README.md)
 
 Durable state has three scopes:
 
-- **Ghost-private:** the character and the conversation live in one ghost
-  home.
+- **Ghost-private:** the character, the conversation and the ghost's topic
+  documents live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, and plans live in the `Notes`
   folder of the owner's XDG Documents directory, and the owner's to-do list
   in its `Reminders` folder; the ghost reads and writes both ([Character and
@@ -106,6 +106,7 @@ A machine has one ghost, and its home is one fixed directory,
 ~/.local/share/ghost/
   character.md
   conversation/        (the one conversation)
+  topics/              (one Markdown document per topic, kept by the ghost)
 ```
 
 A daemon start that finds no `character.md` there makes one, seeded
@@ -113,7 +114,8 @@ A daemon start that finds no `character.md` there makes one, seeded
 home. The ghost's name is its
 persona's title, the leading `# ` heading of `character.md`, read when it is
 needed, else `ghost`; to rename the ghost, retitle its persona. No route,
-command or URL carries the name; `GET /api/ghost` reports it. Another
+command or URL carries the name; `GET /api/ghost` reports it, with where
+the topic documents are and how many. Another
 machine's ghost is reached at that machine, over Tailscale
 ([Remote access](#remote-access)). The directory is the whole ghost: to remove
 it, `gio trash` it.
@@ -131,7 +133,24 @@ with a heading naming the persona. Its complete body, bounded by
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
-There is no ghost-private memory store. A ghost's lasting state is the
+### Topic documents
+
+`topics/` holds one Markdown file per topic the conversation has dealt with,
+named for the topic, its first line a one-line summary
+([`topics.rs`](packages/daemon/src/topics.rs)). They are the ghost's lasting
+memory of each topic: what the owner asked for and decided, what was done and
+found, what is still open, what it was told to remember. The ghost writes
+them with its shell at each handoff ([Local model](#local-model)) and reads
+one with `cat` when the conversation returns to its topic. They outlive the
+conversation: starting over clears the conversation, not what the ghost
+knows. They are plain files, the owner's to read, edit and delete, and
+`ghost status` says where they are and how many. Ghost keeps no index of
+them: ghostd lists `topics/*.md` (not hidden files) with each file's first
+line, cut at 120 characters, when a conversation starts and when a handoff
+is written, and at no other time.
+
+Apart from those, there is no ghost-private memory store. What the owner
+should also read is a note: a ghost's lasting state is the
 `Notes` folder of the owner's Documents directory, which it
 keeps current unasked (it reads the note that covers a task before starting,
 updates it in the same turn as a fact arrives or the task advances, and
@@ -174,9 +193,13 @@ commands run in, holding Ghost's log, `.conversation.jsonl`
 ([`conversation_log.rs`](packages/daemon/src/conversation_log.rs)), the
 images the owner attached (`attachments/`), and two sidecars
 ([`sidecars.rs`](packages/daemon/src/sidecars.rs)). The log is one JSON
-object per line — the conversation header, owner and follow-up and hook
+object per line — the conversation header (with `topics`, what the
+conversation was told of the topic documents as it started, when there were
+any), owner and follow-up and hook
 messages, the assistant's parts in the order they happened (`thinking`, its
-reasoning; `handoff`, the note that stands for the conversation before it;
+reasoning; `handoff`, the note that stands for the conversation before it,
+with `covers`, how many of the log's entries that is, and `topics` as the
+header has it, after the parts of the pass that wrote it;
 `text`; `toolCall` with its `arguments`, `output`, the whole of
 what it returned as the model was given it, and `failed` on one that
 failed; a failed turn carries `error`), and the owner's `!` commands. A torn
@@ -346,7 +369,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 |---|---|
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/status` | `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
-| `GET /api/ghost` | `{ name }`, the machine's one ghost. No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev4)). |
+| `GET /api/ghost` | `{ name, topics: { path, count } }`, the machine's one ghost and its [topic documents](#topic-documents). No route makes, renames, or removes it ([Ghost home](#ghost-home-ghost-homev4)). |
 | `GET\|PUT /api/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `POST /api/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the local model, with no persona, conversation, or tools (`409 no_local_model` with none configured; `502 completion_failed` for an empty answer). It takes no conversation lock or admission, since the turn awaiting the `session_stop` hook that asks holds its own. |
 | `POST /api/messages` | `{ prompt }` → one turn of the conversation as the turn wire below; `409 conversation_busy` while another runs. |
@@ -359,7 +382,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 | `GET /api/conversation/transcript` | Paged renderable history projected from the conversation log, `{ messages, total, truncated, readThrough }`: `?limit=` messages (default 1000, at most 2000) from `?offset=` (counted from the oldest, default 0), out of `total` (0, not a 404, with no log yet), `truncated` when the page is not all of them. Each message is `{ role, content, entryId }`: `role` is `user`, `assistant`, or `hook`, `content` a part list, and `entryId` unique per message (`e<n>` for log entry n, counting every entry from 0; `e<n>o` for a `!command`'s output). An owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /api/conversation/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the model opens it from its shell and clients show it as a picture. |
 | `GET /api/conversation/attachments/:file` | The stored image. |
-| `POST /api/conversation/stop` | Abort the running turn or `!command`; its stream ends `aborted`. With none running, `409 conversation_not_streaming`. |
+| `POST /api/conversation/stop` | Abort the running turn or `!command`; its stream ends `aborted`. A handoff under way is stopped too, with the turn waiting for it or on its own. With none of them running, `409 conversation_not_streaming`. |
 | `GET\|POST /api/conversation/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it. With none running, `409 conversation_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 conversation_busy`. |
 | `DELETE /api/conversation` | Start over: move the conversation directory to Trash. A running turn refuses it with `409 conversation_busy`; `404` when there is no conversation. |
 | `GET /api/remote/whoami` | `{ role: "owner" }`: anyone admitted is the owner. |
@@ -384,7 +407,7 @@ summary, and an end names the tool and carries `isError`, the summary, and
 `output`, the whole of what the call returned as the model was given it.
 Nothing of a turn is held back from the owner: the log keeps the reasoning,
 each call whole, and all it printed (below), `ghost show` and the app show
-them, and the bar, which is captions, shows what was said and the command
+them, and the bar shows what was said and the command
 running. An owner `!command` is
 one `bash` tool card, then `done`.
 
@@ -404,7 +427,8 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/mod.rs`](packages/daemon/src/cli/mod.rs). Every daemon capability, except attaching a photo and reading the follow-up queue, is a
 named verb there (character, the conversation's say, show, stop and
-starting over, hooks, and status, which also says what the conversation is
+starting over, hooks, and status, which also says where the topic documents
+are, how many there are, and what the conversation is
 doing), so a
 ghost can drive and verify itself from Bash without raw HTTP. Marking the
 conversation read is the app's alone. `-q` keeps only
@@ -443,24 +467,30 @@ the daemon into. Removing it preserves owner data.
   persona prompt, configuration, authentication, the conversation, the local model and its loop, hooks, lifecycle,
   HTTP, and the `ghost` CLI. It is a native Rust binary.
 - [`packages/bar`](packages/bar/src/main.rs) is Ghost's bar
-  (`ghost-bar`, app id `io.github.ferdousbhai.Ghost`): a prompt pinned to
-  the bottom of the screen, over whatever else is there, with what the owner
-  asked and what the ghost says above it as captions. Ghost has no window. It
+  (`ghost-bar`, app id `io.github.ferdousbhai.Ghost`): a prompt near
+  the bottom of the screen, over whatever else is there, and above it what
+  the owner asked with the whole of what the ghost answers. Ghost has no window. It
   is Rust and GTK 4, a layer-shell surface (`gtk4-layer-shell`; a plain
   undecorated window where the display has none), whose look (Omarchy's
   current theme, followed live) is [omui](https://github.com/ferdousbhai/omui)'s;
   [`style.css`](packages/bar/src/style.css) holds only Ghost's own rules,
   on omui's `@om_*` colours. It is a client of the
-  API and keeps no data. It shows the conversation a caption at a
-  time: each thing the ghost says takes the caption from the one before, a
-  full caption gives way to the next, a running command is one status line,
-  and Up and Down go back and forth through the whole conversation, which it
-  reads again each time it is shown and when a turn ends. The answers to the
-  ghost's open question are buttons under its caption. Reasoning, commands
-  and what they printed are not in it: `ghost show` lists them. Escape stops
-  a running turn, and with none puts the bar away. It finds the daemon as the CLI
+  API and keeps no data. Nothing of it stays on screen. The prompt
+  goes when a question is sent; the answer, all of it as Markdown, scrolling
+  past about half the screen's height, with the command that is running as
+  one status line, stays until the owner puts the bar away: Escape, or
+  turning to another window. Putting it away stops nothing: a running turn
+  runs on and is on screen when the bar is summoned again, and an answer
+  that had ended while on screen is not, though Up and Down go back and
+  forth through the whole conversation an exchange at a time (it is read
+  again each time the bar is summoned and when a turn ends). Ctrl+C is a
+  terminal's: it stops the running turn; with none it empties the prompt;
+  with nothing to empty it puts the bar away. The answers to the ghost's
+  open question are buttons under what it said. Reasoning, commands and
+  what they printed are not in it: `ghost show` lists them. The prompt sits
+  above where Omarchy's dictation shows what it hears. It finds the daemon as the CLI
   does (`GHOSTD_PORT`, else `port` in `config.json`, else 7717; the token
-  file). One instance: `ghost-bar` again shows the first and gives it the
+  file). One instance: `ghost-bar` again shows the first with its prompt and gives it the
   keyboard, which is how a key binding summons it. `ghost-bar --listen` also
   runs `omarchy-dictation toggle`, so one key opens the bar and listens;
   dictation types into the bar's prompt as into any focused field, and Ghost
@@ -550,18 +580,41 @@ the new message costs time. Nothing is searched ahead of the model.
 The conversation grows as long as the context permits, by the server's own
 count of each request. When a turn ends past three quarters of the context,
 a handoff starts in the background: the ghost is asked, as the conversation's
-own next message, to write a note of it (`HANDOFF_PROMPT`). The note is
-logged as a `handoff` part that says how many of the log's entries it covers,
-and from then on a turn is handed the note in place of those entries. The
-log and every client still hold the whole conversation.
+own next message (`handoff_prompt`, which lists the
+[topic documents](#topic-documents) there are), first to bring those
+documents up to date with its shell, updating a topic's file rather than
+writing a second, and then to reply with only a short note of where things
+stand: what it was in the middle of and what the owner is waiting for. The
+pass is a turn's, commands and all, but for three things: nobody is shown it,
+its `ask` is refused, and its note is what it said after its last command.
+It is logged as one assistant entry, the pass's reasoning, words and commands
+and then the `handoff` part, which says how many of the log's entries the
+note covers. From then on a turn is handed the note in place of those entries
+and of the handoff's own pass. The log and every client still hold the whole
+conversation. A handoff that ends without a note, or is stopped, logs
+nothing and is tried again after the next turn (from the newest part that
+fits, when it was the handoff that outgrew the context); what it had already
+written to the documents stays.
 
-A turn that arrives while the note is being written waits for it, saying so,
+The first message a turn is handed says where the topic documents are, to
+`cat` one when the conversation returns to its topic, and which there are:
+the index as ghostd derived it when the conversation started (the log's
+header) or when the newest note was written (after that note), read back from
+the log and never from the directory. Those are the two moments at which the
+server reads everything after the system message anyway, so the index costs
+no second reading; in the persona, or derived at each turn, a document
+written or edited mid-conversation would change what the server has already
+read and make it read the whole conversation again. A document written since
+is therefore not in the index until the next handoff.
+
+A turn that arrives during a handoff waits for it, saying so,
 and then runs from the note. It waits rather than running beside it because
 the model server has one slot (`--parallel 1`) and answers one request at a
 time: a second slot would halve the context each gets, share the GPU between
 the two, and make the note's slot read the whole conversation again, since
-what a slot has read is its own. So the wait is the note's own length, and
-nothing is cancelled or done twice.
+what a slot has read is its own. So the wait is the handoff's own length, and
+nothing is cancelled or done twice, unless the owner stops it: a stop ends
+the handoff and its running command with the turn.
 
 A request the server refuses for length is retried once with the newest of
 the conversation that fits, and the handoff that follows is written from

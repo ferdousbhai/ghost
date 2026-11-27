@@ -92,9 +92,8 @@ systemctl --user enable --now ghostd.service
 
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
-launcher summons the bar (`ghost-bar`): a prompt at the bottom of the
-screen, with what you ask and what the ghost says above it as captions.
-Up and Down go back through the conversation, and Escape puts the bar away.
+launcher summons the bar (`ghost-bar`): a prompt near the bottom of the
+screen, with what you ask and the ghost's answer above it.
 Bind a key to it in `~/.config/hypr/bindings.lua` so it is always one press
 away, for example `o.bind("SUPER + CTRL + G", "Ghost", "ghost-bar --listen")`;
 with `--listen` the same key starts Omarchy's dictation, and pressed again
@@ -119,6 +118,14 @@ Each machine has one ghost, at home in `~/.local/share/ghost/`. The first time
 ghostd starts it makes that directory with a seeded `character.md`;
 `ghost status` prints the ghost's name, which is its persona's title (`ghost`
 until the persona is written). To rename it, change the title.
+
+The conversation is one, and outlasts the model's context: when it nears
+that, the ghost writes what it knows of each topic into a Markdown document
+in `~/.local/share/ghost/topics/` and carries on from a short note and the
+list of those documents, reading one when you return to its topic. They are
+ordinary files, yours to read, correct or delete; `ghost status` says where
+they are and how many. `ghost new --yes` starts the conversation over and
+leaves them.
 
 While `character.md` is still the seed, the ghost knows it has not met you: it
 helps with what you asked first, learns about you in the gaps, and offers a
@@ -150,12 +157,14 @@ leaves the machine; nothing else does.
 ## 6. First conversation
 
 Summon Ghost from your app launcher, or with the key you bound. Type in the
-prompt at the bottom of the screen, and `Enter` sends. What the ghost says
-appears above it as captions, with a line saying which command it is
-running; `Esc` ends a running turn, and with none puts the bar away. It is
-one conversation: `Up` and `Down` go back and forth through it, and
-`ghost show` in a terminal lists all of it, the ghost's reasoning
-and commands included.
+prompt, and `Enter` sends. The prompt goes, and the answer appears in its
+place, with a line saying which command the ghost is running. It stays
+until you press `Esc` or turn to another window; neither stops the ghost,
+and summoning the bar again shows a turn that is still running. `Ctrl+C`
+stops a running turn (with none it empties the prompt, and with the prompt
+empty it puts the bar away). It is one conversation: `Up` and `Down` go
+back and forth through it, and `ghost show` in a terminal lists all of it,
+the ghost's reasoning and commands included.
 
 Your notes, mail, photos and the rest stay in their own apps. The ghost
 reaches them through each app's command line, and installs or connects one

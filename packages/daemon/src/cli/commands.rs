@@ -156,10 +156,11 @@ pub fn character_command(ctx: &mut Context) -> Result<i32, CliError> {
 }
 
 /// `ghost status`: that the daemon answers and accepts the token, what it
-/// runs, whether the code on disk has changed under it, and what the
-/// conversation is doing.
+/// runs, whether the code on disk has changed under it, where the ghost's
+/// topic documents are and how many, and what the conversation is doing.
 pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let ghost = ctx.request("GET", "/api/ghost", None)?.get("name").cloned();
+    let about = ctx.request("GET", "/api/ghost", None)?;
+    let (ghost, topics) = (about.get("name").cloned(), about.get("topics").cloned());
     let remote = ctx.request("GET", "/api/remote", None)?;
     let daemon = ctx.request("GET", "/api/status", None)?;
     let conversation = ctx.request("GET", "/api/conversation", None)?;
@@ -172,6 +173,7 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         ("daemon", Some(json!(base_url))),
         ("tokenFile", Some(json!(token_file))),
         ("ghost", ghost.clone()),
+        ("topics", topics.clone()),
         ("version", Some(json!(version))),
         ("daemonVersion", daemon.get("version").cloned()),
         ("source", daemon.get("source").cloned()),
@@ -193,6 +195,13 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
             format!("daemon         {base_url}"),
             format!("token file     {token_file}"),
             format!("ghost          {}", ghost.as_ref().filter(|name| !name.is_null()).map_or_else(|| "—".to_string(), |name| text_of(Some(name)))),
+            // The ghost's topic documents: plain files, the owner's to read, edit and delete.
+            format!(
+                "topics         {}",
+                topics
+                    .as_ref()
+                    .map_or_else(|| "—".to_string(), |topics| format!("{} in {}", text_of(topics.get("count")), text_of(topics.get("path"))))
+            ),
             format!("version        {version}"),
             format!("daemon version {}", text_of(daemon.get("version"))),
             format!("daemon commit  {}", source("commit", "unknown")),

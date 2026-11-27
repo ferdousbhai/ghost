@@ -1,5 +1,5 @@
-//! Ghost's bar: the conversation with the ghost as a prompt and captions at the bottom of the screen, with no
-//! window. It is a client of ghostd's API, like the `ghost` CLI; it keeps no data of its own.
+//! Ghost's bar: the conversation with the ghost as a prompt near the bottom of the screen and the answer above it,
+//! with no window. It is a client of ghostd's API, like the `ghost` CLI; it keeps no data of its own.
 //! The look and the shared widgets are omui's; `style.css` holds only what is Ghost's own.
 //!
 //!   ghost-bar            summon the bar: started if it is not running, shown and given the keyboard if it is
@@ -7,6 +7,7 @@
 
 mod api;
 mod bar;
+mod md;
 
 use gtk::{glib, prelude::*};
 

@@ -162,7 +162,8 @@ fn starts_serves_the_ghost_and_stops_cleanly_on_sigterm() {
 
     // The token it minted, into the file it was pointed at, is what the API asks for.
     let token = ghostd::token::read_api_token(Path::new(&scratch.path("state/api-token"))).unwrap().expect("a minted token");
-    assert_eq!(get(port, "/api/ghost", Some(&token)), (200, json!({ "name": "ghost" })));
+    let (status, about) = get(port, "/api/ghost", Some(&token));
+    assert_eq!((status, &about["name"], &about["topics"]["count"]), (200, &json!("ghost"), &json!(0)));
     let (status, refusal) = get(port, "/api/ghost", None);
     assert_eq!((status, refusal["error"]["code"].is_string()), (401, true));
     assert_eq!(get(port, "/api/ghost", Some(&"0".repeat(64))).0, 401);

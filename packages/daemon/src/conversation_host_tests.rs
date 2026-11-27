@@ -237,6 +237,11 @@ impl Home {
         ghost_paths(&self.ghost().dir).conversation_dir
     }
 
+    /// Where the ghost keeps its topic documents.
+    fn topics_dir(&self) -> PathBuf {
+        ghost_paths(&self.ghost().dir).topics_dir
+    }
+
     fn env(&self) -> Env {
         Env::from([
             ("PATH".to_string(), std::env::var("PATH").unwrap_or_default()),
@@ -323,6 +328,11 @@ fn assert_carries(actual: &Value, expected: Value) {
 #[track_caller]
 fn assert_has(events: &[Value], expected: Value) {
     assert!(events.iter().any(|event| carries(event, &expected)), "no event carries {expected} in {events:?}");
+}
+
+/// What a handoff asks while the ghost has no topic documents yet.
+fn handoff_prompt(home: &Home) -> String {
+    crate::local_turn::handoff_prompt(&home.topics_dir(), None)
 }
 
 fn messages(host: &ConversationHost) -> Vec<Value> {
@@ -1042,7 +1052,7 @@ fn a_conversation_near_the_models_context_is_handed_off_in_the_background_and_a_
     fake.wait_for_calls(2);
     let calls = fake.calls();
     // It is asked as the conversation's own next message, so the server has read all before it.
-    assert_eq!(calls[1].prompt, crate::local_turn::HANDOFF_PROMPT);
+    assert_eq!(calls[1].prompt, handoff_prompt(&home));
     assert_eq!(calls[1].history, vec![json!({ "role": "user", "content": "hello" }), json!({ "role": "assistant", "content": long })]);
 
     // The model answers one request at a time: a turn that arrives meanwhile waits, saying why.
@@ -1051,7 +1061,7 @@ fn a_conversation_near_the_models_context_is_handed_off_in_the_background_and_a_
     assert_eq!(fake.calls().len(), 2);
     gate.release();
     running.join().unwrap();
-    assert_has(&events.all(), json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+    assert_has(&events.all(), json!({ "type": "thinking", "delta": "Handing off: updating the topic documents and writing a note…\n" }));
     // It then runs from the note, with the owner's words.
     let calls = fake.calls();
     assert_eq!(calls.len(), 3);
@@ -1083,7 +1093,7 @@ fn the_servers_own_count_of_the_context_decides_when_it_is_known() {
     let host = home.host(&fake);
     turn(&host, "hello");
     turn(&host, "again");
-    assert_eq!(fake.calls()[1].prompt, crate::local_turn::HANDOFF_PROMPT);
+    assert_eq!(fake.calls()[1].prompt, handoff_prompt(&home));
     assert!(fake.calls()[2].prompt.ends_with("a note\n\nagain"));
 }
 
@@ -1103,11 +1113,150 @@ fn a_conversation_that_outgrew_the_context_mid_turn_is_handed_off_from_what_stil
     turn(&host, "second");
     turn(&host, "third");
     let calls = fake.calls();
-    assert_eq!(calls[2].prompt, crate::local_turn::HANDOFF_PROMPT);
+    assert_eq!(calls[2].prompt, handoff_prompt(&home));
     // Not the whole conversation, which no longer fits, but its newest turn, from the owner's message on.
     assert_eq!(calls[2].history.len(), 2);
     assert_eq!(calls[2].history[0], json!({ "role": "user", "content": "second" }));
     assert!(calls[3].prompt.ends_with("a note of what fits\n\nthird"), "{}", &calls[3].prompt[..80]);
+}
+
+// A handoff keeps the ghost's topic documents: it runs commands as a turn
+// does, and only what it says after the last of them is the note.
+#[test]
+fn a_handoff_brings_the_topic_documents_up_to_date_and_the_next_turn_is_handed_its_note_and_their_index() {
+    let home = Home::new();
+    let long = "x".repeat(80_000);
+    let gate = Gate::default();
+    let write = "printf 'The Heron leaves the north pier at nine.\\n' > ../topics/boat-trip.md";
+    let handing_off = FakeTurn {
+        gate: Some(gate.clone()),
+        events: vec![
+            PassEvent::Thinking { block: "r1".into(), delta: "One topic: the boat.".into() },
+            said("r1", "Writing it down."),
+            PassEvent::ToolStart { id: "c1".into(), name: "bash".into(), args: json!({ "command": write }) },
+            PassEvent::ToolEnd { id: "c1".into(), is_error: false, output: Some("(no output)".into()) },
+            said("r2", "Waiting on the owner to pick a pier."),
+        ],
+        ..Default::default()
+    };
+    let fake = Fake::new([replies(&[&long]), vec![handing_off], replies(&["North.", "Still nine."])].concat());
+    let host = home.host(&fake);
+    turn(&host, "when does the boat leave?");
+    fake.wait_for_calls(2);
+    // The directory is there for the ghost's first document, and the pass's commands run where a turn's do.
+    assert!(home.topics_dir().is_dir());
+    assert_eq!(fake.calls()[1].prompt, handoff_prompt(&home));
+    assert_eq!(fake.calls()[1].cwd, home.conversation_dir());
+    // What the scripted command stands for.
+    std::fs::write(home.topics_dir().join("boat-trip.md"), "The Heron leaves the north pier at nine.\n").unwrap();
+    gate.release();
+
+    turn(&host, "which pier?");
+    let index = format!(
+        "Your topic documents are in \"{}\"; `cat` one when the conversation returns to its topic:\n- boat-trip.md: The Heron leaves the north pier at nine.",
+        home.topics_dir().display()
+    );
+    let opening = format!("The conversation before this was handed off. Its note:\n\nWaiting on the owner to pick a pier.\n\n{index}");
+    // The next turn is handed the note and the index, and none of the handoff's own commands.
+    let calls = fake.calls();
+    assert_eq!((calls[2].prompt.as_str(), &calls[2].history), (format!("{opening}\n\nwhich pier?").as_str(), &Vec::new()));
+    // The log keeps what the handoff did, in order, and its note says what it covers and what was told of the documents.
+    let handoff = &messages(&host)[2]["content"];
+    assert_eq!(
+        handoff,
+        &json!([
+            { "type": "thinking", "text": "One topic: the boat." },
+            { "type": "text", "text": "Writing it down." },
+            { "type": "toolCall", "id": "c1", "name": "bash", "arguments": { "command": write }, "output": "(no output)" },
+            { "type": "handoff", "text": "Waiting on the owner to pick a pier.", "covers": 3, "topics": index },
+        ])
+    );
+
+    // Nothing a turn is handed changes between turns: the owner's edit and a new document wait for the next handoff.
+    std::fs::write(home.topics_dir().join("boat-trip.md"), "Cancelled.\n").unwrap();
+    std::fs::write(home.topics_dir().join("taxes.md"), "Filed.\n").unwrap();
+    turn(&host, "and when?");
+    assert_eq!(fake.calls()[3].history[0], json!({ "role": "user", "content": format!("{opening}\n\nwhich pier?") }));
+}
+
+// The owner is not there to be asked, and a question is not a note.
+#[test]
+fn a_handoff_asks_the_owner_nothing() {
+    let home = Home::new();
+    let asking = FakeTurn { ask: Some(("Which pier?".to_string(), vec!["North".to_string(), "South".to_string()])), ..says("Which pier?") };
+    // The handoff tried again after the next turn is held, so the log is read as that turn left it.
+    let held = FakeTurn { gate: Some(Gate::default()), ..Default::default() };
+    let fake = Fake::new([replies(&[&"x".repeat(80_000)]), vec![asking], replies(&["after"]), vec![held]].concat());
+    let host = home.host(&fake);
+    turn(&host, "hello");
+    fake.wait_for_calls(2);
+    turn(&host, "again");
+    assert_eq!(conversation(&host)["question"], Value::Null);
+    assert_eq!(fake.calls()[2].prompt, "again");
+    assert_eq!(roles(&host), ["user", "assistant", "user", "assistant"]);
+    host.dispose_all();
+}
+
+// A handoff runs commands, so the owner can stop one as they stop a turn.
+#[test]
+fn a_stop_stops_a_handoff_and_the_conversation_carries_on_whole() {
+    let home = Home::new();
+    let long = "x".repeat(80_000);
+    let stuck = FakeTurn { gate: Some(Gate::default()), ..says("never said") };
+    let fake = Fake::new([replies(&[&long]), vec![stuck], replies(&["Here."])].concat());
+    let host = home.host(&fake);
+    turn(&host, "hello");
+    fake.wait_for_calls(2);
+    host.stop_turn().unwrap();
+    // No note: the next turn waits for nothing and is handed the conversation as it was.
+    let events = turn(&host, "are you there?");
+    assert!(of_type(&events, &["thinking"]).is_empty());
+    let calls = fake.calls();
+    assert_eq!(calls[2].history, vec![json!({ "role": "user", "content": "hello" }), json!({ "role": "assistant", "content": long })]);
+    assert_eq!(calls[2].prompt, "are you there?");
+    // With nothing left to stop, a stop is refused again.
+    host.dispose_all();
+    assert_eq!(host.stop_turn().unwrap_err().code, "conversation_not_streaming");
+}
+
+// Starting over clears the conversation, not what the ghost knows: a new
+// conversation is told of the topic documents there are, once, as it starts.
+#[test]
+fn a_new_conversation_is_told_of_the_topic_documents_there_are_as_it_starts() {
+    let home = Home::new();
+    std::fs::create_dir_all(home.topics_dir()).unwrap();
+    std::fs::write(home.topics_dir().join("boat-trip.md"), "# The Heron, north pier at nine\n\nBooked on 2026-11-20.\n").unwrap();
+    let fake = Fake::new(replies(&["Hello.", "Yes.", "Hello again."]));
+    let host = home.host(&fake);
+    turn(&host, "hello");
+    let told = |index: &str| {
+        format!("Your topic documents are in \"{}\"; `cat` one when the conversation returns to its topic:\n{index}", home.topics_dir().display())
+    };
+    let first = format!("{}\n\nhello", told("- boat-trip.md: The Heron, north pier at nine"));
+    assert_eq!((fake.calls()[0].prompt.as_str(), &fake.calls()[0].history), (first.as_str(), &Vec::new()));
+    // The log's first line keeps what it was told, so a document written since changes nothing the server has read.
+    let header = &read_log(&home.conversation_dir()).unwrap().unwrap()[0];
+    assert!(
+        matches!(header, LogEntry::Conversation { topics: Some(topics), .. } if *topics == told("- boat-trip.md: The Heron, north pier at nine"))
+    );
+    std::fs::write(home.topics_dir().join("taxes.md"), "Filed on 2026-11-26.\n").unwrap();
+    turn(&host, "still there?");
+    assert_eq!(fake.calls()[1].history[0], json!({ "role": "user", "content": first }));
+    // The owner sees nothing of it: their message is their own words.
+    assert_eq!(messages(&host)[0]["content"][0]["text"], "hello");
+
+    if crate::env::which("gio", &home.env()).is_none() {
+        eprintln!("skipped: gio is not installed");
+        return;
+    }
+    // Starting over leaves the documents where they are, and the new conversation is told of them as they now stand.
+    host.delete_conversation().unwrap();
+    turn(&host, "hello");
+    assert_eq!(
+        fake.calls()[2].prompt,
+        format!("{}\n\nhello", told("- boat-trip.md: The Heron, north pier at nine\n- taxes.md: Filed on 2026-11-26."))
+    );
+    assert!(fake.calls()[2].history.is_empty());
 }
 
 // The model's `ask` tool reaches the same open question a pass is handed the way to set.

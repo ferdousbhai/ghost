@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Ghost's bar: the conversation with the ghost as a prompt and captions at the bottom of the screen"
+description = "Ghost's bar: the conversation with the ghost as a prompt near the bottom of the screen and the answer above it"
 publish = false
 
 [[bin]]
@@ -18,6 +18,7 @@ omui = { git = "https://github.com/ferdousbhai/omui", rev = "d5796183fdcc1dab218
 gtk = { package = "gtk4", version = "0.11.4", features = ["v4_14"] }
 # The bar's place on the screen edge; the system library is one Omarchy's own dictation app already needs.
 gtk4-layer-shell = "0.9"
+pulldown-cmark = { version = "0.13", default-features = false }
 serde_json = "1.0"
 async-channel = "2.3"
 urlencoding = "2.1"

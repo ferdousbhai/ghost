@@ -1,21 +1,32 @@
-/* Ghost's own styles, over omui's stylesheet: the bar's captions and its prompt.
+/* Ghost's own styles, over omui's stylesheet: the bar's answer and its prompt.
    Colours are omui's @om_* tokens, tinted with alpha(); no hex. */
 
-/* Nothing of a window shows, only the captions and the prompt over whatever is on screen. */
+/* Nothing of a window shows, only the answer and the prompt over whatever is on screen. */
 .bar-window { background: transparent; }
-.captions {
-  background: alpha(@om_bg, 0.82);
+.bar-panel {
+  background: alpha(@om_bg, 0.94);
+  border: 1px solid alpha(@om_border, 0.6);
   border-radius: 10px;
-  padding: 10px 18px;
+  padding: 12px 18px;
 }
-.caption-asked { color: @om_dim_text; font-size: 1.05em; }
-.caption-said { font-size: 1.5em; font-weight: 600; line-height: 1.25; }
-.caption-status { color: @om_dim_text; font-family: monospace; font-size: 0.95em; }
+.bar-asked { color: @om_dim_text; }
+.bar-said { font-size: 1.08em; }
+.bar-status { color: @om_dim_text; font-family: monospace; font-size: 0.92em; }
 .bar-entry {
-  background: alpha(@om_bg, 0.92);
+  background: alpha(@om_bg, 0.94);
   border: 1px solid alpha(@om_border, 0.8);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 1.15em;
 }
 .bar-entry:focus-within { border-color: @om_accent; }
+
+.md-p, .md-li { line-height: 1.35; }
+.md-h { font-weight: 700; font-size: 1.08em; margin-top: 6px; }
+.md-marker { color: @om_accent; font-weight: 650; }
+.md-code {
+  background: alpha(@om_text, 0.05);
+  border: 1px solid alpha(@om_border, 0.5);
+  border-radius: 5px;
+  padding: 8px 10px;
+}

@@ -1,5 +1,5 @@
-# The bar on the stand-in model (`stand_in llama-server`): a question by Enter, its answer as a caption, and the
-# conversation gone back through with Up and Down. dev/qa.sh runs it.
+# The bar on the stand-in model (`stand_in llama-server`): a question by Enter, the prompt gone and the whole answer
+# in its place, the conversation gone back through with Up and Down, and the bar put away. dev/qa.sh runs it.
 
 {"do":"wait","role":"window","name":"Ghost","visible":true}
 # The prompt has the keyboard from the start, and nothing is said yet.
@@ -7,19 +7,25 @@
 {"do":"shot","path":"qa-bar-empty.png"}
 {"do":"type","text":"When does the boat leave?"}
 {"do":"key","keys":"Return"}
+# The prompt goes once the question is sent; what was asked stays above the answer.
 {"do":"wait","role":"label","name":"When does the boat leave?","visible":true}
-# What the ghost says is one caption: its Markdown marks dropped, a dot before each list item.
-{"do":"wait","role":"label","name":"The boat leaves at nine, from the north pier (Documents/Notes/Ferry trip.md). · Bring the tickets. · Sara is meeting you there.","visible":true,"timeout_ms":30000}
-{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true,"text":""}
+{"do":"wait","role":"text-box","name":"Ask your ghost","visible":false}
+# All of the answer, as Markdown: its paragraph and each list item.
+{"do":"wait","role":"label","name":"The boat leaves at nine, from the north pier (Documents/Notes/Ferry trip.md).","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"Sara is meeting you there.","visible":true,"timeout_ms":30000}
 {"do":"shot","path":"qa-bar-answer.png"}
 
-# Up names the caption on screen; Down from the last is the end of the conversation, nothing but the prompt; Up
-# brings it back.
+# Up names the exchange on screen; Down from the last is the conversation's end, nothing on screen; Up brings it back.
 {"do":"key","keys":"Up"}
 {"do":"wait","role":"label","name":"1 of 1","visible":true,"timeout_ms":10000}
 {"do":"key","keys":"Down"}
 {"do":"wait","role":"label","name":"When does the boat leave?","visible":false}
 {"do":"key","keys":"Up"}
 {"do":"wait","role":"label","name":"1 of 1","visible":true}
-{"do":"wait","role":"label","name":"When does the boat leave?","visible":true}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true}
+
+# Escape puts the bar away.
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
 {"do":"quit"}

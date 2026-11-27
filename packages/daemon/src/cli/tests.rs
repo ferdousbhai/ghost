@@ -665,6 +665,11 @@ fn hooks_set_acknowledges_in_words_json_keeps_the_api_body_and_q_prints_nothing(
 
 const SERVE_COMMAND: &str = "tailscale serve --bg --https=443 http://127.0.0.1:7717";
 
+/// `GET /api/ghost`: the ghost's name, and its topic documents.
+fn casper() -> Value {
+    json!({ "name": "casper", "topics": { "path": "/home/owner/.local/share/ghost/topics", "count": 3 } })
+}
+
 /// A daemon answering `ghost status`'s four reads, `/api/status` with `daemon`, while Tailscale is stopped.
 fn status_daemon(ghost: Value, daemon: Value, conversation: Value) -> Fake {
     let stopped = json!({ "state": "unavailable", "hostname": null, "guests": "read-only", "owner": null, "app": null, "command": SERVE_COMMAND,
@@ -690,11 +695,11 @@ fn status_names_tailscales_command_while_serve_is_off_and_the_app_link_once_it_i
         json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
     let app = |url: Value| json!({ "origin": "https://summonghost.com", "url": url });
     let off = json!({ "state": "off", "hostname": "box.tail.ts.net", "app": app(Value::Null), "command": SERVE_COMMAND, "problem": null });
-    let stdout = status_daemon_with(json!({ "name": "casper" }), running.clone(), off, empty_conversation()).run(&["status"]).stdout;
+    let stdout = status_daemon_with(casper(), running.clone(), off, empty_conversation()).run(&["status"]).stdout;
     assert!(stdout.ends_with(&format!("\nremote         off; turn on: {SERVE_COMMAND}\nconversation   empty\n")), "{stdout}");
     let on = json!({ "state": "on", "hostname": "box.tail.ts.net", "app": app(json!("https://summonghost.com/#add=box.tail.ts.net")),
         "command": SERVE_COMMAND, "problem": null });
-    let stdout = status_daemon_with(json!({ "name": "casper" }), running, on, empty_conversation()).run(&["status"]).stdout;
+    let stdout = status_daemon_with(casper(), running, on, empty_conversation()).run(&["status"]).stdout;
     assert!(
         stdout.ends_with("\nremote         on box.tail.ts.net\napp            https://summonghost.com/#add=box.tail.ts.net\nconversation   empty\n"),
         "{stdout}"
@@ -705,13 +710,14 @@ fn status_names_tailscales_command_while_serve_is_off_and_the_app_link_once_it_i
 fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
     let source = json!({ "commit": "0123456789abcdef0123456789abcdef01234567", "root": "/home/owner/src/ghost" });
     let running = json!({ "version": "1.4.0", "source": source, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
-    let daemon = status_daemon(json!({ "name": "casper" }), running, empty_conversation());
+    let daemon = status_daemon(casper(), running, empty_conversation());
     let response = daemon.run_env(&["status"], &[("GHOSTD_VERSION", "3.2.1")]);
     let (url, token) = (format!("http://127.0.0.1:{}", daemon.server.address.port()), daemon.token_file().display().to_string());
     assert_eq!(
         response.stdout,
         format!(
-            "daemon         {url}\ntoken file     {token}\nghost          casper\nversion        3.2.1\ndaemon version 1.4.0\n\
+            "daemon         {url}\ntoken file     {token}\nghost          casper\n\
+             topics         3 in /home/owner/.local/share/ghost/topics\nversion        3.2.1\ndaemon version 1.4.0\n\
              daemon commit  0123456789abcdef0123456789abcdef01234567\ndaemon source  /home/owner/src/ghost\n\
              daemon started 2026-10-28T12:40:53.000Z\nremote         unavailable (Tailscale is not running.)\nconversation   empty\n"
         )
@@ -722,11 +728,23 @@ fn reports_the_running_daemons_version_commit_source_root_and_remote_access() {
     let keys: Vec<&String> = json.as_object().unwrap().keys().collect();
     assert_eq!(
         keys,
-        ["daemon", "tokenFile", "ghost", "version", "daemonVersion", "source", "daemonStartedAt", "restartNeeded", "remote", "conversation"]
+        [
+            "daemon",
+            "tokenFile",
+            "ghost",
+            "topics",
+            "version",
+            "daemonVersion",
+            "source",
+            "daemonStartedAt",
+            "restartNeeded",
+            "remote",
+            "conversation"
+        ]
     );
     assert_eq!(
-        (&json["daemon"], &json["tokenFile"], &json["ghost"], &json["version"]),
-        (&json!(url), &json!(token), &json!("casper"), &json!("3.2.1"))
+        (&json["daemon"], &json["tokenFile"], &json["ghost"], &json["topics"], &json["version"]),
+        (&json!(url), &json!(token), &json!("casper"), &casper()["topics"], &json!("3.2.1"))
     );
     assert_eq!((&json["daemonVersion"], &json["source"], &json["restartNeeded"]), (&json!("1.4.0"), &source, &json!(false)));
     assert_eq!(json["remote"]["state"], "unavailable");
@@ -740,7 +758,7 @@ fn says_when_the_code_on_disk_is_newer_than_the_running_daemon() {
     let running =
         json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": true });
     let stdout = status_daemon(json!([]), running, empty_conversation()).run(&["status"]).stdout;
-    assert!(stdout.contains("\nghost          —\n"), "{stdout}");
+    assert!(stdout.contains("\nghost          —\ntopics         —\n"), "{stdout}");
     assert!(stdout.contains("\ndaemon commit  unknown\ndaemon source  packaged install\ndaemon started 2026-10-28T12:40:53.000Z\n"), "{stdout}");
     assert!(stdout.contains("\nrestart needed code on disk is newer than this daemon (ghost help self)\n"), "{stdout}");
 }
@@ -752,7 +770,7 @@ fn status_says_how_long_the_conversation_is_when_it_moved_and_what_it_waits_on()
     let running =
         json!({ "version": "1.4.0", "source": { "commit": null, "root": null }, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": false });
     let status = |conversation: &Value, args: &[&str]| {
-        let result = status_daemon(json!({ "name": "casper" }), running.clone(), conversation.clone()).run(args);
+        let result = status_daemon(casper(), running.clone(), conversation.clone()).run(args);
         assert_eq!((result.code, result.stderr.as_str()), (0, ""));
         result.stdout
     };

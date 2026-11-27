@@ -42,10 +42,14 @@ pub enum AssistantPart {
     /// The note the ghost wrote when the conversation neared the model's
     /// context: later turns are handed it in place of the log's first
     /// `covers` entries. It is written in the background, so entries may have
-    /// been added after those and before the note itself.
+    /// been added after those and before the note itself. `topics` is what
+    /// those turns are told of the topic documents, as they stood when the
+    /// note was written; None when there were none. The entry's other parts
+    /// are what the ghost did to bring those documents up to date.
     Handoff {
         text: String,
         covers: usize,
+        topics: Option<String>,
     },
 }
 
@@ -54,12 +58,18 @@ impl AssistantPart {
         Self::Text { text: text.into() }
     }
 
-    /// As the log and the API carry it: `type`, then `text`, or `id`, `name`, `arguments`, `failed` only when true, and `output` once the call has ended.
+    /// As the log and the API carry it: `type`, then `text` (a handoff's with `covers`, and `topics` when it has them), or `id`, `name`, `arguments`, `failed` only when true, and `output` once the call has ended.
     pub fn to_json(&self) -> Value {
         match self {
             Self::Text { text } => json!({ "type": "text", "text": text }),
             Self::Thinking { text } => json!({ "type": "thinking", "text": text }),
-            Self::Handoff { text, covers } => json!({ "type": "handoff", "text": text, "covers": covers }),
+            Self::Handoff { text, covers, topics } => {
+                let mut part = json!({ "type": "handoff", "text": text, "covers": covers });
+                if let Some(topics) = topics {
+                    part["topics"] = json!(topics);
+                }
+                part
+            }
             Self::ToolCall { id, name, arguments, failed, output } => {
                 let mut part = json!({ "type": "toolCall", "id": id, "name": name, "arguments": arguments });
                 if *failed {
@@ -80,7 +90,7 @@ impl AssistantPart {
             Some("text") => text("text").map(|text| Self::Text { text }),
             Some("thinking") => text("text").map(|text| Self::Thinking { text }),
             Some("handoff") => match (text("text"), value.get("covers").and_then(Value::as_u64)) {
-                (Some(text), Some(covers)) => Some(Self::Handoff { text, covers: covers as usize }),
+                (Some(note), Some(covers)) => Some(Self::Handoff { text: note, covers: covers as usize, topics: text("topics") }),
                 _ => None,
             },
             Some("toolCall") => match (text("id"), text("name"), value.get("arguments")) {
@@ -117,9 +127,12 @@ impl Origin {
 /// One line of the log. `at` and `created_at` are ISO times as `crate::clock` writes them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LogEntry {
+    /// `topics` is what the conversation is told of the topic documents, as
+    /// they stood when it started; None when there were none.
     Conversation {
         v: i64,
         created_at: String,
+        topics: Option<String>,
     },
     /// `origin` is None for an owner message.
     User {
@@ -159,7 +172,13 @@ impl LogEntry {
     /// The line's JSON, keys in the order every version has written them.
     pub fn to_json(&self) -> Value {
         match self {
-            Self::Conversation { v, created_at } => json!({ "type": "conversation", "v": v, "createdAt": created_at }),
+            Self::Conversation { v, created_at, topics } => {
+                let mut entry = json!({ "type": "conversation", "v": v, "createdAt": created_at });
+                if let Some(topics) = topics {
+                    entry["topics"] = json!(topics);
+                }
+                entry
+            }
             Self::User { at, text, origin } => {
                 let mut entry = json!({ "type": "user", "at": at, "text": text });
                 if let Some(origin) = origin {
@@ -188,7 +207,11 @@ impl LogEntry {
         let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
         let at = || text("at");
         Some(match entry.get("type")?.as_str()? {
-            "conversation" => Self::Conversation { v: entry.get("v").and_then(Value::as_i64).unwrap_or(LOG_VERSION), created_at: text("createdAt") },
+            "conversation" => Self::Conversation {
+                v: entry.get("v").and_then(Value::as_i64).unwrap_or(LOG_VERSION),
+                created_at: text("createdAt"),
+                topics: entry.get("topics").and_then(Value::as_str).map(str::to_string),
+            },
             "user" => {
                 let origin = match entry.get("origin") {
                     None => None,
@@ -267,9 +290,9 @@ pub fn read_log(conversation_dir: &Path) -> io::Result<Option<Vec<LogEntry>>> {
     Ok(Some(bytes.split(|byte| *byte == b'\n').filter_map(parse_entry).collect()))
 }
 
-/// The first line of a new log.
-pub fn new_conversation_entry(now_ms: i64) -> LogEntry {
-    LogEntry::Conversation { v: LOG_VERSION, created_at: crate::clock::iso(now_ms) }
+/// The first line of a new log; `topics` is what the conversation is told of the topic documents (`topics::opening`).
+pub fn new_conversation_entry(now_ms: i64, topics: Option<String>) -> LogEntry {
+    LogEntry::Conversation { v: LOG_VERSION, created_at: crate::clock::iso(now_ms), topics }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

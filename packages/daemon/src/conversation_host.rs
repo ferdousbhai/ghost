@@ -238,6 +238,11 @@ impl ConversationHost {
         ghost_paths(&self.inner.ghost.dir).conversation_dir
     }
 
+    /// Where the ghost keeps its topic documents (`topics.rs`).
+    fn topics_dir(&self) -> PathBuf {
+        ghost_paths(&self.inner.ghost.dir).topics_dir
+    }
+
     // ── Conversation events ────────────────────────────────────────────
 
     /// Hear every change to the conversation until `unsubscribe`; `close` is called at shutdown.
@@ -309,7 +314,8 @@ impl ConversationHost {
     fn run_admitted(&self, prompt: &str, command: Option<&OwnerCommand>, emit: &Emit, abort: &Abort) -> Result<Value> {
         let dir = self.dir();
         if !log_path(&dir).exists() {
-            append_log(&dir, &[new_conversation_entry(clock::now_ms())])?;
+            // Topic documents outlive a conversation: a new one is told of those there are, once, as it starts.
+            append_log(&dir, &[new_conversation_entry(clock::now_ms(), crate::topics::opening(&self.topics_dir()))])?;
         }
         emit(json!({ "type": "start" }));
         if let Some(command) = command {
@@ -419,14 +425,16 @@ impl ConversationHost {
     }
 
     /// The conversation grows as long as the model's context permits. Once a
-    /// turn ends past three quarters of it, the ghost writes a handoff note in
-    /// the background, asked as the conversation's own next message. The
-    /// model answers one request at a time, so a turn that arrives while the
-    /// note is being written waits for it (`wait_for_handoff`) and then runs
-    /// from the note. A note replaces, for later turns, the entries it was
-    /// written from. The log keeps all of it.
+    /// turn ends past three quarters of it, the ghost hands off in the
+    /// background, asked as the conversation's own next message: it brings
+    /// its topic documents up to date, then writes a note. The model answers
+    /// one request at a time, so a turn that arrives meanwhile waits for it
+    /// (`wait_for_handoff`) and then runs from the note. A note replaces, for
+    /// later turns, the entries it was written from. The log keeps all of it.
     fn start_handoff_if_due(&self) {
-        let Some(answerer) = self.inner.answerer.clone() else { return };
+        if self.inner.answerer.is_none() {
+            return;
+        }
         let Ok(Some(entries)) = read_log(&self.dir()) else { return };
         let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
         let used = self.context_used(&history);
@@ -448,7 +456,7 @@ impl ConversationHost {
         }
         let (host, covers) = (self.clone(), entries.len());
         std::thread::spawn(move || {
-            host.write_handoff(answerer.as_ref(), history, covers, &abort);
+            host.write_handoff(history, covers, &abort);
             let mut state = host.inner.state.lock().unwrap();
             if state.handoff.as_ref().is_some_and(|(running, _)| *running == generation) {
                 state.handoff = None;
@@ -457,24 +465,48 @@ impl ConversationHost {
         });
     }
 
-    fn write_handoff(&self, answerer: &dyn Answerer, history: Vec<Value>, covers: usize, abort: &Abort) {
+    fn write_handoff(&self, history: Vec<Value>, covers: usize, abort: &Abort) {
         let counted = self.inner.state.lock().unwrap().context;
+        let topics = self.topics_dir();
+        // Made for the ghost, private as the conversation is, so its first document needs no `mkdir`.
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            if let Err(error) = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&topics) {
+                self.inner.logger.warn("no handoff note was written", json!({ "reason": error.to_string() }));
+                return;
+            }
+        }
+        let prompt = crate::local_turn::handoff_prompt(&topics, crate::topics::index(&topics).as_deref());
+        // Nobody is watching a handoff, and the owner is not there to be asked.
         let quiet: Emit = Arc::new(|_| {});
-        let written = self.run_pass(answerer, crate::local_turn::HANDOFF_PROMPT.to_string(), history, &quiet, &mut 0, abort);
-        // The note's own request is not the conversation: what the last turn counted still stands.
+        let ask: crate::local_turn::Ask = Arc::new(|_, _| Err("a handoff asks the owner nothing.".to_string()));
+        let written = self.run_pass(prompt, history, &quiet, &mut 0, abort, ask);
+        // The handoff's own requests are not the conversation: what the last turn counted still stands.
         self.inner.state.lock().unwrap().context = counted;
         let Ok(written) = written else { return };
-        let note: Vec<&str> =
-            written.content.iter().filter_map(|part| if let AssistantPart::Text { text } = part { Some(text.as_str()) } else { None }).collect();
-        let note = note.join("\n\n");
         if abort.is_aborted() {
             return;
         }
+        // The note is what the ghost said once its last command had ended; all before that is the keeping of the documents.
+        let said_from = written.content.iter().rposition(|part| matches!(part, AssistantPart::ToolCall { .. })).map_or(0, |last| last + 1);
+        let mut content = written.content;
+        let note: Vec<String> = content
+            .split_off(said_from)
+            .into_iter()
+            .filter_map(|part| if let AssistantPart::Text { text } = part { Some(text) } else { None })
+            .collect();
+        let note = note.join("\n\n");
         if written.error.is_some() || note.trim().is_empty() {
+            // The handoff itself outgrew the context: the next is written from the newest of the conversation that fits.
+            if written.error.as_deref().is_some_and(|error| error.starts_with(crate::local_turn::NO_FIT)) {
+                self.inner.state.lock().unwrap().outgrown = true;
+            }
             self.inner.logger.warn("no handoff note was written", json!({ "reason": written.error }));
             return;
         }
-        let logged = LogEntry::Assistant { at: clock::now_iso(), content: vec![AssistantPart::Handoff { text: note, covers }], error: None };
+        // The log keeps what the handoff did to the documents; later turns are handed only the note and the index (`conversation_messages`).
+        content.push(AssistantPart::Handoff { text: note, covers, topics: crate::topics::opening(&topics) });
+        let logged = LogEntry::Assistant { at: clock::now_iso(), content, error: None };
         if self.require_conversation().is_err() || append_log(&self.dir(), &[logged]).is_err() {
             return;
         }
@@ -486,23 +518,26 @@ impl ConversationHost {
         self.announce();
     }
 
-    /// Stop a handoff note still being written for a conversation that is going away.
-    fn cancel_handoff(&self) {
-        if let Some((_, abort)) = self.inner.state.lock().unwrap().handoff.take() {
+    /// Stop a handoff still under way, and the command it is running: the
+    /// owner stopped it, or the conversation is going away. Whether one was.
+    fn cancel_handoff(&self) -> bool {
+        let writing = self.inner.state.lock().unwrap().handoff.take();
+        if let Some((_, abort)) = &writing {
             abort.abort();
         }
         self.inner.handoff_done.notify_all();
+        writing.is_some()
     }
 
-    /// A turn that arrives while the conversation's handoff note is being
-    /// written waits for it, saying why, and then runs from the note. A turn
-    /// that is stopped stops waiting.
+    /// A turn that arrives while the conversation is being handed off waits
+    /// for it, saying why, and then runs from the note. Stopping the turn
+    /// stops the handoff too (`stop_turn`).
     fn wait_for_handoff(&self, emit: &Emit, abort: &Abort) {
         let mut state = self.inner.state.lock().unwrap();
         if state.handoff.is_none() {
             return;
         }
-        emit(json!({ "type": "thinking", "delta": "Handing off: writing a note of the conversation so far…\n" }));
+        emit(json!({ "type": "thinking", "delta": "Handing off: updating the topic documents and writing a note…\n" }));
         while state.handoff.is_some() && !abort.is_aborted() && !state.shutting_down {
             state = self.inner.handoff_done.wait_timeout(state, std::time::Duration::from_millis(100)).unwrap().0;
         }
@@ -511,7 +546,9 @@ impl ConversationHost {
     /// Run one prompt on the local model, handed the conversation so far as
     /// the messages it was: the model keeps no session of its own. Returns the terminal error, or None on success.
     fn run_turn_on_model(&self, prompt: &str, emit: &Emit, blocks: &mut usize, abort: &Abort) -> Result<Option<Value>> {
-        let Some(answerer) = self.inner.answerer.clone() else { return Ok(Some(error_event("error", NO_LOCAL_MODEL))) };
+        if self.inner.answerer.is_none() {
+            return Ok(Some(error_event("error", NO_LOCAL_MODEL)));
+        }
         let dir = self.dir();
         // Every pass's prompt is already the log's last entry: the owner's message, a follow-up, or a hook's feedback.
         let entries = read_log(&dir)?.unwrap_or_default();
@@ -533,7 +570,10 @@ impl ConversationHost {
                     prompt.to_string()
                 }
             };
-            let result = self.run_pass(answerer.as_ref(), pass_prompt, history, emit, blocks, abort)?;
+            let host = self.clone();
+            let ask: crate::local_turn::Ask =
+                Arc::new(move |question, options| host.set_question(question, options).map(|_| ()).map_err(|error| error.to_string()));
+            let result = self.run_pass(pass_prompt, history, emit, blocks, abort, ask)?;
             // Refused for length before anything was said or done: once more, with what fits.
             let refused = result.content.is_empty() && result.error.as_deref().is_some_and(|error| error.starts_with(crate::local_turn::NO_FIT));
             if !refused || attempt > 0 {
@@ -562,15 +602,17 @@ impl ConversationHost {
         Ok(text.to_string())
     }
 
+    /// One pass on what answers turns, streamed to `emit`; `ask` is what its `ask` tool does.
     fn run_pass(
         &self,
-        answerer: &dyn Answerer,
         prompt: String,
         history: Vec<Value>,
         emit: &Emit,
         blocks: &mut usize,
         abort: &Abort,
+        ask: crate::local_turn::Ask,
     ) -> Result<PassResult> {
+        let Some(answerer) = self.inner.answerer.as_ref() else { return Err(GhostError::new("no_local_model", NO_LOCAL_MODEL, 409)) };
         let dir = self.dir();
         let persona = self.render_persona()?;
         {
@@ -677,9 +719,6 @@ impl ConversationHost {
         };
 
         let coding_agent_command = (self.inner.coding_agent)().and_then(|agent| coding_agent_command(&agent)).map(str::to_string);
-        let host = self.clone();
-        let ask: crate::local_turn::Ask =
-            Arc::new(move |question, options| host.set_question(question, options).map(|_| ()).map_err(|error| error.to_string()));
         let env = self.inner.env.clone();
         let input = PassInput { prompt, history, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone(), ask };
         let outcome = answerer.turn(&input, &mut on_event);
@@ -837,14 +876,17 @@ impl ConversationHost {
         json!({ "streaming": turn.is_some(), "followUp": turn.map(|turn| turn.follow_ups.clone()).unwrap_or_default() })
     }
 
-    /// Abort the running turn or owner command; its stream ends `aborted`.
+    /// Abort the running turn or owner command (its stream ends `aborted`), and a handoff under way.
     pub fn stop_turn(&self) -> Result<()> {
         let abort = self.inner.state.lock().unwrap().admission.clone();
+        // A handoff runs commands as a turn does, so stopping reaches it too: on its own, or with the turn waiting for it.
+        let handing_off = self.cancel_handoff();
         match abort {
             Some(abort) => {
                 abort.abort();
                 Ok(())
             }
+            None if handing_off => Ok(()),
             None => Err(GhostError::new("conversation_not_streaming", "No turn is running.", 409)),
         }
     }
@@ -891,7 +933,7 @@ impl ConversationHost {
         }))
     }
 
-    /// The sidecars and the handoff note are written beside a log, never into a directory that has none.
+    /// The sidecars and a handoff are written beside a log, never into a directory that has none.
     fn require_conversation(&self) -> Result<()> {
         if !log_path(&self.dir()).exists() {
             return Err(GhostError::not_found("There is no conversation yet."));

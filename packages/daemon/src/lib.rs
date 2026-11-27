@@ -29,6 +29,7 @@ pub mod running_source;
 pub mod sidecars;
 pub mod text;
 pub mod token;
+pub mod topics;
 pub mod trash;
 pub mod turn_buffer;
 pub mod xdg;

@@ -15,7 +15,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, a bar at t
 - **owner** — the one person this machine and its ghost belong to. There is no other user role.
 - **ghost** — a machine's one persona, reached from elsewhere over Tailscale; **ghost home** — its directory, `~/.local/share/ghost/` (layout in `CONTRACTS.md`).
 - **local model** — the GGUF model ghostd runs and loops over; every turn runs on it. **coding agent** — an agent CLI the owner already has (claude, codex, agy), which the model runs from its shell.
-- **daemon** (`ghostd`) — the HTTP API that owns the conversation; **bar** (`ghost-bar`) — the prompt and captions at the bottom of the screen, a client of it. Ghost has no window.
+- **daemon** (`ghostd`) — the HTTP API that owns the conversation; **bar** (`ghost-bar`) — the prompt near the bottom of the screen with the answer above it, a client of it. Ghost has no window.
 
 ## Taste
 
