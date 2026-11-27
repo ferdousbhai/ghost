@@ -6,7 +6,8 @@
 //! What the server has read is kept across a stop: before stopping it, ghostd
 //! saves its one slot to disk, and after the next start restores it, so the
 //! conversation it was in is not read again (68 s for 5,700 tokens, against
-//! 0.2 s to restore). One file, replaced at each stop, and private.
+//! 0.2 s to restore). One file, private, replaced at each stop only by a
+//! save that finished.
 use crate::config::LocalModelConfig;
 use crate::env::Env;
 use crate::http::{ClientRequest, send};
@@ -21,6 +22,7 @@ use std::time::{Duration, Instant};
 /// A 26B model from a cold disk takes about a minute; this bounds a hung load.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const STDERR_TAIL: usize = 4_096;
+/// How long the server gets to exit after SIGTERM before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// Ports handed to llama-server, which binds one later. Drawn at random from
 /// below the ephemeral range (Linux: 32768+), so a port-0 listener elsewhere
@@ -34,7 +36,7 @@ pub struct Endpoint {
 }
 
 /// A loopback port that was bindable a moment ago.
-pub fn free_port() -> Result<u16, String> {
+fn free_port() -> Result<u16, String> {
     let span = u32::from(PORT_RANGE.end() - PORT_RANGE.start()) + 1;
     for _ in 0..32 {
         let draw = u32::from_le_bytes(crate::random::bytes::<4>()) % span;
@@ -51,7 +53,11 @@ pub fn free_port() -> Result<u16, String> {
 /// The slot's saved state, and what it was saved from, in `$XDG_CACHE_HOME/ghost/slot`.
 const SLOT_FILE: &str = "slot.bin";
 const SLOT_FROM: &str = "slot.json";
-/// Saving or restoring a full context's state (about 5 GB) takes seconds, not minutes.
+/// What the server writes a save to: it becomes `SLOT_FILE` only once it is whole.
+const SLOT_SAVING: &str = "slot.saving";
+/// Saving or restoring a full context's state (about 5 GB) takes seconds, not
+/// minutes. The unit's `TimeoutStopSec` is longer than this and `STOP_GRACE`
+/// together (a test below holds it to that), so a stop never kills a save.
 const SLOT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Default)]
@@ -59,6 +65,8 @@ struct State {
     child: Option<Child>,
     endpoint: Option<Endpoint>,
     loading: bool,
+    /// A stop is saving the slot and ending the server; a turn that arrives meanwhile waits to start the next.
+    stopping: bool,
     users: u32,
     /// Bumped whenever the idle clock restarts, so a superseded timer does nothing.
     idle_generation: u64,
@@ -79,11 +87,6 @@ pub struct LocalModel {
     inner: Arc<Inner>,
 }
 
-fn url_safe_key() -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    crate::random::bytes::<32>().iter().map(|byte| ALPHABET[usize::from(byte % 64)] as char).collect()
-}
-
 impl LocalModel {
     pub fn new(config: LocalModelConfig, logger: Logger, env: Env) -> Self {
         let home = std::path::PathBuf::from(crate::env::var(&env, "HOME").unwrap_or("/"));
@@ -96,10 +99,10 @@ impl LocalModel {
         json!({ "model": self.inner.config.model.to_string_lossy(), "contextSize": self.inner.config.context_size })
     }
 
-    /// Ask the server to save or restore its slot; false when it did not.
-    fn slot(&self, endpoint: &Endpoint, action: &str) -> bool {
+    /// Ask the server to save its slot to `file` in the slot directory, or restore it from there; false when it did not.
+    fn slot(&self, endpoint: &Endpoint, action: &str, file: &str) -> bool {
         let authorization = format!("Bearer {}", endpoint.key);
-        let body = json!({ "filename": SLOT_FILE }).to_string();
+        let body = json!({ "filename": file }).to_string();
         let target = format!("/slots/0?action={action}");
         let answered = send(ClientRequest {
             address: endpoint.address,
@@ -113,19 +116,27 @@ impl LocalModel {
         answered.is_ok_and(|response| response.status == 200)
     }
 
-    /// Save the slot before a stop, and say what it was saved from.
+    /// Save the slot before a stop, and say what it was saved from. The
+    /// server writes the file itself, to another name: it is the slot's only
+    /// once the save is whole, and the record is written last. Whatever fails
+    /// or interrupts a save, no record names a file that is not a whole one.
     fn save_slot(&self, endpoint: &Endpoint) {
+        use std::os::unix::fs::PermissionsExt;
         let dir = &self.inner.slot_dir;
-        // The record first: a save that fails half-way is then never restored.
-        let _ = std::fs::remove_file(dir.join(SLOT_FROM));
-        if self.slot(endpoint, "save") {
-            use std::os::unix::fs::PermissionsExt;
+        let (saving, saved, from) = (dir.join(SLOT_SAVING), dir.join(SLOT_FILE), dir.join(SLOT_FROM));
+        let _ = std::fs::remove_file(&from);
+        let whole = self.slot(endpoint, "save", SLOT_SAVING)
             // llama-server writes it world-readable; it holds the conversation.
-            let _ = std::fs::set_permissions(dir.join(SLOT_FILE), std::fs::Permissions::from_mode(0o600));
-            let _ = crate::private_file::write_json_atomic(&dir.join(SLOT_FROM), &self.slot_origin());
+            && std::fs::set_permissions(&saving, std::fs::Permissions::from_mode(0o600)).is_ok()
+            && std::fs::rename(&saving, &saved).is_ok()
+            && crate::private_file::write_json_atomic(&from, &self.slot_origin()).is_ok();
+        if whole {
             self.inner.logger.info("local model state saved", json!({}));
         } else {
-            let _ = std::fs::remove_file(dir.join(SLOT_FILE));
+            // What is left is of no use without its record: the next turn reads the conversation again.
+            let _ = std::fs::remove_file(&saving);
+            let _ = std::fs::remove_file(&saved);
+            self.inner.logger.warn("local model state was not saved", json!({}));
         }
     }
 
@@ -134,7 +145,7 @@ impl LocalModel {
         let dir = &self.inner.slot_dir;
         let saved = crate::private_file::read_text(&dir.join(SLOT_FROM)).ok().flatten();
         let from: Value = saved.and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
-        if from == self.slot_origin() && self.slot(endpoint, "restore") {
+        if from == self.slot_origin() && self.slot(endpoint, "restore", SLOT_FILE) {
             self.inner.logger.info("local model state restored", json!({}));
         }
     }
@@ -174,6 +185,7 @@ impl LocalModel {
         let mut state = inner.state.lock().unwrap();
         state.users += 1;
         state.idle_generation += 1;
+        state = inner.changed.wait_while(state, |state| state.stopping).unwrap();
         // A server that died since its last turn is started again.
         if state.child.as_mut().is_some_and(|child| !matches!(child.try_wait(), Ok(None))) {
             state.child = None;
@@ -236,7 +248,7 @@ impl LocalModel {
     fn start(&self) -> Result<Endpoint, String> {
         let inner = &self.inner;
         let port = free_port()?;
-        let key = url_safe_key();
+        let key = crate::random::hex(&crate::random::bytes::<32>());
         let endpoint = Endpoint { address: SocketAddr::from(([127, 0, 0, 1], port)), key: key.clone() };
         {
             use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
@@ -246,6 +258,8 @@ impl LocalModel {
                 .create(&inner.slot_dir)
                 .map_err(|error| format!("The local model could not start: {error}"))?;
             let _ = std::fs::set_permissions(&inner.slot_dir, std::fs::Permissions::from_mode(0o700));
+            // A save that a kill interrupted left this behind; no record names it.
+            let _ = std::fs::remove_file(inner.slot_dir.join(SLOT_SAVING));
         }
         let mut child = Command::new(&inner.config.server)
             .args([
@@ -349,11 +363,20 @@ impl LocalModel {
         let endpoint = {
             let mut state = self.inner.state.lock().unwrap();
             state.idle_generation += 1;
-            state.endpoint.take()
+            let endpoint = state.endpoint.take();
+            // A server still loading has no endpoint, and its load is what this ends: nothing waits on that.
+            state.stopping = endpoint.is_some();
+            endpoint
         };
         if let Some(endpoint) = &endpoint {
             self.save_slot(endpoint);
         }
+        self.end_server(why);
+        self.inner.state.lock().unwrap().stopping = false;
+        self.inner.changed.notify_all();
+    }
+
+    fn end_server(&self, why: &str) {
         let child = self.inner.state.lock().unwrap().child.take();
         let Some(mut child) = child else { return };
         if !matches!(child.try_wait(), Ok(None)) {
@@ -452,50 +475,120 @@ mod tests {
     }
 
     #[test]
-    fn hands_out_ports_below_the_ephemeral_range_and_fresh_keys() {
+    fn hands_out_ports_below_the_ephemeral_range() {
         for _ in 0..8 {
             assert!(PORT_RANGE.contains(&free_port().unwrap()));
         }
-        let (first, second) = (url_safe_key(), url_safe_key());
-        assert!(first != second && first.len() == 32);
-        assert!(first.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+    }
+
+    /// A stand-in llama-server for the slot calls: it keeps each one asked
+    /// of it and, as the real one does, writes a save itself to the name it
+    /// is given under the slot directory. `fail` makes it answer 500 after
+    /// writing half a save.
+    struct SlotServer {
+        server: crate::http::Server,
+        seen: Arc<Mutex<Vec<(String, String, String)>>>,
+        fail: Arc<Mutex<bool>>,
+    }
+
+    impl SlotServer {
+        fn start(slot_dir: PathBuf) -> Self {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let fail = Arc::new(Mutex::new(false));
+            let (kept, failing) = (seen.clone(), fail.clone());
+            let server = crate::http::Server::start("127.0.0.1:0".parse().unwrap(), move |mut request, responder| {
+                let body = request.read_body(4096).unwrap_or_default();
+                let action = request.query("action").unwrap_or("").to_string();
+                let file = serde_json::from_slice::<Value>(&body).ok().and_then(|body| body["filename"].as_str().map(str::to_string));
+                kept.lock().unwrap().push((request.path.clone(), action.clone(), file.clone().unwrap_or_default()));
+                let fail = *failing.lock().unwrap();
+                if let Some(file) = file.filter(|_| action == "save") {
+                    std::fs::write(slot_dir.join(file), if fail { "half a sl" } else { "a whole slot" }).unwrap();
+                }
+                responder.json(if fail { 500 } else { 200 }, &json!({}));
+            })
+            .unwrap();
+            Self { server, seen, fail }
+        }
+
+        fn endpoint(&self) -> Endpoint {
+            Endpoint { address: self.server.address, key: "k".to_string() }
+        }
+    }
+
+    fn files(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
     }
 
     #[test]
     fn saves_its_slot_before_a_stop_and_restores_it_only_for_the_same_model_and_context() {
         let directory = scratch();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let kept = seen.clone();
-        let server = crate::http::Server::start("127.0.0.1:0".parse().unwrap(), move |mut request, responder| {
-            let body = request.read_body(4096).unwrap_or_default();
-            kept.lock().unwrap().push((
-                request.path.clone(),
-                request.query("action").unwrap_or("").to_string(),
-                String::from_utf8_lossy(&body).into_owned(),
-            ));
-            responder.json(200, &json!({ "ok": true }));
-        })
-        .unwrap();
-        let endpoint = Endpoint { address: server.address, key: "k".to_string() };
         let env = Env::from([("HOME".to_string(), directory.display().to_string())]);
         let config = model(&directory, "llama-server").config().clone();
+        let slot_dir = directory.join(".cache/ghost/slot");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let server = SlotServer::start(slot_dir.clone());
+        let endpoint = server.endpoint();
         let held = LocalModel::with_endpoint(config.clone(), Logger::silent(), env.clone(), endpoint.clone());
-        std::fs::create_dir_all(&held.inner.slot_dir).unwrap();
+        assert_eq!(held.inner.slot_dir, slot_dir);
         held.stop("idle");
-        assert_eq!(*seen.lock().unwrap(), [("/slots/0".to_string(), "save".to_string(), r#"{"filename":"slot.bin"}"#.to_string())]);
-        let from = held.inner.slot_dir.join(SLOT_FROM);
+        // Saved under another name, and the slot's only once whole: private, with its record.
+        assert_eq!(*server.seen.lock().unwrap(), [("/slots/0".to_string(), "save".to_string(), SLOT_SAVING.to_string())]);
+        assert_eq!(files(&slot_dir), [SLOT_FILE, SLOT_FROM]);
+        assert_eq!(std::fs::read_to_string(slot_dir.join(SLOT_FILE)).unwrap(), "a whole slot");
+        let from = slot_dir.join(SLOT_FROM);
         assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&from).unwrap()).unwrap(), held.slot_origin());
-        assert_eq!(std::fs::metadata(&from).unwrap().permissions().mode() & 0o777, 0o600);
-        assert_eq!(held.inner.slot_dir, directory.join(".cache/ghost/slot"));
+        for file in [SLOT_FILE, SLOT_FROM] {
+            assert_eq!(std::fs::metadata(slot_dir.join(file)).unwrap().permissions().mode() & 0o777, 0o600, "{file}");
+        }
 
         // The same model at the same context restores it; another context does not ask.
         held.restore_slot(&endpoint);
-        assert_eq!(seen.lock().unwrap().last().unwrap().1, "restore");
+        assert_eq!(*server.seen.lock().unwrap().last().unwrap(), ("/slots/0".to_string(), "restore".to_string(), SLOT_FILE.to_string()));
         let other = LocalModel::with_endpoint(LocalModelConfig { context_size: 2048, ..config }, Logger::silent(), env, endpoint.clone());
         other.restore_slot(&endpoint);
-        assert_eq!(seen.lock().unwrap().len(), 2);
-        server.close();
+        assert_eq!(server.seen.lock().unwrap().len(), 2);
+        server.server.close();
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_save_that_fails_or_is_interrupted_leaves_no_slot_to_restore() {
+        let directory = scratch();
+        let env = Env::from([("HOME".to_string(), directory.display().to_string())]);
+        let config = model(&directory, "no-such-llama-server").config().clone();
+        let slot_dir = directory.join(".cache/ghost/slot");
+        std::fs::create_dir_all(&slot_dir).unwrap();
+        let server = SlotServer::start(slot_dir.clone());
+        let endpoint = server.endpoint();
+        // A whole slot from an earlier stop, then a save the server fails half-way.
+        LocalModel::with_endpoint(config.clone(), Logger::silent(), env.clone(), endpoint.clone()).stop("idle");
+        assert_eq!(files(&slot_dir), [SLOT_FILE, SLOT_FROM]);
+        *server.fail.lock().unwrap() = true;
+        let failing = LocalModel::with_endpoint(config.clone(), Logger::silent(), env.clone(), endpoint.clone());
+        failing.stop("idle");
+        assert_eq!(files(&slot_dir), Vec::<String>::new());
+        failing.restore_slot(&endpoint);
+        assert!(server.seen.lock().unwrap().iter().all(|(_, action, _)| action == "save"));
+
+        // Killed mid-save: half a file under the saving name, and the record already gone. The next start clears it.
+        std::fs::write(slot_dir.join(SLOT_SAVING), "half a sl").unwrap();
+        let next = LocalModel::new(config, Logger::silent(), env);
+        assert!(next.acquire(None).unwrap_err().contains("could not start"));
+        assert_eq!(files(&slot_dir), Vec::<String>::new());
+        server.server.close();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    // The stop path: the slot's save, then the server's exit; a turn's command is ended beside them.
+    #[test]
+    fn the_units_stop_deadline_is_past_everything_a_stop_waits_for() {
+        let unit = include_str!("../contrib/ghostd.service");
+        let deadline = unit.lines().find_map(|line| line.strip_prefix("TimeoutStopSec=")?.strip_suffix('s')?.parse::<u64>().ok());
+        let waits = SLOT_TIMEOUT + STOP_GRACE + crate::process::KILL_GRACE;
+        assert!(deadline.expect("a TimeoutStopSec in seconds") >= waits.as_secs() + 20, "{deadline:?} against {waits:?}");
     }
 
     #[test]

@@ -24,7 +24,6 @@ path = "src/bin/ghost.rs"
 serde_json = { version = "1.0", features = ["preserve_order"] }
 # Process groups, signals, local time.
 libc = "0.2"
-regex = "1"
 # Request-line and header parsing for the loopback server and client.
 httparse = "1.10"
 p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }

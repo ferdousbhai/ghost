@@ -156,29 +156,23 @@ export function when(time, now = Date.now(), locale) {
 }
 
 /**
- * A turn's events, across the responses a long turn is cut into: a response
- * that ends in `resume` is not over, and `rest(path)` opens what follows it.
+ * A turn's events, each once and in order, from the one response that carries
+ * the turn. Its last is `done` or `error`; a response that ends without one broke.
  */
-export async function* turnEvents(response, rest) {
-  while (response) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", resume = null;
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let index;
-      while ((index = buffer.indexOf("\n\n")) >= 0) {
-        const frame = buffer.slice(0, index);
-        buffer = buffer.slice(index + 2);
-        const line = frame.split("\n").find((l) => l.startsWith("data: "));
-        if (!line) continue;
-        const ev = JSON.parse(line.slice(6));
-        if (ev.type === "resume") resume = ev;
-        else yield ev;
-      }
+export async function* turnEvents(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      const line = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (line) yield JSON.parse(line.slice(6));
     }
-    response = resume && (await rest("/conversation/stream?turn=" + encodeURIComponent(resume.turn) + "&from=" + resume.from));
   }
 }

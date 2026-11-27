@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-pub const MAX_PRIVATE_FILE_BYTES: u64 = 1_048_576;
+const MAX_PRIVATE_FILE_BYTES: u64 = 1_048_576;
 
 /// The file's text, or None when it does not exist; past 1 MiB or invalid UTF-8 is an error naming the file.
 pub fn read_text(path: &Path) -> Result<Option<String>, String> {
@@ -23,7 +23,7 @@ pub fn read_text(path: &Path) -> Result<Option<String>, String> {
 }
 
 /// `value` as the files hold it: two-space indented JSON and a final newline.
-pub fn pretty(value: &Value) -> String {
+fn pretty(value: &Value) -> String {
     format!("{}\n", serde_json::to_string_pretty(value).expect("a JSON value serializes"))
 }
 

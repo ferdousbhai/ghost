@@ -1,171 +1,66 @@
-//! The `ghost` command line's argument parser. Its rules and every error
-//! sentence (strict, positionals allowed) are kept as they have always been:
-//! scripts and a ghost's own prompt have seen these messages.
+//! The `ghost` command line's argument parser: strict, with bare words
+//! allowed anywhere. `--name`, `--name=value` or `--name value`, the short
+//! `-h`, `-q` and `-v`, and `--` before words that start with a dash.
 use super::CliError;
-use std::collections::VecDeque;
 
-/// The flags one parse accepts on top of `--help`, `--json` and `--quiet`.
-#[derive(Debug, Default, Clone)]
-pub struct ArgsSpec {
-    pub boolean: Vec<&'static str>,
-    pub value: Vec<&'static str>,
-}
+/// The flags every verb takes.
+pub(crate) const COMMON: [&str; 4] = ["help", "json", "quiet", "version"];
+const SHORT: [(&str, &str); 3] = [("-h", "help"), ("-q", "quiet"), ("-v", "version")];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Flag {
-    On,
-    Text(String),
-}
-
-/// What a command line held: the bare words in order, and each flag once
-/// (the last value given wins), in the order first seen.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ParsedArgs {
+/// What a command line held: the bare words in order, and each flag given
+/// with its value when it takes one (the last one given wins).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct ParsedArgs {
     pub positionals: Vec<String>,
-    pub flags: Vec<(String, Flag)>,
+    pub flags: Vec<(&'static str, Option<String>)>,
 }
 
 impl ParsedArgs {
-    /// True when the boolean flag `name` was given.
+    /// True when the flag `name` was given.
     pub fn boolean(&self, name: &str) -> bool {
-        self.flags.iter().any(|(key, value)| key == name && *value == Flag::On)
+        self.flags.iter().any(|(key, _)| *key == name)
     }
 
-    /// The value flag `name`, when given.
-    pub fn text(&self, name: &str) -> Option<&str> {
-        self.flags.iter().find_map(|(key, value)| match value {
-            Flag::Text(text) if key == name => Some(text.as_str()),
-            _ => None,
-        })
-    }
-
-    fn set(&mut self, name: &str, value: Flag) {
-        match self.flags.iter_mut().find(|(key, _)| key == name) {
-            Some(slot) => slot.1 = value,
-            None => self.flags.push((name.to_string(), value)),
-        }
+    /// The whole number the value flag `name` was given, when it was given.
+    pub fn number(&self, name: &str) -> Result<Option<u64>, CliError> {
+        let given = self.flags.iter().rev().find(|(key, _)| *key == name).and_then(|(_, value)| value.as_deref());
+        given.map(|value| value.parse().map_err(|_| CliError::usage(format!("--{name} must be a whole number.")))).transpose()
     }
 }
 
-struct Option_ {
-    name: &'static str,
-    takes_value: bool,
-    short: Option<char>,
-}
-
-fn short_of(name: &str) -> Option<char> {
-    match name {
-        "help" => Some('h'),
-        "quiet" => Some('q'),
-        "version" => Some('v'),
-        _ => None,
-    }
-}
-
-/// One option as it appeared: `raw` is how the error messages quote it.
-struct Token {
-    name: String,
-    raw: String,
-    value: Option<String>,
-    /// The value came in the same word (`--limit=5`), so it cannot be a forgotten argument.
-    inline: bool,
-}
-
-struct Parser {
-    options: Vec<Option_>,
-    parsed: ParsedArgs,
-}
-
-impl Parser {
-    fn option(&self, name: &str) -> Option<&Option_> {
-        // A name listed twice keeps its last definition.
-        self.options.iter().rev().find(|option| option.name == name)
-    }
-
-    /// The long name a short letter stands for; the letter itself when none does.
-    fn long_for(&self, short: char) -> String {
-        self.options.iter().find(|option| option.short == Some(short)).map_or_else(|| short.to_string(), |option| option.name.to_string())
-    }
-
-    fn takes_value(&self, name: &str) -> bool {
-        self.option(name).is_some_and(|option| option.takes_value)
-    }
-
-    fn accept(&mut self, token: Token) -> Result<(), CliError> {
-        if let Some(value) = &token.value
-            && !token.inline
-            && value.chars().count() > 1
-            && value.starts_with('-')
-        {
-            let raw = &token.raw;
-            return Err(CliError::usage(format!(
-                "Option '{raw}' argument is ambiguous.\nDid you forget to specify the option argument for '{raw}'?\nTo specify an option argument starting with a dash use '{raw}=-XYZ'."
-            )));
-        }
-        let Some(option) = self.option(&token.name) else {
-            let quoted = serde_json::Value::String(token.raw.clone()).to_string();
-            return Err(CliError::usage(format!(
-                "Unknown option '{}'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- {quoted}",
-                token.raw
-            )));
-        };
-        let shown = match option.short {
-            Some(short) => format!("-{short}, --{}", option.name),
-            None => format!("--{}", option.name),
-        };
-        let name = option.name;
-        match (option.takes_value, token.value) {
-            (true, None) => Err(CliError::usage(format!("Option '{shown} <value>' argument missing"))),
-            (false, Some(_)) => Err(CliError::usage(format!("Option '{shown}' does not take an argument"))),
-            (true, Some(value)) => {
-                self.parsed.set(name, Flag::Text(value));
-                Ok(())
-            }
-            (false, None) => {
-                self.parsed.set(name, Flag::On);
-                Ok(())
-            }
-        }
-    }
-}
-
-/// `--help`, `--json`, and `--quiet` plus the spec's flags; anything else is a usage error.
-pub fn parse_args(argv: &[String], spec: &ArgsSpec) -> Result<ParsedArgs, CliError> {
-    let define = |takes_value: bool| move |name: &&'static str| Option_ { name, takes_value, short: short_of(name) };
-    let options = ["help", "json", "quiet"].iter().chain(spec.boolean.iter()).map(define(false)).chain(spec.value.iter().map(define(true))).collect();
-    let mut parser = Parser { options, parsed: ParsedArgs::default() };
-    let mut rest: VecDeque<&String> = argv.iter().collect();
-    while let Some(arg) = rest.pop_front() {
-        if arg == "--" {
-            parser.parsed.positionals.extend(rest.drain(..).cloned());
+/// `argv` over the common flags, the `boolean` ones and the `value` ones; anything else is a usage error.
+pub(crate) fn parse_args(argv: &[String], boolean: &[&'static str], value: &[&'static str]) -> Result<ParsedArgs, CliError> {
+    let mut parsed = ParsedArgs::default();
+    let mut words = argv.iter();
+    while let Some(word) = words.next() {
+        if word == "--" {
+            parsed.positionals.extend(words.cloned());
             break;
         }
-        let letters: Vec<char> = arg.chars().collect();
-        if letters.len() >= 2 && letters[0] == '-' && letters[1] != '-' {
-            // `-q`, `-qh`: no short flag takes a value. A letter inside a group is quoted bare.
-            for letter in &letters[1..] {
-                let raw = if letters.len() == 2 { arg.clone() } else { letter.to_string() };
-                parser.accept(Token { name: parser.long_for(*letter), raw, value: None, inline: false })?;
+        let (name, inline) = match (word.strip_prefix("--"), SHORT.iter().find(|(short, _)| short == word)) {
+            (Some(long), _) => long.split_once('=').map_or((long, None), |(name, value)| (name, Some(value))),
+            (None, Some((_, long))) => (*long, None),
+            // A lone dash is a word: `say -` reads stdin.
+            (None, None) if word.starts_with('-') && word.len() > 1 => return Err(CliError::usage(format!("Unknown option '{word}'."))),
+            (None, None) => {
+                parsed.positionals.push(word.clone());
+                continue;
             }
-        } else if letters.len() > 2 && arg.starts_with("--") {
-            match letters.iter().skip(3).position(|letter| *letter == '=') {
-                Some(offset) => {
-                    let name: String = letters[2..offset + 3].iter().collect();
-                    let value = letters[offset + 4..].iter().collect();
-                    parser.accept(Token { raw: format!("--{name}"), name, value: Some(value), inline: true })?;
-                }
-                None => {
-                    let name: String = letters[2..].iter().collect();
-                    let value = if parser.takes_value(&name) { rest.pop_front().cloned() } else { None };
-                    parser.accept(Token { name, raw: arg.clone(), value, inline: false })?;
-                }
+        };
+        let known = |names: &[&'static str]| names.iter().copied().find(|known| *known == name);
+        if let Some(name) = known(&COMMON).or_else(|| known(boolean)) {
+            if inline.is_some() {
+                return Err(CliError::usage(format!("--{name} takes no value.")));
+            }
+            parsed.flags.push((name, None));
+        } else if let Some(name) = known(value) {
+            match inline.map(str::to_string).or_else(|| words.next().cloned()).filter(|value| !value.is_empty()) {
+                Some(value) => parsed.flags.push((name, Some(value))),
+                None => return Err(CliError::usage(format!("--{name} needs a value."))),
             }
         } else {
-            parser.parsed.positionals.push(arg.clone());
+            return Err(CliError::usage(format!("Unknown option '--{name}'.")));
         }
     }
-    if let Some((name, _)) = parser.parsed.flags.iter().find(|(_, value)| *value == Flag::Text(String::new())) {
-        return Err(CliError::usage(format!("--{name} requires a value.")));
-    }
-    Ok(parser.parsed)
+    Ok(parsed)
 }

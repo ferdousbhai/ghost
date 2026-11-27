@@ -8,19 +8,18 @@ use crate::abort::Abort;
 use crate::attachments::{Attachment, read_attachment, save_attachment};
 use crate::clock;
 use crate::coding_agent::{choose_coding_agent, coding_agent_command};
-use crate::conversation_log::{AssistantPart, IndexedLog, LogEntry, Origin, append_log, log_path, new_conversation_entry, read_log};
+use crate::conversation_log::{AssistantPart, LogEntry, Origin, append_log, log_path, log_state, new_conversation_entry, read_log, transcript_page};
 use crate::env::Env;
 use crate::error::{GhostError, Result};
-use crate::ghosts::{Ghost, ghost_paths};
-use crate::home::read_character;
-use crate::hooks::{HookEvent, HookEventName, HookRunner, continuation};
+use crate::home::{Home, is_seeded_character};
+use crate::hooks::{HookEvent, HookRunner, SESSION_STOP};
 use crate::local_model::LocalModel;
 use crate::local_turn::{Answerer, LocalAnswerer, PassEvent, PassInput, conversation_messages};
 use crate::log::Logger;
-use crate::persona::{GhostSystemPromptInput, build_ghost_system_prompt, is_seeded_character};
+use crate::persona::{GhostSystemPromptInput, build_ghost_system_prompt};
 use crate::process::{ProcessOptions, run_process, signal_name};
 use crate::prompt_policy::stable_policy_sections;
-use crate::sidecars::{OwnerQuestion, read_question, read_read_at, remove_question, write_question, write_read_at};
+use crate::sidecars::{OwnerQuestion, QUESTION_OPTIONS, read_question, read_read_at, remove_question, write_question, write_read_at};
 use crate::text;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -28,12 +27,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// Same prefix Claude Code and Codex put on Stop-hook continuation prompts.
-const STOP_HOOK_FEEDBACK_PREFIX: &str = "Stop hook feedback:\n";
 /// The live tail of a tool's output shown on its card.
 const TOOL_SUMMARY_MAX: usize = 800;
 const MAX_QUESTION_LENGTH: usize = 2_000;
-const MAX_QUESTION_OPTIONS: usize = 6;
 const MAX_QUESTION_OPTION_LENGTH: usize = 120;
 const DEFAULT_TRANSCRIPT_LIMIT: usize = 1_000;
 const MAX_TRANSCRIPT_LIMIT: usize = 2_000;
@@ -45,8 +41,8 @@ type AppUrl = Box<dyn Fn() -> Option<String> + Send + Sync>;
 type CodingAgent = Box<dyn Fn() -> Option<String> + Send + Sync>;
 
 pub struct ConversationHostOptions {
-    /// The machine's one ghost.
-    pub ghost: Ghost,
+    /// The ghost home.
+    pub ghost: Home,
     pub owner_home: PathBuf,
     pub logger: Logger,
     pub hooks: Arc<HookRunner>,
@@ -60,8 +56,8 @@ pub struct ConversationHostOptions {
     pub coding_agent: Option<CodingAgent>,
     /// The environment commands run with.
     pub env: Env,
-    /// The owner's devices that get an alert when a turn ends; None alerts none.
-    pub push: Option<Arc<crate::push::Push>>,
+    /// The owner's devices that get an alert when a turn ends.
+    pub push: Arc<crate::push::Push>,
 }
 
 struct LiveTurn {
@@ -83,7 +79,7 @@ struct State {
     live: Option<LiveTurn>,
     /// The admitted turn's stop: the turn outlives its client, so only `stop_turn` or shutdown ends it early.
     admission: Option<Abort>,
-    /// While it is being trashed the conversation admits no turn and no other mutation.
+    /// While it is being trashed the conversation admits no turn, no second trashing, and no handoff.
     reserved: bool,
     listeners: Vec<Listener>,
     next_listener: u64,
@@ -99,7 +95,7 @@ struct State {
 }
 
 struct Inner {
-    ghost: Ghost,
+    ghost: Home,
     owner_home: PathBuf,
     logger: Logger,
     hooks: Arc<HookRunner>,
@@ -108,12 +104,10 @@ struct Inner {
     coding_agent: CodingAgent,
     local_model: Option<LocalModel>,
     env: Env,
-    push: Option<Arc<crate::push::Push>>,
-    /// The log as `GET /api/conversation` and the transcript read it.
-    log: IndexedLog,
+    push: Arc<crate::push::Push>,
     state: Mutex<State>,
-    /// Serializes read-marker rewrites, so two of them cannot interleave a read and a write.
-    metadata: Mutex<()>,
+    /// Held across a rewrite of the read mark, so two of them cannot interleave a read and a write.
+    read_mark: Mutex<()>,
     /// Signalled when a handoff note stops being written.
     handoff_done: std::sync::Condvar,
 }
@@ -175,7 +169,7 @@ fn internal(error: impl std::fmt::Display) -> GhostError {
     GhostError::internal(error.to_string())
 }
 
-/// A question as asked: trimmed, bounded, options deduplicated in order.
+/// A question as asked: trimmed, bounded, its 2 to 4 options deduplicated in order.
 fn valid_question(text: &str, options: &[String]) -> Result<OwnerQuestion> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -190,20 +184,13 @@ fn valid_question(text: &str, options: &[String]) -> Result<OwnerQuestion> {
             kept.push(option.to_string());
         }
     }
-    if kept.len() > MAX_QUESTION_OPTIONS {
-        return Err(GhostError::invalid(format!("A question takes at most {MAX_QUESTION_OPTIONS} options.")));
+    if !QUESTION_OPTIONS.contains(&kept.len()) {
+        return Err(GhostError::invalid(format!("A question offers {} to {} different options.", QUESTION_OPTIONS.start(), QUESTION_OPTIONS.end())));
     }
     if kept.iter().any(|option| text::len(option) > MAX_QUESTION_OPTION_LENGTH) {
         return Err(GhostError::invalid(format!("Each option must be at most {MAX_QUESTION_OPTION_LENGTH} characters.")));
     }
     Ok(OwnerQuestion { text: trimmed.to_string(), options: kept, asked_at: clock::now_iso() })
-}
-
-fn clamp(value: Option<f64>, fallback: usize, max: usize) -> usize {
-    match value {
-        Some(value) if value.is_finite() => value.floor().clamp(0.0, max as f64) as usize,
-        _ => fallback,
-    }
 }
 
 impl ConversationHost {
@@ -212,7 +199,6 @@ impl ConversationHost {
         let env = options.env;
         let agent_env = env.clone();
         let coding_agent = options.coding_agent.unwrap_or_else(|| Box::new(move || choose_coding_agent(&agent_env)));
-        let log = IndexedLog::new(&ghost_paths(&options.ghost.dir).conversation_dir);
         Self {
             inner: Arc::new(Inner {
                 ghost: options.ghost,
@@ -225,9 +211,8 @@ impl ConversationHost {
                 local_model: options.local_model,
                 env,
                 push: options.push,
-                log,
                 state: Mutex::new(State::default()),
-                metadata: Mutex::new(()),
+                read_mark: Mutex::new(()),
                 handoff_done: std::sync::Condvar::new(),
             }),
         }
@@ -235,12 +220,12 @@ impl ConversationHost {
 
     /// The conversation directory: where the model's commands run, holding the log and the sidecars.
     fn dir(&self) -> PathBuf {
-        ghost_paths(&self.inner.ghost.dir).conversation_dir
+        self.inner.ghost.conversation_dir()
     }
 
     /// Where the ghost keeps its topic documents (`topics.rs`).
     fn topics_dir(&self) -> PathBuf {
-        ghost_paths(&self.inner.ghost.dir).topics_dir
+        self.inner.ghost.topics_dir()
     }
 
     // ── Conversation events ────────────────────────────────────────────
@@ -269,18 +254,20 @@ impl ConversationHost {
     // ── Persona ───────────────────────────────────────────────────────
 
     /// The ghost's whole system prompt: its character and the stable policy sections.
-    /// Rendered before every turn, so a character the ghost (or the owner)
-    /// rewrote is who it is on the next one.
-    pub fn render_persona(&self) -> Result<String> {
+    /// Rendered before every pass, so a character the ghost (or the owner)
+    /// rewrote is who it is on the next one; the same bytes while nothing
+    /// changed, so the model's server reads none of it twice.
+    fn render_persona(&self) -> Result<String> {
         let ghost = &self.inner.ghost;
-        let character = read_character(&ghost.dir, true)?;
+        let character = ghost.read_character(true)?;
         let documents = crate::xdg::documents_dir(&self.inner.env, &self.inner.owner_home);
-        let first_meeting = is_seeded_character(&ghost.name(), character.as_ref().map(|character| character.body.as_str()));
-        let sections = stable_policy_sections(&documents, first_meeting);
+        let first_meeting = is_seeded_character(character.as_deref());
+        let coding_agent = (self.inner.coding_agent)().and_then(|agent| coding_agent_command(&agent));
+        let sections = stable_policy_sections(&documents, first_meeting, coding_agent);
         Ok(build_ghost_system_prompt(&GhostSystemPromptInput {
             ghost_name: &ghost.name(),
-            character: character.as_ref(),
-            home_dir: &ghost.dir,
+            character: character.as_deref(),
+            home_dir: ghost.dir(),
             extra_sections: &sections,
         }))
     }
@@ -303,12 +290,6 @@ impl ConversationHost {
         }
         state.admission = Some(abort.clone());
         Ok(TurnAdmission { host: self.clone(), prompt: prompt.to_string(), command, abort })
-    }
-
-    /// admit_turn then run, in one call, for tests.
-    pub fn run_turn(&self, prompt: &str, emit: Emit) -> Result<()> {
-        self.admit_turn(prompt)?.run(emit);
-        Ok(())
     }
 
     fn run_admitted(&self, prompt: &str, command: Option<&OwnerCommand>, emit: &Emit, abort: &Abort) -> Result<Value> {
@@ -436,7 +417,7 @@ impl ConversationHost {
             return;
         }
         let Ok(Some(entries)) = read_log(&self.dir()) else { return };
-        let mut history = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
+        let mut history = conversation_messages(&entries);
         let used = self.context_used(&history);
         let (abort, generation, outgrown) = {
             let mut state = self.inner.state.lock().unwrap();
@@ -552,7 +533,7 @@ impl ConversationHost {
         let dir = self.dir();
         // Every pass's prompt is already the log's last entry: the owner's message, a follow-up, or a hook's feedback.
         let entries = read_log(&dir)?.unwrap_or_default();
-        let whole = conversation_messages(&entries, STOP_HOOK_FEEDBACK_PREFIX);
+        let whole = conversation_messages(&entries);
         emit(json!({ "type": "pass" }));
         let mut attempt = 0;
         let result = loop {
@@ -587,8 +568,8 @@ impl ConversationHost {
 
     /// One completion for a trusted command hook (`ghostd hook-complete`), on the
     /// local model with no persona, conversation, or tools. It takes no
-    /// admission or conversation lock: the turn awaiting the `session_stop` hook
-    /// that asks holds its own, and waiting for it would deadlock.
+    /// admission: the turn awaiting the `session_stop` hook that asks holds
+    /// the conversation, and waiting for it would deadlock.
     pub fn complete(&self, prompt: &str, abort: &Abort) -> Result<String> {
         if prompt.trim().is_empty() {
             return Err(GhostError::invalid("prompt must be a non-empty string."));
@@ -615,10 +596,6 @@ impl ConversationHost {
         let Some(answerer) = self.inner.answerer.as_ref() else { return Err(GhostError::new("no_local_model", NO_LOCAL_MODEL, 409)) };
         let dir = self.dir();
         let persona = self.render_persona()?;
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
-        }
         let cwd = dir.to_string_lossy().into_owned();
 
         let mut content: Vec<AssistantPart> = Vec::new();
@@ -698,29 +675,25 @@ impl ConversationHost {
             }
             PassEvent::ToolEnd { id: tool, is_error, output } => {
                 let Some((name, part)) = tools.get(&tool).cloned() else { return };
-                if let AssistantPart::ToolCall { failed, output: logged, .. } = &mut content[part] {
-                    *failed = is_error;
-                    *logged = output.clone();
-                }
                 let mut event = json!({ "type": "tool_execution_end", "id": tool, "toolName": name, "isError": is_error });
-                if let Some(summary) = output.as_deref().and_then(tail) {
+                if let Some(summary) = tail(&output) {
                     event["summary"] = json!(summary);
                 }
                 // The whole of what the call returned, as the model is given it.
-                if let Some(output) = &output {
-                    event["output"] = json!(output);
+                event["output"] = json!(output);
+                if let AssistantPart::ToolCall { failed, output: logged, .. } = &mut content[part] {
+                    *failed = is_error;
+                    *logged = Some(output);
                 }
                 emit(event);
             }
-            PassEvent::Error { message } => error = Some(message),
             PassEvent::Context { tokens, characters } => {
                 self.inner.state.lock().unwrap().context = Some((tokens, characters));
             }
         };
 
-        let coding_agent_command = (self.inner.coding_agent)().and_then(|agent| coding_agent_command(&agent)).map(str::to_string);
         let env = self.inner.env.clone();
-        let input = PassInput { prompt, history, persona, coding_agent_command, cwd: dir.clone(), env, abort: abort.clone(), ask };
+        let input = PassInput { prompt, history, persona, cwd: dir.clone(), env, abort: abort.clone(), ask };
         let outcome = answerer.turn(&input, &mut on_event);
         if let Err(failure) = outcome
             && !abort.is_aborted()
@@ -734,34 +707,16 @@ impl ConversationHost {
         Ok(PassResult { content, error, aborted: false })
     }
 
-    /// The fields every hook event carries (docs/hooks.md), after the event's own.
-    fn hook_event(&self, name: HookEventName, mut payload: Value, abort: &Abort, last: &[(&str, Value)]) -> HookEvent {
-        let ghost = &self.inner.ghost;
-        let cwd = self.dir();
-        let base = json!({
-            "transcript_path": log_path(&cwd).to_string_lossy(),
-            "ghost_name": ghost.name(),
-            "ghost_home": ghost.dir.to_string_lossy(),
-            "cwd": cwd.to_string_lossy(),
-        });
-        let fields = payload.as_object_mut().expect("an object payload");
-        fields.extend(base.as_object().expect("an object").clone());
-        for (key, value) in last {
-            fields.insert((*key).to_string(), value.clone());
-        }
-        HookEvent { name, payload, cwd, abort: abort.clone() }
-    }
-
     /// The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
-    pub fn push(&self) -> Option<&Arc<crate::push::Push>> {
-        self.inner.push.as_ref()
+    pub fn push(&self) -> &Arc<crate::push::Push> {
+        &self.inner.push
     }
 
     /// Alert the owner's devices that a turn ended (CONTRACTS.md "Push alerts"). A cancelled turn alerts no one.
     fn alert(&self, terminal: &Value, abort: &Abort) {
         let failed = terminal["type"] == "error";
-        let Some(push) = self.inner.push.as_ref().filter(|push| push.count() > 0) else { return };
-        if abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
+        let push = &self.inner.push;
+        if push.count() == 0 || abort.is_aborted() || (failed && terminal["reason"] == "aborted") {
             return;
         }
         let Ok(entries) = read_log(&self.dir()).map(Option::unwrap_or_default) else { return };
@@ -787,7 +742,7 @@ impl ConversationHost {
 
     fn session_stop(&self, owner_prompt: &str, turn_id: &str, active: bool, abort: &Abort, emit: &Emit) -> Result<Option<String>> {
         let hooks = &self.inner.hooks;
-        if !hooks.has_handlers(HookEventName::SessionStop) || abort.is_aborted() {
+        if !hooks.has_handlers() || abort.is_aborted() {
             return Ok(None);
         }
         let entries = read_log(&self.dir())?.unwrap_or_default();
@@ -795,17 +750,25 @@ impl ConversationHost {
             return Ok(None);
         };
         let message = json!({ "role": "assistant", "content": content.iter().map(AssistantPart::to_json).collect::<Vec<_>>() });
-        let payload = json!({ "type": "session_stop", "messages": [message], "turn_id": turn_id, "last_assistant_message": message });
-        let event = self.hook_event(
-            HookEventName::SessionStop,
-            payload,
-            abort,
-            &[("stop_hook_active", json!(active)), ("owner_prompt", json!(owner_prompt))],
-        );
-        let observe = |name: &str, event: HookEventName, running: bool| {
-            emit(json!({ "type": if running { "hook_start" } else { "hook_end" }, "name": name, "event": event.as_str() }));
+        let (ghost, cwd) = (&self.inner.ghost, self.dir());
+        // The event as a handler reads it on stdin (docs/hooks.md), in this order.
+        let payload = json!({
+            "type": SESSION_STOP,
+            "messages": [message],
+            "turn_id": turn_id,
+            "last_assistant_message": message,
+            "transcript_path": log_path(&cwd).to_string_lossy(),
+            "ghost_name": ghost.name(),
+            "ghost_home": ghost.dir().to_string_lossy(),
+            "cwd": cwd.to_string_lossy(),
+            "stop_hook_active": active,
+            "owner_prompt": owner_prompt,
+        });
+        let event = HookEvent { payload, cwd, abort: abort.clone() };
+        let observe = |name: &str, running: bool| {
+            emit(json!({ "type": if running { "hook_start" } else { "hook_end" }, "name": name, "event": SESSION_STOP }));
         };
-        Ok(continuation(hooks.emit_session_stop(&event, Some(&observe)).as_ref()))
+        Ok(hooks.emit_session_stop(&event, Some(&observe)))
     }
 
     /// The owner's `!command` (or `!!command`, kept from the ghost), run in the
@@ -827,6 +790,7 @@ impl ConversationHost {
                 cwd: home,
                 env: &self.inner.env,
                 abort,
+                timeout: None,
                 stdin: None,
                 merge_stderr: false,
                 tick: true,
@@ -913,20 +877,20 @@ impl ConversationHost {
 
     // ── The conversation's state ──────────────────────────────────────
 
-    /// The conversation as a client lists it: `{ preview, updatedAt,
-    /// messageCount, unread, running, question }`. Before anything is said it
-    /// has no preview and no time.
+    /// The conversation at a glance: `{ preview, updatedAt, messageCount,
+    /// unread, running, question }`. Before anything is said it has no
+    /// preview and no time.
     pub fn conversation(&self) -> Result<Value> {
         let dir = self.dir();
         // An owner command logs when it ends, so a running one shows before anything is logged.
         let running = self.inner.state.lock().unwrap().admission.is_some();
-        let log = self.inner.log.listed()?;
-        let updated_at = log.as_ref().filter(|log| log.state.message_count > 0).map(|log| log.updated_at.clone());
+        let log = log_state(&read_log(&dir)?.unwrap_or_default());
+        let updated_at = log.active_at.filter(|_| log.message_count > 0);
         let unread = updated_at.as_ref().is_some_and(|updated_at| read_read_at(&dir).is_none_or(|read_at| *updated_at > read_at));
         Ok(json!({
-            "preview": log.as_ref().and_then(|log| log.state.preview.clone()),
+            "preview": log.preview,
             "updatedAt": updated_at,
-            "messageCount": log.as_ref().map_or(0, |log| log.state.message_count),
+            "messageCount": log.message_count,
             "unread": unread,
             "running": running,
             "question": read_question(&dir).map(|question| question.to_json()),
@@ -943,7 +907,7 @@ impl ConversationHost {
 
     /// Record what the ghost asks the owner, replacing an earlier open
     /// question. It stays until the owner's next message.
-    pub fn set_question(&self, text: &str, options: &[String]) -> Result<Value> {
+    fn set_question(&self, text: &str, options: &[String]) -> Result<Value> {
         let question = valid_question(text, options)?;
         self.require_conversation()?;
         write_question(&self.dir(), &question)?;
@@ -957,7 +921,7 @@ impl ConversationHost {
         let dir = self.dir();
         let mut read_at = clock::iso(opened_at_ms);
         {
-            let _writing = self.inner.metadata.lock().unwrap();
+            let _writing = self.inner.read_mark.lock().unwrap();
             if let Some(earlier) = read_read_at(&dir).filter(|earlier| *earlier > read_at) {
                 read_at = earlier;
             }
@@ -976,16 +940,17 @@ impl ConversationHost {
         read_attachment(&self.dir(), name)
     }
 
-    /// `{ messages, total, truncated }`: one page of the renderable history.
-    pub fn read_transcript(&self, limit: Option<f64>, offset: Option<f64>) -> Result<Value> {
-        let limit = clamp(limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT).max(1);
-        let requested = clamp(offset, 0, usize::MAX / 2);
-        let page = self.inner.log.page(requested, limit)?;
-        let offset = requested.min(page.total);
+    /// `{ messages, total, truncated }`: one page of the renderable history,
+    /// `limit` messages (the default when None, at least one, at most the
+    /// maximum) from the `offset`th.
+    pub fn read_transcript(&self, limit: Option<usize>, offset: Option<usize>) -> Result<Value> {
+        let limit = limit.unwrap_or(DEFAULT_TRANSCRIPT_LIMIT).clamp(1, MAX_TRANSCRIPT_LIMIT);
+        let entries = read_log(&self.dir())?.unwrap_or_default();
+        let page = transcript_page(&entries, offset.unwrap_or(0), limit);
         Ok(json!({
             "messages": page.messages.iter().map(|message| message.to_json()).collect::<Vec<_>>(),
             "total": page.total,
-            "truncated": offset > 0 || offset + page.messages.len() < page.total,
+            "truncated": page.messages.len() < page.total,
         }))
     }
 
@@ -1022,7 +987,7 @@ impl ConversationHost {
     // ── Shutdown ──────────────────────────────────────────────────────
 
     /// Refuse new turns, abort the running one, end the event streams, stop the model.
-    pub fn dispose_all(&self) {
+    pub fn shut_down(&self) {
         let (aborts, closers) = {
             let mut state = self.inner.state.lock().unwrap();
             state.shutting_down = true;
@@ -1059,6 +1024,10 @@ impl TurnAdmission {
         std::thread::spawn(move || host.alert(&terminal, &abort));
     }
 }
+
+#[cfg(test)]
+#[path = "fake_answerer.rs"]
+pub(crate) mod fake_answerer;
 
 #[cfg(test)]
 #[path = "conversation_host_tests.rs"]

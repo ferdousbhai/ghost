@@ -1,7 +1,7 @@
 //! Child processes: a command in its own process group whose output is handed
-//! on as it arrives and whose whole group ends on abort (an owner's
-//! `!command`, a hook, the model's `bash`), and a short-lived binary whose
-//! output is collected (`tailscale`, `curl`). ghostd signals only a
+//! on as it arrives and whose whole group ends on abort or at its timeout (an
+//! owner's `!command`, a hook, the model's `bash`), and a short-lived binary
+//! whose output is collected (`tailscale`, `curl`). ghostd signals only a
 //! group it spawned.
 use crate::abort::Abort;
 use crate::env::Env;
@@ -13,7 +13,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 /// How long a command gets to exit after SIGTERM before the group is killed.
-const KILL_GRACE: Duration = Duration::from_secs(3);
+pub(crate) const KILL_GRACE: Duration = Duration::from_secs(3);
 /// The stderr kept for an error message.
 const STDERR_TAIL_BYTES: usize = 8_192;
 /// How long output may keep arriving after the process itself exits.
@@ -28,6 +28,8 @@ pub struct ProcessExit {
     pub stderr: String,
     /// The process could not start (not installed, not executable).
     pub spawn_error: Option<String>,
+    /// Ended for outliving `ProcessOptions::timeout`.
+    pub timed_out: bool,
 }
 
 pub struct ProcessOptions<'a> {
@@ -35,6 +37,8 @@ pub struct ProcessOptions<'a> {
     pub cwd: &'a Path,
     pub env: &'a Env,
     pub abort: &'a Abort,
+    /// How long it may run before its group is ended as on abort; None, as long as it likes.
+    pub timeout: Option<Duration>,
     /// Written to the process's stdin, which is then closed; None, stdin is /dev/null.
     pub stdin: Option<&'a str>,
     /// Hand stderr to `on_output` too, in arrival order with stdout.
@@ -95,8 +99,8 @@ impl Utf8Stream {
     }
 }
 
-/// Run `argv` in its own process group until it exits or `abort` ends the
-/// group (SIGTERM, then SIGKILL). `on_output` gets stdout as it arrives. A
+/// Run `argv` in its own process group until it exits, or `abort` or the
+/// timeout ends the group (SIGTERM, then SIGKILL). `on_output` gets stdout as it arrives. A
 /// detached descendant that keeps the pipes open does not hold the call: it
 /// ends with the command, not with its grandchildren.
 pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str)) -> ProcessExit {
@@ -149,6 +153,8 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
         }
     }
     let _terminate = options.abort.on_abort(move || signal_group(pid, libc::SIGTERM));
+    let deadline = options.timeout.map(|timeout| Instant::now() + timeout);
+    let mut timed_out = false;
 
     let (mut out, mut err) = (Utf8Stream::default(), Utf8Stream::default());
     let mut stderr = String::new();
@@ -178,18 +184,27 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
         {
             exited = Some((status, Instant::now()));
         }
+        if exited.is_none() && !timed_out && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            timed_out = true;
+            signal_group(pid, libc::SIGTERM);
+        }
+        let stopping = timed_out || options.abort.is_aborted();
         if let Some((status, at)) = exited {
-            if !pipes_open || at.elapsed() >= PIPE_DRAIN || options.abort.is_aborted() {
+            if !pipes_open || at.elapsed() >= PIPE_DRAIN || stopping {
                 break status;
             }
-        } else if options.abort.is_aborted() {
+        } else if stopping {
             match killed_at {
                 None => killed_at = Some(Instant::now() + KILL_GRACE),
-                Some(deadline) if Instant::now() >= deadline => signal_group(pid, libc::SIGKILL),
+                Some(grace) if Instant::now() >= grace => signal_group(pid, libc::SIGKILL),
                 Some(_) => {}
             }
         }
-        match receiver.recv_timeout(Duration::from_millis(if exited.is_some() { 10 } else { 50 })) {
+        let mut wait = Duration::from_millis(if exited.is_some() { 10 } else { 50 });
+        if let Some(deadline) = deadline.filter(|_| !timed_out) {
+            wait = wait.min(deadline.saturating_duration_since(Instant::now()));
+        }
+        match receiver.recv_timeout(wait) {
             Ok(chunk) => take(chunk, &mut on_output),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 pipes_open = false;
@@ -206,14 +221,14 @@ pub fn run_process(options: ProcessOptions<'_>, mut on_output: impl FnMut(&str))
         }
     };
     // Cancellation kills surviving members of the group even after its leader exits.
-    if options.abort.is_aborted() {
+    if timed_out || options.abort.is_aborted() {
         signal_group(pid, libc::SIGKILL);
     } else {
         while let Ok(chunk) = receiver.try_recv() {
             take(chunk, &mut on_output);
         }
     }
-    ProcessExit { code: status.code(), signal: status.signal(), stderr, spawn_error: None }
+    ProcessExit { code: status.code(), signal: status.signal(), stderr, spawn_error: None, timed_out }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -240,44 +255,33 @@ impl std::fmt::Display for CommandFailure {
     }
 }
 
-/// Run one binary to its end and collect its output, bounded by `timeout`
-/// and `abort`. A non-zero exit is a result; a missing binary is `Missing`.
-pub fn run_command(
-    binary: &str,
-    args: &[&str],
-    env: &Env,
-    stdin: Option<&str>,
-    timeout: Duration,
-    abort: &Abort,
-) -> Result<CommandResult, CommandFailure> {
+/// Run one binary to its end and collect its output, bounded by `timeout`.
+/// A non-zero exit is a result; a missing binary is `Missing`.
+pub fn run_command(binary: &str, args: &[&str], env: &Env, timeout: Duration) -> Result<CommandResult, CommandFailure> {
     if !binary.contains('/') && crate::env::which(binary, env).is_none() {
         return Err(CommandFailure::Missing);
     }
-    let (own, _link) = abort.child();
-    let timer = own.clone();
-    let (done, finished) = mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        if finished.recv_timeout(timeout).is_err() {
-            timer.abort();
-        }
-    });
     let mut argv = vec![binary];
     argv.extend_from_slice(args);
     let mut stdout = String::new();
     let exit = run_process(
-        ProcessOptions { argv: &argv, cwd: Path::new("/"), env, abort: &own, stdin: Some(stdin.unwrap_or("")), merge_stderr: false, tick: false },
+        ProcessOptions {
+            argv: &argv,
+            cwd: Path::new("/"),
+            env,
+            abort: &Abort::new(),
+            timeout: Some(timeout),
+            stdin: None,
+            merge_stderr: false,
+            tick: false,
+        },
         |chunk| stdout.push_str(chunk),
     );
-    let _ = done.send(());
     if let Some(error) = exit.spawn_error {
         return Err(CommandFailure::Other(error));
     }
-    if own.is_aborted() && exit.code.is_none() {
-        return Err(CommandFailure::Other(if abort.is_aborted() {
-            "stopped".into()
-        } else {
-            format!("{binary} did not answer in {} s", timeout.as_secs())
-        }));
+    if exit.timed_out && exit.code.is_none() {
+        return Err(CommandFailure::Other(format!("{binary} did not answer in {} s", timeout.as_secs())));
     }
     Ok(CommandResult { stdout, stderr: exit.stderr, code: exit.code.unwrap_or(1) })
 }
@@ -293,7 +297,16 @@ mod tests {
     fn bash(script: &str, abort: &Abort, stdin: Option<&str>, merge: bool) -> (ProcessExit, String) {
         let mut out = String::new();
         let exit = run_process(
-            ProcessOptions { argv: &["bash", "-c", script], cwd: Path::new("/"), env: &env(), abort, stdin, merge_stderr: merge, tick: false },
+            ProcessOptions {
+                argv: &["bash", "-c", script],
+                cwd: Path::new("/"),
+                env: &env(),
+                abort,
+                timeout: None,
+                stdin,
+                merge_stderr: merge,
+                tick: false,
+            },
             |chunk| out.push_str(chunk),
         );
         (exit, out)
@@ -324,6 +337,7 @@ mod tests {
                 cwd: Path::new("/"),
                 env: &env(),
                 abort: &Abort::new(),
+                timeout: None,
                 stdin: None,
                 merge_stderr: false,
                 tick: false,
@@ -331,37 +345,40 @@ mod tests {
             |_| {},
         );
         assert!(exit.spawn_error.is_some());
-        assert_eq!(run_command("ghost-no-such-binary", &[], &env(), None, Duration::from_secs(1), &Abort::new()), Err(CommandFailure::Missing));
+        assert_eq!(run_command("ghost-no-such-binary", &[], &env(), Duration::from_secs(1)), Err(CommandFailure::Missing));
     }
 
     #[test]
-    fn abort_ends_the_whole_group() {
-        let abort = Abort::new();
-        let stopper = abort.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(200));
-            stopper.abort();
-        });
+    fn a_timeout_ends_the_group_and_is_told_apart_from_a_stop() {
+        let timed = |script: &str, timeout: Duration, abort: &Abort| {
+            run_process(
+                ProcessOptions {
+                    argv: &["bash", "-c", script],
+                    cwd: Path::new("/"),
+                    env: &env(),
+                    abort,
+                    timeout: Some(timeout),
+                    stdin: None,
+                    merge_stderr: false,
+                    tick: false,
+                },
+                |_| {},
+            )
+        };
         let started = Instant::now();
-        let (exit, out) = bash("echo started; sleep 30 & wait", &abort, None, false);
-        assert!(started.elapsed() < Duration::from_secs(5));
-        assert_eq!(out, "started\n");
-        assert_eq!(exit.code, None);
-    }
+        let late = timed("sleep 30", Duration::from_millis(100), &Abort::new());
+        assert_eq!((late.code, late.signal, late.timed_out), (None, Some(libc::SIGTERM), true));
+        assert!(started.elapsed() < KILL_GRACE);
+        // In time, and stopped before its time, are neither of them a timeout.
+        let early = timed("exit 3", Duration::from_secs(30), &Abort::new());
+        assert_eq!((early.code, early.timed_out), (Some(3), false));
+        let stopped = Abort::new();
+        stopped.abort();
+        assert!(!timed("sleep 30", Duration::from_secs(30), &stopped).timed_out);
 
-    #[test]
-    fn a_detached_grandchild_does_not_hold_the_call() {
-        let started = Instant::now();
-        let (exit, out) = bash("(sleep 20 &) ; echo done", &Abort::new(), None, false);
-        assert_eq!((exit.code, out.as_str()), (Some(0), "done\n"));
-        assert!(started.elapsed() < Duration::from_secs(8));
-    }
-
-    #[test]
-    fn run_command_times_out() {
-        let failure = run_command("sleep", &["30"], &env(), None, Duration::from_millis(200), &Abort::new()).unwrap_err();
-        assert!(matches!(failure, CommandFailure::Other(message) if message.contains("did not answer")));
-        let ok = run_command("bash", &["-c", "echo hi; exit 2"], &env(), None, Duration::from_secs(5), &Abort::new()).unwrap();
+        let failure = run_command("sleep", &["30"], &env(), Duration::from_millis(100)).unwrap_err();
+        assert!(matches!(failure, CommandFailure::Other(message) if message.starts_with("sleep did not answer in ")));
+        let ok = run_command("bash", &["-c", "echo hi; exit 2"], &env(), Duration::from_secs(5)).unwrap();
         assert_eq!((ok.stdout.as_str(), ok.code), ("hi\n", 2));
     }
 
@@ -442,6 +459,7 @@ mod tests {
                 cwd: &scratch.0,
                 env: &env,
                 abort: &Abort::new(),
+                timeout: None,
                 stdin: None,
                 merge_stderr: false,
                 tick: false,
@@ -483,6 +501,7 @@ mod tests {
                     cwd: &scratch.0,
                     env: &env,
                     abort: &abort,
+                    timeout: None,
                     stdin: None,
                     merge_stderr: false,
                     tick: false,
@@ -515,6 +534,7 @@ mod tests {
                 cwd: &scratch.0,
                 env: &env(),
                 abort: &Abort::new(),
+                timeout: None,
                 stdin: None,
                 merge_stderr: false,
                 tick: false,
@@ -543,7 +563,16 @@ mod tests {
     #[test]
     fn an_empty_command_and_the_stderr_tail() {
         let exit = run_process(
-            ProcessOptions { argv: &[], cwd: Path::new("/"), env: &env(), abort: &Abort::new(), stdin: None, merge_stderr: false, tick: false },
+            ProcessOptions {
+                argv: &[],
+                cwd: Path::new("/"),
+                env: &env(),
+                abort: &Abort::new(),
+                timeout: None,
+                stdin: None,
+                merge_stderr: false,
+                tick: false,
+            },
             |_| {},
         );
         assert_eq!(exit, ProcessExit { spawn_error: Some("empty command".into()), ..Default::default() });

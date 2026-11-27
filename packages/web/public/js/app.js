@@ -908,7 +908,7 @@ async function send() {
   clearTray();
   if (mine.shown) drawMeta();
   try {
-    for await (const ev of turnEvents(response, (path) => request(host, path))) {
+    for await (const ev of turnEvents(response)) {
       const notice = fold(mine.messages, ev);
       if (notice) mine.now = { text: notice, since: Date.now() };
       else if (ev.type === "tool_execution_start") mine.now = { text: toolCall(ev.toolName, ev.arguments), since: Date.now() };

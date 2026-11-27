@@ -1,7 +1,6 @@
 //! Which coding agent a turn's prompt names: Omarchy's default agent, when it
 //! is one Ghost has a one-shot command for. Ghost runs none of them itself; the local model
 //! runs the one named from its shell (CONTRACTS.md "Local model").
-use crate::abort::Abort;
 use crate::env::{Env, which};
 use crate::process::run_command;
 use std::time::Duration;
@@ -28,7 +27,7 @@ pub fn coding_agent_command(id: &str) -> Option<&'static str> {
 
 /// Omarchy's default agent (`omarchy default agent`), or None when none is chosen.
 fn omarchy_default_agent(env: &Env) -> Option<String> {
-    let chosen = run_command("omarchy-default-agent", &[], env, None, Duration::from_secs(5), &Abort::new()).ok()?;
+    let chosen = run_command("omarchy-default-agent", &[], env, Duration::from_secs(5)).ok()?;
     let name = chosen.stdout.trim();
     (chosen.code == 0 && !name.is_empty()).then(|| name.to_string())
 }

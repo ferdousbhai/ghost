@@ -11,7 +11,7 @@ pub fn current() -> Env {
 }
 
 /// A variable's trimmed value, when it has one.
-pub fn var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
+pub(crate) fn var<'a>(env: &'a Env, name: &str) -> Option<&'a str> {
     env.get(name).map(|value| value.trim()).filter(|value| !value.is_empty())
 }
 
@@ -21,7 +21,7 @@ pub fn home(env: &Env) -> PathBuf {
 }
 
 /// The executable `name` resolves to on `env`'s `PATH`, or None.
-pub fn which(name: &str, env: &Env) -> Option<PathBuf> {
+pub(crate) fn which(name: &str, env: &Env) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     env.get("PATH")?.split(':').filter(|dir| !dir.is_empty()).map(|dir| PathBuf::from(dir).join(name)).find(|path| {
         // What `access(X_OK)` would say for the owner: a file with an execute bit.

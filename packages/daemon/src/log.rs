@@ -3,7 +3,7 @@
 //! ghost names, event counts, error classes — not message text.
 use serde_json::{Map, Value};
 use std::os::unix::fs::MetadataExt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Level {
@@ -76,6 +76,7 @@ fn stderr_line(record: &Record, journal: bool) -> String {
 }
 
 impl Logger {
+    #[cfg(test)]
     pub fn silent() -> Self {
         Self { min: Level::Error, sink: None, bound: Map::new() }
     }
@@ -90,9 +91,10 @@ impl Logger {
         Self::new(min, move |record| eprintln!("{}", stderr_line(record, journal)))
     }
 
-    /// A logger that keeps its records, for tests.
-    pub fn recording() -> (Self, Arc<Mutex<Vec<Record>>>) {
-        let records = Arc::new(Mutex::new(Vec::new()));
+    /// A logger that keeps its records.
+    #[cfg(test)]
+    pub fn recording() -> (Self, Arc<std::sync::Mutex<Vec<Record>>>) {
+        let records = Arc::new(std::sync::Mutex::new(Vec::new()));
         let kept = records.clone();
         (Self::new(Level::Info, move |record| kept.lock().unwrap().push(record.clone())), records)
     }
@@ -135,30 +137,17 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn child_fields_merge_and_levels_filter() {
+    fn drops_what_is_below_its_level_and_formats_a_record_as_one_line() {
         let (logger, records) = Logger::recording();
-        let child = logger.child(json!({ "ghost": "casper" }));
-        child.info("hello", json!({ "n": 1 }));
-        child.warn("plain", Value::Null);
-        let records = records.lock().unwrap();
-        assert_eq!(format(&records[0]), r#"ghostd: hello {"ghost":"casper","n":1}"#);
-        assert_eq!(records[1].level, Level::Warn);
-        let kept = Arc::new(Mutex::new(0));
+        logger.child(json!({ "ghost": "casper" })).info("hello", json!({ "n": 1 }));
+        assert_eq!(format(&records.lock().unwrap()[0]), r#"ghostd: hello {"ghost":"casper","n":1}"#);
+        let kept = Arc::new(std::sync::Mutex::new(0));
         let count = kept.clone();
         let quiet = Logger::new(Level::Warn, move |_| *count.lock().unwrap() += 1);
         quiet.info("dropped", Value::Null);
         quiet.error("kept", Value::Null);
         assert_eq!(*kept.lock().unwrap(), 1);
     }
-
-    #[test]
-    fn journal_needs_stderr_itself() {
-        assert!(!stderr_is_journal(None));
-        assert!(!stderr_is_journal(Some("1:2")));
-        assert!(!stderr_is_journal(Some("nonsense")));
-    }
-
-    // ── Logging ─────────────────────────────────────────────────────────
 
     #[test]
     fn merges_bound_fields_below_call_site_fields() {
@@ -204,7 +193,7 @@ mod tests {
 
     #[test]
     fn treats_an_inherited_journal_stream_that_is_not_this_stderr_as_no_journal() {
-        assert!(!stderr_is_journal(Some("1:1")));
+        assert!(!stderr_is_journal(None) && !stderr_is_journal(Some("1:1")) && !stderr_is_journal(Some("nonsense")));
         assert!(!stderr_is_journal(Some("1:1:1")) && !stderr_is_journal(Some(":")) && !stderr_is_journal(Some("")));
         // The stream systemd names is this stderr only when both numbers are its own.
         let info = std::fs::metadata("/proc/self/fd/2").unwrap();

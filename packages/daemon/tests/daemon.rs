@@ -1,5 +1,5 @@
 //! The real `ghostd` binary, started and stopped as systemd would, against a
-//! scratch home: nothing here reads the owner's ghosts, config, or token, and
+//! scratch home: nothing here reads the owner's ghost home, config, or token, and
 //! the daemon binds whatever port is free.
 use ghostd::http::{ClientRequest, send};
 use serde_json::{Value, json};

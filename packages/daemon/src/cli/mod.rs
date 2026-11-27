@@ -4,7 +4,6 @@
 //! the owner's scripts rely on. Nothing in this tree reads the process's
 //! environment, home or streams: they come in through [`CliRuntime`].
 mod args;
-mod client;
 mod commands;
 mod common;
 mod hook_complete;
@@ -13,23 +12,43 @@ mod say;
 #[cfg(test)]
 mod tests;
 
+use crate::client::{CONTROL_TIMEOUT, Client, ClientError};
 use crate::env::Env;
 use crate::help_topics::{HELP_TOPICS, render_help_topic};
-use args::{ArgsSpec, ParsedArgs, parse_args};
-use client::{DaemonClient, EXIT_CODES, EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE};
-pub use hook_complete::{hook_complete_command, parse_hook_complete_input};
+use args::{COMMON, ParsedArgs, parse_args};
+pub use hook_complete::hook_complete_command;
 use output::{CommandDocumentation, Rendered, render_command_help, render_exit_codes, render_usage};
 use serde_json::Value;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::time::Duration;
 
-/// Where a command's piped input comes from.
-pub enum Stdin<'a> {
-    /// The whole input, already read (tests, and callers that hold it).
-    Text(String),
-    /// A stream to read to its end, and whether it is a terminal: a command
-    /// never waits on a terminal for text nobody was asked to type.
-    Stream { reader: Box<dyn Read + 'a>, is_tty: bool },
+const EXIT_SUCCESS: i32 = 0;
+const EXIT_FAILURE: i32 = 1;
+const EXIT_USAGE: i32 = 2;
+const EXIT_UNREACHABLE: i32 = 3;
+const EXIT_UNAUTHORIZED: i32 = 4;
+const EXIT_NOT_FOUND: i32 = 5;
+const EXIT_CONFLICT: i32 = 6;
+const EXIT_INTERRUPTED: i32 = 130;
+
+/// Every exit code and what it means, as `ghost help exit-codes` prints them.
+const EXIT_CODES: &[(i32, &str)] = &[
+    (EXIT_SUCCESS, "success"),
+    (EXIT_FAILURE, "turn or action failed"),
+    (EXIT_USAGE, "usage error"),
+    (EXIT_UNREACHABLE, "daemon unreachable"),
+    (EXIT_UNAUTHORIZED, "unauthorized"),
+    (EXIT_NOT_FOUND, "not found"),
+    (EXIT_CONFLICT, "busy or conflict"),
+    (EXIT_INTERRUPTED, "interrupted at the terminal (Ctrl-C)"),
+];
+
+/// A command's piped input: a stream to read to its end, and whether it is a
+/// terminal, since a command never waits on one for text nobody was asked to type.
+pub struct Stdin<'a> {
+    pub reader: Box<dyn Read + 'a>,
+    pub is_tty: bool,
 }
 
 /// Everything a command may touch of the process it runs in.
@@ -43,26 +62,36 @@ pub struct CliRuntime<'a> {
     pub stdout_is_tty: bool,
 }
 
-/// A failure with the exit code it ends the command with. `code` is the
-/// daemon's error code when the failure was an HTTP error body.
-#[derive(Debug, Clone)]
+/// A failure with the exit code it ends the command with.
+#[derive(Debug)]
 pub(crate) struct CliError {
     pub exit_code: i32,
     pub message: String,
-    pub code: Option<String>,
 }
 
 impl CliError {
-    pub fn new(exit_code: i32, message: impl Into<String>) -> Self {
-        Self { exit_code, message: message.into(), code: None }
-    }
     /// A command line that cannot be run as written (exit 2).
     pub fn usage(message: impl Into<String>) -> Self {
-        Self::new(EXIT_USAGE, message)
+        Self { exit_code: EXIT_USAGE, message: message.into() }
     }
     /// Anything else that went wrong (exit 1).
     pub fn failure(message: impl Into<String>) -> Self {
-        Self::new(EXIT_FAILURE, message)
+        Self { exit_code: EXIT_FAILURE, message: message.into() }
+    }
+}
+
+/// The client's failure as this command line's sentence and exit code.
+impl From<ClientError> for CliError {
+    fn from(error: ClientError) -> Self {
+        let exit_code = match &error {
+            ClientError::Unreachable(_) => EXIT_UNREACHABLE,
+            ClientError::Unauthorized { .. } | ClientError::Status { status: 403, .. } => EXIT_UNAUTHORIZED,
+            ClientError::Status { status: 404, .. } => EXIT_NOT_FOUND,
+            ClientError::Status { status: 409, .. } => EXIT_CONFLICT,
+            ClientError::Configuration(_) => EXIT_USAGE,
+            ClientError::Status { .. } | ClientError::Protocol(_) => EXIT_FAILURE,
+        };
+        Self { exit_code, message: error.to_string() }
     }
 }
 
@@ -71,21 +100,23 @@ impl CliError {
 pub(crate) struct Context<'r, 'a> {
     pub parsed: ParsedArgs,
     pub runtime: &'r mut CliRuntime<'a>,
-    pub version: String,
-    client: Option<DaemonClient>,
+    /// How long a control request may take.
+    pub timeout: Duration,
+    client: Option<Client>,
 }
 
 impl Context<'_, '_> {
-    pub fn client(&mut self) -> Result<&mut DaemonClient, CliError> {
+    pub fn client(&mut self) -> Result<&mut Client, CliError> {
         if self.client.is_none() {
-            self.client = Some(DaemonClient::new(self.runtime.env, self.runtime.home)?);
+            self.client = Some(Client::discover(self.runtime.env, self.runtime.home)?);
         }
         Ok(self.client.as_mut().expect("just set"))
     }
 
     /// A control request to the daemon.
     pub fn request(&mut self, method: &str, path: &str, body: Option<&Value>) -> Result<Value, CliError> {
-        self.client()?.request(method, path, body)
+        let timeout = self.timeout;
+        Ok(self.client()?.request(method, path, body, Some(timeout))?)
     }
 
     pub fn out(&mut self, text: &str) {
@@ -131,16 +162,6 @@ struct Command {
     boolean: &'static [&'static str],
     value: &'static [&'static str],
     run: Run,
-}
-
-impl Command {
-    /// The common flags plus this verb's own.
-    fn args(&self) -> ArgsSpec {
-        let mut spec = ArgsSpec { boolean: vec!["version"], value: Vec::new() };
-        spec.boolean.extend(self.boolean);
-        spec.value.extend(self.value);
-        spec
-    }
 }
 
 /// The command catalog, in the order the usage screen lists it.
@@ -253,33 +274,27 @@ fn help_command(ctx: &mut Context) -> Result<i32, CliError> {
     Ok(EXIT_SUCCESS)
 }
 
-/// `$GHOSTD_VERSION` from the runtime's environment when set (the test seam), else this build's.
-fn version(env: &Env) -> String {
-    crate::env::var(env, "GHOSTD_VERSION").unwrap_or(crate::VERSION).to_string()
-}
-
-fn dispatch(argv: &[String], runtime: &mut CliRuntime) -> Result<i32, CliError> {
+fn dispatch(argv: &[String], runtime: &mut CliRuntime, timeout: Duration) -> Result<i32, CliError> {
     let commands = commands();
-    // Two passes: the first knows every verb's flags and is trusted only for the
-    // verb, the second holds that verb to its own, so another verb's flag is
-    // the unknown option it is.
-    let mut every = ArgsSpec::default();
-    for spec in commands.iter().map(Command::args) {
-        every.boolean.extend(spec.boolean);
-        every.value.extend(spec.value);
-    }
-    let scouted = parse_args(argv, &every)?;
-    if scouted.boolean("version") {
-        output::write(runtime.stdout, &format!("{}\n", version(runtime.env)));
+    // Every verb's flags are known while the verb is found; the verb is then
+    // held to its own, so another verb's flag is the unknown option it is.
+    let every =
+        |flags: fn(&Command) -> &'static [&'static str]| commands.iter().flat_map(|command| flags(command).iter().copied()).collect::<Vec<_>>();
+    let mut parsed = parse_args(argv, &every(|command| command.boolean), &every(|command| command.value))?;
+    if parsed.boolean("version") {
+        output::write(runtime.stdout, &format!("{}\n", crate::VERSION));
         return Ok(EXIT_SUCCESS);
     }
-    let Some(verb) = scouted.positionals.first() else {
+    if parsed.positionals.is_empty() {
         output::write(runtime.stdout, &usage_text(&commands));
         return Ok(EXIT_SUCCESS);
-    };
+    }
+    let verb = parsed.positionals.remove(0);
     let command = commands.iter().find(|candidate| candidate.doc.verb == verb).ok_or_else(|| CliError::usage(format!("Unknown command: {verb}")))?;
-    let mut parsed = parse_args(argv, &command.args())?;
-    parsed.positionals.remove(0);
+    let takes = |flag: &str| COMMON.contains(&flag) || command.boolean.contains(&flag) || command.value.contains(&flag);
+    if let Some((flag, _)) = parsed.flags.iter().find(|(flag, _)| !takes(flag)) {
+        return Err(CliError::usage(format!("Unknown option '--{flag}'.")));
+    }
     if parsed.boolean("help") {
         output::write(runtime.stdout, &render_command_help(&command.doc));
         return Ok(EXIT_SUCCESS);
@@ -288,18 +303,22 @@ fn dispatch(argv: &[String], runtime: &mut CliRuntime) -> Result<i32, CliError> 
     if parsed.positionals.len() < minimum || parsed.positionals.len() > maximum {
         return Err(CliError::usage(format!("Usage: ghost {}", command.doc.usage)));
     }
-    let version = version(runtime.env);
-    (command.run)(&mut Context { parsed, runtime, version, client: None })
+    (command.run)(&mut Context { parsed, runtime, timeout, client: None })
 }
 
-/// The whole `ghost` command: run `args` (without the program name) and
-/// return the exit code. A failure is one `ghost: <why>` line on stderr.
-pub fn ghost_cli(args: &[String], mut runtime: CliRuntime) -> i32 {
-    match dispatch(args, &mut runtime) {
+/// `ghost_cli` with the bound on a control request given.
+fn run(args: &[String], mut runtime: CliRuntime, timeout: Duration) -> i32 {
+    match dispatch(args, &mut runtime, timeout) {
         Ok(code) => code,
         Err(error) => {
             output::write(runtime.stderr, &format!("ghost: {}\n", error.message));
             error.exit_code
         }
     }
+}
+
+/// The whole `ghost` command: run `args` (without the program name) and
+/// return the exit code. A failure is one `ghost: <why>` line on stderr.
+pub fn ghost_cli(args: &[String], runtime: CliRuntime) -> i32 {
+    run(args, runtime, CONTROL_TIMEOUT)
 }

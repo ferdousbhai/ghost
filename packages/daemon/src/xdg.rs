@@ -92,30 +92,18 @@ mod tests {
     fn documents_come_from_the_variable_then_the_file_then_the_default() {
         let dir = std::env::temp_dir().join(format!("ghost-xdg-{}", crate::random::uuid()));
         std::fs::create_dir_all(dir.join(".config")).unwrap();
+        let file = |contents: &str| std::fs::write(dir.join(".config/user-dirs.dirs"), contents).unwrap();
         assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Documents"));
-        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DESKTOP_DIR=\"$HOME/Desk\"\n  XDG_DOCUMENTS_DIR = \"$HOME/Docs\"\n").unwrap();
+        // A systemd user unit inherits no XDG desktop variables, so the file decides.
+        file("XDG_DESKTOP_DIR=\"$HOME/Desk\"\n  XDG_DOCUMENTS_DIR = \"$HOME/Docs\"\n");
         assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Docs"));
         assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "~/Mine")]), &dir), dir.join("Mine"));
+        assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "$HOME/Dokumente")]), &dir), dir.join("Dokumente"));
         assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "rel/../x")]), &dir), dir.join("x"));
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    // ── XDG user directories ────────────────────────────────────────────
-
-    #[test]
-    fn resolves_the_owners_documents_directory_the_way_the_desktop_does() {
-        let home = Path::new("/home/someone");
-        assert_eq!(documents_dir(&env(&[("XDG_DOCUMENTS_DIR", "$HOME/Dokumente")]), home), Path::new("/home/someone/Dokumente"));
-        assert_eq!(documents_dir(&env(&[]), home), Path::new("/home/someone/Documents"));
-        let dir = std::env::temp_dir().join(format!("ghost-xdg-{}", crate::random::uuid()));
-        std::fs::create_dir_all(dir.join(".config")).unwrap();
-        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOWNLOAD_DIR=\"$HOME/Downloads\"\nXDG_DOCUMENTS_DIR=\"$HOME/Notes\"\n").unwrap();
-        // A systemd user unit inherits no XDG desktop variables, so the file decides.
-        assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Notes"));
         // An unquoted value, an absolute one, and a line for another directory with a longer name.
-        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOCUMENTS_DIRS=\"$HOME/No\"\nXDG_DOCUMENTS_DIR=/srv/docs\n").unwrap();
+        file("XDG_DOCUMENTS_DIRS=\"$HOME/No\"\nXDG_DOCUMENTS_DIR=/srv/docs\n");
         assert_eq!(documents_dir(&env(&[]), &dir), Path::new("/srv/docs"));
-        std::fs::write(dir.join(".config/user-dirs.dirs"), "XDG_DOCUMENTS_DIR=\"\"\n").unwrap();
+        file("XDG_DOCUMENTS_DIR=\"\"\n");
         assert_eq!(documents_dir(&env(&[]), &dir), dir.join("Documents"));
         std::fs::remove_dir_all(dir).unwrap();
     }

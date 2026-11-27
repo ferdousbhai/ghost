@@ -10,7 +10,6 @@ struct FakeState {
     calls: Vec<Vec<String>>,
     /// Whether `tailscale serve status` reports this daemon served on HTTPS.
     https: bool,
-    certs: bool,
     backend_state: String,
 }
 
@@ -22,9 +21,9 @@ fn ok(stdout: impl Into<String>) -> Result<CommandResult, CommandFailure> {
 }
 
 impl FakeTailscale {
-    /// A `tailscale` that answers `status`, `serve status`, `serve --bg`, and `serve ... off` from its fields.
+    /// A `tailscale` that answers `status` and `serve status` from its fields, and nothing else.
     fn new() -> Self {
-        Self(Arc::new(Mutex::new(FakeState { calls: Vec::new(), https: false, certs: true, backend_state: "Running".into() })))
+        Self(Arc::new(Mutex::new(FakeState { calls: Vec::new(), https: false, backend_state: "Running".into() })))
     }
     fn with(self, change: impl FnOnce(&mut FakeState)) -> Self {
         change(&mut self.0.lock().unwrap());
@@ -32,9 +31,6 @@ impl FakeTailscale {
     }
     fn https(self) -> Self {
         self.with(|fake| fake.https = true)
-    }
-    fn no_certs(self) -> Self {
-        self.with(|fake| fake.certs = false)
     }
 
     fn answer(&self, args: &[&str]) -> Result<CommandResult, CommandFailure> {
@@ -52,8 +48,7 @@ impl FakeTailscale {
                     "c": { "DNSName": "partner.example.ts.net.", "UserID": 7, "Online": true },
                     "d": { "DNSName": "server.example.ts.net.", "UserID": 42, "Online": true, "Tags": ["tag:server"] },
                 },
-                "User": { "42": { "LoginName": "owner@example.com" }, "7": { "LoginName": "partner@example.com" } },
-                "CertDomains": if fake.certs { json!([FAKE_HOSTNAME]) } else { json!([]) },
+                "User": { "42": { "LoginName": "Owner@Example.com" }, "7": { "LoginName": "partner@example.com" } },
             })
             .to_string()),
             "serve status --json" => {
@@ -79,11 +74,6 @@ impl FakeTailscale {
     fn serve_with(&self, owner: Option<&str>, apps: &[&str]) -> RemoteServe {
         RemoteServe::new(7717, &remote(owner, apps), self.runner())
     }
-
-    /// The Serve writes asked for: every `serve` call but `serve status`.
-    fn writes(&self) -> Vec<String> {
-        self.0.lock().unwrap().calls.iter().filter(|args| args[0] == "serve" && args[1] != "status").map(|args| args.join(" ")).collect()
-    }
 }
 
 fn remote(owner: Option<&str>, apps: &[&str]) -> RemoteConfig {
@@ -99,14 +89,14 @@ const APP: &str = "https://summonghost.com";
 // ── Serve status ────────────────────────────────────────────────────────
 
 #[test]
-fn derives_an_https_url_owner_and_guest_policy_from_tailscale_json() {
+fn reports_the_state_hostname_owner_and_command_from_tailscale_json() {
     let status = FakeTailscale::new().https().serve().status();
     assert_eq!(
         status.to_json(),
         json!({ "state": "on", "hostname": "ghostbox.example.ts.net", "owner": "owner@example.com", "app": null, "command": "tailscale serve --bg --https=443 http://127.0.0.1:7717", "problem": null })
     );
-    // The owner reported is the one configured, as it is compared.
-    let configured = RemoteServe::new(7717, &remote(Some(" Partner@Example.com "), &[]), FakeTailscale::new().runner()).status();
+    // The owner reported is the one configured.
+    let configured = RemoteServe::new(7717, &remote(Some("partner@example.com"), &[]), FakeTailscale::new().runner()).status();
     assert_eq!((configured.owner.as_deref(), configured.state), (Some("partner@example.com"), "off"));
 }
 
@@ -117,20 +107,14 @@ fn links_the_first_app_to_this_machine_only_once_serve_is_on_https() {
         FakeTailscale::new().https().serve_with(None, &apps).status().to_json()["app"],
         json!({ "origin": APP, "url": "https://summonghost.com/#add=ghostbox.example.ts.net" })
     );
-    for fake in [FakeTailscale::new().no_certs(), FakeTailscale::new()] {
-        assert_eq!(fake.serve_with(None, &apps).status().to_json()["app"], json!({ "origin": APP, "url": null }));
-    }
+    assert_eq!(FakeTailscale::new().serve_with(None, &apps).status().to_json()["app"], json!({ "origin": APP, "url": null }));
 }
 
 #[test]
 fn links_this_machine_in_the_first_app_only_while_there_is_an_app_link() {
     let linked = FakeTailscale::new().https().serve_with(None, &[APP]);
     assert_eq!(linked.machine_url().as_deref(), Some("https://summonghost.com/#/ghostbox.example.ts.net"));
-    for serve in [
-        FakeTailscale::new().https().serve_with(None, &[]),
-        FakeTailscale::new().no_certs().serve_with(None, &[APP]),
-        FakeTailscale::new().serve_with(None, &[APP]),
-    ] {
+    for serve in [FakeTailscale::new().https().serve_with(None, &[]), FakeTailscale::new().serve_with(None, &[APP])] {
         assert_eq!(serve.machine_url(), None);
     }
 }
@@ -195,18 +179,13 @@ fn a_serve_status_that_fails_or_is_not_json_is_a_problem_not_a_state() {
 }
 
 #[test]
-fn only_an_https_proxy_to_this_daemon_is_remote_access_and_ghost_writes_nothing() {
+fn only_an_https_proxy_to_this_daemon_is_remote_access() {
     let served = |web: Value| -> &'static str {
         let fake = FakeTailscale::new();
         let inner = fake.clone();
         let runner: TailscaleRunner =
             Arc::new(move |args| if args == ["serve", "status", "--json"] { ok(json!({ "Web": web }).to_string()) } else { inner.answer(args) });
-        let serve = RemoteServe::new(7717, &remote(None, &[]), runner);
-        let status = serve.status();
-        // Turning Serve on is Tailscale's command, which the status names; Ghost only reads.
-        assert_eq!(status.command, "tailscale serve --bg --https=443 http://127.0.0.1:7717");
-        assert!(fake.writes().is_empty());
-        status.state
+        RemoteServe::new(7717, &remote(None, &[]), runner).status().state
     };
     let proxy = |target: &str| json!({ "Handlers": { "/": { "Proxy": target } } });
     // A trailing slash is the same target; another port's proxy, another target, or plain HTTP is not it.
@@ -226,7 +205,7 @@ fn lists_the_owners_other_untagged_nodes_online_or_not() {
         json!([{ "hostname": "laptop.example.ts.net", "online": true }, { "hostname": "phone.example.ts.net", "online": false }])
     );
     assert_eq!(
-        FakeTailscale::new().serve_with(Some("Partner@Example.com"), &[]).machines().unwrap(),
+        FakeTailscale::new().serve_with(Some("partner@example.com"), &[]).machines().unwrap(),
         json!([{ "hostname": "partner.example.ts.net", "online": true }])
     );
 }
@@ -248,38 +227,34 @@ fn access(owner: Option<&str>) -> RemoteAccess {
 
 /// Whether `login` is admitted: only the owner is.
 fn admitted(access: &RemoteAccess, login: &str) -> bool {
-    access.identify(Some(login), LOOPBACK).is_some()
+    access.identify(Some(login), LOOPBACK)
 }
 
 #[test]
 fn admits_the_owner_and_no_one_else() {
     let access = access(None);
-    assert_eq!(access.identify(Some("owner@example.com"), LOOPBACK), Some(TailscaleIdentity { login: "owner@example.com".into() }));
-    // A login is compared without its case or the space around it, and reported that way.
-    assert_eq!(access.identify(Some(" OWNER@example.com "), LOOPBACK), Some(TailscaleIdentity { login: "owner@example.com".into() }));
+    assert!(admitted(&access, "owner@example.com"));
+    // A login is compared without its case or the space around it.
+    assert!(admitted(&access, " OWNER@example.com "));
     // Anyone else on the tailnet is no one.
-    assert_eq!(access.identify(Some("guest@example.com"), LOOPBACK), None);
+    assert!(!admitted(&access, "someone@example.com"));
     // No header, or an empty one, is no identity.
-    assert_eq!(access.identify(None, LOOPBACK), None);
-    assert_eq!(access.identify(Some("  "), LOOPBACK), None);
+    assert!(!access.identify(None, LOOPBACK));
+    assert!(!admitted(&access, "  "));
 }
 
 #[test]
 fn honours_a_configured_owner_login() {
-    let access = access(Some(" Partner@Example.com "));
+    let access = access(Some("partner@example.com"));
     assert!(!admitted(&access, "owner@example.com"));
-    assert!(admitted(&access, "partner@example.com"));
+    assert!(admitted(&access, "Partner@Example.com"));
     assert_eq!(access.owner_login().as_deref(), Some("partner@example.com"));
-    // An empty configured owner is none: the node's own login owns.
-    let unset = self::access(Some("  "));
-    assert!(admitted(&unset, "owner@example.com"));
-    assert!(!admitted(&unset, "partner@example.com"));
 }
 
 #[test]
 fn accepts_the_identity_only_on_a_loopback_connection() {
     let access = access(None);
-    let from = |peer: &str| access.identify(Some("owner@example.com"), peer.parse().unwrap()).is_some();
+    let from = |peer: &str| access.identify(Some("owner@example.com"), peer.parse().unwrap());
     for loopback in ["127.0.0.1", "::1", "::ffff:127.0.0.1"] {
         assert!(from(loopback), "{loopback}");
     }
@@ -287,7 +262,7 @@ fn accepts_the_identity_only_on_a_loopback_connection() {
     for elsewhere in ["100.101.102.103", "192.168.1.20", "127.0.0.2", "::ffff:192.168.1.20", "fd7a:115c:a1e0::1"] {
         assert!(!from(elsewhere), "{elsewhere}");
     }
-    assert_eq!(access.identify(Some("owner@example.com"), IpAddr::V6(Ipv6Addr::UNSPECIFIED)), None);
+    assert!(!access.identify(Some("owner@example.com"), IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
 }
 
 #[test]
@@ -328,8 +303,8 @@ fn reads_the_owner_from_tailscale_status_itself() {
 fn reads_a_node_out_of_tailscale_status() {
     let node = read_tailscale_node(&FakeTailscale::new().runner()).unwrap();
     assert_eq!(
-        (node.backend_state.as_str(), node.login.as_deref(), node.hostname.as_deref(), node.certs),
-        ("Running", Some("owner@example.com"), Some(FAKE_HOSTNAME), true)
+        (node.backend_state.as_str(), node.login.as_deref(), node.hostname.as_deref()),
+        ("Running", Some("owner@example.com"), Some(FAKE_HOSTNAME))
     );
     let tagged = TailscalePeer { hostname: "server.example.ts.net".into(), login: None, online: true };
     assert_eq!(node.peers.len(), 4);
@@ -337,15 +312,15 @@ fn reads_a_node_out_of_tailscale_status() {
     assert_eq!(node.peers[2].login.as_deref(), Some("partner@example.com"));
 
     let answering = |result: CommandResult| -> TailscaleRunner { Arc::new(move |_| Ok(result.clone())) };
-    // A status with almost nothing in it is still a node: logged out, unnamed, without certificates or peers.
-    let bare = json!({ "Self": { "DNSName": " . ", "UserID": "9" }, "User": { "9": { "LoginName": "  " } }, "Peer": { "x": { "DNSName": "" } }, "CertDomains": [""] });
+    // A status with almost nothing in it is still a node: logged out, unnamed, without peers.
+    let bare = json!({ "Self": { "DNSName": " . ", "UserID": "9" }, "User": { "9": { "LoginName": "  " } }, "Peer": { "x": { "DNSName": "" } } });
     let empty = read_tailscale_node(&answering(CommandResult { stdout: bare.to_string(), ..Default::default() })).unwrap();
-    assert_eq!(empty, TailscaleNode { backend_state: String::new(), login: None, hostname: None, certs: false, peers: Vec::new() });
-    // A failure says what tailscale said: stderr, else stdout, else its exit code.
+    assert_eq!(empty, TailscaleNode { backend_state: String::new(), login: None, hostname: None, peers: Vec::new() });
+    // A failure says what tailscale said: the first line of stderr, else of stdout, else its exit code.
     let failed = |stdout: &str, stderr: &str| {
         read_tailscale_node(&answering(CommandResult { stdout: stdout.into(), stderr: stderr.into(), code: 4 })).unwrap_err().to_string()
     };
-    assert_eq!(failed("out\n", " err \n"), "err");
+    assert_eq!(failed("out\n", " err \nmore\n"), "err");
     assert_eq!(failed(" out\n", ""), "out");
     assert_eq!(failed("", ""), "tailscale exited with code 4");
     assert!(read_tailscale_node(&answering(CommandResult { stdout: "<html>".into(), ..Default::default() })).is_err());

@@ -1,7 +1,6 @@
 //! What is running right now: the daemon's version, and — when it runs from a
 //! source checkout rather than the packaged install — that checkout's root and
 //! HEAD commit. Nothing here fails: an unreadable checkout only means "unknown".
-use crate::abort::Abort;
 use crate::env::Env;
 use crate::process::run_command;
 use std::os::unix::fs::MetadataExt;
@@ -30,7 +29,7 @@ fn is_workspace_root(dir: &Path) -> bool {
 }
 
 /// The nearest ancestor of `start_dir` that is this repository's checkout root (a clone or a worktree).
-pub fn find_source_root(start_dir: &Path) -> Option<PathBuf> {
+fn find_source_root(start_dir: &Path) -> Option<PathBuf> {
     let start = crate::xdg::resolve(&std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")), start_dir);
     start.ancestors().find(|dir| dir.join(".git").exists() && is_workspace_root(dir)).map(Path::to_path_buf)
 }
@@ -38,10 +37,10 @@ pub fn find_source_root(start_dir: &Path) -> Option<PathBuf> {
 /// The commit `HEAD` names in the checkout at `root`, or None if git cannot
 /// say. Git's own variables are dropped: under a hook's GIT_DIR, `-C root`
 /// would answer for the hook's repository instead.
-pub fn read_head_commit(root: &Path, env: &Env) -> Option<String> {
+fn read_head_commit(root: &Path, env: &Env) -> Option<String> {
     let env: Env = env.iter().filter(|(name, _)| !name.starts_with("GIT_")).map(|(name, value)| (name.clone(), value.clone())).collect();
     let args = ["-C", &root.to_string_lossy(), "rev-parse", "--verify", "-q", "HEAD"];
-    let result = run_command("git", &args, &env, None, Duration::from_secs(10), &Abort::new()).ok()?;
+    let result = run_command("git", &args, &env, Duration::from_secs(10)).ok()?;
     let commit = result.stdout.trim();
     (result.code == 0 && !commit.is_empty()).then(|| commit.to_string())
 }
@@ -87,7 +86,7 @@ mod tests {
         let git = |args: &[&str]| {
             let mut argv = vec!["-C", root.to_str().unwrap()];
             argv.extend_from_slice(args);
-            let result = run_command("git", &argv, &env, None, Duration::from_secs(30), &Abort::new()).expect("git runs");
+            let result = run_command("git", &argv, &env, Duration::from_secs(30)).expect("git runs");
             assert_eq!(result.code, 0, "git {args:?}: {}", result.stderr);
             result.stdout.trim().to_string()
         };

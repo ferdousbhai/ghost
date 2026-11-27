@@ -166,7 +166,7 @@ try {
   equal(when(new Date(2026, 9, 1, 9, 0).toISOString(), noon, "en-US"), "10/1/26", "an older time");
   for (const none of [null, undefined, "", "soon"]) equal(when(none, noon), "", `no time for ${JSON.stringify(none)}`);
 
-  // The turn wire: a response cut at `resume` goes on in the next, each event once, in order, whatever the chunking.
+  // The turn wire: one response, each event once, in order, whatever the chunking, ending at the terminal event.
   const frames = (...events) => events.map((ev) => `data: ${JSON.stringify(ev)}\n\n`).join("");
   const cut = (text, size) => new Response(new ReadableStream({
     start(controller) {
@@ -175,16 +175,17 @@ try {
       controller.close();
     },
   }));
-  const asked = [], heard = [];
-  const rest = async (path) => {
-    asked.push(path);
-    return asked.length === 1
-      ? cut(frames({ type: "text_delta", delta: "né" }, { type: "resume", turn: "t 1", from: 4 }), 3)
-      : cut(": keep-alive\n\n" + frames({ type: "done" }), 1000);
-  };
-  for await (const ev of turnEvents(cut(frames({ type: "start" }, { type: "pass" }, { type: "resume", turn: "t 1", from: 2 }), 7), rest)) heard.push(ev);
-  same(heard, [{ type: "start" }, { type: "pass" }, { type: "text_delta", delta: "né" }, { type: "done" }], "a turn cut into three responses");
-  same(asked, ["/conversation/stream?turn=t%201&from=2", "/conversation/stream?turn=t%201&from=4"], "where a cut turn goes on");
+  const turn = [{ type: "start" }, { type: "pass" }, { type: "text_delta", delta: "né" }, { type: "done" }];
+  const wire = frames(...turn.slice(0, 3)) + ": keep-alive\n\n" + frames(turn[3]);
+  for (const size of [1, 3, 7, 1000]) {
+    const heard = [];
+    for await (const ev of turnEvents(cut(wire, size))) heard.push(ev);
+    same(heard, turn, `a turn read ${size} bytes at a time`);
+  }
+  // A stream that breaks before its terminal event gives what arrived whole, and no more.
+  const broken = [];
+  for await (const ev of turnEvents(cut(wire.slice(0, wire.indexOf("text_delta") + 4), 5))) broken.push(ev);
+  same(broken, turn.slice(0, 2), "a turn whose stream broke");
 } catch (error) {
   failures.push(`thread.js: ${error.message}`);
 }

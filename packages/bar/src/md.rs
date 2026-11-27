@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 //! The assistant's Markdown as GTK labels: paragraphs, headings, lists, emphasis and code.
 
 use gtk::{glib, prelude::*};
@@ -6,7 +5,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// One block of the answer: its Pango markup and how it is shown.
 #[derive(Debug, PartialEq)]
-pub enum Block {
+enum Block {
     Para(String),
     Heading(String),
     Item { depth: usize, marker: String, markup: String },
@@ -14,11 +13,11 @@ pub enum Block {
 }
 
 /// Whether a label can show this markup.
-pub fn valid_markup(m: &str) -> bool {
+fn valid_markup(m: &str) -> bool {
     gtk::pango::parse_markup(m, '\0').is_ok()
 }
 
-pub fn blocks(md: &str) -> Vec<Block> {
+fn blocks(md: &str) -> Vec<Block> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut lists: Vec<Option<u64>> = Vec::new();

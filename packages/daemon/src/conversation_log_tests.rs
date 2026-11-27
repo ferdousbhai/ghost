@@ -1,14 +1,13 @@
 use super::*;
 
-/// A scratch conversation directory, and the log in it as an indexed reader sees it.
-struct Scratch(PathBuf, IndexedLog);
+/// A scratch conversation directory.
+struct Scratch(PathBuf);
 
 impl Scratch {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("ghost-log-{}", crate::random::uuid()));
         std::fs::create_dir_all(&root).unwrap();
-        let log = IndexedLog::new(&root);
-        Self(root, log)
+        Self(root)
     }
 }
 
@@ -36,32 +35,6 @@ fn command(at: &str, command: &str, output: &str, exit_code: Option<i32>, exclud
     LogEntry::Command { at: at.to_string(), command: command.to_string(), output: output.to_string(), exit_code, excluded }
 }
 
-fn lines(entries: &[LogEntry]) -> String {
-    entries.iter().map(|entry| format!("{}\n", entry.to_json())).collect()
-}
-
-fn parsed() -> usize {
-    PARSED.with(|parsed| parsed.get())
-}
-
-/// The transcript page `read_transcript_page` should serve, computed straight
-/// from the entries with no file or index: the oracle its indexed reads are
-/// checked against. The conversation record is not a message.
-fn transcript_page(entries: &[LogEntry], offset: usize, limit: usize) -> TranscriptPage {
-    let end = offset.saturating_add(limit);
-    let mut page = TranscriptPage::default();
-    for (index, entry) in entries.iter().enumerate() {
-        let count = message_count(entry);
-        let first = page.total;
-        page.total += count;
-        if count == 0 || first >= end || page.total <= offset {
-            continue;
-        }
-        page.messages.extend(entry_messages(entry, &format!("e{index}"), offset.saturating_sub(first), end - offset.max(first)));
-    }
-    page
-}
-
 fn whole(entries: &[LogEntry]) -> TranscriptPage {
     transcript_page(entries, 0, usize::MAX)
 }
@@ -73,14 +46,14 @@ fn texts(page: &TranscriptPage) -> Vec<Value> {
 // ── The file format ─────────────────────────────────────────────────────
 
 #[test]
-fn writes_each_entry_with_the_keys_and_key_order_every_version_has_written() {
+fn writes_each_entry_with_these_keys_in_this_order_and_reads_it_back() {
     let at = "2026-11-25T08:21:20.123Z";
     let written = [
-        (new_conversation_entry(1_795_594_880_123, None), r#"{"type":"conversation","v":1,"createdAt":"2026-11-25T08:21:20.123Z"}"#),
+        (new_conversation_entry(1_795_594_880_123, None), r#"{"type":"conversation","createdAt":"2026-11-25T08:21:20.123Z"}"#),
         // A conversation that started with topic documents records what it was told of them.
         (
             new_conversation_entry(1_795_594_880_123, Some("In \"/g/topics\":\n- boat.md: Heron".into())),
-            r#"{"type":"conversation","v":1,"createdAt":"2026-11-25T08:21:20.123Z","topics":"In \"/g/topics\":\n- boat.md: Heron"}"#,
+            r#"{"type":"conversation","createdAt":"2026-11-25T08:21:20.123Z","topics":"In \"/g/topics\":\n- boat.md: Heron"}"#,
         ),
         // A handoff: what it did to the topic documents, then its note, what the note covers, and the documents as they then stood.
         (
@@ -236,6 +209,11 @@ fn an_assistant_error_and_a_hook_message_reach_the_transcript() {
 fn the_preview_skips_attachment_lines_and_names_a_message_of_photos_alone() {
     let at = "2026-10-05T00:00:00.000Z";
     assert_eq!(log_state(&[user_at(at, "![image](attachments/a-0123abcd.png)\nlook at this")]).preview.as_deref(), Some("look at this"));
+    assert_eq!(log_state(&[user_at(at, "![a photo](attachments/a.png)\r\n\r\n  then this  \r\n")]).preview.as_deref(), Some("then this"));
+    // Only a whole line of exactly that shape is an attachment.
+    for said in ["see ![image](attachments/a.png)", "![image](elsewhere/a.png)", "![image](attachments/a b.png)", "![image](attachments/)"] {
+        assert_eq!(log_state(&[user_at(at, said)]).preview.as_deref(), Some(said));
+    }
     let photo = log_state(&[user_at(at, "![image](attachments/a-0123abcd.png)")]);
     assert_eq!(photo.preview.as_deref(), Some("Photo"));
     // A long first line is cut to 120, without trailing white space.
@@ -301,192 +279,47 @@ fn a_commands_output_is_fenced_past_its_own_backticks_and_says_how_it_ended() {
 // ── Reads from the file ─────────────────────────────────────────────────
 
 #[test]
-fn reads_chunk_boundaries_and_skips_malformed_blank_and_torn_lines() {
+fn skips_malformed_blank_and_torn_lines_and_reads_a_last_line_once_it_is_whole() {
     let root = Scratch::new();
+    let path = log_path(&root.0);
+    let append = |text: &str| std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(text.as_bytes()).unwrap();
     let entry = user_at("now", &"🐈".repeat(40_000));
-    std::fs::write(log_path(&root.0), format!("\n{}\nmalformed\nnull\n{{}}\n{{\"type\":", entry.to_json())).unwrap();
-    assert_eq!(read_log(&root.0).unwrap(), Some(vec![entry]));
+    std::fs::write(&path, format!("\n{}\nmalformed\nnull\n{{}}\n{{\"type\":", entry.to_json())).unwrap();
+    assert_eq!(read_log(&root.0).unwrap(), Some(vec![entry.clone()]));
+    // The torn line is an entry once the rest of it lands, with or without its newline.
+    append(r#""user","at":"now","text":"recovered"}"#);
+    let recovered = user_at("now", "recovered");
+    assert_eq!(read_log(&root.0).unwrap(), Some(vec![entry.clone(), recovered.clone()]));
+    append("\n");
+    append_log(&root.0, &[user("last")]).unwrap();
+    assert_eq!(read_log(&root.0).unwrap(), Some(vec![entry, recovered, user("last")]));
     assert_eq!(read_log(&root.0.join("missing")).unwrap(), None);
 }
 
 /// A line ends at a line feed and nowhere else: U+2028 and U+2029 are written
-/// unescaped inside a text, and the entry holding one is whole to both readers.
+/// unescaped inside a text, and the entry holding one reads back whole.
 #[test]
-fn a_text_holding_a_unicode_line_separator_is_one_entry_to_the_log_and_the_index() {
+fn a_text_holding_a_unicode_line_separator_is_one_entry() {
     let root = Scratch::new();
     let entries = [user("first\u{2028}second"), answer(AT, "one\u{2029}two\r"), user("third")];
     append_log(&root.0, &entries).unwrap();
     assert!(std::fs::read_to_string(log_path(&root.0)).unwrap().contains("first\u{2028}second"));
     assert_eq!(read_log(&root.0).unwrap().as_deref(), Some(&entries[..]));
-    assert_eq!(root.1.page(0, 10).unwrap(), whole(&entries));
 }
 
 #[test]
 fn skips_records_it_does_not_write() {
     let root = Scratch::new();
     let owner = user_at("2026-10-15T00:00:00Z", "hello");
+    // A kind of record this version does not write, and a message from an origin it does not know.
     let others = [
-        json!({ "type": "resources", "at": "2026-10-15T00:01:00Z", "run": "r1", "harness": "codex",
-            "resources": { "skills": ["mail"], "extensions": [], "mcpServers": [] }, "supplied": { "instructions": [], "mcpServers": [] }, "summary": "legacy" }),
-        json!({ "type": "handoff", "at": "2026-10-12T00:00:00Z", "harness": "pi", "text": "idle reply" }),
-        json!({ "type": "user", "at": "2026-10-12T00:00:00Z", "text": "next work", "origin": "auto" }),
-        json!({ "type": "user", "at": "2026-10-30T00:00:00Z", "text": "[ghost-peer] wife\n\"hi\"", "origin": "peer" }),
-        json!({ "type": "user", "at": "2026-10-30T00:00:00Z", "text": "nobody's", "origin": null }),
-        json!({ "type": "sent", "at": "2026-10-30T00:01:00Z", "peer": "wife", "text": "hello back" }),
-        json!({ "type": "handed", "at": "2026-10-30T00:02:00Z", "id": "m1" }),
-        json!({ "type": "future", "at": "later" }),
-        json!({ "type": 7 }),
-        json!(["user"]),
+        json!({ "type": "future", "at": "2026-10-30T00:00:00Z", "text": "later" }),
+        json!({ "type": "user", "at": "2026-10-30T00:00:00Z", "text": "someone else's", "origin": "elsewhere" }),
     ];
     let body: String = std::iter::once(owner.to_json()).chain(others).map(|line| format!("{line}\n")).collect();
     std::fs::write(log_path(&root.0), body).unwrap();
-    assert_eq!(read_log(&root.0).unwrap(), Some(vec![owner.clone()]));
-    let listed = root.1.listed().unwrap().unwrap();
-    assert_eq!((listed.state.active_at.as_deref(), listed.state.message_count), (Some("2026-10-15T00:00:00Z"), 1));
-    assert_eq!(listed.updated_at, "2026-10-15T00:00:00Z");
-    assert_eq!(root.1.page(0, 10).unwrap(), whole(&[owner]));
-}
-
-#[test]
-fn a_log_with_no_dated_entry_is_as_new_as_its_file() {
-    let root = Scratch::new();
-    let path = log_path(&root.0);
-    std::fs::write(&path, lines(&[new_conversation_entry(0, None)])).unwrap();
-    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_millis(1_795_594_880_123);
-    File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
-    let listed = root.1.listed().unwrap().unwrap();
-    assert_eq!(listed, ListedLog { state: LogState::default(), updated_at: "2026-11-25T08:21:20.123Z".into() });
-}
-
-#[test]
-fn refreshes_a_replaced_log_even_if_its_size_and_mtime_match_the_cached_file() {
-    let root = Scratch::new();
-    let path = log_path(&root.0);
-    let replacement = path.with_extension("new");
-    std::fs::write(&path, lines(&[user("first topic")])).unwrap();
-    let original = std::fs::metadata(&path).unwrap();
-    assert_eq!(root.1.listed().unwrap().unwrap().state.preview.as_deref(), Some("first topic"));
-    std::fs::write(&replacement, lines(&[user("other topic")])).unwrap();
-    File::options().write(true).open(&replacement).unwrap().set_modified(original.modified().unwrap()).unwrap();
-    std::fs::rename(&replacement, &path).unwrap();
-    let replaced = std::fs::metadata(&path).unwrap();
-    assert_eq!((replaced.len(), replaced.modified().unwrap()), (original.len(), original.modified().unwrap()));
-    assert_eq!(root.1.listed().unwrap().unwrap().state.preview.as_deref(), Some("other topic"));
-    std::fs::remove_file(&path).unwrap();
-    assert_eq!(root.1.listed().unwrap(), None);
-}
-
-#[test]
-fn preserves_every_page_and_entry_id_through_incremental_appends() {
-    let root = Scratch::new();
-    let entries = [
-        LogEntry::Conversation { v: 1, created_at: AT.into(), topics: None },
-        user("Explain the new feature"),
-        command(AT, "printf hello", "hello", Some(0), false),
-        answer(AT, "answer"),
-        command(AT, "private", "hidden", Some(0), true),
-    ];
-    for (index, entry) in entries.iter().enumerate() {
-        append_log(&root.0, std::slice::from_ref(entry)).unwrap();
-        assert_eq!(root.1.listed().unwrap().unwrap().state, log_state(&entries[..=index]));
-    }
-    let expected = whole(&entries);
-    assert_eq!(expected.total, 4);
-    for offset in 0..=expected.total + 1 {
-        for limit in [1, 2, 4] {
-            let messages: Vec<TranscriptMessage> = expected.messages.iter().skip(offset).take(limit).cloned().collect();
-            assert_eq!(root.1.page(offset, limit).unwrap(), TranscriptPage { messages, total: expected.total });
-        }
-    }
-    assert_eq!(root.1.page(0, usize::MAX).unwrap(), expected);
-}
-
-#[test]
-fn parses_only_appended_records_for_list_refresh_and_only_requested_records_for_a_warm_page() {
-    let root = Scratch::new();
-    let entries: Vec<LogEntry> = (0..1500).map(|n| user(&format!("indexed-payload-{n} {}", "x".repeat(4000)))).collect();
-    append_log(&root.0, &entries).unwrap();
-    root.1.listed().unwrap();
-    let before = parsed();
-    assert_eq!(root.1.page(1499, 1).unwrap().messages[0].entry_id, "e1499");
-    assert_eq!(parsed() - before, 1);
-    append_log(&root.0, &[user("indexed-payload-new")]).unwrap();
-    assert_eq!(root.1.listed().unwrap().unwrap().state.message_count, 1501);
-    assert_eq!(parsed() - before, 2);
-    root.1.listed().unwrap();
-    assert_eq!(parsed() - before, 2);
-    // The appended record is on the next page read, found without a rescan.
-    assert_eq!(root.1.page(1500, 5).unwrap().messages[0].entry_id, "e1500");
-    assert_eq!(parsed() - before, 3);
-}
-
-#[test]
-fn rebuilds_for_truncation_and_replacement() {
-    let root = Scratch::new();
-    let path = log_path(&root.0);
-    // An in-place rewrite that grows the file reads as an append: ghostd is
-    // the log's only writer, and it only appends.
-    for entries in [vec![user("entirely different and longer"), user("second")], vec![user("first")], vec![]] {
-        let body = entries.iter().map(|entry| entry.to_json().to_string()).collect::<Vec<_>>().join("\n") + "\n";
-        std::fs::write(&path, body).unwrap();
-        assert_eq!(root.1.page(0, 10).unwrap(), whole(&entries));
-        assert_eq!(root.1.listed().unwrap().unwrap().state, log_state(&entries));
-    }
-    let replacement = path.with_extension("new");
-    std::fs::write(&replacement, lines(&[user("replacement")])).unwrap();
-    std::fs::rename(&replacement, &path).unwrap();
-    assert_eq!(root.1.page(0, 1).unwrap().messages[0].content, [AssistantPart::text("replacement")]);
-    std::fs::remove_file(&path).unwrap();
-    assert_eq!(root.1.page(0, 1).unwrap(), TranscriptPage::default());
-}
-
-#[test]
-fn keeps_concurrent_reads_and_appends_coherent_and_rebuilds_after_an_unterminated_record() {
-    let root = Scratch::new();
-    let mut entries: Vec<LogEntry> = (0..300).map(|n| user(&format!("message {n}"))).collect();
-    append_log(&root.0, &entries).unwrap();
-    root.1.listed().unwrap();
-    for n in 0..5 {
-        let entry = user(&format!("append {n}"));
-        let page = std::thread::scope(|scope| {
-            let page = scope.spawn(|| root.1.page(250, 10).unwrap());
-            let appended = scope.spawn(|| append_log(&root.0, std::slice::from_ref(&entry)).unwrap());
-            let listed = scope.spawn(|| root.1.listed().unwrap());
-            appended.join().unwrap();
-            listed.join().unwrap();
-            page.join().unwrap()
-        });
-        assert_eq!(page.messages, transcript_page(&entries, 250, 10).messages);
-        entries.push(entry);
-        assert_eq!(root.1.listed().unwrap().unwrap().state, log_state(&entries));
-    }
-    std::fs::write(log_path(&root.0), user("no newline").to_json().to_string()).unwrap();
-    assert_eq!(root.1.page(0, 10).unwrap().total, 1);
-    append_log(&root.0, &[user("concatenated")]).unwrap();
-    let actual = read_log(&root.0).unwrap().unwrap_or_default();
-    assert_eq!(root.1.page(0, 10).unwrap(), whole(&actual));
-}
-
-#[test]
-fn handles_malformed_split_utf8_torn_and_valid_unterminated_final_lines() {
-    let root = Scratch::new();
-    let path = log_path(&root.0);
-    let append = |text: &str| File::options().append(true).open(&path).unwrap().write_all(text.as_bytes()).unwrap();
-    let first = user(&"🐈".repeat(40_000));
-    std::fs::write(&path, format!("\n{}\nmalformed\nnull\n{{}}\n{{\"type\":", first.to_json())).unwrap();
-    assert_eq!(root.1.page(0, 10).unwrap().messages, whole(std::slice::from_ref(&first)).messages);
-    append(r#""user","at":"now","text":"recovered"}"#);
-    let recovered = user_at("now", "recovered");
-    assert_eq!(root.1.page(0, 10).unwrap().messages, whole(&[first.clone(), recovered.clone()]).messages);
-    append("\n");
-    append_log(&root.0, &[user("last")]).unwrap();
-    assert_eq!(root.1.page(0, 10).unwrap(), whole(&[first, recovered, user("last")]));
-}
-
-#[test]
-fn entries_and_pages_are_shareable_across_threads() {
-    fn shareable<T: Send + Sync>() {}
-    shareable::<LogEntry>();
-    shareable::<TranscriptPage>();
-    shareable::<ListedLog>();
+    let read = read_log(&root.0).unwrap().unwrap();
+    assert_eq!(read, [owner]);
+    let state = log_state(&read);
+    assert_eq!((state.active_at.as_deref(), state.message_count), (Some("2026-10-15T00:00:00Z"), 1));
 }

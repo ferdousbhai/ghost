@@ -11,7 +11,7 @@ fn main() {
     let runtime = CliRuntime {
         env: &env,
         home: &home,
-        stdin: Stdin::Stream { is_tty: stdin.is_terminal(), reader: Box::new(stdin) },
+        stdin: Stdin { is_tty: stdin.is_terminal(), reader: Box::new(stdin) },
         stdout: &mut stdout,
         stderr: &mut stderr,
         stdout_is_tty,

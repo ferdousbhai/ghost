@@ -44,7 +44,7 @@ enum Framing {
 }
 
 /// A message body as its framing delimits it.
-pub struct Body {
+pub(crate) struct Body {
     reader: BufReader<TcpStream>,
     framing: Framing,
 }
@@ -125,7 +125,7 @@ fn lowercase_headers(parsed: &[httparse::Header<'_>]) -> Vec<(String, String)> {
 }
 
 /// `%XX` decoded as UTF-8; None when the encoding or the text is invalid.
-pub fn percent_decode(text: &str) -> Option<String> {
+pub(crate) fn percent_decode(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
@@ -142,44 +142,31 @@ pub fn percent_decode(text: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// As JavaScript's `encodeURIComponent` writes it.
-pub fn percent_encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
-            out.push(byte as char);
-        } else {
-            out.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    out
-}
-
 // ── Server ──────────────────────────────────────────────────────────────
 
 pub struct Request {
-    pub method: String,
+    pub(crate) method: String,
     /// The path as sent, without its query.
     pub path: String,
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
-    pub peer: SocketAddr,
+    pub(crate) peer: SocketAddr,
     body: Option<Body>,
 }
 
 impl Request {
     /// A header's value, by lowercase name.
-    pub fn header(&self, name: &str) -> Option<&str> {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
     }
 
     /// A query parameter's decoded value; the first when repeated.
-    pub fn query(&self, name: &str) -> Option<&str> {
+    pub(crate) fn query(&self, name: &str) -> Option<&str> {
         self.query.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
     }
 
     /// The path's non-empty segments, still percent-encoded.
-    pub fn segments(&self) -> Vec<&str> {
+    pub(crate) fn segments(&self) -> Vec<&str> {
         self.path.split('/').filter(|segment| !segment.is_empty()).collect()
     }
 
@@ -211,6 +198,7 @@ pub struct Responder {
     headers: Vec<(String, String)>,
 }
 
+/// The reason phrase of each status the daemon answers with.
 fn reason(status: u16) -> &'static str {
     match status {
         200 => "OK",
@@ -224,7 +212,7 @@ fn reason(status: u16) -> &'static str {
         409 => "Conflict",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
-        422 => "Unprocessable Content",
+        500 => "Internal Server Error",
         502 => "Bad Gateway",
         503 => "Service Unavailable",
         _ => "Status",
@@ -233,7 +221,7 @@ fn reason(status: u16) -> &'static str {
 
 impl Responder {
     /// A header every answer to this request carries (CORS, `WWW-Authenticate`).
-    pub fn set_header(&mut self, name: &str, value: &str) {
+    pub(crate) fn set_header(&mut self, name: &str, value: &str) {
         self.headers.push((name.to_string(), value.to_string()));
     }
 
@@ -257,17 +245,17 @@ impl Responder {
         let _ = self.stream.shutdown(Shutdown::Write);
     }
 
-    pub fn json(self, status: u16, body: &Value) {
+    pub(crate) fn json(self, status: u16, body: &Value) {
         self.bytes(status, &[("content-type", "application/json; charset=utf-8"), ("cache-control", "no-store")], body.to_string().as_bytes());
     }
 
     /// The `{ error: { message, code } }` envelope every client parses.
-    pub fn error(self, error: &GhostError) {
+    pub(crate) fn error(self, error: &GhostError) {
         let body = serde_json::json!({ "error": { "message": error.message, "code": error.code } });
         self.json(error.status, &body);
     }
 
-    pub fn empty(self, status: u16) {
+    pub(crate) fn empty(self, status: u16) {
         self.bytes(status, &[], b"");
     }
 
@@ -288,7 +276,7 @@ impl Responder {
 
     /// A signal that fires when the peer closes its end before the answer: a
     /// request whose work is only for that caller stops with it.
-    pub fn peer_gone(&self) -> io::Result<Abort> {
+    pub(crate) fn peer_gone(&self) -> io::Result<Abort> {
         let abort = Abort::new();
         let signal = abort.clone();
         let mut stream = self.stream.try_clone()?;
@@ -359,7 +347,7 @@ fn accept(stream: TcpStream, peer: SocketAddr) -> io::Result<(Request, Responder
 
 /// A listening server; dropping the handle does not stop it, `close` does.
 pub struct Server {
-    pub address: SocketAddr,
+    pub(crate) address: SocketAddr,
     stop: Abort,
 }
 
@@ -392,7 +380,7 @@ impl Server {
     }
 
     /// Stop accepting. Requests already running finish on their own.
-    pub fn close(&self) {
+    pub(crate) fn close(&self) {
         self.stop.abort();
         // Wake the accept loop so it sees the flag.
         let _ = TcpStream::connect_timeout(&self.address, Duration::from_secs(1));
@@ -403,13 +391,15 @@ impl Server {
 
 pub struct ClientResponse {
     pub status: u16,
+    #[cfg(test)]
     headers: Vec<(String, String)>,
-    pub body: Body,
+    pub(crate) body: Body,
     _abort: Option<AbortGuard>,
 }
 
 impl ClientResponse {
-    pub fn header(&self, name: &str) -> Option<&str> {
+    #[cfg(test)]
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
     }
 
@@ -421,7 +411,7 @@ impl ClientResponse {
     }
 
     /// Change how long a read of the body may wait; None waits for ever.
-    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+    pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         self.body.reader.get_ref().set_read_timeout(timeout)
     }
 }
@@ -468,37 +458,37 @@ pub fn send(request: ClientRequest<'_>) -> io::Result<ClientResponse> {
     message.extend_from_slice(request.body.unwrap_or(b""));
     (&stream).write_all(&message)?;
     let mut reader = BufReader::new(stream);
-    loop {
-        let head = read_head(&mut reader)?;
-        let mut slots = [httparse::EMPTY_HEADER; 96];
-        let mut parsed = httparse::Response::new(&mut slots);
-        if !parsed.parse(&head).map_err(|_| bad("malformed response"))?.is_complete() {
-            return Err(bad("incomplete response"));
-        }
-        let status = parsed.code.unwrap_or(0);
-        if status == 100 {
-            continue;
-        }
-        let headers = lowercase_headers(parsed.headers);
-        let framing =
-            if status == 204 || status == 304 || request.method == "HEAD" { Framing::Length(0) } else { framing(&headers, Framing::UntilClose)? };
-        return Ok(ClientResponse { status, headers, body: Body { reader, framing }, _abort: guard });
+    let head = read_head(&mut reader)?;
+    let mut slots = [httparse::EMPTY_HEADER; 96];
+    let mut parsed = httparse::Response::new(&mut slots);
+    if !parsed.parse(&head).map_err(|_| bad("malformed response"))?.is_complete() {
+        return Err(bad("incomplete response"));
     }
+    let status = parsed.code.unwrap_or(0);
+    let headers = lowercase_headers(parsed.headers);
+    let framing = framing(&headers, Framing::UntilClose)?;
+    Ok(ClientResponse {
+        status,
+        #[cfg(test)]
+        headers,
+        body: Body { reader, framing },
+        _abort: guard,
+    })
 }
 
 /// Server-sent events off a body: each frame's joined `data:` lines.
-pub struct EventReader<R: Read> {
+pub(crate) struct EventReader<R: Read> {
     reader: BufReader<R>,
 }
 
 impl<R: Read> EventReader<R> {
-    pub fn new(body: R) -> Self {
+    pub(crate) fn new(body: R) -> Self {
         Self { reader: BufReader::new(body) }
     }
 
     /// The next event's data, or None at the end of the stream. Comments and
     /// frames without data are skipped.
-    pub fn next_event(&mut self) -> io::Result<Option<String>> {
+    pub(crate) fn next_event(&mut self) -> io::Result<Option<String>> {
         let mut data: Option<String> = None;
         loop {
             let mut raw = Vec::new();
@@ -630,29 +620,31 @@ mod tests {
 
     #[test]
     fn abort_ends_a_read_in_progress_and_the_server_sees_the_peer_go() {
+        let (arrived, waiting) = std::sync::mpsc::channel();
         let (seen, gone) = std::sync::mpsc::channel();
         let server = Server::start(local(), move |_, responder| {
             let peer = responder.peer_gone().unwrap();
-            seen.send(peer.wait(Duration::from_secs(5))).unwrap();
+            arrived.send(()).unwrap();
+            seen.send(peer.wait(Duration::from_secs(30))).unwrap();
             drop(responder);
         })
         .unwrap();
         let abort = Abort::new();
-        let stopper = abort.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(150));
-            stopper.abort();
+        std::thread::scope(|scope| {
+            let request =
+                ClientRequest { address: server.address, method: "GET", target: "/", headers: &[], body: None, timeout: None, abort: Some(&abort) };
+            let reading = scope.spawn(|| send(request).map(|response| response.status));
+            // The request is with the server, which answers nothing: the client is reading.
+            waiting.recv_timeout(Duration::from_secs(30)).unwrap();
+            abort.abort();
+            assert!(reading.join().unwrap().is_err());
         });
-        let result =
-            send(ClientRequest { address: server.address, method: "GET", target: "/", headers: &[], body: None, timeout: None, abort: Some(&abort) });
-        assert!(result.is_err());
-        assert!(gone.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert!(gone.recv_timeout(Duration::from_secs(30)).unwrap());
         server.close();
     }
 
     #[test]
-    fn percent_coding_matches_uri_components() {
-        assert_eq!(percent_encode("a b/ü?&=+!~*'()"), "a%20b%2F%C3%BC%3F%26%3D%2B!~*'()");
+    fn percent_decoding_refuses_a_bad_escape_and_bad_utf8() {
         assert_eq!(percent_decode("a%20b%2F%C3%BC").as_deref(), Some("a b/ü"));
         assert_eq!(percent_decode("%zz"), None);
         assert_eq!(percent_decode("%ff"), None);

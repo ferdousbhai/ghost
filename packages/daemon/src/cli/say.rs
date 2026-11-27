@@ -1,11 +1,10 @@
 //! `ghost say`: send a turn and print it as it streams, or queue a follow-up
 //! into a running one.
-use super::client::{EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_SUCCESS};
-use super::common::{stdin_is_tty, stdin_text};
-use super::output::{Rendered, dim, text_of};
-use super::{CliError, Context};
+use super::common::stdin_text;
+use super::output::{Rendered, dim};
+use super::{CliError, Context, EXIT_FAILURE, EXIT_INTERRUPTED, EXIT_SUCCESS};
 use crate::abort::Abort;
-use crate::http::percent_encode;
+use crate::client::ClientError;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
@@ -86,17 +85,13 @@ impl Drop for InterruptWatch {
 /// The message: the words on the command line, or stdin when the only word
 /// is `-` or there are none and stdin is not a terminal.
 fn message_text(ctx: &mut Context) -> Result<String, CliError> {
-    let words = &ctx.parsed.positionals;
-    if words.len() == 1 && words[0] == "-" {
-        return stdin_text(&mut ctx.runtime.stdin);
+    let (words, stdin) = (&ctx.parsed.positionals, &mut ctx.runtime.stdin);
+    match words.as_slice() {
+        [] if stdin.is_tty => Ok(String::new()),
+        [] => stdin_text(stdin, None).map_err(CliError::failure),
+        [only] if only == "-" => stdin_text(stdin, None).map_err(CliError::failure),
+        words => Ok(words.join(" ")),
     }
-    if !words.is_empty() {
-        return Ok(words.join(" "));
-    }
-    if !stdin_is_tty(&ctx.runtime.stdin) {
-        return stdin_text(&mut ctx.runtime.stdin);
-    }
-    Ok(String::new())
 }
 
 fn tool_name(event: &Value) -> &str {
@@ -116,7 +111,7 @@ fn tool_description(event: &Value) -> String {
     }
 }
 
-/// What one turn's events add up to, across the first stream and any resumed ones.
+/// What one turn's events add up to.
 #[derive(Default)]
 struct Turn {
     /// An owner `!command` streams as one bash card before any pass starts;
@@ -127,8 +122,6 @@ struct Turn {
     final_text: String,
     /// The terminal event seen: true for `done`, false for `error`.
     done: Option<bool>,
-    /// A long turn's response is cut, its last frame naming where the next resumes.
-    resume: Option<(String, String)>,
     /// Reasoning as it streams, printed whole when something else follows it.
     thinking: String,
 }
@@ -137,10 +130,6 @@ impl Turn {
     fn on_event(&mut self, ctx: &mut Context, event: &Value) {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
         let text = |key: &str| event.get(key).and_then(Value::as_str);
-        if kind == "resume" {
-            self.resume = Some((text_of(event.get("turn")), text_of(event.get("from"))));
-            return;
-        }
         if kind == "pass" {
             self.pass_started = true;
         } else if kind == "tool_execution_start" && !self.pass_started {
@@ -148,11 +137,7 @@ impl Turn {
         }
         if kind == "error" {
             self.done = Some(false);
-            let why = match (text("errorMessage"), event.get("reason").filter(|reason| !reason.is_null())) {
-                (Some(message), _) => message.to_string(),
-                (None, Some(reason)) => text_of(Some(reason)),
-                (None, None) => "turn failed".to_string(),
-            };
+            let why = text("errorMessage").or(text("reason")).unwrap_or("turn failed");
             ctx.err(&format!("ghost: {why}\n"));
         } else if kind == "done" && self.done != Some(false) {
             self.done = Some(true);
@@ -214,6 +199,10 @@ impl Turn {
     }
 }
 
+/// How long a follow-up waits for a conversation that is busy with something it cannot join.
+const FOLLOW_UP_PATIENCE: std::time::Duration = std::time::Duration::from_secs(600);
+const FOLLOW_UP_RETRY: std::time::Duration = std::time::Duration::from_millis(if cfg!(test) { 10 } else { 1000 });
+
 pub fn say_command(ctx: &mut Context) -> Result<i32, CliError> {
     let follow_up = ctx.parsed.boolean("follow-up");
     let text = message_text(ctx)?;
@@ -221,30 +210,40 @@ pub fn say_command(ctx: &mut Context) -> Result<i32, CliError> {
         return Err(CliError::usage("Message text cannot be empty."));
     }
     // The stream borrows the runtime for printing, so the client is this command's own from here.
-    let mut client = ctx.client()?.clone();
+    let (mut client, timeout) = (ctx.client()?.clone(), Some(ctx.timeout));
 
-    if follow_up {
-        match client.request("POST", "/api/conversation/queue", Some(&json!({ "text": text }))) {
-            Ok(response) => {
-                ctx.emit(&response, || Rendered::Secondary("Queued.\n".to_string()));
-                return Ok(EXIT_SUCCESS);
-            }
-            // A follow-up with no turn running is the next turn: this is how a
-            // background command wakes the ghost that started it.
-            Err(error) if error.code.as_deref() == Some("conversation_not_streaming") => {}
-            Err(error) => return Err(error),
-        }
-    }
+    let busy = |error: &ClientError| matches!(error, ClientError::Status { code: Some(code), .. } if code == "conversation_busy");
+    // A follow-up is often a background command waking the ghost with nobody watching, so it is not lost to a
+    // conversation that is between turns or running the owner's own command: it waits for it.
+    let waited = std::time::Instant::now();
+    let patient = |error: &ClientError| follow_up && busy(error) && waited.elapsed() < FOLLOW_UP_PATIENCE;
 
     let mut stopper = client.clone();
     let watch = InterruptWatch::install(move || {
-        let _ = stopper.request("POST", "/api/conversation/stop", Some(&json!({})));
+        let _ = stopper.request("POST", "/api/conversation/stop", Some(&json!({})), timeout);
     });
     let mut turn = Turn::default();
-    client.stream("/api/messages", Some(&json!({ "prompt": text })), &mut |event| turn.on_event(ctx, event))?;
-    while let Some((turn_id, from)) = turn.resume.take() {
-        let path = format!("/api/conversation/stream?turn={}&from={from}", percent_encode(&turn_id));
-        client.stream(&path, None, &mut |event| turn.on_event(ctx, event))?;
+    loop {
+        if follow_up {
+            match client.request("POST", "/api/conversation/queue", Some(&json!({ "text": text })), timeout) {
+                Ok(response) => {
+                    ctx.emit(&response, || Rendered::Secondary("Queued.\n".to_string()));
+                    return Ok(EXIT_SUCCESS);
+                }
+                // A follow-up with no turn running is the next turn: this is how a
+                // background command wakes the ghost that started it.
+                Err(ClientError::Status { code: Some(code), .. }) if code == "conversation_not_streaming" => {}
+                Err(error) if patient(&error) && !watch.interrupted() => {
+                    std::thread::sleep(FOLLOW_UP_RETRY);
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        match client.stream("/api/messages", Some(&json!({ "prompt": text })), None, &mut |event| turn.on_event(ctx, event)) {
+            Err(error) if patient(&error) && !watch.interrupted() => std::thread::sleep(FOLLOW_UP_RETRY),
+            sent => break sent?,
+        }
     }
     let interrupted = watch.interrupted();
     drop(watch);

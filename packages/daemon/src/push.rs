@@ -6,7 +6,6 @@
 //! subscription and a signing key the browser made for it. Each alert is
 //! encrypted for that one browser (RFC 8291), signed with that key (VAPID,
 //! RFC 8292), and posted with `curl`: ghostd has no TLS of its own.
-use crate::abort::Abort;
 use crate::env::Env;
 use crate::log::Logger;
 use crate::private_file::{read_text, write_json_atomic};
@@ -25,7 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// A device is a phone or a browser; an owner has a handful.
-pub const MAX_SUBSCRIPTIONS: usize = 20;
+const MAX_SUBSCRIPTIONS: usize = 20;
 const MAX_ENDPOINT_LENGTH: usize = 2_000;
 /// How long a push service keeps an alert for a device that is offline.
 const TTL_SECONDS: u32 = 86_400;
@@ -42,7 +41,7 @@ const PUSH_DOMAINS: [&str; 5] = [".googleapis.com", ".google.com", ".push.apple.
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// Unpadded base64url, as Web Push writes keys.
-pub fn b64url(bytes: &[u8]) -> String {
+fn b64url(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let n = (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
@@ -54,7 +53,7 @@ pub fn b64url(bytes: &[u8]) -> String {
 }
 
 /// The bytes of unpadded (or padded) base64url, or None when it is not that.
-pub fn b64url_decode(text: &str) -> Option<Vec<u8>> {
+fn b64url_decode(text: &str) -> Option<Vec<u8>> {
     let text = text.trim_end_matches('=');
     if text.len() % 4 == 1 {
         return None;
@@ -88,7 +87,7 @@ pub struct Subscription {
 }
 
 /// The origin of a push endpoint ghostd will post to, or why it will not.
-pub fn endpoint_origin(endpoint: &str) -> Result<String, String> {
+fn endpoint_origin(endpoint: &str) -> Result<String, String> {
     let refused = || "endpoint is not a known browser push service.".to_string();
     if endpoint.len() > MAX_ENDPOINT_LENGTH || endpoint.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(refused());
@@ -133,7 +132,7 @@ fn expand(prk_salt: &[u8], ikm: &[u8], info: &[u8], length: usize) -> Vec<u8> {
 /// `plaintext` as one `aes128gcm` record for the browser that holds
 /// `p256dh` and `auth` (RFC 8291). `sender` is this message's own key and
 /// `salt` its salt: fresh random ones for every message.
-pub fn encrypt(p256dh: &[u8], auth: &[u8], plaintext: &[u8], sender: &[u8; 32], salt: &[u8; 16]) -> Result<Vec<u8>, String> {
+fn encrypt(p256dh: &[u8], auth: &[u8], plaintext: &[u8], sender: &[u8; 32], salt: &[u8; 16]) -> Result<Vec<u8>, String> {
     let receiver = PublicKey::from_sec1_bytes(p256dh).map_err(|_| "the device's key is not a P-256 public key".to_string())?;
     let sender = SecretKey::from_slice(sender).map_err(|_| "a sender key out of range".to_string())?;
     let sender_public = sender.public_key().to_encoded_point(false);
@@ -162,7 +161,7 @@ pub fn encrypt(p256dh: &[u8], auth: &[u8], plaintext: &[u8], sender: &[u8; 32], 
 
 /// The `Authorization` header that signs a push to `origin` with the
 /// device's own key (RFC 8292): a 12-hour ES256 token and the public key.
-pub fn vapid_authorization(origin: &str, vapid: &[u8], now_seconds: u64) -> Result<String, String> {
+fn vapid_authorization(origin: &str, vapid: &[u8], now_seconds: u64) -> Result<String, String> {
     let key = SigningKey::from_slice(vapid).map_err(|_| "the signing key is not a P-256 private key".to_string())?;
     let claims = json!({ "aud": origin, "exp": now_seconds + 12 * 3600, "sub": CONTACT });
     let signed = format!("{}.{}", b64url(br#"{"typ":"JWT","alg":"ES256"}"#), b64url(claims.to_string().as_bytes()));
@@ -229,7 +228,7 @@ pub fn send(subscription: &Subscription, payload: &Value, env: &Env) -> Sent {
             "--",
             &subscription.endpoint,
         ];
-        match run_command("curl", &args, env, None, SEND_TIMEOUT, &Abort::new()) {
+        match run_command("curl", &args, env, SEND_TIMEOUT) {
             Ok(result) => Ok(result.stdout.trim().to_string()),
             Err(crate::process::CommandFailure::Missing) => Err("curl is not installed".to_string()),
             Err(crate::process::CommandFailure::Other(message)) => Err(message),
@@ -301,7 +300,7 @@ impl Push {
             };
         }
         let entries: Vec<Value> = subscriptions.iter().map(Subscription::to_json).collect();
-        write_json_atomic(&self.path, &json!({ "version": 1, "subscriptions": entries })).map_err(|error| error.to_string())
+        write_json_atomic(&self.path, &json!({ "subscriptions": entries })).map_err(|error| error.to_string())
     }
 
     /// How many devices get alerts.

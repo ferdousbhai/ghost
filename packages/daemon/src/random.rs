@@ -2,13 +2,13 @@
 use std::fs::File;
 use std::io::Read;
 
-pub fn bytes<const N: usize>() -> [u8; N] {
+pub(crate) fn bytes<const N: usize>() -> [u8; N] {
     let mut buffer = [0u8; N];
     File::open("/dev/urandom").and_then(|mut file| file.read_exact(&mut buffer)).expect("/dev/urandom");
     buffer
 }
 
-pub fn hex(bytes: &[u8]) -> String {
+pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
@@ -21,8 +21,8 @@ pub fn uuid() -> String {
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..])
 }
 
-/// A number in base 36, as JavaScript's `toString(36)` writes it.
-pub fn base36(mut value: u64) -> String {
+/// A number in base 36, lower case.
+pub(crate) fn base36(mut value: u64) -> String {
     if value == 0 {
         return "0".to_string();
     }

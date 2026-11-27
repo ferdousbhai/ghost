@@ -9,17 +9,16 @@
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::mpsc::TryRecvError,
     time::Duration,
 };
 
-use gtk::{gdk, glib, prelude::*};
+use ghostd::abort::Abort;
+use gtk::{accessible::Property, gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde_json::{Value, json};
 
-use crate::{
-    api::{Api, Cancel, Frame, segment},
-    md,
-};
+use crate::{api, md};
 
 const WIDTH: i32 = 880;
 /// The panel's border and padding on both sides (`.bar-panel` in style.css), which the answer's width is less by.
@@ -29,6 +28,8 @@ const PANEL_INSET: i32 = 2 * (1 + 18);
 const RAISED: f64 = 0.16;
 /// As much of the screen's height as an answer takes before it scrolls.
 const TALLEST: f64 = 0.55;
+/// The most messages the daemon hands over in one page of the transcript.
+const PAGE: u64 = 2000;
 
 /// One exchange of the conversation: what the owner asked, and all the ghost said to it.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,7 +39,6 @@ struct Exchange {
 }
 
 pub struct Bar {
-    api: Api,
     window: gtk::ApplicationWindow,
     panel: gtk::Box,
     asked: gtk::Label,
@@ -55,7 +55,8 @@ pub struct Bar {
     text: RefCell<String>,
     /// Said since the answer was last drawn.
     dirty: Cell<bool>,
-    live: RefCell<Option<Cancel>>,
+    /// The turn this bar is reading, and what ends the reading.
+    live: RefCell<Option<Abort>>,
     /// The answer on screen ended while the owner could see it: putting the bar away puts it away for good.
     seen: Cell<bool>,
 }
@@ -89,6 +90,22 @@ fn exchanges_of(transcript: &Value) -> Vec<Exchange> {
     }
     exchanges.retain(|exchange| !exchange.said.is_empty());
     exchanges
+}
+
+/// Where the conversation's newest page starts, when `page`, read from its oldest message, is not all of it.
+fn newest_from(page: &Value) -> Option<u64> {
+    let count = page["messages"].as_array().map_or(0, Vec::len) as u64;
+    (page["truncated"] == true).then(|| page["total"].as_u64().unwrap_or(0).saturating_sub(count))
+}
+
+/// The newest page of the transcript: the daemon pages from the oldest, as `ghost show` knows too.
+async fn newest_page() -> Result<Value, String> {
+    let page = |from: u64| api::call("GET", format!("/api/conversation/transcript?limit={PAGE}&offset={from}"), None);
+    let first = page(0).await?;
+    match newest_from(&first) {
+        Some(from) => page(from).await,
+        None => Ok(first),
+    }
 }
 
 fn line(class: &str) -> gtk::Label {
@@ -138,34 +155,11 @@ fn surface(app: &gtk::Application) -> gtk::ApplicationWindow {
     window
 }
 
-/// The bar when ghostd cannot be reached: why, until Escape.
-pub fn unavailable(app: &gtk::Application, message: &str) {
-    let window = surface(app);
-    let panel = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    panel.add_css_class("bar-panel");
-    let label = line("bar-status");
-    label.add_css_class("error");
-    label.set_text(message);
-    label.set_visible(true);
-    panel.append(&label);
-    window.set_child(Some(&panel));
-    let keys = gtk::EventControllerKey::new();
-    let closed = window.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        if key == gdk::Key::Escape {
-            closed.close();
-        }
-        glib::Propagation::Proceed
-    });
-    window.add_controller(keys);
-    window.present();
-}
-
 impl Bar {
-    pub fn build(app: &gtk::Application, api: Api) {
+    pub fn build(app: &gtk::Application) {
         let window = surface(app);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        // The keyboard's place once the prompt has gone, so Escape and Ctrl+C still reach the bar.
+        // The keyboard's place once the prompt has gone, so the bar's keys still reach it.
         root.set_focusable(true);
         let panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
         panel.add_css_class("bar-panel");
@@ -191,7 +185,6 @@ impl Bar {
         window.set_child(Some(&root));
 
         let bar = Rc::new(Self {
-            api,
             window,
             panel,
             asked,
@@ -212,7 +205,7 @@ impl Bar {
         bar.entry.connect_activate(move |_| this.ask());
         // Escape puts the bar away and stops nothing. Ctrl+C is a terminal's: it stops the turn that is running; with
         // none it empties the prompt; with nothing to empty it puts the bar away. Up and Down go through the
-        // conversation an exchange at a time.
+        // conversation an exchange at a time. Ctrl+Q ends the bar itself, which the next `ghost-bar` starts anew.
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let this = bar.clone();
@@ -223,6 +216,7 @@ impl Bar {
                 gdk::Key::c if control && this.live.borrow().is_some() => this.stop(),
                 gdk::Key::c if control && !this.entry.text().is_empty() && this.entry.get_visible() => this.entry.set_text(""),
                 gdk::Key::c if control => this.put_away(),
+                gdk::Key::q if control => this.window.application().iter().for_each(|app| app.quit()),
                 gdk::Key::Up | gdk::Key::Page_Up => this.step(-1),
                 gdk::Key::Down | gdk::Key::Page_Down => this.step(1),
                 _ => return glib::Propagation::Proceed,
@@ -369,20 +363,27 @@ impl Bar {
     }
 
     /// The conversation as the log has it, and the ghost's open question: the last thing it said, with the
-    /// answers it offers under it, the one it recommends first and marked. Any other answer is typed.
+    /// answers it offers under it, the one it recommends first and marked. Any other answer is typed into the
+    /// prompt, once the bar is summoned.
     async fn settle(self: &Rc<Self>) {
         if self.live.borrow().is_some() {
             return;
         }
-        let transcript = self.api.get("/api/conversation/transcript?limit=2000".to_string()).await;
-        let conversation = self.api.get("/api/conversation".to_string()).await.unwrap_or(Value::Null);
+        let transcript = newest_page().await;
+        let conversation = api::call("GET", "/api/conversation".to_string(), None).await.unwrap_or(Value::Null);
         if self.live.borrow().is_some() {
             return;
         }
         match transcript {
             Ok(transcript) => *self.exchanges.borrow_mut() = exchanges_of(&transcript),
-            Err(error) => return self.note(&error.message, true),
+            Err(error) => {
+                // Why the daemon cannot be asked, until the bar is put away: summoned again, it asks again.
+                self.seen.set(true);
+                return self.note(&error, true);
+            }
         }
+        // The answer area's name tells a screen reader, and the scripted QA, that what it shows is all there is.
+        self.scroll.update_property(&[Property::Label("Answer")]);
         let offered: Vec<String> = conversation["question"]["options"]
             .as_array()
             .map(|options| options.iter().filter_map(Value::as_str).map(String::from).collect())
@@ -414,71 +415,109 @@ impl Bar {
 
     fn ask(self: &Rc<Self>) {
         let prompt = self.entry.text().trim().to_string();
-        if prompt.is_empty() || self.live.borrow().is_some() {
+        if prompt.is_empty() {
             return;
         }
-        self.entry.set_text("");
+        if self.live.borrow().is_some() {
+            return self.follow_up(prompt);
+        }
         self.clear();
         self.seen.set(false);
         self.show(&self.asked, &prompt);
         self.note("Thinking…", false);
-        // The prompt has done its work; the answer keeps the keyboard, for Escape and Ctrl+C.
+        self.sent();
+        self.scroll.update_property(&[Property::Label("Answering")]);
+
+        let abort = Abort::new();
+        let events = api::stream("/api/messages", json!({ "prompt": prompt }), abort.clone());
+        *self.live.borrow_mut() = Some(abort);
+
+        // Tokens arrive faster than a redraw is worth: what has come is read, and the answer drawn, every 60 ms.
+        let this = self.clone();
+        // Whether the daemon took the turn, and whether it said how the turn ended.
+        let (mut taken, mut closed) = (false, false);
+        glib::timeout_add_local(Duration::from_millis(60), move || {
+            loop {
+                match events.try_recv() {
+                    Ok(Ok(event)) => {
+                        taken = true;
+                        closed |= matches!(event["type"].as_str(), Some("done" | "error"));
+                        this.on_event(&event);
+                    }
+                    Ok(Err(error)) => {
+                        closed = true;
+                        this.note(&error, true);
+                        // What was not sent is the owner's to send again: another turn was running, or no daemon.
+                        if !taken {
+                            this.entry.set_text(&prompt);
+                            this.entry.set_position(-1);
+                            this.entry.set_visible(true);
+                            this.entry.grab_focus();
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => {
+                        if !closed && !this.status.has_css_class("error") {
+                            this.note("The answer was cut off; ghostd stopped sending it.", true);
+                        }
+                        this.ended();
+                        return glib::ControlFlow::Break;
+                    }
+                }
+            }
+            if this.dirty.replace(false) {
+                this.say(&this.text.borrow());
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    /// The prompt has done its work; the answer keeps the keyboard, for the bar's keys.
+    fn sent(&self) {
+        self.entry.set_text("");
         self.entry.set_visible(false);
         if let Some(root) = self.window.child() {
             root.grab_focus();
         }
+    }
 
-        let (frames, cancel) = self.api.stream("/api/messages".to_string(), Some(json!({ "prompt": prompt })));
-        *self.live.borrow_mut() = Some(cancel);
-
-        // Tokens arrive faster than a redraw is worth: the answer is drawn at most every 60 ms.
-        let this = self.clone();
-        glib::timeout_add_local(Duration::from_millis(60), move || {
-            if this.dirty.replace(false) {
-                this.say(&this.text.borrow());
-            }
-            if this.live.borrow().is_some() { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
-        });
-
+    /// Sent while a turn is running (the bar was summoned during it): the turn's next pass, which `owner_message`
+    /// announces. A turn that ended meanwhile leaves the text in the prompt, for Enter to send as a turn of its own.
+    fn follow_up(self: &Rc<Self>, text: String) {
         let this = self.clone();
         glib::spawn_future_local(async move {
-            let mut next = Some(frames);
-            while let Some(frames) = next.take() {
-                while let Ok(frame) = frames.recv().await {
-                    match frame {
-                        // A long turn's stream is cut; its last frame says where the rest is.
-                        Frame::Event(event) if event["type"] == "resume" => {
-                            let path = format!(
-                                "/api/conversation/stream?turn={}&from={}",
-                                segment(event["turn"].as_str().unwrap_or_default()),
-                                event["from"].as_u64().unwrap_or(0)
-                            );
-                            let (frames, cancel) = this.api.stream(path, None);
-                            *this.live.borrow_mut() = Some(cancel);
-                            next = Some(frames);
-                        }
-                        Frame::Event(event) => this.on_event(&event),
-                        Frame::Failed(error) => this.note(&error.message, true),
-                        Frame::End => break,
-                    }
-                }
+            match api::call("POST", "/api/conversation/queue".to_string(), Some(json!({ "text": text }))).await {
+                Ok(_) => this.sent(),
+                Err(error) => this.note(&error, true),
             }
-            *this.live.borrow_mut() = None;
-            this.dirty.set(false);
-            this.say(&this.text.borrow());
-            if !this.status.has_css_class("error") {
-                this.note("", false);
-            }
-            // An answer that ended off screen is still to be seen.
-            this.seen.set(this.window.is_visible());
-            this.settle().await;
         });
+    }
+
+    /// The turn's stream has ended: all it said is drawn, and the conversation read again.
+    fn ended(self: &Rc<Self>) {
+        *self.live.borrow_mut() = None;
+        self.dirty.set(false);
+        self.say(&self.text.borrow());
+        if !self.status.has_css_class("error") {
+            self.note("", false);
+        }
+        // An answer that ended off screen is still to be seen.
+        self.seen.set(self.window.is_visible());
+        let this = self.clone();
+        glib::spawn_future_local(async move { this.settle().await });
     }
 
     fn on_event(&self, event: &Value) {
         match event["type"].as_str().unwrap_or_default() {
             "pass" => self.note("Thinking…", false),
-            // "Loading the local model…" is a notice; the reasoning itself is `ghost show`'s to list.
+            // A follow-up is an exchange of its own, as it is in the transcript.
+            "owner_message" => {
+                self.show(&self.asked, event["text"].as_str().unwrap_or_default());
+                self.text.borrow_mut().clear();
+                self.dirty.set(true);
+            }
+            // "Loading the local model…" is a notice, which the wire tells from reasoning by its words alone; the
+            // reasoning itself is `ghost show`'s to list.
             "thinking" => {
                 if let Some(text) = event["delta"].as_str().filter(|text| text.trim_start().starts_with("Loading the local model")) {
                     self.note(text.trim(), false);
@@ -512,12 +551,12 @@ impl Bar {
     fn stop(self: &Rc<Self>) {
         let this = self.clone();
         glib::spawn_future_local(async move {
-            if let Err(error) = this.api.call("POST", "/api/conversation/stop".to_string(), Some(json!({}))).await {
-                // Nothing to stop on the daemon: end the reading instead.
-                if let Some(cancel) = this.live.borrow().as_ref() {
-                    cancel.stop();
+            if let Err(error) = api::call("POST", "/api/conversation/stop".to_string(), Some(json!({}))).await {
+                // The daemon stops nothing: the reading ends instead, and the bar is free again.
+                if let Some(reading) = this.live.borrow().as_ref() {
+                    reading.abort();
                 }
-                this.note(&error.message, true);
+                this.note(&error, true);
             }
         });
     }
@@ -544,5 +583,14 @@ mod tests {
         ] });
         let exchange = |asked: &str, said: &str| Exchange { asked: asked.into(), said: said.into() };
         assert_eq!(exchanges_of(&transcript), [exchange("When?", "I will look.\n\nAt **nine**."), exchange("And then?", "The model stopped.")]);
+    }
+
+    #[test]
+    fn a_conversation_longer_than_a_page_is_read_from_its_newest_page() {
+        let page = |count: usize, total: u64, truncated: bool| json!({ "messages": vec![json!({}); count], "total": total, "truncated": truncated });
+        assert_eq!(newest_from(&page(3, 3, false)), None);
+        assert_eq!(newest_from(&page(0, 0, false)), None);
+        assert_eq!(newest_from(&page(2000, 2001, true)), Some(1));
+        assert_eq!(newest_from(&page(2000, 5000, true)), Some(3000));
     }
 }

@@ -18,31 +18,6 @@ fn width(text: &str) -> usize {
     text.chars().count()
 }
 
-/// A JSON value as a template would print it: a string bare, anything else as JSON.
-pub fn text_of(value: Option<&Value>) -> String {
-    match value {
-        None => "undefined".to_string(),
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => other.to_string(),
-    }
-}
-
-/// Whether a JSON value counts as present: not missing, null, false, zero or empty text.
-pub fn truthy(value: Option<&Value>) -> bool {
-    match value {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(flag)) => *flag,
-        Some(Value::Number(number)) => number.as_f64().is_some_and(|n| n != 0.0),
-        Some(Value::String(text)) => !text.is_empty(),
-        Some(_) => true,
-    }
-}
-
-/// The value at `key` unless it is missing or null.
-pub fn present<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    value.get(key).filter(|found| !found.is_null())
-}
-
 /// How long ago an ISO time was, in the largest whole unit; `—` when it is not a time.
 pub fn relative_time(value: &str, now_ms: i64) -> String {
     let Some(timestamp) = crate::clock::parse_iso(value) else { return "—".to_string() };
@@ -142,8 +117,8 @@ Common flags:
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd runs the machine (tokens, remote access, and the conversation, each turn
-answered by a model on this machine); ghost talks to the ghost.
+ghostd holds the conversation and answers each turn on a model on this machine;
+ghost talks to it.
 ",
         rows.join("\n")
     )

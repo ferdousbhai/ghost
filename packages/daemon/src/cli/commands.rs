@@ -1,9 +1,8 @@
 //! Every verb but `say`: each asks the daemon one thing and prints the answer
 //! as a table, a transcript, or one acknowledging sentence.
-use super::client::EXIT_SUCCESS;
 use super::common::{read_argument_file, read_argument_json};
-use super::output::{Rendered, present, primary, relative_time, table, text_of, truncate, truthy};
-use super::{CliError, Context};
+use super::output::{Rendered, primary, relative_time, table, truncate};
+use super::{CliError, Context, EXIT_SUCCESS};
 use serde_json::{Map, Value, json};
 
 // ── The conversation ────────────────────────────────────────────────────
@@ -35,12 +34,12 @@ fn transcript_markdown(body: &Value) -> String {
                 (Some("toolCall"), Some("ask"), _) => "> ⚙ ask".to_string(),
                 (Some("toolCall"), Some("bash"), Some(command)) => {
                     let output = part.get("output").and_then(Value::as_str).map_or_else(String::new, |output| format!("\n{}", output.trim_end()));
-                    let failed = if truthy(part.get("failed")) { " ✗" } else { "" };
+                    let failed = if part["failed"] == true { " ✗" } else { "" };
                     format!("```\n$ {command}{failed}{output}\n```")
                 }
-                (Some("toolCall"), _, _) => {
-                    let arguments = present(part, "arguments").map_or_else(|| "{}".to_string(), Value::to_string);
-                    format!("> ⚙ {}({})", text_of(part.get("name")), truncate(&arguments, 120))
+                (Some("toolCall"), name, _) => {
+                    let arguments = part.get("arguments").filter(|arguments| !arguments.is_null()).map_or_else(|| "{}".to_string(), Value::to_string);
+                    format!("> ⚙ {}({})", name.unwrap_or("tool"), truncate(&arguments, 120))
                 }
                 _ => text.to_string(),
             }
@@ -51,58 +50,37 @@ fn transcript_markdown(body: &Value) -> String {
     items(body, "messages").iter().map(message).collect::<Vec<_>>().join("\n\n")
 }
 
-/// A query value as a form writes it: letters, digits and `*-._` bare, a space as `+`.
-fn form_encode(text: &str) -> String {
-    let mut out = String::new();
-    for byte in text.bytes() {
-        match byte {
-            b' ' => out.push('+'),
-            byte if byte.is_ascii_alphanumeric() || b"*-._".contains(&byte) => out.push(byte as char),
-            byte => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
 /// `ghost show`: the conversation as Markdown. Without --offset, the newest
 /// page: the daemon pages from the oldest, so a conversation longer than one
 /// page is fetched again from its last page.
 pub fn show_command(ctx: &mut Context) -> Result<i32, CliError> {
-    let limit = ctx.parsed.text("limit").map(str::to_string);
-    let offset = ctx.parsed.text("offset").map(str::to_string);
-    let page = |ctx: &mut Context, from: Option<&str>| {
-        let pairs: Vec<String> = [("limit", limit.as_deref()), ("offset", from)]
-            .iter()
-            .filter_map(|(key, value)| Some(format!("{key}={}", form_encode((*value)?))))
-            .collect();
+    let (limit, offset) = (ctx.parsed.number("limit")?, ctx.parsed.number("offset")?);
+    let page = |ctx: &mut Context, from: Option<u64>| {
+        let pairs: Vec<String> =
+            [("limit", limit), ("offset", from)].iter().filter_map(|(key, value)| Some(format!("{key}={}", (*value)?))).collect();
         let query = if pairs.is_empty() { String::new() } else { format!("?{}", pairs.join("&")) };
         ctx.request("GET", &format!("/api/conversation/transcript{query}"), None)
     };
-    let count = |body: &Value| items(body, "messages").len() as i64;
-    let total = |body: &Value| body.get("total").and_then(Value::as_i64).unwrap_or(0);
-    let mut response = page(ctx, offset.as_deref())?;
-    // The first message shown, counted from zero; None when --offset was not a number.
-    let mut first = match &offset {
-        Some(offset) => offset.trim().parse::<i64>().ok(),
-        None => Some(0),
-    };
-    if offset.is_none() && truthy(response.get("truncated")) {
-        let from = (total(&response) - count(&response)).max(0);
-        first = Some(from);
-        response = page(ctx, Some(&from.to_string()))?;
+    let count = |body: &Value| items(body, "messages").len() as u64;
+    let total = |body: &Value| body["total"].as_u64().unwrap_or(0);
+    let mut response = page(ctx, offset)?;
+    // The first message shown, counted from zero.
+    let mut first = offset.unwrap_or(0);
+    if offset.is_none() && response["truncated"] == true {
+        first = total(&response).saturating_sub(count(&response));
+        response = page(ctx, Some(first))?;
     }
-    let number = |add: i64| first.map_or_else(|| "NaN".to_string(), |first| (first + add).to_string());
     ctx.emit(&response, || {
         let (total, count) = (total(&response), count(&response));
         if total == 0 {
             return Rendered::Both { human: "No messages.\n".to_string(), quiet: String::new() };
         }
         if count == 0 {
-            return Rendered::Both { human: format!("(no messages from {}; {total} in all)\n", number(1)), quiet: String::new() };
+            return Rendered::Both { human: format!("(no messages from {}; {total} in all)\n", first + 1), quiet: String::new() };
         }
         let quiet = format!("{}\n", transcript_markdown(&response));
-        let human = if truthy(response.get("truncated")) {
-            format!("{quiet}\n(messages {}–{} of {total}; --offset/--limit for others)\n", number(1), number(count))
+        let human = if response["truncated"] == true {
+            format!("{quiet}\n(messages {}–{} of {total}; --offset/--limit for others)\n", first + 1, first + count)
         } else {
             quiet.clone()
         };
@@ -166,8 +144,8 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
     let conversation = ctx.request("GET", "/api/conversation", None)?;
     let now = crate::clock::now_ms();
     let client = ctx.client()?;
-    let (base_url, token_file) = (client.base_url.clone(), client.token_path.display().to_string());
-    let version = ctx.version.clone();
+    let (base_url, token_file) = (client.base_url(), client.token_path().display().to_string());
+    let version = crate::VERSION;
     let mut result = Map::new();
     let fields = [
         ("daemon", Some(json!(base_url))),
@@ -188,40 +166,39 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         }
     }
     ctx.emit(&Value::Object(result), || {
-        let source = |key: &str, fallback: &str| {
-            daemon.get("source").and_then(|source| present(source, key)).map_or_else(|| fallback.to_string(), |found| text_of(Some(found)))
-        };
+        // What the daemon left out or sent as null is a dash.
+        let text = |value: &Value| value.as_str().unwrap_or("—").to_string();
+        let topics = topics.as_ref().and_then(|topics| Some(format!("{} in {}", topics["count"].as_u64()?, topics["path"].as_str()?)));
         let mut lines = vec![
             format!("daemon         {base_url}"),
             format!("token file     {token_file}"),
-            format!("ghost          {}", ghost.as_ref().filter(|name| !name.is_null()).map_or_else(|| "—".to_string(), |name| text_of(Some(name)))),
+            format!("ghost          {}", ghost.as_ref().map_or_else(|| "—".to_string(), text)),
             // The ghost's topic documents: plain files, the owner's to read, edit and delete.
-            format!(
-                "topics         {}",
-                topics
-                    .as_ref()
-                    .map_or_else(|| "—".to_string(), |topics| format!("{} in {}", text_of(topics.get("count")), text_of(topics.get("path"))))
-            ),
+            format!("topics         {}", topics.unwrap_or_else(|| "—".to_string())),
             format!("version        {version}"),
-            format!("daemon version {}", text_of(daemon.get("version"))),
-            format!("daemon commit  {}", source("commit", "unknown")),
-            format!("daemon source  {}", source("root", "packaged install")),
-            format!("daemon started {}", text_of(daemon.get("startedAt"))),
+            format!("daemon version {}", text(&daemon["version"])),
+            format!("daemon commit  {}", daemon["source"]["commit"].as_str().unwrap_or("unknown")),
+            format!("daemon source  {}", daemon["source"]["root"].as_str().unwrap_or("packaged install")),
+            format!("daemon started {}", text(&daemon["startedAt"])),
         ];
         // The code changed under a running daemon: what is on disk is not what answers.
-        if truthy(daemon.get("restartNeeded")) {
+        if daemon["restartNeeded"] == true {
             lines.push("restart needed code on disk is newer than this daemon (ghost help self)".to_string());
         }
         // Remote access is Tailscale Serve, the owner's to turn on: off names the command, on the app's link to this machine.
-        let state = text_of(remote.get("state"));
-        let url = if state == "on" && truthy(remote.get("hostname")) { format!(" {}", text_of(remote.get("hostname"))) } else { String::new() };
-        let problem = present(&remote, "problem").map_or_else(String::new, |problem| format!(" ({})", text_of(problem.get("message"))));
-        let turn_on = if state == "off" && problem.is_empty() { format!("; turn on: {}", text_of(remote.get("command"))) } else { String::new() };
-        lines.push(format!("remote         {state}{url}{problem}{turn_on}"));
-        if state == "on"
-            && let Some(app) = present(&remote, "app").filter(|app| truthy(app.get("url")))
-        {
-            lines.push(format!("app            {}", text_of(app.get("url"))));
+        let state = text(&remote["state"]);
+        let mut line = format!("remote         {state}");
+        if let Some(hostname) = remote["hostname"].as_str().filter(|_| state == "on") {
+            line.push_str(&format!(" {hostname}"));
+        }
+        match (remote["problem"]["message"].as_str(), remote["command"].as_str()) {
+            (Some(problem), _) => line.push_str(&format!(" ({problem})")),
+            (None, Some(command)) if state == "off" => line.push_str(&format!("; turn on: {command}")),
+            _ => {}
+        }
+        lines.push(line);
+        if let Some(url) = remote["app"]["url"].as_str().filter(|_| state == "on") {
+            lines.push(format!("app            {url}"));
         }
         // The conversation: how long it is, when it last moved, and what it waits on.
         let mut said = match conversation.get("messageCount").and_then(Value::as_u64).unwrap_or(0) {
@@ -232,8 +209,12 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         if let Some(updated) = conversation.get("updatedAt").and_then(Value::as_str) {
             said.push(format!("updated {}", relative_time(updated, now)));
         }
-        let states = [("running", "running"), ("question", "asking"), ("unread", "unread")];
-        said.extend(states.iter().filter(|(key, _)| truthy(conversation.get(*key))).map(|(_, word)| word.to_string()));
+        let states = [
+            (conversation["running"] == true, "running"),
+            (!conversation["question"].is_null(), "asking"),
+            (conversation["unread"] == true, "unread"),
+        ];
+        said.extend(states.iter().filter(|(holds, _)| *holds).map(|(_, word)| word.to_string()));
         lines.push(format!("conversation   {}", said.join(", ")));
         Rendered::Both { human: format!("{}\n", lines.join("\n")), quiet: "ok\n".to_string() }
     });
@@ -242,61 +223,12 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
 
 // ── Hooks ───────────────────────────────────────────────────────────────
 
-/// A handler's default name and description, per event, in the order hooks are loaded.
-const HOOK_EVENTS: &[(&str, &str, &str)] = &[("session_stop", "Session-stop command hook", "Runs after the assistant pass and may continue it.")];
-
-fn display_text(value: Option<&Value>, fallback: &str, label: &str, maximum: usize) -> Result<String, CliError> {
-    match value {
-        None => Ok(fallback.to_string()),
-        Some(Value::String(text)) if !text.trim().is_empty() && text.trim().chars().count() <= maximum => Ok(text.trim().to_string()),
-        Some(_) => Err(CliError::failure(format!("{label} must be a non-empty string of at most {maximum} characters."))),
-    }
-}
-
 /// The `(event, name, description)` of every hook in a `hooks.json` document,
 /// admitted by the daemon's own rules and refusals, so `ghost hooks` never
 /// lists what ghostd would not run.
 fn hook_rows(document: &Value, path: &str) -> Result<Vec<Vec<String>>, CliError> {
-    let fail = |message: String| Err(CliError::failure(message));
-    let Some(top) = document.as_object() else { return fail(format!("{path} must contain a JSON object.")) };
-    let stray: Vec<String> = top.keys().filter(|key| *key != "hooks").map(|key| Value::String(key.clone()).to_string()).collect();
-    if !stray.is_empty() {
-        return fail(format!("{path} has no top-level {}; send the document itself.", stray.join(", ")));
-    }
-    let Some(hooks) = top.get("hooks") else { return Ok(Vec::new()) };
-    let Some(hooks) = hooks.as_object() else { return fail(format!("{path}: \"hooks\" must be an object.")) };
-    if let Some(unknown) = hooks.keys().find(|key| !HOOK_EVENTS.iter().any(|(event, _, _)| event == key)) {
-        return fail(format!("{path}: unsupported hook event {}.", Value::String(unknown.clone())));
-    }
-    let mut rows = Vec::new();
-    for (event, default_name, default_description) in HOOK_EVENTS {
-        let Some(groups) = hooks.get(*event) else { continue };
-        let Some(groups) = groups.as_array() else { return fail(format!("{path}: \"hooks.{event}\" must be an array.")) };
-        for (group_index, group) in groups.iter().enumerate() {
-            let Some(handlers) = group.as_object().and_then(|group| group.get("hooks")).and_then(Value::as_array) else {
-                return fail(format!("{path}: hooks.{event}[{group_index}].hooks must be an array."));
-            };
-            for (handler_index, raw) in handlers.iter().enumerate() {
-                let label = format!("hooks.{event}[{group_index}].hooks[{handler_index}]");
-                let command =
-                    raw.as_object().filter(|raw| raw.get("type").and_then(Value::as_str) == Some("command")).and_then(|raw| raw.get("command"));
-                if !command.and_then(Value::as_str).is_some_and(|command| !command.trim().is_empty() && !command.contains('\0')) {
-                    return fail(format!("{path}: {label} must be a command hook with a non-empty NUL-free command."));
-                }
-                let timeout_ok = match raw.get("timeout") {
-                    None => true,
-                    Some(timeout) => timeout.as_f64().is_some_and(|seconds| seconds > 0.0 && seconds <= 600.0),
-                };
-                if !timeout_ok {
-                    return fail(format!("{path}: {label}.timeout must be a number in (0, 600]."));
-                }
-                let name = display_text(raw.get("name"), default_name, &format!("{path}: {label}.name"), 80)?;
-                let description = display_text(raw.get("description"), default_description, &format!("{path}: {label}.description"), 240)?;
-                rows.push(vec![event.to_string(), name, description]);
-            }
-        }
-    }
-    Ok(rows)
+    let hooks = crate::hooks::parse_hooks_document(document, path).map_err(CliError::failure)?;
+    Ok(hooks.into_iter().map(|hook| vec![crate::hooks::SESSION_STOP.to_string(), hook.name, hook.description]).collect())
 }
 
 /// `ghost hooks [status|show|set <file>]` over the daemon's `hooks.json`.
@@ -318,8 +250,8 @@ pub fn hooks_command(ctx: &mut Context) -> Result<i32, CliError> {
     } else if action == "show" {
         primary(format!("{}\n", serde_json::to_string_pretty(&body).unwrap_or_default()))
     } else {
-        let path = text_of(body.get("path"));
-        let rows = hook_rows(body.get("document").unwrap_or(&Value::Null), &path)?;
+        let path = body["path"].as_str().unwrap_or("hooks.json");
+        let rows = hook_rows(&body["document"], path)?;
         if action == "set" {
             Rendered::Secondary(format!("Replaced {path} ({} {}).\n", rows.len(), if rows.len() == 1 { "hook" } else { "hooks" }))
         } else {

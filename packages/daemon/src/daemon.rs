@@ -2,7 +2,7 @@
 use crate::config::{DaemonConfig, Overrides, load_config};
 use crate::conversation_host::{ConversationHost, ConversationHostOptions};
 use crate::env::Env;
-use crate::ghosts::the_ghost;
+use crate::home::Home;
 use crate::hooks::HookRunner;
 use crate::local_model::LocalModel;
 use crate::log::{Level, Logger, stderr_is_journal};
@@ -42,12 +42,12 @@ Options:
 
 Environment:
   GHOSTD_PORT, GHOST_HOME, GHOSTD_CONFIG, GHOSTD_HOOKS,
-  GHOSTD_API_TOKEN_FILE, XDG_CONFIG_HOME, XDG_STATE_HOME,
-  XDG_CACHE_HOME, XDG_DOCUMENTS_DIR
+  GHOSTD_API_TOKEN_FILE, XDG_CONFIG_HOME, XDG_DATA_HOME,
+  XDG_STATE_HOME, XDG_CACHE_HOME, XDG_DOCUMENTS_DIR
 ";
 
 #[derive(Debug)]
-pub struct ParsedArgs {
+pub(crate) struct ParsedArgs {
     pub overrides: Overrides,
     pub log_level: Level,
     pub help: bool,
@@ -55,7 +55,7 @@ pub struct ParsedArgs {
 }
 
 /// The daemon's own flags; anything else is refused by name.
-pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
+pub(crate) fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
     let mut parsed = ParsedArgs { overrides: Overrides::default(), log_level: Level::Info, help: false, version: false };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -87,8 +87,8 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 /// Point every child — a turn's commands, a hook, `ghostd hook-complete`,
 /// `ghost` — at this daemon: a `--port`, `--config`, or `--home` flag is
 /// otherwise invisible to them, and they would address the default daemon.
-pub fn daemon_env(config: &DaemonConfig, port: u16, mut env: Env) -> Env {
-    env.insert("GHOSTD_PORT".into(), port.to_string());
+fn daemon_env(config: &DaemonConfig, mut env: Env) -> Env {
+    env.insert("GHOSTD_PORT".into(), config.port.to_string());
     env.insert("GHOSTD_CONFIG".into(), config.config_path.to_string_lossy().into_owned());
     env.insert("GHOST_HOME".into(), config.home.to_string_lossy().into_owned());
     env.insert("GHOSTD_HOOKS".into(), config.hooks_path.to_string_lossy().into_owned());
@@ -183,7 +183,7 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
             }
         }
     }
-    let env = daemon_env(&config, config.port, process_env);
+    let env = daemon_env(&config, process_env);
     let hooks = match HookRunner::from_config(&config.hooks_path, logger.clone(), env.clone()) {
         Ok(hooks) => Arc::new(hooks),
         Err(error) => {
@@ -193,8 +193,8 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
     };
     // What is running: the source checkout behind this process, if it has one.
     let running_source = resolve_running_source(crate::VERSION, &running_executable(), &env);
-    let ghost = match the_ghost(&config.home) {
-        Ok(ghost) => ghost,
+    let ghost = match Home::open(config.home.clone()) {
+        Ok(home) => home,
         Err(error) => {
             logger.error("no ghost home", json!({ "error": error.message }));
             return 1;
@@ -214,7 +214,7 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
         answerer: None,
         coding_agent: None,
         env: env.clone(),
-        push: Some(crate::push::Push::new(crate::push::Push::default_path(&env, home), logger.child(json!({ "part": "push" })), env.clone())),
+        push: crate::push::Push::new(crate::push::Push::default_path(&env, home), logger.child(json!({ "part": "push" })), env.clone()),
     });
     let summary = json!({
         "url": format!("http://127.0.0.1:{}", config.port),
@@ -232,12 +232,10 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
         running_source,
         hooks,
         logger: logger.clone(),
-        max_body_bytes: None,
         api_token: ApiToken::File,
         remote: Some(Arc::new(RemoteAccess::new(&config.remote, tailscale))),
         remote_apps: config.remote.apps.clone(),
         remote_serve,
-        stream_cut_bytes: None,
         port: config.port,
         env,
         home: home.to_path_buf(),
@@ -246,18 +244,19 @@ pub fn main(args: &[String], process_env: Env, home: &Path) -> i32 {
         Ok(listening) => listening,
         Err(error) => {
             logger.error("could not bind", json!({ "port": config.port, "error": error }));
-            host.dispose_all();
+            host.shut_down();
             return 1;
         }
     };
     // Caught before the daemon says it is up, so a stop sent the moment it does is a clean one.
     let shutdown = ShutdownSignal::install();
     logger.info("listening", summary);
-    // Stop accepting work, abort running turns, and close everything. A second
-    // signal ends the process outright; systemd's `TimeoutStopSec` bounds the whole stop.
+    // Stop accepting work, abort the running turn, save the model's slot, and
+    // close everything. A second signal ends the process outright; systemd's
+    // `TimeoutStopSec` (contrib/ghostd.service) is longer than the whole stop can take.
     let signal = shutdown.wait();
     logger.info("shutting down", json!({ "signal": signal }));
-    host.dispose_all();
+    host.shut_down();
     listening.close();
     logger.info("stopped", serde_json::Value::Null);
     let _ = std::io::stderr().flush();
@@ -273,26 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn flags_are_read_in_both_spellings() {
-        let parsed = parse_args(&args(&["-p", "7001", "--home=/g", "--config", "/c.json", "--log-level", "warn"])).unwrap();
-        assert_eq!(parsed.overrides.port, Some(7001));
-        assert_eq!(parsed.overrides.home.as_deref(), Some("/g"));
-        assert_eq!(parsed.overrides.config_path.as_deref(), Some(Path::new("/c.json")));
-        assert_eq!(parsed.log_level, Level::Warn);
-        assert!(parse_args(&args(&["-h"])).unwrap().help && parse_args(&args(&["--version"])).unwrap().version);
-    }
-
-    #[test]
-    fn bad_arguments_are_named() {
-        assert_eq!(parse_args(&args(&["--port", "99999"])).unwrap_err(), "Invalid port: 99999");
-        assert_eq!(parse_args(&args(&["--log-level", "loud"])).unwrap_err(), "Invalid log level: loud");
-        assert_eq!(parse_args(&args(&["--nope"])).unwrap_err(), "Unknown option '--nope'");
-        assert!(parse_args(&args(&["--port"])).unwrap_err().contains("argument missing"));
-    }
-
-    // ── Start-up ────────────────────────────────────────────────────────
-
-    #[test]
     fn defaults_to_no_overrides() {
         let parsed = parse_args(&[]).unwrap();
         assert_eq!((parsed.overrides.port, parsed.overrides.home, parsed.overrides.config_path), (None, None, None));
@@ -300,16 +279,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_serve_options() {
-        let parsed = parse_args(&args(&["--port", "7788", "--home", "/tmp/ghosts", "--config", "/tmp/config.json", "--log-level", "warn"])).unwrap();
+    fn parses_its_options_in_both_spellings() {
+        let parsed = parse_args(&args(&["--port", "7788", "--home", "/tmp/ghost", "--config", "/tmp/config.json", "--log-level", "warn"])).unwrap();
         assert_eq!(
             (parsed.overrides.port, parsed.overrides.home.as_deref(), parsed.overrides.config_path.as_deref()),
-            (Some(7788), Some("/tmp/ghosts"), Some(Path::new("/tmp/config.json")))
+            (Some(7788), Some("/tmp/ghost"), Some(Path::new("/tmp/config.json")))
         );
         assert_eq!((parsed.log_level, parsed.help, parsed.version), (Level::Warn, false, false));
         // The short port flag, and port 0 for any free port.
         assert_eq!(parse_args(&args(&["-p", "9000"])).unwrap().overrides.port, Some(9000));
         assert_eq!(parse_args(&args(&["--port=0"])).unwrap().overrides.port, Some(0));
+        assert_eq!(parse_args(&args(&["--home=/g"])).unwrap().overrides.home.as_deref(), Some("/g"));
         assert_eq!(parse_args(&args(&["--log-level=error"])).unwrap().log_level, Level::Error);
     }
 
@@ -330,8 +310,6 @@ mod tests {
         }
         assert_eq!(refused(&["--log-level", "loud"]), "Invalid log level: loud");
         assert_eq!(refused(&["--wat"]), "Unknown option '--wat'");
-        // A word that is no flag is not a ghost to serve or a command to run.
-        assert_eq!(refused(&["serve"]), "Unknown option 'serve'");
     }
 
     #[test]
@@ -342,9 +320,22 @@ mod tests {
         for flag in ["-p, --port <port>", "--home <dir>", "--config <file>", "--log-level <level>", "-h, --help", "-v, --version"] {
             assert!(USAGE.contains(flag), "{flag}");
         }
-        for variable in ["GHOSTD_PORT", "GHOST_HOME", "GHOSTD_CONFIG", "GHOSTD_HOOKS", "GHOSTD_API_TOKEN_FILE", "XDG_CONFIG_HOME", "XDG_STATE_HOME"] {
-            assert!(USAGE.contains(variable), "{variable}");
-        }
+        // Every variable ghostd reads for where things are: `config.rs`, `token.rs`, and each `xdg.rs` base.
+        let variables = [
+            "GHOSTD_PORT",
+            "GHOST_HOME",
+            "GHOSTD_CONFIG",
+            "GHOSTD_HOOKS",
+            "GHOSTD_API_TOKEN_FILE",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DOCUMENTS_DIR",
+        ];
+        let listed = USAGE.split("Environment:\n").nth(1).expect("an Environment section");
+        let listed: Vec<&str> = listed.split([',', ' ', '\n']).filter(|word| !word.is_empty()).collect();
+        assert_eq!(listed, variables);
         assert!(USAGE.ends_with('\n'));
     }
 
@@ -352,24 +343,20 @@ mod tests {
     fn hands_a_daemons_flags_to_every_child_so_they_address_it_and_not_the_default_daemon() {
         let scratch = std::env::temp_dir().join(format!("ghostd-env-{}", crate::random::uuid()));
         std::fs::create_dir_all(&scratch).unwrap();
-        let (config_file, root) = (scratch.join("config.json").display().to_string(), scratch.join("ghosts").display().to_string());
+        let (config_file, root) = (scratch.join("config.json").display().to_string(), scratch.join("home").display().to_string());
         let parsed = parse_args(&args(&["--port", "7788", "--config", &config_file, "--home", &root])).unwrap();
         let config = load_config(&parsed.overrides, &Env::new(), &scratch).unwrap();
         let inherited = Env::from([("HOME".to_string(), scratch.display().to_string()), ("PATH".to_string(), "/usr/bin:/bin".to_string())]);
-        let env = daemon_env(&config, 7788, inherited.clone());
+        let env = daemon_env(&config, inherited.clone());
         // What the daemon was started with stays; the four that name it are added.
         assert_eq!(env.len(), inherited.len() + 4);
         assert!(inherited.iter().all(|(name, value)| env.get(name) == Some(value)));
         // A hook's shell sees the flag's port…
         let print = "printf '%s %s %s %s' \"$GHOSTD_PORT\" \"$GHOSTD_CONFIG\" \"$GHOST_HOME\" \"$GHOSTD_HOOKS\"";
-        let hook =
-            crate::process::run_command("/bin/bash", &["-c", print], &env, None, std::time::Duration::from_secs(30), &crate::abort::Abort::new())
-                .unwrap();
+        let hook = crate::process::run_command("/bin/bash", &["-c", print], &env, std::time::Duration::from_secs(30)).unwrap();
         assert_eq!(hook.stdout, format!("7788 {config_file} {root} {}", scratch.join("hooks.json").display()));
         // …and a child that loads the config from its environment resolves this daemon's.
         assert_eq!(load_config(&Overrides::default(), &env, &scratch).unwrap(), config);
-        // The port is the one bound, whatever the configuration asked for.
-        assert_eq!(daemon_env(&config, 4242, inherited)["GHOSTD_PORT"], "4242");
         std::fs::remove_dir_all(scratch).unwrap();
     }
 }

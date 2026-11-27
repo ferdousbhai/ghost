@@ -14,11 +14,9 @@
 //! only reads whether one proxies to this daemon over HTTPS, since the app is
 //! an https page and cannot call an http address: that is what links the app
 //! to this machine and names the machine in an alert's link.
-use crate::abort::Abort;
-use crate::config::RemoteConfig;
+use crate::config::{RemoteConfig, normalise_login};
 use crate::env::Env;
 use crate::error::GhostError;
-use crate::http::percent_encode;
 use crate::process::{CommandFailure, CommandResult, run_command};
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -30,28 +28,26 @@ pub type TailscaleRunner = Arc<dyn Fn(&[&str]) -> Result<CommandResult, CommandF
 
 /// The real `tailscale`, bounded at ten seconds a call.
 pub fn tailscale_runner(env: Env) -> TailscaleRunner {
-    Arc::new(move |args| run_command("tailscale", args, &env, None, Duration::from_secs(10), &Abort::new()))
+    Arc::new(move |args| run_command("tailscale", args, &env, Duration::from_secs(10)))
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct TailscalePeer {
+struct TailscalePeer {
     pub hostname: String,
-    /// None for a tagged node, which is owned by its tags.
+    /// As logins are compared; None for a tagged node, which is owned by its tags.
     pub login: Option<String>,
     pub online: bool,
 }
 
 /// `tailscale status --json`, reduced to what Ghost asks of it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct TailscaleNode {
+struct TailscaleNode {
     /// `Running`, `NeedsLogin`, `Stopped`, ... as `tailscale status` reports it.
     pub backend_state: String,
-    /// The login this node is signed in as.
+    /// The login this node is signed in as, as logins are compared.
     pub login: Option<String>,
     /// The node's MagicDNS name, without the trailing dot.
     pub hostname: Option<String>,
-    /// Whether the tailnet has HTTPS certificates enabled.
-    pub certs: bool,
     pub peers: Vec<TailscalePeer>,
 }
 
@@ -61,7 +57,7 @@ fn login_of(users: &Value, user_id: &Value) -> Option<String> {
         Value::Number(id) => id.to_string(),
         _ => return None,
     };
-    users.get(key)?.get("LoginName")?.as_str().map(str::trim).filter(|login| !login.is_empty()).map(str::to_string)
+    normalise_login(users.get(key)?.get("LoginName")?.as_str()?)
 }
 
 fn dns_hostname(name: &Value) -> Option<String> {
@@ -71,11 +67,10 @@ fn dns_hostname(name: &Value) -> Option<String> {
 }
 
 /// Ask Tailscale about this node; an error when it is missing or does not answer.
-pub fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, CommandFailure> {
+fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, CommandFailure> {
     let result = run(&["status", "--json"])?;
     if result.code != 0 {
-        let said = [result.stderr.trim(), result.stdout.trim()].into_iter().find(|text| !text.is_empty()).map(str::to_string);
-        return Err(CommandFailure::Other(said.unwrap_or_else(|| format!("tailscale exited with code {}", result.code))));
+        return Err(CommandFailure::Other(detail(&result)));
     }
     let status: Value = serde_json::from_str(&result.stdout).map_err(|error| CommandFailure::Other(error.to_string()))?;
     let users = &status["User"];
@@ -101,17 +96,8 @@ pub fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, Comma
         backend_state: status["BackendState"].as_str().unwrap_or("").to_string(),
         login: login_of(users, &status["Self"]["UserID"]),
         hostname: dns_hostname(&status["Self"]["DNSName"]),
-        certs: status["CertDomains"]
-            .as_array()
-            .is_some_and(|domains| domains.iter().any(|domain| domain.as_str().is_some_and(|name| !name.is_empty()))),
         peers,
     })
-}
-
-/// The owner, calling through Tailscale Serve: no one else is admitted.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TailscaleIdentity {
-    pub login: String,
 }
 
 type SelfLogin = Box<dyn Fn() -> Option<String> + Send + Sync>;
@@ -130,31 +116,29 @@ impl RemoteAccess {
 
     /// Test seam over `tailscale status`.
     pub fn with_self_login(config: &RemoteConfig, self_login: SelfLogin) -> Self {
-        let configured_owner = config.owner.as_deref().map(|owner| owner.trim().to_lowercase()).filter(|owner| !owner.is_empty());
-        Self { self_login, configured_owner, owner: Mutex::new(None) }
+        Self { self_login, configured_owner: config.owner.clone(), owner: Mutex::new(None) }
     }
 
-    /// The owner's tailnet identity, when a proxied request carries it; None for anyone else.
-    pub fn identify(&self, login_header: Option<&str>, peer: IpAddr) -> Option<TailscaleIdentity> {
-        let login = login_header.map(|login| login.trim().to_lowercase()).filter(|login| !login.is_empty())?;
+    /// Whether a request is the owner's, calling through Tailscale Serve: it
+    /// carries their login and arrived on loopback. No one else is admitted.
+    pub fn identify(&self, login_header: Option<&str>, peer: IpAddr) -> bool {
+        let Some(login) = login_header.and_then(normalise_login) else { return false };
         // The addresses a connection to the daemon's own 127.0.0.1 or ::1 arrives from, and no other in 127.0.0.0/8.
         let loopback = match peer {
             IpAddr::V4(address) => address == Ipv4Addr::LOCALHOST,
             IpAddr::V6(address) => address == Ipv6Addr::LOCALHOST || address.to_ipv4_mapped() == Some(Ipv4Addr::LOCALHOST),
         };
-        if !loopback {
-            return None;
-        }
-        (self.owner_login().as_deref() == Some(login.as_str())).then_some(TailscaleIdentity { login })
+        loopback && self.owner_login() == Some(login)
     }
 
-    pub fn owner_login(&self) -> Option<String> {
+    /// The configured owner, else the login this node is signed in as.
+    fn owner_login(&self) -> Option<String> {
         if let Some(owner) = &self.configured_owner {
             return Some(owner.clone());
         }
         let mut owner = self.owner.lock().unwrap();
         if owner.is_none() {
-            *owner = (self.self_login)().map(|login| login.to_lowercase());
+            *owner = (self.self_login)().as_deref().and_then(normalise_login);
         }
         owner.clone()
     }
@@ -218,6 +202,7 @@ fn first_line(text: &str) -> String {
     text.trim().lines().next().unwrap_or("").trim().to_string()
 }
 
+/// What a failed `tailscale` said: the first line of stderr, else of stdout, else its exit code.
 fn detail(result: &CommandResult) -> String {
     [first_line(&result.stderr), first_line(&result.stdout)]
         .into_iter()
@@ -250,13 +235,12 @@ pub struct RemoteServe {
 
 impl RemoteServe {
     pub fn new(port: u16, config: &RemoteConfig, run: TailscaleRunner) -> Self {
-        Self {
-            target: format!("http://127.0.0.1:{port}"),
-            run,
-            // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
-            owner: config.owner.as_deref().map(|owner| owner.trim().to_lowercase()).filter(|owner| !owner.is_empty()),
-            app: config.apps.first().cloned(),
-        }
+        Self { target: format!("http://127.0.0.1:{port}"), run, owner: config.owner.clone(), app: config.apps.first().cloned() }
+    }
+
+    /// The configured owner, else the login `node` is signed in as: what RemoteAccess admits.
+    fn owner_of(&self, node: &TailscaleNode) -> Option<String> {
+        self.owner.clone().or_else(|| node.login.clone())
     }
 
     /// Tailscale's own command that serves this daemon to the tailnet over HTTPS.
@@ -271,11 +255,11 @@ impl RemoteServe {
         let node = read_tailscale_node(&self.run).map_err(|error| {
             GhostError::new("tailscale_unavailable", format!("Tailscale did not answer: {}", first_line(&error.to_string())), 503)
         })?;
-        let owner = self.owner.clone().or_else(|| node.login.as_deref().map(str::to_lowercase));
+        let owner = self.owner_of(&node);
         let machines: Vec<Value> = node
             .peers
             .iter()
-            .filter(|peer| owner.is_some() && peer.login.as_deref().map(str::to_lowercase) == owner)
+            .filter(|peer| owner.is_some() && peer.login == owner)
             .map(|peer| json!({ "hostname": peer.hostname, "online": peer.online }))
             .collect();
         Ok(Value::Array(machines))
@@ -287,7 +271,7 @@ impl RemoteServe {
         let status = self.status();
         let (origin, url) = status.app?;
         url?;
-        Some(format!("{origin}/#/{}", percent_encode(&status.hostname?)))
+        Some(format!("{origin}/#/{}", status.hostname?))
     }
 
     pub fn status(&self) -> RemoteStatus {
@@ -305,11 +289,7 @@ impl RemoteServe {
             Err(CommandFailure::Missing) => return unavailable(off, tailscale_missing()),
             Err(error) => return unavailable(off, RemoteProblem::new("tailscale_stopped", first_line(&error.to_string()), None)),
         };
-        let known = RemoteStatus {
-            hostname: node.hostname.clone(),
-            owner: self.owner.clone().or_else(|| node.login.as_deref().map(str::to_lowercase)),
-            ..off
-        };
+        let known = RemoteStatus { hostname: node.hostname.clone(), owner: self.owner_of(&node), ..off };
         if node.backend_state == "NeedsLogin" || node.hostname.is_none() {
             return unavailable(known, RemoteProblem::new("not_logged_in", "This machine is not logged in to Tailscale.", Some("tailscale up")));
         }

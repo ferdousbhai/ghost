@@ -1,159 +1,30 @@
 //! The HTTP API over a real listening loopback server on an ephemeral port,
 //! with a scripted answerer standing where the local model does. Everything a
 //! test touches lives in one scratch directory: the ghost home, the owner
-//! home, and the XDG directories `gio trash`, the token file and the turn
-//! spill files resolve from.
+//! home, and the XDG directories `gio trash` and the token file resolve from.
 use super::*;
+use crate::abort::Abort;
+use crate::config::RemoteConfig;
 use crate::conversation_host::ConversationHostOptions;
+use crate::conversation_host::fake_answerer::{Fake, FakeTurn, Gate, WAIT, replies, said, says};
 use crate::conversation_log::LOG_FILENAME;
-use crate::ghosts::ghost_paths;
 use crate::http::{ClientRequest, ClientResponse, EventReader, send};
-use crate::local_turn::{Answerer, PassEvent, PassInput};
+use crate::local_turn::PassEvent;
 use crate::process::{CommandFailure, CommandResult};
 use crate::remote::TailscaleRunner;
-use crate::sidecars::{question_path, read_path};
+use crate::sidecars::read_path;
 use std::io::{BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-/// The bound on every wait: far longer than anything here takes, so reaching it is a failure, never a pace.
-const WAIT: Duration = Duration::from_secs(30);
 const APP: &str = "https://summonghost.com";
 const PNG: &[u8] = &[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52];
 const JSON: (&str, &str) = ("content-type", "application/json");
 
-// ── The scripted answerer ───────────────────────────────────────────────
-
-/// Holds a turn until released, or until the turn is stopped.
-#[derive(Clone, Default)]
-struct Gate(Arc<(Mutex<bool>, Condvar)>);
-
-impl Gate {
-    fn release(&self) {
-        *self.0.0.lock().unwrap() = true;
-        self.0.1.notify_all();
-    }
-
-    fn hold(&self, abort: &Abort) -> std::result::Result<(), String> {
-        let waker = self.clone();
-        let _woken = abort.on_abort(move || {
-            let _held = waker.0.0.lock().unwrap();
-            waker.0.1.notify_all();
-        });
-        let mut open = self.0.0.lock().unwrap();
-        while !*open {
-            if abort.is_aborted() {
-                return Err("stopped".to_string());
-            }
-            let (next, timeout) = self.0.1.wait_timeout(open, WAIT).unwrap();
-            if timeout.timed_out() {
-                return Err("the gate was never released".to_string());
-            }
-            open = next;
-        }
-        Ok(())
-    }
-}
-
-/// One turn of the fake, in the order turns are run.
-#[derive(Clone, Default)]
-struct FakeTurn {
-    events: Vec<PassEvent>,
-    /// Fail the pass after its events, with this message.
-    fail: Option<String>,
-    gate: Option<Gate>,
-}
-
-#[derive(Clone)]
-struct FakeCall {
-    prompt: String,
-    /// The prompt without the conversation so far that every pass is handed.
-    message: String,
-    cwd: PathBuf,
-}
-
-/// Turn n runs entry n of the script, or its last.
-struct Fake {
-    script: Vec<FakeTurn>,
-    calls: Mutex<Vec<FakeCall>>,
-    called: Condvar,
-    /// How many held passes ended because their caller stopped them.
-    stops: Mutex<usize>,
-    stopped: Condvar,
-}
-
-impl Fake {
-    fn enter(&self, prompt: &str, cwd: &Path) -> FakeTurn {
-        let message = prompt;
-        let mut calls = self.calls.lock().unwrap();
-        calls.push(FakeCall { prompt: prompt.to_string(), message: message.to_string(), cwd: cwd.to_path_buf() });
-        let turn = self.script.get((calls.len() - 1).min(self.script.len().saturating_sub(1))).cloned().unwrap_or_default();
-        self.called.notify_all();
-        turn
-    }
-
-    fn calls(&self) -> Vec<FakeCall> {
-        self.calls.lock().unwrap().clone()
-    }
-
-    /// Wait until `count` passes have reached the answerer.
-    fn wait_for_calls(&self, count: usize) {
-        let calls = self.calls.lock().unwrap();
-        let (_calls, timeout) = self.called.wait_timeout_while(calls, WAIT, |calls| calls.len() < count).unwrap();
-        assert!(!timeout.timed_out(), "timed out waiting for {count} pass(es)");
-    }
-
-    fn hold(&self, turn: &FakeTurn, abort: &Abort) -> std::result::Result<(), String> {
-        let Some(gate) = &turn.gate else { return Ok(()) };
-        let held = gate.hold(abort);
-        if held.is_err() && abort.is_aborted() {
-            *self.stops.lock().unwrap() += 1;
-            self.stopped.notify_all();
-        }
-        held
-    }
-
-    /// Wait until a held pass has been stopped.
-    fn wait_for_a_stop(&self) {
-        let stops = self.stops.lock().unwrap();
-        let (_stops, timeout) = self.stopped.wait_timeout_while(stops, WAIT, |stops| *stops == 0).unwrap();
-        assert!(!timeout.timed_out(), "timed out waiting for a pass to be stopped");
-    }
-}
-
-impl Answerer for Fake {
-    fn turn(&self, input: &PassInput, on_event: &mut dyn FnMut(PassEvent)) -> std::result::Result<(), String> {
-        let turn = self.enter(&input.prompt, &input.cwd);
-        self.hold(&turn, &input.abort)?;
-        for event in turn.events {
-            on_event(event);
-        }
-        turn.fail.map_or(Ok(()), Err)
-    }
-
-    fn complete(&self, prompt: &str, abort: &Abort) -> std::result::Result<String, String> {
-        let turn = self.enter(prompt, Path::new(""));
-        self.hold(&turn, abort)?;
-        if let Some(failure) = turn.fail {
-            return Err(failure);
-        }
-        Ok(turn.events.iter().filter_map(|event| if let PassEvent::Text { delta, .. } = event { Some(delta.as_str()) } else { None }).collect())
-    }
-}
-
-fn text(delta: &str) -> PassEvent {
-    PassEvent::Text { block: "a".to_string(), delta: delta.to_string() }
-}
-
-/// Text events for the common case: each string is one reply.
-fn replies(texts: &[&str]) -> Vec<FakeTurn> {
-    texts.iter().map(|reply| FakeTurn { events: vec![text(reply)], ..FakeTurn::default() }).collect()
-}
-
-/// A first turn that holds until released, so "the conversation is answering"
-/// is a state the test owns rather than a race it has to win.
+/// A first turn that says "held" once released, then one for each of `after`.
 fn held(after: &[&str]) -> (Vec<FakeTurn>, Gate) {
     let gate = Gate::default();
-    let mut turns = vec![FakeTurn { events: vec![text("held")], fail: None, gate: Some(gate.clone()) }];
+    let mut turns = vec![FakeTurn { gate: Some(gate.clone()), ..says("held") }];
     turns.extend(replies(after));
     (turns, gate)
 }
@@ -163,31 +34,17 @@ fn held(after: &[&str]) -> (Vec<FakeTurn>, Gate) {
 const FAKE_TARGET: &str = "http://127.0.0.1:7717";
 const FAKE_HOSTNAME: &str = "ghostbox.example.ts.net";
 
-#[derive(Default)]
-struct Tailscale {
-    calls: Mutex<Vec<String>>,
-    https: Mutex<bool>,
-}
-
-impl Tailscale {
-    /// The Serve changes asked for, not the status reads.
-    fn changes(&self) -> Vec<String> {
-        self.calls.lock().unwrap().iter().filter(|call| !call.contains("status")).cloned().collect()
-    }
-}
-
-/// A `tailscale` that answers `status`, `serve status`, `serve --bg`, and `serve ... off` from its fields.
-fn fake_tailscale() -> (Arc<Tailscale>, TailscaleRunner) {
-    let fake = Arc::new(Tailscale::default());
-    let state = fake.clone();
+/// A `tailscale` that answers the two status reads, with Serve off, and keeps every command it was asked to run.
+fn fake_tailscale() -> (Arc<Mutex<Vec<String>>>, TailscaleRunner) {
+    let calls: Arc<Mutex<Vec<String>>> = Arc::default();
+    let asked = calls.clone();
     let runner: TailscaleRunner = Arc::new(move |args| {
         let line = args.join(" ");
-        state.calls.lock().unwrap().push(line.clone());
-        let ok = |stdout: String| Ok(CommandResult { stdout, stderr: String::new(), code: 0 });
-        let mut https = state.https.lock().unwrap();
-        if line == "status --json" {
+        asked.lock().unwrap().push(line.clone());
+        let ok = |stdout: Value| Ok(CommandResult { stdout: stdout.to_string(), stderr: String::new(), code: 0 });
+        match line.as_str() {
             // The owner's laptop and phone, a partner's shared machine, and a tagged server.
-            return ok(json!({
+            "status --json" => ok(json!({
                 "BackendState": "Running",
                 "Self": { "DNSName": format!("{FAKE_HOSTNAME}."), "UserID": 42 },
                 "Peer": {
@@ -197,29 +54,12 @@ fn fake_tailscale() -> (Arc<Tailscale>, TailscaleRunner) {
                     "d": { "DNSName": "server.example.ts.net.", "UserID": 42, "Online": true, "Tags": ["tag:server"] },
                 },
                 "User": { "42": { "LoginName": "owner@example.com" }, "7": { "LoginName": "partner@example.com" } },
-                "CertDomains": [FAKE_HOSTNAME],
-            })
-            .to_string());
+            })),
+            "serve status --json" => ok(json!({})),
+            _ => Err(CommandFailure::Other(format!("Unexpected command: {line}"))),
         }
-        if line == "serve status --json" {
-            let served = if *https {
-                json!({ "Web": { format!("{FAKE_HOSTNAME}:443"): { "Handlers": { "/": { "Proxy": FAKE_TARGET } } } } })
-            } else {
-                json!({})
-            };
-            return ok(served.to_string());
-        }
-        if line == format!("serve --bg --https=443 {FAKE_TARGET}") {
-            *https = true;
-            return ok(String::new());
-        }
-        if line == "serve --https=443 off" {
-            *https = false;
-            return ok(String::new());
-        }
-        Err(CommandFailure::Other(format!("Unexpected command: {line}")))
     });
-    (fake, runner)
+    (calls, runner)
 }
 
 fn serve_over(runner: TailscaleRunner) -> Arc<RemoteServe> {
@@ -322,7 +162,7 @@ struct Daemon {
     env: Env,
     fake: Arc<Fake>,
     host: ConversationHost,
-    listening: ListeningServer,
+    listening: Server,
     /// One message per change to the conversation the host announces.
     updates: mpsc::Receiver<()>,
     gates: Vec<Gate>,
@@ -358,14 +198,13 @@ impl Daemon {
             ("XDG_STATE_HOME".to_string(), scratch(".state")),
             ("XDG_CONFIG_HOME".to_string(), scratch(".config")),
         ]);
-        let ghost = Ghost { dir: ghost_dir.clone() };
+        let ghost = Home { dir: ghost_dir.clone() };
         let pushed: Pushed = Arc::default();
         let app_url: Arc<Mutex<Option<String>>> = Arc::default();
         let hooks_path = root.join(".hooks.json");
         let hooks = Arc::new(HookRunner::from_config(&hooks_path, Logger::silent(), env.clone()).unwrap());
         let gates = turns.iter().filter_map(|turn| turn.gate.clone()).collect();
-        let fake =
-            Arc::new(Fake { script: turns, calls: Mutex::new(Vec::new()), called: Condvar::new(), stops: Mutex::new(0), stopped: Condvar::new() });
+        let fake = Fake::new(turns);
         let host = ConversationHost::new(ConversationHostOptions {
             ghost: ghost.clone(),
             owner_home: owner_home.clone(),
@@ -380,7 +219,7 @@ impl Daemon {
             coding_agent: Some(Box::new(|| None)),
             env: env.clone(),
             // No test reaches a push service: what would be sent is recorded.
-            push: Some(crate::push::Push::with_sender(
+            push: crate::push::Push::with_sender(
                 root.join(".state").join("ghost").join("push.json"),
                 Logger::silent(),
                 Box::new({
@@ -390,7 +229,7 @@ impl Daemon {
                         if subscription.endpoint.ends_with("/gone") { crate::push::Sent::Gone } else { crate::push::Sent::Delivered }
                     }
                 }),
-            )),
+            ),
         });
         let (sender, updates) = mpsc::channel();
         let sender = Mutex::new(sender);
@@ -400,13 +239,30 @@ impl Daemon {
             },
             || {},
         );
-        let mut options = ServerOptions::for_test(ghost, host.clone(), hooks, env.clone(), &owner_home);
-        options.running_source.version = "0.0.0-test".to_string();
-        // No test reaches the real `tailscale`.
-        options.remote_serve = serve_over(fake_tailscale().1);
+        // No authentication, no remote callers, any free port, and no real `tailscale`, unless the test says otherwise.
+        let mut options = ServerOptions {
+            ghost,
+            host: host.clone(),
+            running_source: RunningSource {
+                version: "0.0.0-test".to_string(),
+                commit: None,
+                root: None,
+                entry: std::env::current_exe().unwrap_or_default(),
+                started_at: crate::clock::now_ms(),
+            },
+            hooks,
+            logger: Logger::silent(),
+            api_token: ApiToken::Off,
+            remote: None,
+            remote_apps: Vec::new(),
+            remote_serve: serve_over(fake_tailscale().1),
+            port: 0,
+            env: env.clone(),
+            home: owner_home,
+        };
         configure(&mut options);
         let listening = start_daemon_server(options).unwrap();
-        let conversation_dir = ghost_paths(&ghost_dir).conversation_dir;
+        let conversation_dir = ghost_dir.join("conversation");
         Self { root, ghost_dir, conversation_dir, hooks_path, env, fake, host, listening, updates, gates, pushed, app_url }
     }
 
@@ -421,7 +277,7 @@ impl Daemon {
 
     /// Send a request and read the response head; the body is the caller's to read.
     fn open(&self, method: &str, target: &str, headers: &[(&str, &str)], body: Option<&[u8]>) -> ClientResponse {
-        let address = SocketAddr::from(([127, 0, 0, 1], self.listening.port));
+        let address = SocketAddr::from(([127, 0, 0, 1], self.listening.address.port()));
         send(ClientRequest { address, method, target, headers, body, timeout: Some(WAIT), abort: None }).expect("the daemon answers")
     }
 
@@ -464,7 +320,7 @@ impl Daemon {
         finish(self.open_turn(body))
     }
 
-    /// `GET /api/conversation`: the conversation as a client lists it.
+    /// `GET /api/conversation`.
     fn conversation(&self) -> Value {
         let response = self.get("/api/conversation");
         assert_eq!(response.status, 200);
@@ -483,18 +339,6 @@ impl Daemon {
             self.updates.recv_timeout(WAIT).expect("the turn settles");
         }
     }
-
-    /// Every response of one turn: the first, then each continuation its `resume` frame names.
-    fn follow(&self, first: &Reply) -> Vec<Vec<Value>> {
-        let mut responses = vec![first.events()];
-        while let Some(last) = responses.last().and_then(|events| events.last()).filter(|last| last["type"] == "resume").cloned() {
-            let target = format!("/api/conversation/stream?turn={}&from={}", last["turn"].as_str().unwrap(), last["from"]);
-            let response = self.get(&target);
-            assert_eq!(response.status, 200);
-            responses.push(response.events());
-        }
-        responses
-    }
 }
 
 impl Drop for Daemon {
@@ -506,7 +350,7 @@ impl Drop for Daemon {
         // still running and wait for it to give the conversation back, which
         // the host announces, before the scratch directory goes.
         while self.host.stop_turn().is_ok() && self.updates.recv_timeout(WAIT).is_ok() {}
-        self.host.dispose_all();
+        self.host.shut_down();
         self.listening.close();
         let _ = std::fs::remove_dir_all(&self.root);
     }
@@ -563,8 +407,6 @@ fn hooks_config_reads_and_replaces_the_whole_document_through_the_runner() {
     let wrapped = daemon.put(route, &json!({ "path": path, "document": next, "hooks": {} }));
     assert_eq!(wrapped.status, 400);
     assert_eq!(wrapped.json()["error"]["message"], json!(format!("{path} has no top-level \"path\", \"document\"; send the document itself.")));
-    let legacy = daemon.put(route, &json!({ "hooks": {}, "builtin": { "next_work_turns": 1 } }));
-    assert_eq!(legacy.status, 400);
     assert_eq!(daemon.get(route).json(), json!({ "path": path, "document": next }));
     assert_eq!(read_json(&daemon.hooks_path), next);
 
@@ -593,7 +435,6 @@ fn character_round_trips_the_persona_file_and_refuses_an_oversize_write() {
 
     assert_eq!(daemon.put(route, &json!({ "body": 42 })).status, 400);
     assert_eq!(daemon.post(route, &json!({})).status, 405);
-    assert_eq!(daemon.get("/api/ghosts/missing/character").status, 404);
 }
 
 #[test]
@@ -623,21 +464,11 @@ fn refuses_a_second_turn_while_one_is_answering_before_the_stream_and_admits_it_
 
     gate.release();
     assert_eq!(finish(first).events().last(), Some(&json!({ "type": "done" })));
-    daemon.wait_settled();
+    // The response ended, so the conversation is free: a client that read to the end is never told it is busy.
     let retried = daemon.post_turn(&turn_body("after release"));
     assert_eq!(retried.status, 200);
     assert_eq!(terminals(&retried.events()), [&json!({ "type": "done" })]);
-    assert!(daemon.fake.calls().iter().all(|call| call.message != "must fail before SSE"));
-}
-
-#[test]
-fn does_not_expose_live_voice_or_a_collaboration_host() {
-    let daemon = Daemon::start();
-    for route in ["live", "collab"] {
-        let target = format!("/api/conversation/{route}");
-        assert_eq!(daemon.get(&target).status, 404);
-        assert_eq!(daemon.post(&target, &json!({ "action": "start" })).status, 404);
-    }
+    assert_eq!(daemon.fake.prompts(), ["hold this turn", "after release"]);
 }
 
 #[test]
@@ -645,8 +476,8 @@ fn streams_one_well_formed_turn() {
     let daemon = Daemon::answering(vec![FakeTurn {
         events: vec![
             PassEvent::ToolStart { id: "t1".to_string(), name: "Read".to_string(), args: json!({ "path": "character.md" }) },
-            PassEvent::ToolEnd { id: "t1".to_string(), is_error: false, output: Some("# casper".to_string()) },
-            text("I set type for a living."),
+            PassEvent::ToolEnd { id: "t1".to_string(), is_error: false, output: "# casper".to_string() },
+            said("a", "I set type for a living."),
         ],
         ..FakeTurn::default()
     }]);
@@ -668,150 +499,48 @@ fn streams_one_well_formed_turn() {
     assert_eq!(deltas(&events).concat(), "I set type for a living.");
 }
 
-/// A long turn of 60 deltas, read across cut responses.
-fn resumes_a_long_turn(size: usize) {
-    let sent: Vec<String> = (0..60).map(|index| format!("{index:02}{}", "é".repeat(size))).collect();
-    let turn = FakeTurn { events: sent.iter().map(|delta| text(delta)).collect(), ..FakeTurn::default() };
-    let daemon = Daemon::with(vec![turn], |options| options.stream_cut_bytes = Some(2_000.max(size * 8)));
-    let responses = daemon.follow(&daemon.post_turn(&first_turn()));
-
-    assert!(responses.len() > 2, "{} responses", responses.len());
-    let events: Vec<Value> = responses.iter().flatten().filter(|event| event["type"] != "resume").cloned().collect();
-    assert_eq!(terminals(&events), [&json!({ "type": "done" })]);
-    assert_eq!(events.last(), Some(&json!({ "type": "done" })));
-    // Each event once, in order, whole.
-    assert_eq!(deltas(&events), sent.iter().map(String::as_str).collect::<Vec<_>>());
-    assert_eq!(events.iter().filter(|event| event["type"] == "start").count(), 1);
-    // Every response but the last ends in its resume frame, the only one it has.
-    for batch in &responses[..responses.len() - 1] {
-        assert_eq!(batch.iter().filter(|event| event["type"] == "resume").collect::<Vec<_>>(), [batch.last().unwrap()]);
-    }
-    assert!(responses.last().unwrap().iter().all(|event| event["type"] != "resume"));
+/// A megabyte the stream carries and the log does not: a notice, as "Loading the local model…" is.
+fn megabyte_notice() -> PassEvent {
+    PassEvent::Thinking { block: "load".to_string(), delta: "x".repeat(1_048_576) }
 }
 
 #[test]
-fn resumes_a_long_turn_of_small_deltas_from_memory() {
-    resumes_a_long_turn(100);
-}
-
-#[test]
-fn resumes_a_long_turn_of_large_deltas_from_spooled_replay() {
-    resumes_a_long_turn(20_000);
-}
-
-#[test]
-fn terminates_cleanly_when_replay_storage_fails() {
-    // One event larger than a turn may hold in memory, and nowhere to spill it.
-    let daemon = Daemon::answering(replies(&["x".repeat(DEFAULT_MEMORY_LIMIT + 1).as_str()]));
-    std::fs::write(daemon.root.join(".cache"), "a file where the cache directory would be").unwrap();
-    let events = daemon.post_turn(&first_turn()).events();
-    let failure = json!({ "type": "error", "reason": "error", "errorMessage": "Could not retain the turn stream; read the transcript." });
-    assert_eq!(terminals(&events), [&failure]);
-    assert_eq!(events.last(), Some(&failure));
-    // The turn nobody can follow any more is stopped.
-    daemon.wait_settled();
-    assert_eq!(daemon.host.queued_messages(), json!({ "streaming": false, "followUp": [] }));
-    let transcript = daemon.get("/api/conversation/transcript").text();
-    assert!(transcript.contains("Turn aborted."), "{}", &transcript[transcript.len().saturating_sub(300)..]);
-}
-
-#[test]
-fn the_turn_completes_on_its_own_behind_a_client_that_is_not_reading() {
-    // More than the loopback socket buffers hold, so the response is blocked on the client.
-    let megabyte = "x".repeat(1_048_576);
-    let turn = FakeTurn { events: (0..16).map(|_| text(&megabyte)).collect(), ..FakeTurn::default() };
-    let daemon = Daemon::with(vec![turn], |options| options.stream_cut_bytes = Some(usize::MAX));
-    let response = daemon.open_turn(&first_turn());
+fn a_turn_outlives_the_client_that_started_it() {
+    let (turns, gate) = held(&[]);
+    let daemon = Daemon::answering(turns);
+    let response = daemon.open_turn(&turn_body("carry on without me"));
     daemon.fake.wait_for_calls(1);
+    // The client goes away mid-turn: its socket closes with the turn still answering.
+    drop(response);
+    assert_eq!(daemon.conversation()["running"], true);
+    gate.release();
     daemon.wait_settled();
-    assert!(!daemon.streaming());
-
-    let events = finish(response).events();
-    assert_eq!(events.last(), Some(&json!({ "type": "done" })));
-    assert_eq!(terminals(&events).len(), 1);
-    assert_eq!(deltas(&events).iter().map(|delta| delta.len()).sum::<usize>(), 16 * 1_048_576);
-}
-
-#[test]
-fn refuses_to_resume_a_turn_it_does_not_know_or_past_where_the_turn_has_reached() {
-    let daemon = Daemon::with(replies(&["short"]), |options| options.stream_cut_bytes = Some(1));
-    let first = daemon.post_turn(&first_turn());
-    let events = first.events();
-    assert_eq!(types(&events), ["start", "resume"]);
-    let resume = events.last().unwrap();
-    assert_eq!(resume["from"], 1);
-    let turn = resume["turn"].as_str().unwrap();
-    let stream = |query: &str| daemon.get(&format!("/api/conversation/stream?{query}"));
-
-    let unknown = stream("turn=nope&from=0");
-    assert_eq!(unknown.status, 404);
-    assert_eq!(unknown.code(), "turn_not_found");
-    for from in ["from=999", "from=-1", "from=1.5", "from=soon", "other=1"] {
-        let refused = stream(&format!("turn={turn}&{from}"));
-        assert_eq!(refused.status, 400, "{from}");
-        assert_eq!(refused.code(), "invalid_request", "{from}");
-    }
-
-    // Each continuation is cut the same way, one event a response, to the one terminal.
-    let responses = daemon.follow(&first);
-    let all: Vec<Value> = responses.iter().flatten().filter(|event| event["type"] != "resume").cloned().collect();
-    assert_eq!(types(&all), ["start", "pass", "text_start", "text_delta", "text_end", "done"]);
-    assert!(responses[..responses.len() - 1].iter().all(|batch| batch.len() == 2));
-    // An ended turn stays resumable for a while, from any event it reached.
-    let replayed = stream(&format!("turn={turn}&from=5"));
-    assert_eq!(replayed.events(), [json!({ "type": "done" })]);
-    assert_eq!(stream(&format!("turn={turn}&from=6")).events(), Vec::<Value>::new());
-    assert_eq!(stream(&format!("turn={turn}&from=7")).status, 400);
-}
-
-#[test]
-fn streams_reasoning_and_keeps_it_in_the_transcript() {
-    let daemon = Daemon::answering(vec![FakeTurn {
-        events: vec![PassEvent::Thinking { block: "r".to_string(), delta: "its reasoning".to_string() }, text("Answer.")],
-        ..FakeTurn::default()
-    }]);
-    let events = daemon.post_turn(&first_turn()).events();
-    assert!(events.contains(&json!({ "type": "thinking", "delta": "its reasoning" })), "{events:?}");
+    // The turn ran to its end, and is in the log for whoever reads next.
     let transcript = daemon.get("/api/conversation/transcript").json();
-    assert_eq!(
-        transcript["messages"].as_array().unwrap().last().unwrap()["content"],
-        json!([{ "type": "thinking", "text": "its reasoning" }, { "type": "text", "text": "Answer." }])
-    );
-    assert!(std::fs::read_to_string(daemon.conversation_dir.join(LOG_FILENAME)).unwrap().contains("its reasoning"));
+    assert_eq!(transcript["total"], 2);
+    assert_eq!(transcript["messages"][1]["content"], json!([{ "type": "text", "text": "held" }]));
+    assert_eq!(transcript["messages"][1].get("errorMessage"), None);
+    assert_eq!(daemon.get("/api/conversation/queue").json(), json!({ "streaming": false, "followUp": [] }));
 }
 
 #[test]
-fn ignores_a_caller_supplied_turn_id_header() {
-    let daemon = Daemon::start();
-    let body = first_turn().to_string();
-    let response = daemon.call("POST", "/api/messages", &[JSON, ("x-ghost-turn-id", "turn-abc.1")], Some(body.as_bytes()));
-    assert_eq!(response.status, 200);
-    assert_eq!(response.header("x-ghost-turn-id"), None);
-}
-
-#[test]
-fn runs_every_turn_in_the_one_conversation_directory_whatever_else_the_body_names() {
-    let daemon = Daemon::answering(replies(&["one", "two"]));
-    daemon.post_turn(&first_turn());
+fn a_reader_that_falls_too_far_behind_is_dropped_and_the_turn_carries_on() {
+    // Far more than the loopback socket buffers and the response's backlog hold between them, to a client that reads none of it.
+    let megabytes = 64;
+    assert!(megabytes * 1_048_576 > 4 * MAX_TURN_BACKLOG_BYTES);
+    let mut events: Vec<PassEvent> = (0..megabytes).map(|_| megabyte_notice()).collect();
+    events.push(said("a", "All of it."));
+    let daemon = Daemon::answering(vec![FakeTurn { events, ..FakeTurn::default() }]);
+    let response = daemon.open_turn(&first_turn());
+    // The turn never waited on that client.
     daemon.wait_settled();
-    // `prompt` is the whole body: a conversation named beside it names nothing.
-    let named = daemon.post_turn(&json!({ "prompt": "And then?", "sessionId": "conv-2" }));
-    assert_eq!(named.status, 200);
-    let ran_in: Vec<PathBuf> = daemon.fake.calls().into_iter().map(|call| call.cwd).collect();
-    assert_eq!(ran_in, [daemon.conversation_dir.clone(), daemon.conversation_dir.clone()]);
-    assert_eq!(daemon.conversation_dir, daemon.ghost_dir.join("conversation"));
-    assert_eq!(daemon.get("/api/conversation/transcript").json()["total"], 4);
-    // The home holds that one directory and no other conversation.
-    assert!(daemon.conversation_dir.join(LOG_FILENAME).exists());
-    assert!(!daemon.ghost_dir.join("sessions").exists());
-}
-
-#[test]
-fn fails_before_the_stream_for_an_unknown_ghost() {
-    let daemon = Daemon::start();
-    let response = daemon.post("/api/ghosts/nobody/messages", &first_turn());
-    assert_eq!(response.status, 404);
-    assert_eq!(response.json(), json!({ "error": { "message": "Not found.", "code": "not_found" } }));
+    let transcript = daemon.get("/api/conversation/transcript").json();
+    assert_eq!(transcript["messages"][1]["content"], json!([{ "type": "text", "text": "All of it." }]));
+    // What the client then reads is whole events from the start, and stops short: no terminal, so it reads the transcript.
+    let events = finish(response).events();
+    assert_eq!(types(&events[..2]), ["start", "pass"]);
+    assert!(events[2..].iter().all(|event| event["type"] == "thinking"), "{:?}", types(&events));
+    assert!(events.len() < 2 + megabytes, "{} events", events.len());
 }
 
 #[test]
@@ -827,19 +556,6 @@ fn rejects_a_malformed_turn_body_with_a_client_error() {
     let empty = daemon.call("POST", "/api/messages", &[JSON], None);
     assert_eq!(empty.json(), json!({ "error": { "message": "Request body is required.", "code": "invalid_request" } }));
     assert!(daemon.fake.calls().is_empty());
-}
-
-#[test]
-fn still_terminates_the_stream_when_the_pass_fails() {
-    let daemon = Daemon::answering(vec![FakeTurn { fail: Some("boom: the model crashed".to_string()), ..FakeTurn::default() }]);
-    let response = daemon.post_turn(&first_turn());
-    assert_eq!(response.status, 200);
-    let events = response.events();
-    assert_eq!(events[0], json!({ "type": "start" }));
-    let last = events.last().unwrap();
-    assert_eq!(last["type"], "error");
-    assert!(last["errorMessage"].as_str().unwrap().contains("boom"), "{last}");
-    assert_eq!(terminals(&events).len(), 1);
 }
 
 // ── The turn stream's lifecycle ─────────────────────────────────────────
@@ -885,22 +601,11 @@ fn a_stopped_turn_ends_its_stream_aborted() {
     assert_eq!(events.last().unwrap()["reason"], "aborted");
 }
 
-#[test]
-fn closing_the_server_ends_an_open_turn_stream() {
-    let (turns, _gate) = held(&[]);
-    let daemon = Daemon::answering(turns);
-    let response = daemon.open_turn(&turn_body("hold"));
-    daemon.fake.wait_for_calls(1);
-    daemon.listening.close();
-    // The stream ends without a terminal: the turn is the host's to abort.
-    assert_eq!(types(&finish(response).events()), ["start", "pass"]);
-}
-
 // ── GET /api/events ─────────────────────────────────────────────────────
 
 #[test]
-fn conversation_events_announce_a_change_and_the_stream_is_cut_for_a_reconnect() {
-    let daemon = Daemon::with(replies(&["hello"]), |options| options.stream_cut_bytes = Some(50));
+fn conversation_events_announce_each_change() {
+    let daemon = Daemon::answering(replies(&["hello"]));
     let response = daemon.open("GET", "/api/events", &[], None);
     assert_eq!(response.status, 200);
     assert_eq!(response.header("content-type"), Some("text/event-stream; charset=utf-8"));
@@ -916,10 +621,10 @@ fn conversation_events_announce_a_change_and_the_stream_is_cut_for_a_reconnect()
     let event: Value = serde_json::from_str(&events.next_event().unwrap().expect("an invalidation")).unwrap();
     assert_eq!(event["type"], "conversation-updated");
     assert!(crate::clock::parse_iso(event["updatedAt"].as_str().unwrap()).is_some(), "{event}");
-    // There is one conversation, so a frame names none.
     assert_eq!(event.as_object().map(Map::len), Some(2), "{event}");
-    // Past the cut the response ends, and the client reconnects.
-    assert_eq!(events.next_event().unwrap(), None);
+    // The turn's end is another.
+    let event: Value = serde_json::from_str(&events.next_event().unwrap().expect("a second invalidation")).unwrap();
+    assert_eq!(event["type"], "conversation-updated");
 }
 
 #[test]
@@ -929,7 +634,7 @@ fn conversation_events_end_when_the_host_shuts_down() {
     let mut body = BufReader::new(response.body);
     let mut opening = String::new();
     body.read_line(&mut opening).unwrap();
-    daemon.host.dispose_all();
+    daemon.host.shut_down();
     let mut rest = String::new();
     body.read_to_string(&mut rest).unwrap();
     assert_eq!(rest, "\n");
@@ -964,29 +669,32 @@ fn queues_a_follow_up_during_a_live_turn_and_runs_it_as_the_next_pass_of_the_sam
     assert!(events[owner..].iter().any(|event| event["type"] == "text_delta"));
     assert!(events.contains(&json!({ "type": "queue", "followUp": ["Keep the result understated."] })));
     assert_eq!(terminals(&events).len(), 1);
-    let messages: Vec<String> = daemon.fake.calls().into_iter().map(|call| call.message).collect();
-    assert_eq!(messages, ["Set the type.", "Keep the result understated."]);
+    assert_eq!(daemon.fake.prompts(), ["Set the type.", "Keep the result understated."]);
 
     assert_eq!(daemon.get(route).json(), json!({ "streaming": false, "followUp": [] }));
     let too_late = daemon.post(route, &json!({ "text": "Too late" }));
     assert_eq!(too_late.status, 409);
     assert_eq!(too_late.code(), "conversation_not_streaming");
     assert_eq!(daemon.delete(route).status, 405);
-    // The removed automatic-work endpoint is no longer exposed.
-    assert_eq!(daemon.delete("/api/conversation/continuation").status, 404);
 }
 
 // ── GET /api/conversation ───────────────────────────────────────────────
 
 #[test]
-fn the_conversation_has_nothing_before_anything_is_said_and_describes_itself_after_a_turn() {
+fn the_conversation_has_nothing_before_anything_is_said_shows_a_running_turn_to_any_client_and_describes_itself_after() {
     let (turns, gate) = held(&[]);
     let daemon = Daemon::answering(turns);
     assert_eq!(daemon.conversation(), nothing_said());
 
     let turn = daemon.open_turn(&first_turn());
     daemon.fake.wait_for_calls(1);
-    assert_eq!(daemon.conversation()["running"], true);
+    // A client that arrives mid-turn sees it running, with what is logged so far: the prompt.
+    let mut running = daemon.conversation();
+    assert!(running.as_object_mut().unwrap().remove("updatedAt").is_some_and(|at| at.is_string()));
+    assert_eq!(running, json!({ "preview": "Who are you?", "messageCount": 1, "unread": true, "running": true, "question": null }));
+    let transcript = daemon.get("/api/conversation/transcript").json();
+    assert_eq!((&transcript["total"], &transcript["messages"][0]["content"]), (&json!(1), &json!([{ "type": "text", "text": "Who are you?" }])));
+    assert_eq!(daemon.get("/api/conversation/queue").json(), json!({ "streaming": true, "followUp": [] }));
     gate.release();
     assert_eq!(finish(turn).events().last(), Some(&json!({ "type": "done" })));
     daemon.wait_settled();
@@ -994,43 +702,7 @@ fn the_conversation_has_nothing_before_anything_is_said_and_describes_itself_aft
     let mut row = daemon.conversation();
     let updated_at = row.as_object_mut().unwrap().remove("updatedAt").expect("an updatedAt");
     assert!(crate::clock::parse_iso(updated_at.as_str().unwrap()).is_some(), "{updated_at}");
-    // These fields and no others: no id, title, or pin.
     assert_eq!(row, json!({ "preview": "Who are you?", "messageCount": 2, "unread": true, "running": false, "question": null }));
-}
-
-// ── The ghost's open question ───────────────────────────────────────────
-
-// A pass sets it (the model's `ask` tool); the API only shows it.
-#[test]
-fn shows_the_question_until_the_owners_next_message_answers_it_or_the_conversation_goes() {
-    let daemon = Daemon::answering(replies(&["first", "second"]));
-    let file = question_path(&daemon.conversation_dir);
-    daemon.post_turn(&first_turn());
-    daemon.wait_settled();
-    assert_eq!(daemon.conversation()["question"], Value::Null);
-    // Turns that ask nothing write nothing.
-    assert!(!file.exists());
-
-    let asked = daemon.host.set_question("  Ship it tonight? ", &["yes".to_string(), " yes".to_string(), "wait".to_string()]).unwrap();
-    assert_eq!((&asked["text"], &asked["options"]), (&json!("Ship it tonight?"), &json!(["yes", "wait"])));
-    assert!(crate::clock::parse_iso(asked["askedAt"].as_str().unwrap()).is_some(), "{asked}");
-    assert_eq!(daemon.conversation()["question"], asked);
-    assert_eq!(read_json(&file), asked);
-    // No route sets or withdraws one.
-    assert_eq!(daemon.put("/api/conversation/question", &json!({ "text": "hi" })).status, 404);
-
-    assert_eq!(daemon.post_turn(&turn_body("yes")).status, 200);
-    daemon.wait_settled();
-    assert_eq!(daemon.conversation()["question"], Value::Null);
-    assert!(!file.exists());
-
-    if !daemon.can_trash() {
-        return;
-    }
-    daemon.host.set_question("Still there?", &[]).unwrap();
-    assert_eq!(daemon.delete("/api/conversation").status, 200);
-    assert_eq!(daemon.conversation()["question"], Value::Null);
-    assert!(!file.exists());
 }
 
 // ── PUT /api/conversation/read ──────────────────────────────────────────
@@ -1048,7 +720,9 @@ fn marks_the_conversation_read_through_a_time_no_later_than_now_and_never_back()
     daemon.post_turn(&first_turn());
     daemon.wait_settled();
     assert_eq!(daemon.conversation()["unread"], true);
-    for body in [json!({ "readThrough": "soon" }), json!({ "readThrough": 7 }), json!({ "readThrough": "2999-01-01T00:00:00.000Z" }), json!([])] {
+    // Only the form the transcript carries is a timestamp: a date alone or one with an offset is refused.
+    let refused = ["soon", "2999-01-01T00:00:00.000Z", "2020-01-01", "2020-01-01T02:00:00+02:00"].map(|at| json!({ "readThrough": at }));
+    for body in refused.into_iter().chain([json!({ "readThrough": 7 }), json!([])]) {
         let refused = daemon.put(route, &body);
         assert_eq!(refused.status, 400, "{body}");
         assert_eq!(refused.code(), "invalid_request", "{body}");
@@ -1132,19 +806,6 @@ fn starting_over_moves_the_conversation_to_recoverable_trash_and_the_next_messag
     assert_eq!(daemon.conversation()["preview"], "the second conversation");
 }
 
-#[test]
-fn refuses_to_start_over_while_a_turn_is_running() {
-    let (turns, gate) = held(&[]);
-    let daemon = Daemon::answering(turns);
-    let turn = daemon.open_turn(&turn_body("hold"));
-    daemon.fake.wait_for_calls(1);
-    let refused = daemon.delete("/api/conversation");
-    assert_eq!((refused.status, refused.code().as_str()), (409, "conversation_busy"));
-    gate.release();
-    assert_eq!(finish(turn).events().last(), Some(&json!({ "type": "done" })));
-    assert!(daemon.conversation_dir.join(LOG_FILENAME).exists());
-}
-
 // ── GET /api/conversation/transcript ────────────────────────────────────
 
 #[test]
@@ -1170,7 +831,7 @@ fn returns_the_conversations_renderable_messages() {
 }
 
 #[test]
-fn pages_with_limit_and_offset_and_rejects_a_non_numeric_one() {
+fn pages_with_limit_and_offset_and_rejects_what_is_not_a_count() {
     let daemon = Daemon::answering(replies(&["one", "two"]));
     daemon.post_turn(&turn_body("first"));
     daemon.wait_settled();
@@ -1180,15 +841,30 @@ fn pages_with_limit_and_offset_and_rejects_a_non_numeric_one() {
     let messages = page["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 1);
     assert_eq!((&messages[0]["role"], &messages[0]["content"]), (&json!("user"), &json!([{ "type": "text", "text": "second" }])));
-    for (query, key) in [("limit=many", "limit"), ("offset=later", "offset"), ("limit=Infinity", "limit"), ("offset=NaN", "offset")] {
+    // A limit of none is one message, and an offset past the end is an empty page.
+    let page = daemon.get("/api/conversation/transcript?limit=0&offset=%203").json();
+    assert_eq!((page["messages"].as_array().unwrap().len(), &page["total"], &page["truncated"]), (1, &json!(4), &json!(true)));
+    let page = daemon.get("/api/conversation/transcript?offset=4").json();
+    assert_eq!((&page["messages"], &page["total"], &page["truncated"]), (&json!([]), &json!(4), &json!(true)));
+    for (query, key) in [
+        ("limit=many", "limit"),
+        ("offset=later", "offset"),
+        ("limit=Infinity", "limit"),
+        ("offset=NaN", "offset"),
+        ("limit=1.5", "limit"),
+        ("offset=-1", "offset"),
+        ("limit=", "limit"),
+        ("offset=99999999999999999999999", "offset"),
+    ] {
         let response = daemon.get(&format!("/api/conversation/transcript?{query}"));
         assert_eq!(response.status, 400, "{query}");
-        assert_eq!(response.json(), json!({ "error": { "message": format!("\"{key}\" must be a number."), "code": "invalid_request" } }));
+        let refusal = json!({ "error": { "message": format!("\"{key}\" must be a whole number, zero or more."), "code": "invalid_request" } });
+        assert_eq!(response.json(), refusal, "{query}");
     }
 }
 
 #[test]
-fn reads_the_conversation_with_no_log_yet_as_empty_and_404s_an_unknown_ghost() {
+fn reads_the_conversation_with_no_log_yet_as_empty() {
     let daemon = Daemon::start();
     let before = crate::clock::now_ms();
     let response = daemon.get("/api/conversation/transcript");
@@ -1198,7 +874,6 @@ fn reads_the_conversation_with_no_log_yet_as_empty_and_404s_an_unknown_ghost() {
     let read_through = crate::clock::parse_iso(read_through.as_str().unwrap()).expect("a timestamp");
     assert!((before..=crate::clock::now_ms()).contains(&read_through));
     assert_eq!(transcript, json!({ "messages": [], "total": 0, "truncated": false }));
-    assert_eq!(daemon.get("/api/ghosts/nobody/conversation/transcript").status, 404);
 }
 
 // ── Routing and transport ───────────────────────────────────────────────
@@ -1206,8 +881,8 @@ fn reads_the_conversation_with_no_log_yet_as_empty_and_404s_an_unknown_ghost() {
 #[test]
 fn binds_a_free_loopback_port() {
     let daemon = Daemon::start();
-    assert!(daemon.listening.port > 0);
-    assert_ne!(daemon.listening.port, crate::config::DEFAULT_PORT);
+    assert!(daemon.listening.address.port() > 0);
+    assert_ne!(daemon.listening.address.port(), crate::config::DEFAULT_PORT);
     assert_eq!(daemon.get("/api/ghost").status, 200);
 }
 
@@ -1232,7 +907,6 @@ const ROUTE_TABLE: &[(&str, &[&str])] = &[
     ("/api/conversation/read", &["PUT"]),
     ("/api/conversation/attachments", &["POST"]),
     ("/api/conversation/attachments/:file", &["GET"]),
-    ("/api/conversation/stream", &["GET"]),
     ("/api/conversation/transcript", &["GET"]),
     ("/api/conversation/stop", &["POST"]),
     ("/api/conversation/queue", &["GET", "POST"]),
@@ -1245,7 +919,7 @@ fn plain_404() -> Value {
 #[test]
 fn it_404s_anything_outside_the_contract_and_405s_the_wrong_method() {
     let daemon = Daemon::start();
-    for path in ["/nothing", "/api/other", "/api/ghosts/casper", "/api/nothing", "/", "//", "/api", "/api/conversation/transcript/more"] {
+    for path in ["/nothing", "/api/other", "/api/nothing", "/", "//", "/api", "/api/conversation/transcript/more"] {
         let response = daemon.get(path);
         assert_eq!(response.status, 404, "{path}");
         assert_eq!(response.json(), plain_404(), "{path}");
@@ -1294,45 +968,6 @@ fn answers_exactly_the_contracts_route_table_and_405s_every_other_method_on_it()
 }
 
 #[test]
-fn the_routes_of_many_conversations_are_plain_404s() {
-    let daemon = Daemon::start();
-    daemon.post_turn(&first_turn());
-    for path in [
-        "/api/sessions",
-        "/api/sessions/x",
-        "/api/sessions/x/transcript",
-        "/api/sessions/x/pin",
-        "/api/sessions/x/title",
-        "/api/sessions/x/read",
-        "/api/sessions/x/stream",
-        "/api/sessions/x/stop",
-        "/api/sessions/x/queue",
-        "/api/sessions/x/attachments",
-        "/api/sessions/x/attachments/y.png",
-        "/api/conversations",
-        "/api/conversation/x",
-        "/api/conversation/pin",
-        "/api/conversation/title",
-    ] {
-        for method in METHODS {
-            let response = daemon.call(method, path, &[JSON], (method != "GET").then_some(b"{}"));
-            assert_eq!(response.status, 404, "{method} {path}");
-            assert_eq!(response.json(), plain_404(), "{method} {path}");
-        }
-    }
-}
-
-#[test]
-fn has_no_route_that_makes_renames_or_removes_a_ghost() {
-    let daemon = Daemon::start();
-    assert_eq!(daemon.post("/api/ghost", &json!({ "name": "wisp" })).status, 405);
-    assert_eq!(daemon.put("/api/name", &json!({ "name": "wisp" })).status, 404);
-    assert_eq!(daemon.call("DELETE", "/api/ghosts/casper?confirm=casper", &[JSON], None).status, 404);
-    assert_eq!(daemon.get("/api/ghost").json()["name"], "casper");
-    assert!(daemon.ghost_dir.join("character.md").exists());
-}
-
-#[test]
 fn returns_a_typed_400_for_malformed_percent_encoding_in_dynamic_path_segments() {
     let daemon = Daemon::start();
     for path in ["/api/conversation/attachments/%", "/api/conversation/attachments/%zz", "/api/conversation/attachments/%ff"] {
@@ -1371,15 +1006,21 @@ fn offers_cors_to_no_origin_that_is_not_an_app() {
 }
 
 #[test]
-fn refuses_an_oversized_body() {
-    let daemon = Daemon::with(replies(&["hello there"]), |options| options.max_body_bytes = Some(256));
-    let response = daemon.put("/api/character", &json!({ "body": "x".repeat(1_000) }));
-    assert_eq!(response.status, 413);
-    assert_eq!(response.json(), json!({ "error": { "message": "Request body is too large.", "code": "payload_too_large" } }));
-    // At the bound is fine.
-    let padding = 256 - json!({ "body": "" }).to_string().len();
-    assert_eq!(daemon.put("/api/character", &json!({ "body": "x".repeat(padding) })).status, 200);
-    assert_eq!(daemon.put("/api/character", &json!({ "body": "x".repeat(padding + 1) })).status, 413);
+fn refuses_a_body_over_a_megabyte() {
+    let daemon = Daemon::start();
+    // Refused by the length it declares, before any of it is read.
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", daemon.listening.address.port())).unwrap();
+    let head = format!("PUT /api/character HTTP/1.1\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
+    std::io::Write::write_all(&mut stream, head.as_bytes()).unwrap();
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).unwrap();
+    assert!(answer.starts_with("HTTP/1.1 413 Payload Too Large\r\n"), "{answer}");
+    let body: Value = serde_json::from_str(answer.split_once("\r\n\r\n").expect("a head and a body").1).unwrap();
+    assert_eq!(body, json!({ "error": { "message": "Request body is too large.", "code": "payload_too_large" } }));
+    // At the bound it is read, and refused for what it says: no character is that long.
+    let padding = MAX_BODY_BYTES - json!({ "body": "" }).to_string().len();
+    let read = daemon.put("/api/character", &json!({ "body": "x".repeat(padding) }));
+    assert_eq!((read.status, read.code().as_str()), (400, "limit_exceeded"));
 }
 
 #[test]
@@ -1409,7 +1050,7 @@ fn completes_a_prompt_for_a_hook() {
 fn a_completion_stops_when_its_caller_goes_away() {
     let (turns, _gate) = held(&[]);
     let daemon = Daemon::answering(turns);
-    let address = SocketAddr::from(([127, 0, 0, 1], daemon.listening.port));
+    let address = SocketAddr::from(([127, 0, 0, 1], daemon.listening.address.port()));
     let body = json!({ "prompt": "Summarise." }).to_string();
     let leaving = Abort::new();
     std::thread::scope(|scope| {
@@ -1550,6 +1191,7 @@ fn refuses_a_token_smuggled_somewhere_other_than_the_authorization_header() {
 
 #[test]
 fn lets_the_real_token_through() {
+    // With no Origin: that is what a client that read the token file sends.
     let daemon = guarded();
     let response = daemon.get_as("/api/ghost", &[("authorization", &bearer(&token()))]);
     assert_eq!(response.status, 200);
@@ -1577,12 +1219,6 @@ fn guards_every_route_not_just_the_mutating_ones() {
 }
 
 #[test]
-fn authentication_can_be_switched_off_but_only_deliberately() {
-    let daemon = Daemon::start();
-    assert_eq!(daemon.get("/api/ghost").status, 200);
-}
-
-#[test]
 fn the_machine_local_token_is_minted_into_the_state_directory_and_required() {
     let daemon = Daemon::with(replies(&["hello there"]), |options| options.api_token = ApiToken::File);
     let path = crate::token::api_token_path(&daemon.env, &daemon.root.join(".owner"));
@@ -1606,13 +1242,6 @@ fn refuses_a_foreign_origin_before_it_even_looks_at_the_token() {
     let daemon = guarded();
     let response = daemon.get_as("/api/ghost", &[("origin", "https://evil.example")]);
     assert_eq!((response.status, response.header("www-authenticate")), (403, None));
-}
-
-#[test]
-fn allows_a_request_with_no_origin_at_all() {
-    // That is what a file-reading client sends.
-    let daemon = guarded();
-    assert_eq!(daemon.get_as("/api/ghost", &[("authorization", &bearer(&token()))]).status, 200);
 }
 
 #[test]
@@ -1664,19 +1293,10 @@ fn leaves_get_and_delete_alone_since_a_bodyless_request_has_nothing_to_smuggle()
     assert_eq!(deleted.status, 404);
 }
 
-#[test]
-fn a_replaced_token_is_not_honored_until_the_daemon_restarts() {
-    let daemon = guarded();
-    assert_eq!(daemon.get_as("/api/ghost", &[("authorization", &bearer(&token()))]).status, 200);
-    // The server holds the token it was built with; a client that read a
-    // replaced file is presenting the wrong secret until then.
-    assert_eq!(daemon.get_as("/api/ghost", &[("authorization", &bearer(&other_token()))]).status, 401);
-}
-
 // ── Tailnet identity ────────────────────────────────────────────────────
 
 /// Someone else on the owner's tailnet.
-const OTHER: (&str, &str) = ("tailscale-user-login", "guest@example.com");
+const OTHER: (&str, &str) = ("tailscale-user-login", "other@example.com");
 const OWNER: (&str, &str) = ("tailscale-user-login", "owner@example.com");
 
 /// A token-guarded daemon that admits the owner calling over the tailnet.
@@ -1743,7 +1363,7 @@ fn shows_the_owner_what_runs_the_daemon() {
 
 #[test]
 fn honours_a_configured_owner_login() {
-    let daemon = remote(|options| options.remote = tailnet(Some("guest@example.com")));
+    let daemon = remote(|options| options.remote = tailnet(Some("other@example.com")));
     let refused = daemon.get_as("/api/ghost", &[OWNER]);
     assert_eq!((refused.status, refused.header("www-authenticate")), (401, Some("Bearer")));
     assert_eq!(daemon.get_as("/api/remote/whoami", &[OTHER]).json(), json!({ "role": "owner" }));
@@ -1775,34 +1395,27 @@ fn refuses_a_page_on_the_tailnet_host_itself_since_only_remote_apps_are_origins(
 
 // ── Remote status ───────────────────────────────────────────────────────
 
-fn remote_status(enabled: bool) -> Value {
-    json!({
-        "state": if enabled { "on" } else { "off" },
+// Serve is the owner's to turn on with Tailscale's own command: ghostd reads its state and changes nothing.
+#[test]
+fn reports_remote_status_and_has_no_route_that_changes_it() {
+    let (calls, runner) = fake_tailscale();
+    let daemon = remote(|options| options.remote_serve = serve_over(runner));
+    let off = json!({
+        "state": "off",
         "hostname": FAKE_HOSTNAME,
         "owner": "owner@example.com",
         "app": null,
         "command": format!("tailscale serve --bg --https=443 {FAKE_TARGET}"),
         "problem": null,
-    })
-}
-
-/// A remote daemon whose Serve exposure is a fake `tailscale` the test can inspect.
-fn remote_over_tailscale() -> (Daemon, Arc<Tailscale>) {
-    let (fake, runner) = fake_tailscale();
-    (remote(|options| options.remote_serve = serve_over(runner)), fake)
-}
-
-// Serve is the owner's to turn on with Tailscale's own command: ghostd reads its state and changes nothing.
-#[test]
-fn reports_remote_status_and_has_no_route_that_changes_it() {
-    let (daemon, tailscale) = remote_over_tailscale();
+    });
     let authorization = bearer(&token());
     let headers = [("authorization", authorization.as_str()), JSON];
-    assert_eq!(daemon.get_as("/api/remote", &headers[..1]).json(), remote_status(false));
-    assert_eq!(daemon.get_as("/api/remote", &[OWNER]).json(), remote_status(false));
+    assert_eq!(daemon.get_as("/api/remote", &headers[..1]).json(), off);
+    assert_eq!(daemon.get_as("/api/remote", &[OWNER]).json(), off);
     let posted = daemon.call("POST", "/api/remote", &headers, Some(json!({ "enabled": true }).to_string().as_bytes()));
     assert_eq!(posted.status, 405);
-    assert_eq!(tailscale.changes(), Vec::<String>::new());
+    let calls = calls.lock().unwrap();
+    assert!(!calls.is_empty() && calls.iter().all(|call| call.ends_with("status --json")), "{calls:?}");
 }
 
 // ── A web app in remote.apps ────────────────────────────────────────────
@@ -1913,8 +1526,6 @@ fn answers_each_route_the_app_calls_admitted_by_tailnet_identity_alone() {
         let response = send("POST", &format!("/conversation{path}"), body);
         assert_eq!((response.status, response.code().as_str()), (409, "conversation_not_streaming"), "{path}");
     }
-    let gone = get("/conversation/stream?turn=gone&from=0");
-    assert_eq!((gone.status, gone.code().as_str()), (404, "turn_not_found"));
     if daemon.can_trash() {
         assert_eq!(daemon.call("DELETE", "/api/conversation", &owner, None).status, 200);
     }
@@ -1983,11 +1594,18 @@ fn a_subscribed_device_is_alerted_when_a_turn_ends_and_forgotten_when_it_unsubsc
     // The dropped device is no longer known.
     assert_eq!(daemon.post("/api/push/test", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/gone" })).status, 400);
 
+    // A device that unsubscribed is alerted no more: the next turn's alert goes to the one still subscribed, alone.
+    daemon.put("/api/push/subscription", &device("tablet"));
     let removed = daemon.send_json("DELETE", "/api/push/subscription", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
     assert_eq!((removed.status, removed.json()), (200, json!({ "ok": true, "removed": true })));
+    let again = daemon.send_json("DELETE", "/api/push/subscription", &json!({ "endpoint": "https://fcm.googleapis.com/fcm/send/phone" }));
+    assert_eq!((again.status, again.json()), (200, json!({ "ok": true, "removed": false })));
     let sent = daemon.pushed.lock().unwrap().len();
+    daemon.wait_settled();
     daemon.post_turn(&turn_body("more"));
-    assert_eq!(daemon.pushed.lock().unwrap().len(), sent);
+    let later = wait_for(|| Some(daemon.pushed.lock().unwrap()[sent..].to_vec()).filter(|later| !later.is_empty()));
+    assert_eq!(later.iter().map(|(endpoint, _)| endpoint.as_str()).collect::<Vec<_>>(), ["https://fcm.googleapis.com/fcm/send/tablet"]);
+    assert_eq!(later[0].1["body"], "again");
 }
 
 #[test]

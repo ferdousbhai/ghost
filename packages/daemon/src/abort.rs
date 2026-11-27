@@ -19,7 +19,7 @@ pub struct Abort {
 }
 
 /// Unregisters its callback when dropped.
-pub struct AbortGuard {
+pub(crate) struct AbortGuard {
     abort: Abort,
     id: u64,
 }
@@ -58,7 +58,7 @@ impl Abort {
 
     /// Run `callback` on abort, at once when already aborted. Dropping the
     /// guard withdraws it.
-    pub fn on_abort(&self, callback: impl FnOnce() + Send + 'static) -> AbortGuard {
+    pub(crate) fn on_abort(&self, callback: impl FnOnce() + Send + 'static) -> AbortGuard {
         let mut state = self.state.0.lock().unwrap();
         let id = state.next;
         state.next += 1;
@@ -72,7 +72,7 @@ impl Abort {
     }
 
     /// A signal that aborts when this one does, and can be aborted alone.
-    pub fn child(&self) -> (Abort, AbortGuard) {
+    pub(crate) fn child(&self) -> (Abort, AbortGuard) {
         let child = Abort::new();
         let linked = child.clone();
         let guard = self.on_abort(move || linked.abort());
@@ -80,7 +80,7 @@ impl Abort {
     }
 
     /// Sleep up to `duration`; true when aborted before or during it.
-    pub fn wait(&self, duration: Duration) -> bool {
+    pub(crate) fn wait(&self, duration: Duration) -> bool {
         let state = self.state.0.lock().unwrap();
         let (state, _) = self.state.1.wait_timeout_while(state, duration, |state| !state.aborted).unwrap();
         state.aborted

@@ -21,7 +21,7 @@ fn main() {
                     home: &home,
                     stdout: &mut std::io::stdout(),
                     stderr: &mut std::io::stderr(),
-                    stdin: Stdin::Stream { reader: Box::new(stdin), is_tty },
+                    stdin: Stdin { reader: Box::new(stdin), is_tty },
                     stdout_is_tty: std::io::stdout().is_terminal(),
                 },
             )

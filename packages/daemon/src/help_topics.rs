@@ -9,10 +9,6 @@ use crate::help_guides::{BROWSER_LINES, products_lines};
 
 pub const HELP_TOPICS: [&str; 5] = ["self", "background", "memory", "browser", "products"];
 
-pub fn is_help_topic(value: &str) -> bool {
-    HELP_TOPICS.contains(&value)
-}
-
 /// One topic's text, as `ghost help <topic>` prints it; None for a name that is not a topic.
 pub fn render_help_topic(topic: &str) -> Option<String> {
     let lines = match topic {
@@ -32,7 +28,7 @@ const SELF_LINES: &[&str] = &[
     r"Read the checkout's AGENTS.md and CONTRACTS.md; follow its authorized branch, commit, and push workflow. Edit, test the affected package, run clippy, commit with the reason, build, and restart.",
     r"Commit your own changes; preserve other sessions' edits. Never restore, stash, or discard changes you did not make.",
     r"CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",
-    r"To restart yourself, finish the turn and tell the owner first; a restart aborts every running turn:",
+    r"To restart yourself, finish the turn and tell the owner first; a restart aborts the running turn:",
     r"```sh",
     r#"systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \"#,
     r#"  --description="<reason>" \"#,
@@ -109,8 +105,6 @@ mod tests {
     #[test]
     fn knows_its_topics() {
         assert_eq!(HELP_TOPICS, ["self", "background", "memory", "browser", "products"]);
-        assert!(is_help_topic("self"));
-        assert!(!is_help_topic("status"));
         assert_eq!(render_help_topic("status"), None);
         for name in HELP_TOPICS {
             let text = topic(name);
@@ -126,9 +120,8 @@ mod tests {
         {
             assert!(text.contains(kept), "{kept}");
         }
-        for gone in ["ghost say", "git restore", "branch from upstream master"] {
-            assert!(!text.contains(gone), "{gone}");
-        }
+        // A restart is its own unit's work, never a message to the model.
+        assert!(!text.contains("ghost say"));
     }
 
     #[test]
@@ -149,9 +142,6 @@ mod tests {
             "`omarchy reminder <minutes> \"<text>\"`",
         ] {
             assert!(text.contains(kept), "{kept}");
-        }
-        for gone in ["/tmp/job.log", "GHOST_SESSION", " -s "] {
-            assert!(!text.contains(gone), "{gone}");
         }
     }
 
@@ -193,7 +183,6 @@ mod tests {
     /// and act under one lock, and a missing tab fails closed.
     #[test]
     fn browser_shared_owner_session_selects_and_acts_atomically_and_missing_tabs_fail_closed() {
-        use crate::abort::Abort;
         use crate::process::run_command;
         use std::os::unix::fs::PermissionsExt;
         use std::time::Duration;
@@ -231,7 +220,7 @@ fi
                     .into_iter()
                     .map(|(name, value)| (name.to_string(), value))
                     .collect();
-            run_command("bash", &["-c", &script], &env, None, Duration::from_secs(60), &Abort::new()).expect("bash runs")
+            run_command("bash", &["-c", &script], &env, Duration::from_secs(60)).expect("bash runs")
         };
         std::thread::scope(|scope| {
             let a = scope.spawn(|| run("a"));

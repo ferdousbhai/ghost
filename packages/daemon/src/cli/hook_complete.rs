@@ -2,30 +2,16 @@
 //! stop-hook reviewer, a classifier), asked of the daemon that owns the ghost
 //! (`POST /api/complete`), so it completes on the daemon's own loaded copy of
 //! the local model rather than a second one started here.
-use super::client::{DaemonClient, EXIT_UNREACHABLE};
+use super::CliRuntime;
+use super::common::stdin_text;
 use super::output::write;
-use super::{CliRuntime, Stdin};
+use crate::client::{Client, ClientError};
 use serde_json::{Map, Value, json};
-use std::io::Read;
 
-const HOOK_COMPLETE_MAX_STDIN_BYTES: u64 = 1024 * 1024;
-
-fn read_stdin(stdin: &mut Stdin) -> Result<String, String> {
-    match stdin {
-        Stdin::Text(text) => Ok(text.clone()),
-        Stdin::Stream { reader, .. } => {
-            let mut bytes = Vec::new();
-            reader.take(HOOK_COMPLETE_MAX_STDIN_BYTES + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
-            if bytes.len() as u64 > HOOK_COMPLETE_MAX_STDIN_BYTES {
-                return Err(format!("stdin exceeds {HOOK_COMPLETE_MAX_STDIN_BYTES} bytes."));
-            }
-            Ok(String::from_utf8_lossy(&bytes).into_owned())
-        }
-    }
-}
+const MAX_STDIN_BYTES: u64 = 1024 * 1024;
 
 /// The `prompt` of a hook's JSON input; any other field is ignored.
-pub fn parse_hook_complete_input(raw: &str) -> Result<String, String> {
+fn parse_hook_complete_input(raw: &str) -> Result<String, String> {
     let value: Value = serde_json::from_str(raw).map_err(|error| format!("stdin is not valid JSON: {error}"))?;
     let Some(input) = value.as_object() else { return Err("stdin must contain a JSON object.".to_string()) };
     match input.get("prompt") {
@@ -35,19 +21,16 @@ pub fn parse_hook_complete_input(raw: &str) -> Result<String, String> {
 }
 
 fn complete(runtime: &mut CliRuntime) -> Result<String, String> {
-    let prompt = parse_hook_complete_input(&read_stdin(&mut runtime.stdin)?)?;
+    let prompt = parse_hook_complete_input(&stdin_text(&mut runtime.stdin, Some(MAX_STDIN_BYTES))?)?;
     if prompt.trim().is_empty() {
         return Err("prompt must be a non-empty string.".to_string());
     }
-    let mut client = DaemonClient::new(runtime.env, runtime.home).map_err(|error| error.message)?;
+    let mut client = Client::discover(runtime.env, runtime.home).map_err(|error| error.to_string())?;
     // No deadline of its own: the hook's `timeout` kills this process group,
     // which closes the request and stops the completion.
-    let answer = client.request_within("POST", "/api/complete", Some(&json!({ "prompt": prompt })), None).map_err(|error| {
-        if error.exit_code == EXIT_UNREACHABLE {
-            format!("{} at {}; is it running? (systemctl --user status ghostd)", error.message, client.base_url)
-        } else {
-            error.message
-        }
+    let answer = client.request("POST", "/api/complete", Some(&json!({ "prompt": prompt })), None).map_err(|error| match error {
+        ClientError::Unreachable(_) => format!("{error} at {}; is it running? (systemctl --user status ghostd)", client.base_url()),
+        _ => error.to_string(),
     })?;
     let mut reply = Map::new();
     if let Some(text) = answer.get("text") {
@@ -72,5 +55,18 @@ pub fn hook_complete_command(args: &[String], mut runtime: CliRuntime) -> i32 {
             write(runtime.stderr, &format!("{message}\n"));
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hook_complete_input;
+
+    #[test]
+    fn takes_a_string_prompt_from_a_json_object_and_refuses_anything_else() {
+        assert_eq!(parse_hook_complete_input("{\"ghost_home\":\"/g/casper\",\"prompt\":\"hi\",\"extra\":1}"), Ok("hi".to_string()));
+        assert!(parse_hook_complete_input("not json").unwrap_err().starts_with("stdin is not valid JSON: "));
+        assert_eq!(parse_hook_complete_input("[]").unwrap_err(), "stdin must contain a JSON object.");
+        assert_eq!(parse_hook_complete_input("{\"ghost_home\":\"/g\",\"prompt\":7}").unwrap_err(), "stdin must contain a string prompt field.");
     }
 }

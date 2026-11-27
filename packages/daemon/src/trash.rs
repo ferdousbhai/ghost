@@ -1,7 +1,6 @@
 //! Recoverable deletion: `gio trash` moves a path into the freedesktop Trash
 //! (the home trash, or its filesystem's `.Trash-$UID`) by rename, never by
 //! copy-then-delete. Where it cannot, it refuses and nothing is removed.
-use crate::abort::Abort;
 use crate::env::Env;
 use crate::error::{GhostError, Result};
 use crate::process::{CommandFailure, run_command};
@@ -13,13 +12,13 @@ const TRASH_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn trash_path(path: &Path, env: &Env) -> Result<()> {
     let shown = path.to_string_lossy();
-    let reason = match run_command("gio", &["trash", "--", &shown], env, None, TRASH_TIMEOUT, &Abort::new()) {
+    let reason = match run_command("gio", &["trash", "--", &shown], env, TRASH_TIMEOUT) {
         Ok(result) if result.code == 0 => return Ok(()),
         Ok(result) => match result.stderr.trim().rsplit('\n').next() {
             Some(line) if !line.is_empty() => line.to_string(),
             _ => format!("Command failed: gio trash -- {shown}"),
         },
-        Err(CommandFailure::Missing) => "spawn gio ENOENT".to_string(),
+        Err(CommandFailure::Missing) => "gio is not installed.".to_string(),
         Err(CommandFailure::Other(message)) => message,
     };
     Err(GhostError::new("trash_failed", format!("Could not move {shown} to Trash; nothing was deleted. {reason}"), 500))
@@ -74,7 +73,7 @@ mod tests {
         let bare = Env::from([("PATH".to_string(), root.display().to_string())]);
         let refusal = trash_path(&root.join("missing"), &bare).unwrap_err();
         assert_eq!(refusal.code, "trash_failed");
-        assert!(refusal.message.ends_with("nothing was deleted. spawn gio ENOENT"), "{}", refusal.message);
+        assert!(refusal.message.ends_with("nothing was deleted. gio is not installed."), "{}", refusal.message);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

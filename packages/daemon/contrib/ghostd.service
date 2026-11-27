@@ -16,11 +16,13 @@ ExecStart=/usr/bin/ghostd
 SyslogIdentifier=ghostd
 Restart=on-failure
 RestartSec=2
-# On SIGTERM ghostd aborts running turns and closes; this is the only deadline,
-# for a command that ignores cancellation.
-TimeoutStopSec=10s
+# On SIGTERM ghostd aborts the running turn, has the local model save what it
+# has read (up to 120 s for a full context, about 5 GB), gives the model's
+# server 5 s to exit, and closes. This deadline is past all of that, so a save
+# is never killed half-written; it is reached only by a stop that hangs. A
+# command that ignores the turn's cancellation is killed with the unit.
+TimeoutStopSec=150s
 KillMode=mixed
-SendSIGKILL=yes
 
 # Do NOT put credential values in this unit or an EnvironmentFile: each coding
 # agent reads its own sign-in from its own configuration.
@@ -46,15 +48,14 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 # Browser automation attaches to the owner's Chromium over CDP. A ghost may still run `chromium` from its shell when none is
 # open — and that child would land in this unit's cgroup, where KillMode=mixed
-# and SendSIGKILL would take the owner's browser down with `systemctl --user
-# restart ghostd`. `ghost help browser` therefore tells the ghost to start it
-# detached (`systemd-run --user --scope`). A Chromium that does end up here
-# still needs its sandbox's user namespaces, so the unit sets no
-# RestrictNamespaces (smoke.sh enforces that), and the commands a ghost runs
-# (node, a browser) have JITs that need writable-executable pages, so
-# MemoryDenyWriteExecute stays off.
+# would take the owner's browser down with `systemctl --user restart ghostd`.
+# `ghost help browser` therefore tells the ghost to start it detached
+# (`systemd-run --user --scope`). A Chromium that does end up here still needs
+# its sandbox's user namespaces, so the unit sets no RestrictNamespaces
+# (packaging/release/install-payload.sh enforces that), and the commands a
+# ghost runs (node, a browser) have JITs that need writable-executable pages,
+# so it sets no MemoryDenyWriteExecute either.
 LockPersonality=yes
-MemoryDenyWriteExecute=no
 # PrivateTmp only isolates /tmp and /var/tmp. The user runtime directory stays
 # available for the Wayland, Hyprland, and D-Bus sockets.
 ReadWritePaths=%h %t

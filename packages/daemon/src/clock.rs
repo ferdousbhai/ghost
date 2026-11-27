@@ -40,74 +40,29 @@ pub fn iso(ms: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z", rest / 3_600_000, rest / 60_000 % 60, rest / 1_000 % 60, rest % 1_000)
 }
 
-/// Milliseconds of an ISO 8601 time: a date alone (UTC midnight), or a date
-/// and time with optional fraction and `Z` or `±hh:mm` (UTC without either,
-/// as every time Ghost wrote carries `Z`).
+/// Milliseconds of a time as `iso` writes one, `YYYY-MM-DDTHH:MM:SS[.fff]Z`:
+/// the only form the daemon sends, stores or is sent back.
 pub fn parse_iso(text: &str) -> Option<i64> {
-    let text = text.trim();
     let bytes = text.as_bytes();
+    let marks: &[(usize, u8)] = match bytes.len() {
+        20 => &[(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'Z')],
+        24 => &[(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'.'), (23, b'Z')],
+        _ => return None,
+    };
+    if !marks.iter().all(|(at, mark)| bytes[*at] == *mark) {
+        return None;
+    }
     let number = |from: usize, to: usize| -> Option<i64> {
         let part = text.get(from..to)?;
-        (part.len() == to - from && part.bytes().all(|b| b.is_ascii_digit())).then(|| part.parse().ok())?
+        part.bytes().all(|b| b.is_ascii_digit()).then(|| part.parse().ok())?
     };
-    if bytes.len() < 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+    let (year, month, day) = (number(0, 4)?, number(5, 7)?, number(8, 10)?);
+    let (hour, minute, second) = (number(11, 13)?, number(14, 16)?, number(17, 19)?);
+    let millis = if bytes.len() == 24 { number(20, 23)? } else { 0 };
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 59 {
         return None;
     }
-    let (year, month, day) = (number(0, 4)?, number(5, 7)? as u32, number(8, 10)? as u32);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let mut ms = days_from_civil(year, month, day) * 86_400_000;
-    if bytes.len() == 10 {
-        return Some(ms);
-    }
-    if !matches!(bytes[10], b'T' | b't' | b' ') || bytes.len() < 16 || bytes[13] != b':' {
-        return None;
-    }
-    let (hour, minute) = (number(11, 13)?, number(14, 16)?);
-    if hour > 24 || minute > 59 {
-        return None;
-    }
-    ms += hour * 3_600_000 + minute * 60_000;
-    let mut at = 16;
-    if bytes.get(at) == Some(&b':') {
-        let second = number(at + 1, at + 3)?;
-        if second > 60 {
-            return None;
-        }
-        ms += second * 1_000;
-        at += 3;
-        if bytes.get(at) == Some(&b'.') {
-            let start = at + 1;
-            let mut end = start;
-            while bytes.get(end).is_some_and(u8::is_ascii_digit) {
-                end += 1;
-            }
-            if end == start {
-                return None;
-            }
-            let digits = &text[start..end.min(start + 3)];
-            ms += digits.parse::<i64>().ok()? * 10_i64.pow(3 - digits.len() as u32);
-            at = end;
-        }
-    }
-    match &text[at..] {
-        "" | "Z" | "z" => Some(ms),
-        zone => {
-            let zone = zone.as_bytes();
-            let sign = match zone.first()? {
-                b'+' => 1,
-                b'-' => -1,
-                _ => return None,
-            };
-            let digits: String = zone[1..].iter().filter(|b| **b != b':').map(|b| *b as char).collect();
-            if digits.len() != 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                return None;
-            }
-            let offset = digits[..2].parse::<i64>().ok()? * 60 + digits[2..].parse::<i64>().ok()?;
-            Some(ms - sign * offset * 60_000)
-        }
-    }
+    Some(days_from_civil(year, month as u32, day as u32) * 86_400_000 + hour * 3_600_000 + minute * 60_000 + second * 1_000 + millis)
 }
 
 #[cfg(test)]
@@ -124,12 +79,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_what_clients_send() {
-        assert_eq!(parse_iso("2026-11-25"), Some(1_795_564_800_000));
+    fn parses_only_the_form_it_writes() {
         assert_eq!(parse_iso("2026-11-25T08:21:20Z"), Some(1_795_594_880_000));
-        assert_eq!(parse_iso("2026-11-25T16:21:20.5+08:00"), Some(1_795_594_880_500));
-        assert_eq!(parse_iso("2026-11-25T08:21"), Some(1_795_594_860_000));
-        for bad in ["", "soon", "2026-13-01", "2026-11-25T", "2026-11-25T08:21:20.Z", "2026-11-25T08:21:20+8"] {
+        assert_eq!(parse_iso("2026-11-25T08:21:20.123Z"), Some(1_795_594_880_123));
+        let others = [
+            "2026-11-25",
+            "2026-11-25T08:21",
+            "2026-11-25T16:21:20.5+08:00",
+            "2026-11-25t08:21:20z",
+            "2026-11-25 08:21:20Z",
+            " 2026-11-25T08:21:20Z",
+        ];
+        let invalid =
+            ["", "soon", "2026-13-01T08:21:20Z", "2026-11-25T24:00:00Z", "2026-11-25T08:21:60Z", "2026-11-25T08:21:20.Z", "2026-11-25T08:21:2éZ"];
+        for bad in others.iter().chain(&invalid) {
             assert_eq!(parse_iso(bad), None, "{bad}");
         }
     }

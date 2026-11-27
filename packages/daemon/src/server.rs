@@ -1,60 +1,53 @@
 //! The daemon's HTTP API (CONTRACTS.md "Daemon HTTP API"): the gate every
-//! `/api` request passes, the routes, and the turn streams, which outlive the
-//! response that started them so a cut or dropped client can resume.
-use crate::abort::Abort;
+//! `/api` request passes, the routes, and the two event streams. A turn runs
+//! on its own thread and never waits on the response that started it.
 use crate::attachments::MAX_ATTACHMENT_BYTES;
-use crate::config::RemoteConfig;
-use crate::conversation_host::{ConversationHost, Emit};
+use crate::conversation_host::{ConversationHost, Emit, TurnAdmission};
 use crate::env::Env;
 use crate::error::{GhostError, Result};
-use crate::ghosts::Ghost;
-use crate::home::{read_character, write_character};
+use crate::home::{Home, MAX_CHARACTER_BODY_LENGTH};
 use crate::hooks::HookRunner;
 use crate::http::{Request, Responder, Server, percent_decode};
 use crate::log::Logger;
-use crate::persona::MAX_CHARACTER_BODY_LENGTH;
 use crate::remote::{RemoteAccess, RemoteServe};
 use crate::running_source::{RunningSource, replaced_since_start};
 use crate::token::{api_token_path, ensure_api_token, token_matches};
-use crate::turn_buffer::{DEFAULT_MEMORY_LIMIT, TurnBuffer, spill_dir};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::Path;
-use std::sync::mpsc;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-const DEFAULT_MAX_BODY_BYTES: usize = 1_048_576;
-/// Where a turn response is cut, so no client holds one ever-growing body.
-const DEFAULT_STREAM_CUT_BYTES: usize = 1_048_576;
-/// How long an ended turn stays resumable, for a client cut just before the end.
-const RESUME_GRACE: Duration = Duration::from_secs(60);
+const MAX_BODY_BYTES: usize = 1_048_576;
+/// How much of a turn may wait unsent for its reader. A reader further behind
+/// than this is not reading: its response ends there, and the turn carries on.
+const MAX_TURN_BACKLOG_BYTES: usize = 8 * 1_048_576;
 const SSE_KEEPALIVE_COMMENT: &str = ": keepalive\n\n";
-pub const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 /// The bearer token every private `/api` route requires.
 pub enum ApiToken {
     /// Read from, and minted into, the XDG state token file: a client that
     /// reads that file is authenticated and a web page that cannot is not.
     File,
-    /// Use this token, for tests that want to present one.
+    /// Use this token.
+    #[cfg(test)]
     Fixed(String),
-    /// No authentication at all. **Test-only**, for tests whose subject is
-    /// routing or streaming; nothing that ships may pass it.
+    /// No authentication at all, for tests whose subject is routing or streaming.
+    #[cfg(test)]
     Off,
 }
 
 pub struct ServerOptions {
     /// The machine's one ghost.
-    pub ghost: Ghost,
+    pub ghost: Home,
     pub host: ConversationHost,
     /// What runs this daemon, as `GET /api/status` reports it.
     pub running_source: RunningSource,
     /// The owner's `hooks.json`, as `HookRunner::from_config` admitted it.
     pub hooks: Arc<HookRunner>,
     pub logger: Logger,
-    pub max_body_bytes: Option<usize>,
     pub api_token: ApiToken,
     /// Callers reaching the daemon through `tailscale serve`; None admits none.
     pub remote: Option<Arc<RemoteAccess>>,
@@ -63,58 +56,10 @@ pub struct ServerOptions {
     pub remote_apps: Vec<String>,
     /// Reads what Tailscale Serve exposes of this daemon.
     pub remote_serve: Arc<RemoteServe>,
-    /// Response size for turn continuation and invalidation reconnects; about 1 MB by default.
-    pub stream_cut_bytes: Option<usize>,
     pub port: u16,
-    /// Where the token file and the turn spill directory are resolved from.
+    /// Where the token file is resolved from.
     pub env: Env,
     pub home: std::path::PathBuf,
-}
-
-impl ServerOptions {
-    /// What a test needs: no authentication, no remote callers, any free port.
-    pub fn for_test(ghost: Ghost, host: ConversationHost, hooks: Arc<HookRunner>, env: Env, home: &Path) -> Self {
-        let runner: crate::remote::TailscaleRunner = Arc::new(|_| Err(crate::process::CommandFailure::Missing));
-        Self {
-            ghost,
-            host,
-            running_source: RunningSource {
-                version: crate::VERSION.to_string(),
-                commit: None,
-                root: None,
-                entry: std::env::current_exe().unwrap_or_default(),
-                started_at: crate::clock::now_ms(),
-            },
-            hooks,
-            logger: Logger::silent(),
-            max_body_bytes: None,
-            api_token: ApiToken::Off,
-            remote: None,
-            remote_apps: Vec::new(),
-            remote_serve: Arc::new(RemoteServe::new(0, &RemoteConfig::default(), runner)),
-            stream_cut_bytes: None,
-            port: 0,
-            env,
-            home: home.to_path_buf(),
-        }
-    }
-}
-
-struct TurnState {
-    /// Each event SSE-encoded; once `ended`, the last is the terminal.
-    frames: TurnBuffer,
-    ended: bool,
-    failure: Option<String>,
-    followers: usize,
-    /// Past its resume grace: disposed once the last follower leaves.
-    expired: bool,
-}
-
-/// One turn's events, kept while it runs (and briefly after) so a cut response can resume.
-struct TurnLog {
-    id: String,
-    state: Mutex<TurnState>,
-    changed: Condvar,
 }
 
 fn encode_sse(event: &Value) -> String {
@@ -124,19 +69,13 @@ fn encode_sse(event: &Value) -> String {
 struct Shared {
     options: ServerOptions,
     api_token: Option<String>,
-    max_body_bytes: usize,
-    stream_cut_bytes: usize,
-    turn_logs: Mutex<HashMap<String, Arc<TurnLog>>>,
-    /// Ends every open stream at shutdown.
-    closing: Abort,
 }
 
 enum Reply {
     Json(u16, Value),
-    Bytes {
+    /// A stored attachment, which never changes under its name.
+    Image {
         content_type: String,
-        cache: &'static str,
-        nosniff: bool,
         body: Vec<u8>,
     },
     /// The handler writes its own response (an event stream).
@@ -154,7 +93,7 @@ enum Route {
     RemoteGet,
     HooksConfig,
     Status,
-    GhostName,
+    Ghost,
     CharacterGet,
     CharacterPut,
     Complete,
@@ -168,7 +107,6 @@ enum Route {
     Read,
     AttachmentSave,
     AttachmentRead,
-    Stream,
     Transcript,
     Stop,
     QueueGet,
@@ -185,7 +123,7 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("PUT", "api/push/subscription", Route::PushPut),
     ("DELETE", "api/push/subscription", Route::PushDelete),
     ("POST", "api/push/test", Route::PushTest),
-    ("GET", "api/ghost", Route::GhostName),
+    ("GET", "api/ghost", Route::Ghost),
     ("GET", "api/character", Route::CharacterGet),
     ("PUT", "api/character", Route::CharacterPut),
     ("POST", "api/complete", Route::Complete),
@@ -196,7 +134,6 @@ const ROUTES: &[(&str, &str, Route)] = &[
     ("PUT", "api/conversation/read", Route::Read),
     ("POST", "api/conversation/attachments", Route::AttachmentSave),
     ("GET", "api/conversation/attachments/:file", Route::AttachmentRead),
-    ("GET", "api/conversation/stream", Route::Stream),
     ("GET", "api/conversation/transcript", Route::Transcript),
     ("POST", "api/conversation/stop", Route::Stop),
     ("GET", "api/conversation/queue", Route::QueueGet),
@@ -262,30 +199,28 @@ fn is_preflighted_content_type(header: Option<&str>) -> bool {
     kind == "application/json" || kind.starts_with("image/")
 }
 
-/// A query parameter as a number; None when absent.
-fn number_param(request: &Request, key: &str) -> Result<Option<f64>> {
+/// A query parameter as a count; None when absent.
+fn count_param(request: &Request, key: &str) -> Result<Option<usize>> {
     let Some(raw) = request.query(key) else { return Ok(None) };
-    let value = raw.trim().parse::<f64>().ok().filter(|value| value.is_finite());
-    value.map(Some).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a number.")))
+    raw.trim().parse().map(Some).map_err(|_| GhostError::invalid(format!("\"{key}\" must be a whole number, zero or more.")))
 }
 
 fn string_field<'a>(body: &'a Map<String, Value>, key: &str) -> Result<&'a str> {
     body.get(key).and_then(Value::as_str).ok_or_else(|| GhostError::invalid(format!("\"{key}\" must be a string.")))
 }
 
-struct Context<'a> {
-    shared: &'a Arc<Shared>,
+struct Context {
     request: Request,
     params: HashMap<&'static str, String>,
 }
 
-impl Context<'_> {
+impl Context {
     fn param(&self, name: &str) -> &str {
         self.params.get(name).map_or("", String::as_str)
     }
 
     fn json_body(&mut self) -> Result<Value> {
-        let bytes = self.request.read_body(self.shared.max_body_bytes)?;
+        let bytes = self.request.read_body(MAX_BODY_BYTES)?;
         serde_json::from_slice(&bytes).map_err(|_| GhostError::invalid("Request body must be JSON."))
     }
 
@@ -323,9 +258,8 @@ impl Shared {
         }
         let presented = bearer_token(request.header("authorization"));
         let token_ok = !presented.is_empty() && token_matches(api_token, presented);
-        let owner_by_tailnet = || {
-            self.options.remote.as_ref().is_some_and(|remote| remote.identify(request.header("tailscale-user-login"), request.peer.ip()).is_some())
-        };
+        let owner_by_tailnet =
+            || self.options.remote.as_ref().is_some_and(|remote| remote.identify(request.header("tailscale-user-login"), request.peer.ip()));
         if !token_ok && !owner_by_tailnet() {
             responder.set_header("www-authenticate", "Bearer");
             return Err(GhostError::new("unauthorized", "This API needs the machine-local bearer token. Run `ghostd api-token`.", 401));
@@ -353,161 +287,66 @@ impl Shared {
         }
     }
 
-    /// Run an admitted turn into a new log, which ends in exactly one terminal event.
-    fn start_turn_log(self: &Arc<Self>, admission: crate::conversation_host::TurnAdmission) -> Arc<TurnLog> {
-        let log = Arc::new(TurnLog {
-            id: crate::random::uuid(),
-            state: Mutex::new(TurnState {
-                frames: TurnBuffer::new(DEFAULT_MEMORY_LIMIT, spill_dir(&self.options.env)),
-                ended: false,
-                failure: None,
-                followers: 0,
-                expired: false,
-            }),
-            changed: Condvar::new(),
-        });
-        self.turn_logs.lock().unwrap().insert(log.id.clone(), log.clone());
-        let (shared, appended) = (self.clone(), log.clone());
-        let append = move |event: Value| {
-            let stored_badly = {
-                let mut state = appended.state.lock().unwrap();
-                if state.ended {
-                    return;
-                }
-                let stored = state.frames.push(&encode_sse(&event));
-                match &stored {
-                    Ok(()) => state.ended = matches!(event["type"].as_str(), Some("done" | "error")),
-                    Err(_) => {
-                        state.ended = true;
-                        state.failure = Some(encode_sse(
-                            &json!({ "type": "error", "reason": "error", "errorMessage": "Could not retain the turn stream; read the transcript." }),
-                        ));
-                    }
-                }
-                stored.err()
-            };
-            appended.changed.notify_all();
-            if let Some(error) = stored_badly {
-                shared.options.logger.error("turn replay storage failed", json!({ "error": error.to_string() }));
-                // The turn may already have settled.
-                let _ = shared.host().stop_turn();
-            }
-        };
-        let emit: Emit = Arc::new(append);
-        let (shared, running) = (self.clone(), log.clone());
-        std::thread::spawn(move || {
-            admission.run(emit.clone());
-            // Keep the HTTP seam honest even if the host regresses: every client
-            // gets a terminal; after the turn's own, this is a no-op.
-            emit(json!({ "type": "error", "reason": "error", "errorMessage": "The turn ended without a terminal event." }));
-            if shared.closing.wait(RESUME_GRACE) {
+    /// Run an admitted turn on its own thread and return what streams it to
+    /// the response. The turn never waits on its reader: each event is queued
+    /// in memory, and a reader whose queue passes `MAX_TURN_BACKLOG_BYTES`, or
+    /// whose socket refuses a write (gone, or not reading for the socket's
+    /// timeout), is dropped. The turn runs on to its end and its log either
+    /// way: `POST …/stop` is the only stop. The response ends when the turn
+    /// has given the conversation back, after its terminal event.
+    fn start_turn(admission: TurnAdmission) -> impl FnOnce(Responder) + Send {
+        let (queue, frames) = mpsc::channel::<String>();
+        // Bytes queued and not yet taken for writing, and whether anyone still reads.
+        let (backlog, reading) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(true)));
+        let (queued, read) = (backlog.clone(), reading.clone());
+        let emit: Emit = Arc::new(move |event| {
+            if !read.load(Ordering::Relaxed) {
                 return;
             }
-            shared.turn_logs.lock().unwrap().remove(&running.id);
-            let mut state = running.state.lock().unwrap();
-            state.expired = true;
-            if state.followers == 0 {
-                state.frames.dispose();
+            let frame = encode_sse(&event);
+            if queued.fetch_add(frame.len(), Ordering::Relaxed) + frame.len() > MAX_TURN_BACKLOG_BYTES {
+                read.store(false, Ordering::Relaxed);
+            } else {
+                let _ = queue.send(frame);
             }
         });
-        log
-    }
-
-    /// Stream `log` from event `from` until its terminal, or until about
-    /// `stream_cut_bytes` have gone out, when a `resume` frame ends the
-    /// response. A client that goes away stops listening, never the turn:
-    /// `POST …/stop` is the only stop.
-    fn follow_turn(&self, responder: Responder, log: &TurnLog, from: usize) {
-        let Ok(mut stream) = responder.event_stream() else { return };
-        log.state.lock().unwrap().followers += 1;
-        let mut next = from;
-        let mut written = 0usize;
-        let mut pump = || -> std::io::Result<()> {
-            stream.write(SSE_KEEPALIVE_COMMENT)?;
-            loop {
-                // Frames are copied out under the lock and written outside it,
-                // so a slow client never holds the turn.
-                let (frames, ended, failure, total) = {
-                    let mut state = log.state.lock().unwrap();
-                    if state.failure.is_none() && !state.ended && next >= state.frames.len() && !self.closing.is_aborted() {
-                        // A turn can idle behind a slow model; a comment keeps the
-                        // connection warm and costs a client nothing.
-                        let (waited, timeout) = log.changed.wait_timeout(state, SSE_KEEPALIVE_INTERVAL).unwrap();
-                        state = waited;
-                        if timeout.timed_out() && next >= state.frames.len() && !state.ended {
-                            drop(state);
-                            stream.write(SSE_KEEPALIVE_COMMENT)?;
-                            continue;
-                        }
+        // The queue closes when the turn drops `emit`, as it returns.
+        std::thread::spawn(move || admission.run(emit));
+        move |responder| {
+            let Ok(mut stream) = responder.event_stream() else { return reading.store(false, Ordering::Relaxed) };
+            let mut frame = SSE_KEEPALIVE_COMMENT.to_string();
+            while reading.load(Ordering::Relaxed) && stream.write(&frame).is_ok() {
+                // A turn can idle behind a slow model; a comment keeps the
+                // connection warm and costs a client nothing.
+                frame = match frames.recv_timeout(SSE_KEEPALIVE_INTERVAL) {
+                    Ok(frame) => {
+                        backlog.fetch_sub(frame.len(), Ordering::Relaxed);
+                        frame
                     }
-                    let mut frames = Vec::new();
-                    let mut size = 0usize;
-                    let mut at = next;
-                    // A failed store closed the buffer: its frames are gone, and the failure is all there is to send.
-                    while state.failure.is_none() && at < state.frames.len() && size < 256 * 1024 {
-                        let frame = state.frames.at(at)?;
-                        size += frame.len();
-                        frames.push(frame);
-                        at += 1;
-                    }
-                    (frames, state.ended, state.failure.clone(), state.frames.len())
+                    Err(mpsc::RecvTimeoutError::Timeout) => SSE_KEEPALIVE_COMMENT.to_string(),
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 };
-                if let Some(failure) = failure {
-                    return stream.write(&failure);
-                }
-                for frame in frames {
-                    stream.write(&frame)?;
-                    written += frame.len();
-                    next += 1;
-                    // Never cut after the terminal: there is nothing left to resume.
-                    if written >= self.stream_cut_bytes && !(ended && next == total) {
-                        return stream.write(&encode_sse(&json!({ "type": "resume", "turn": log.id, "from": next })));
-                    }
-                }
-                if (ended && next >= total) || self.closing.is_aborted() {
-                    return Ok(());
-                }
             }
-        };
-        if let Err(error) = pump()
-            && error.kind() == std::io::ErrorKind::InvalidInput
-        {
-            self.options.logger.error("turn replay read failed", json!({ "error": error.to_string() }));
-            let _ = stream.write(&encode_sse(
-                &json!({ "type": "error", "reason": "error", "errorMessage": "Could not replay the turn stream; read the transcript." }),
-            ));
-        }
-        let mut state = log.state.lock().unwrap();
-        state.followers -= 1;
-        if state.expired && state.followers == 0 {
-            state.frames.dispose();
+            reading.store(false, Ordering::Relaxed);
         }
     }
 
     /// Passive invalidations of the conversation. This subscription never opens a
-    /// turn; a client that goes away, or stops reading, drops its listener.
+    /// turn; it ends when the client goes away or stops reading, or the host shuts down.
     fn conversation_events(&self, responder: Responder) {
         let Ok(mut stream) = responder.event_stream() else { return };
-        let (sender, receiver) = mpsc::channel::<Option<String>>();
-        let (events, closed) = (Mutex::new(sender.clone()), Mutex::new(sender));
+        let (events, receiver) = mpsc::channel::<Option<String>>();
+        let closed = events.clone();
         let subscription = self.host().subscribe(
             move |event| {
-                let _ = events.lock().unwrap().send(Some(encode_sse(event)));
+                let _ = events.send(Some(encode_sse(event)));
             },
             move || {
-                let _ = closed.lock().unwrap().send(None);
+                let _ = closed.send(None);
             },
         );
-        let mut written = 0usize;
         let mut frame = SSE_KEEPALIVE_COMMENT.to_string();
-        loop {
-            if stream.write(&frame).is_err() {
-                break;
-            }
-            written += frame.len();
-            if written >= self.stream_cut_bytes || self.closing.is_aborted() {
-                break;
-            }
+        while stream.write(&frame).is_ok() {
             frame = match receiver.recv_timeout(SSE_KEEPALIVE_INTERVAL) {
                 Ok(Some(event)) => event,
                 Ok(None) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -517,7 +356,7 @@ impl Shared {
         self.host().unsubscribe(subscription);
     }
 
-    fn handle(self: &Arc<Self>, route: Route, mut context: Context<'_>, responder: &Responder) -> Result<Reply> {
+    fn handle(self: &Arc<Self>, route: Route, mut context: Context, responder: &Responder) -> Result<Reply> {
         let options = &self.options;
         let host = self.host();
         // What a request's own work stops with: its caller going away.
@@ -532,7 +371,7 @@ impl Shared {
             // per-hook ids to invent for a file that has none.
             Route::HooksConfig => {
                 let (path, document) = if context.request.method == "GET" {
-                    options.hooks.config().ok_or_else(|| GhostError::internal("A configured hook runner has no hooks.json."))?
+                    options.hooks.config()
                 } else {
                     let document = context.json_body()?;
                     options.hooks.replace_config(document).map_err(GhostError::invalid)?
@@ -548,18 +387,18 @@ impl Shared {
                     "restartNeeded": replaced_since_start(running),
                 }))
             }
-            Route::GhostName => {
+            Route::Ghost => {
                 // The topic documents are the owner's to read, edit and delete: where they are, and how many.
-                let topics = crate::ghosts::ghost_paths(&options.ghost.dir).topics_dir;
+                let topics = options.ghost.topics_dir();
                 ok(json!({ "name": options.ghost.name(), "topics": { "path": topics.to_string_lossy(), "count": crate::topics::count(&topics) } }))
             }
             Route::CharacterGet => {
-                let character = read_character(&options.ghost.dir, false)?;
-                ok(json!({ "body": character.map(|character| character.body).unwrap_or_default(), "limit": MAX_CHARACTER_BODY_LENGTH }))
+                let character = options.ghost.read_character(false)?;
+                ok(json!({ "body": character.unwrap_or_default(), "limit": MAX_CHARACTER_BODY_LENGTH }))
             }
             Route::CharacterPut => {
                 let body = context.body()?;
-                write_character(&options.ghost.dir, string_field(&body, "body")?)?;
+                options.ghost.write_character(string_field(&body, "body")?)?;
                 ok(json!({ "ok": true, "limit": MAX_CHARACTER_BODY_LENGTH }))
             }
             Route::Complete => {
@@ -574,10 +413,7 @@ impl Shared {
                 let body = context.body()?;
                 let prompt = body.get("prompt").and_then(Value::as_str).map(str::trim).filter(|prompt| !prompt.is_empty());
                 let prompt = prompt.ok_or_else(|| GhostError::invalid("\"prompt\" must be non-empty text."))?;
-                let admission = host.admit_turn(prompt)?;
-                let log = self.start_turn_log(admission);
-                let shared = self.clone();
-                Ok(Reply::Stream(Box::new(move |responder| shared.follow_turn(responder, &log, 0))))
+                Ok(Reply::Stream(Box::new(Self::start_turn(host.admit_turn(prompt)?))))
             }
             Route::Events => {
                 let shared = self.clone();
@@ -590,7 +426,7 @@ impl Shared {
             }
             // The owner's devices that get an alert when a turn ends (CONTRACTS.md "Push alerts").
             Route::PushPut | Route::PushDelete | Route::PushTest => {
-                let push = host.push().ok_or_else(|| GhostError::new("push_unavailable", "This ghostd keeps no devices to alert.", 501))?;
+                let push = host.push();
                 let body = context.body()?;
                 match route {
                     Route::PushPut => {
@@ -623,35 +459,18 @@ impl Shared {
                 let read_at = read_at.ok_or_else(|| GhostError::invalid("readThrough must be a valid timestamp no later than now."))?;
                 ok(json!({ "ok": true, "readAt": host.mark_read(read_at)? }))
             }
-            // An image body, from any owner.
+            // The body is the image itself.
             Route::AttachmentSave => {
                 let bytes = context.request.read_body(MAX_ATTACHMENT_BYTES)?;
                 Ok(Reply::Json(201, json!({ "path": host.save_attachment(&bytes)? })))
             }
             Route::AttachmentRead => {
                 let attachment = host.read_attachment(context.param("file"))?;
-                Ok(Reply::Bytes {
-                    content_type: attachment.content_type,
-                    cache: "private, max-age=31536000, immutable",
-                    nosniff: true,
-                    body: attachment.bytes,
-                })
-            }
-            // The rest of a cut turn response; see CONTRACTS.md, "Turn wire".
-            Route::Stream => {
-                let log = self.turn_logs.lock().unwrap().get(context.request.query("turn").unwrap_or("")).cloned();
-                let Some(log) = log else {
-                    return Err(GhostError::new("turn_not_found", "That turn is no longer resumable; read the transcript.", 404));
-                };
-                let reached = log.state.lock().unwrap().frames.len();
-                let from = number_param(&context.request, "from")?.filter(|from| from.fract() == 0.0 && *from >= 0.0 && *from <= reached as f64);
-                let from = from.ok_or_else(|| GhostError::invalid("\"from\" must be an event index this turn has reached."))? as usize;
-                let shared = self.clone();
-                Ok(Reply::Stream(Box::new(move |responder| shared.follow_turn(responder, &log, from))))
+                Ok(Reply::Image { content_type: attachment.content_type, body: attachment.bytes })
             }
             Route::Transcript => {
                 let read_through = crate::clock::now_iso();
-                let mut transcript = host.read_transcript(number_param(&context.request, "limit")?, number_param(&context.request, "offset")?)?;
+                let mut transcript = host.read_transcript(count_param(&context.request, "limit")?, count_param(&context.request, "offset")?)?;
                 transcript["readThrough"] = json!(read_through);
                 ok(transcript)
             }
@@ -681,7 +500,7 @@ impl Shared {
             let decoded = percent_decode(&segment).ok_or_else(|| GhostError::invalid("URL path segments must use valid percent-encoding."))?;
             params.insert(name, decoded);
         }
-        self.handle(route, Context { shared: self, request, params }, responder)
+        self.handle(route, Context { request, params }, responder)
     }
 
     /// Nothing a request carries may take the process down: every failure is
@@ -697,11 +516,12 @@ impl Shared {
         let outcome = self.authenticate(&request, &mut responder).and_then(|()| self.route(request, &responder));
         match outcome {
             Ok(Reply::Json(status, body)) => responder.json(status, &body),
-            Ok(Reply::Bytes { content_type, cache, nosniff, body }) => {
-                let mut headers = vec![("content-type", content_type.as_str()), ("cache-control", cache)];
-                if nosniff {
-                    headers.push(("x-content-type-options", "nosniff"));
-                }
+            Ok(Reply::Image { content_type, body }) => {
+                let headers = [
+                    ("content-type", content_type.as_str()),
+                    ("cache-control", "private, max-age=31536000, immutable"),
+                    ("x-content-type-options", "nosniff"),
+                ];
                 responder.bytes(200, &headers, &body);
             }
             Ok(Reply::Stream(stream)) => stream(responder),
@@ -714,35 +534,14 @@ impl Shared {
     }
 }
 
-pub struct ListeningServer {
-    pub port: u16,
-    server: Server,
-    shared: Arc<Shared>,
-}
-
-impl ListeningServer {
-    /// Stop accepting and end every open stream. Turns are the host's to abort.
-    pub fn close(&self) {
-        self.server.close();
-        self.shared.closing.abort();
-        let logs: Vec<Arc<TurnLog>> = self.shared.turn_logs.lock().unwrap().drain().map(|(_, log)| log).collect();
-        for log in logs {
-            log.state.lock().unwrap().ended = true;
-            log.changed.notify_all();
-        }
-    }
-}
-
 /// What `ServerOptions.api_token` means. `File` is the machine-local token,
 /// minted here rather than on the first authenticated request so a client that
-/// starts alongside the daemon finds the file. `Off` is no authentication at
-/// all, which is test-only and says so out loud.
+/// starts alongside the daemon finds the file.
 fn resolve_api_token(options: &ServerOptions) -> std::result::Result<Option<String>, String> {
     match &options.api_token {
-        ApiToken::Off => {
-            options.logger.warn("the HTTP API is running without authentication", Value::Null);
-            Ok(None)
-        }
+        #[cfg(test)]
+        ApiToken::Off => Ok(None),
+        #[cfg(test)]
         ApiToken::Fixed(token) => Ok(Some(token.clone())),
         ApiToken::File => {
             let path = api_token_path(&options.env, &options.home);
@@ -754,21 +553,14 @@ fn resolve_api_token(options: &ServerOptions) -> std::result::Result<Option<Stri
     }
 }
 
-/// Bind `127.0.0.1:<port>` and serve the API.
-pub fn start_daemon_server(options: ServerOptions) -> std::result::Result<ListeningServer, String> {
+/// Bind `127.0.0.1:<port>` and serve the API. Closing the server stops it
+/// accepting; the streams still open end with the host, whose shutdown aborts
+/// the running turn and closes the event subscriptions.
+pub fn start_daemon_server(options: ServerOptions) -> std::result::Result<Server, String> {
     let api_token = resolve_api_token(&options)?;
     let address = SocketAddr::from(([127, 0, 0, 1], options.port));
-    let shared = Arc::new(Shared {
-        api_token,
-        max_body_bytes: options.max_body_bytes.unwrap_or(DEFAULT_MAX_BODY_BYTES),
-        stream_cut_bytes: options.stream_cut_bytes.unwrap_or(DEFAULT_STREAM_CUT_BYTES),
-        turn_logs: Mutex::new(HashMap::new()),
-        closing: Abort::new(),
-        options,
-    });
-    let serving = shared.clone();
-    let server = Server::start(address, move |request, responder| serving.serve(request, responder)).map_err(|error| error.to_string())?;
-    Ok(ListeningServer { port: server.address.port(), server, shared })
+    let shared = Arc::new(Shared { api_token, options });
+    Server::start(address, move |request, responder| shared.serve(request, responder)).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
