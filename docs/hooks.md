@@ -7,7 +7,7 @@ Ghost does not translate, duplicate, or await those hooks.
 
 Ghost supports one event, `session_stop`. It runs after a pass ends and before
 Ghost emits the turn's terminal `done` frame, and can accept the pass or return
-context for a continuation pass. Alerts when a turn ends need no hook: the app
+context for a continuation pass. Alerts when a turn ends need no hook: the page
 turns them on ([mobile.md](mobile.md#completion-alerts)).
 
 ## Configuration
@@ -42,13 +42,13 @@ unknown event, or any top-level key other than `hooks`, is refused, at startup
 and by `PUT /api/hooks/config`.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
-600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
-event, and are what `ghost hooks` shows. While a `session_stop` handler runs, the turn
+600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, have defaults,
+and are what `ghost hooks` shows. While a `session_stop` handler runs, the turn
 stream carries `hook_start`/`hook_end` with its `name` and `event`. It runs
 out of sight: the reply already reads as finished, and only a continuation
 shows. The first `session_stop` handler that requests a continuation wins.
 
-Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
+Ghost registers no built-in hooks, and ghostd starts no turn of its own.
 
 `ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
 document with the file, which must be the document itself (`hooks` at its top level), so a
@@ -66,9 +66,8 @@ descendant tree (TERM, then KILL after 3 s) and drains its pipes before the
 lifecycle boundary returns; the last 8 KiB of stderr is kept for a block
 reason. A hook ends with its own process: output still arriving 2 s
 after it exits is dropped, so a descendant that left the group (`setsid job &`)
-and still holds the pipes cannot hold the daemon's hook promise open. Synchronous spawn failures, process-start
-errors, and unexpected command-runner rejection are generically logged and
-fail open for every event; they never fail the owner turn or expose the
+and still holds the pipes cannot hold the daemon's hook promise open. A hook that cannot be
+started is logged and fails open; it never fails the owner turn or expose the
 command/error payload.
 
 ## `session_stop` protocol
@@ -126,7 +125,7 @@ continuation:
 ```
 
 `continue`/`decision` without non-empty context is ignored. Exit 2 also blocks,
-using stderr as the reason. Other exit codes, malformed output, thrown handlers,
+using stderr as the reason. Other exit codes, malformed output,
 and timeouts are logged and fail open.
 Handlers are cancelled when the turn is stopped.
 
@@ -157,7 +156,7 @@ completion.
 ## Status and editing
 
 The hooks that run are exactly the handlers in the `hooks.json` the daemon
-admitted. The owner-only `GET /api/hooks/config` returns `{ path, document }`:
+admitted. `GET /api/hooks/config` returns `{ path, document }`:
 that file as one object and its absolute path; `ghost hooks` reads it there, showing a handler without a `name` or
 `description` with the defaults above. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,

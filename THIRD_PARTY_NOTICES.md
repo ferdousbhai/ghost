@@ -88,7 +88,7 @@ named. `Cargo.lock` holds the exact versions.
 The daemon and the `ghost` command (`ghostd`, `ghost`):
 
 - MIT or Apache-2.0: equivalent, hashbrown, httparse, indexmap, itoa, libc,
-  regex, regex-automata, regex-syntax, serde_core, serde_json
+  serde_core, serde_json
 - MIT or Apache-2.0, the [RustCrypto](https://github.com/RustCrypto) crates
   that encrypt and sign push alerts: aead, aes, aes-gcm, base16ct,
   block-buffer, cipher, const-oid, cpufeatures, crypto-bigint, crypto-common,
@@ -97,27 +97,18 @@ The daemon and the `ghost` command (`ghostd`, `ghost`):
   sha2, signature, typenum, universal-hash, zeroize; and cfg-if
 - BSD-3-Clause: subtle
 - MIT: generic-array, zmij
-- Unlicense or MIT: aho-corasick, memchr
+- Unlicense or MIT: memchr
 - Zlib: foldhash
 
-The bar (`ghost-bar`):
+The bar (`ghost-bar`) reaches the daemon with the daemon's own client, so it
+is built from all of the above, and from:
 
 - MIT and ISC: omui (its Lucide icons and Strata theme code are above)
 - MIT, the [gtk-rs](https://gtk-rs.org) crates: cairo-rs, cairo-sys-rs,
   gdk-pixbuf, gdk-pixbuf-sys, gdk4, gdk4-sys, gio, gio-sys, glib, glib-sys,
   gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
   pango, pango-sys
-- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab, urlencoding, zmij
-- MIT or Apache-2.0: async-channel, base64, bitflags, concurrent-queue,
-  crossbeam-utils, equivalent, event-listener, event-listener-strategy,
-  field-offset, form_urlencoded, futures-channel, futures-core,
-  futures-executor, futures-io, futures-task, futures-util, hashbrown, idna,
-  idna_adapter, indexmap, itoa, libc, log, once_cell, parking,
-  percent-encoding, pin-project-lite, serde, serde_core, serde_json,
-  smallvec, stable_deref_trait, unicase, ureq, url, utf8_iter, utf_types
-- Unlicense or MIT: memchr
-- Zlib: foldhash
-- Unicode-3.0: icu_collections, icu_locale_core, icu_normalizer,
-  icu_normalizer_data, icu_properties, icu_properties_data, icu_provider,
-  litemap, potential_utf, tinystr, writeable, yoke, zerofrom, zerotrie,
-  zerovec
+- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab
+- MIT or Apache-2.0: bitflags, field-offset, futures-channel, futures-core,
+  futures-executor, futures-io, futures-task, futures-util, pin-project-lite,
+  smallvec, unicase

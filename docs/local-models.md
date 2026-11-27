@@ -9,17 +9,17 @@ what was measured.
 
 - **In use (2026-11-24):** Inkling 2 Mini. See
   [Inkling 2 Mini](#inkling-2-mini-2026-11-24).
-- **Before it (2026-11-17):** Gemma 4 26B A4B. See
-  [Gemma 4 26B A4B](#gemma-4-26b-a4b-2026-11-17).
-- **Not pursued:** Gemma 4 E4B, Qwen3.5-0.8B, and running a model through
-  Crush. See [Tried before](#tried-before).
+- **Before it:** Gemma 4 26B A4B (2026-11-17), and, not pursued, Gemma 4
+  E4B, Qwen3.5-0.8B and running a model through the Crush harness, whose own
+  22,646-token prompt took 309 s a turn: that is why Ghost runs the model
+  itself with a short prompt and two tools. Their measurements are in Git
+  history.
 
 ## Test machine
 
 MacBook Pro 16-inch (M1 Max, 2021), 64 GB, running Omarchy on Asahi Linux.
 There is no Metal or MLX on Linux; the GPU is reached through the Asahi Vulkan
-driver (Honeykrisp, `vulkan-asahi` 26.2.6). The runtime is llama.cpp at
-`61dbf49`, built from source with `-DGGML_VULKAN=ON`.
+driver (Honeykrisp).
 
 ## Inkling 2 Mini (2026-11-24)
 
@@ -76,46 +76,12 @@ lists Intel GPUs only, so Ghost starts the server itself.
   `idleMinutes` 1: the server stopped for idleness after a turn, saving 1.1 GB;
   the next turn in that conversation took 49 s, 25 s of it the load, and did
   not read the conversation again. By hand, on a 5,739-token prompt: 68.5 s to
-  read it, 0.2 s to save, 0.2 s to restore after a restart, then 0.4 s.
+  read it, 0.2 s to save, 0.2 s to restore after a restart, then 0.4 s. The
+  save has since been made atomic (CONTRACTS.md "Local model").
 - The same day the time left the prompt. Asked the time or the weekday, the
   model ran `date` unprompted, twice of twice. Writing a note, it once dated
   a change with the note's old date rather than look the date up; the recipe no
   longer asks for dates.
-
-## Gemma 4 26B A4B (2026-11-17)
-
-Model: `unsloth/gemma-4-26B-A4B-it-GGUF`, `gemma-4-26B-A4B-it-UD-Q4_K_M.gguf`
-(15.8 GiB), revision `c099eb48e663`, served by the source build above with
-every layer on Vulkan. Lastbook loads the same file through its own runner.
-
-Measured on this machine:
-
-- `llama-bench -p 2048`: micro-batch 512 reads prompts at 102 tokens/s, 2048
-  at 164; flash attention changes neither. ghostd uses 2048.
-- Generation ran at 23 tokens/s on a short prompt, but at 6.5 tokens/s in
-  `llama-bench` minutes later with the machine otherwise idle (load 1.5).
-  The cause was not found.
-- Thinking cost about a minute per answer (about 1,000 tokens of it);
-  without it a turn took 22–39 s.
-
-Lastbook gives its copy back after 15 idle minutes; Ghost gives its own back
-after its idle minutes. Both can be resident at once for up to that long.
-
-## Tried before
-
-- **Gemma 4 E4B** (`google/gemma-4-E4B-it-qat-q4_0-gguf`, 2026-11-14): 26.7
-  tokens/s generation on Vulkan, and no wrong action or malformed call in 32
-  runs of a 16-case, 12-tool probe (29 fully right; it refused "mute my
-  microphone" though `bash` could do it). It was never tried on real ghost
-  turns; the 26B model replaced it.
-- **Qwen3.5-0.8B** (dropped 2026-11-09): an offline fallback making one
-  constrained choice from 19 `omarchy` commands. At best 1% wrong actions but
-  only 28 of 64 in-scope requests right: too small to tell lookalikes apart
-  ("shut down" became lock) without refusing ordinary requests.
-- **Crush** (2026-11-17): the 26B model through the Crush harness got 22,646
-  prompt tokens a turn, almost all Crush's own, which took 309 s, and guessed
-  the time four hours off rather than check the clock. That is why Ghost runs
-  the model itself with a short prompt and two tools.
 
 ## Running one on Omarchy
 
@@ -130,8 +96,3 @@ after its idle minutes. Both can be resident at once for up to that long.
   `cmake` (`uvx cmake` works), `glslc` and the Vulkan headers.
 - Weights go in the Hugging Face hub cache (`~/.cache/huggingface/hub`),
   fetched with `uvx --from huggingface_hub hf download <repo> <file>`.
-
-## Open questions
-
-1. Why generation sometimes drops from 23 to about 6 tokens/s.
-2. Whether to stop Lastbook's idle copy before loading Ghost's.

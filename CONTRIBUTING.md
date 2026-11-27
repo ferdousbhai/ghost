@@ -1,29 +1,14 @@
 # Contributing
 
-Read [AGENTS.md](AGENTS.md) for working rules and [CONTRACTS.md](CONTRACTS.md)
-for shared guarantees. Check current issues and commits before starting.
+The working rules, the commands and the gate are in [AGENTS.md](AGENTS.md);
+the shared guarantees, and why the product stops where it does, are in
+[CONTRACTS.md](CONTRACTS.md). What only this page says:
 
-Owner-specific character, documents, configuration, and transcripts stay
-private. Upstream fixes must generalise without including owner data.
-[Concepts](docs/concepts.md) explains the product's deliberate boundaries.
-
-## Workflow
-
-Follow the owner's authorized workflow. Work in this repository currently
-commits directly to `master`; do not open task PRs. External contributors use
-a topic branch and a fork. A ghost needs owner authorization to publish under
-their GitHub identity; an existing instruction to push is sufficient.
-
-1. Preserve concurrent edits. Never stash, restore, or discard a peer's work.
-2. Update contracts and all affected consumers together. Add a focused test
-   for behavior changes; run the affected tests and `clippy` for the package.
-3. Commit the problem, change, and reason. Justify any prompt-budget increase
-   in the message. A ghost-authored change can identify its model in a trailer.
-4. Push only within the authorized scope. Master pushes require the full
-   `.githooks/verify` gate after the final commit; never bypass the hook.
-5. If using a PR, describe the resulting behavior and validation, then remove
-   its worktree and branches after merge.
-
-A source build does not update a packaged install. Deploy and verify using
-[the maintenance runbook](docs/self-maintenance.md), Test changes against scratch state and the bar's scripted QA,
-never the owner's live ghost or desktop.
+- Owner-specific character, documents, configuration, and transcripts stay
+  private. An upstream fix generalises without including owner data.
+- External contributors use a fork and a topic branch, and a pull request
+  that describes the resulting behavior and how it was checked.
+- A ghost needs its owner's authorization to publish under their GitHub
+  identity; an existing instruction to push is sufficient.
+- A commit message gives the problem, the change, and the reason. A
+  ghost-authored change can identify its model in a trailer.

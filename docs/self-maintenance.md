@@ -79,8 +79,10 @@ only after `cargo build --release --locked` and a restart.
 
 The bar is one binary, `ghost-bar`, and a client of the daemon's API.
 The same build compiles a clone's to `target/release/ghost-bar`. One bar
-runs at a time and stays running once summoned, hidden by Escape, so the
-packaged one must have ended before a clone's can start, and the reverse. `packages/bar/dev/qa.sh` walks a change's flows, with
+runs at a time and stays running once summoned, hidden by Escape. Launching
+a bar of another version replaces the one running; a build of the same
+version, as a clone's is, needs the running one ended first, with `Ctrl+Q`
+in it. `packages/bar/dev/qa.sh` walks a change's flows, with
 screenshots, against a scratch ghostd and a stand-in model.
 
 The ghost's prompt carries none of this: the loop, the restart unit, and the
@@ -91,7 +93,7 @@ undo list are `ghost help self`, read on the turn that needs them.
 A plain restart kills a ghost's own parent. `ghost help self` schedules the
 restart in a transient `systemd-run --user` unit that survives the daemon;
 its description carries the reason. Finish the turn and tell the owner first:
-a restart aborts every running turn and sends no model prompt.
+a restart aborts the running turn and sends no model prompt.
 
 The daemon's `TimeoutStopSec` is the shutdown deadline. Read `git log`, the
 journal, and the conversation before retrying a failed change. Use a dedicated
@@ -118,9 +120,9 @@ not the version, is what says an update is live.
 
 ## Canary before adopting
 
-Never prove a build against the owner's ghost or desktop. For a checkout
-canary, use a private root and configuration and a free
-non-live port (7799 below):
+Never prove a build against the owner's ghost, port, hooks or desktop. For a
+checkout canary, use a private root and configuration and a free non-live
+port (7799 below):
 
 ```sh
 task_canary_dir=$(mktemp -d /tmp/ghost-canary.XXXXXX)
@@ -138,28 +140,23 @@ with `GHOSTD_PORT=7799` and
 before deleting the scratch directory. Functional verification of the bar
 uses `packages/bar/dev/qa.sh`, never the owner's session.
 
-Never port 7717 or `~/.local/share/ghost`; scratch configuration also prevents
-live owner hooks from running. Every canary must use its own ghost home.
+The scratch `GHOSTD_HOOKS` is what keeps the owner's live hooks from running.
+Every canary uses its own ghost home.
 
 ## Rollback
 
 - **Code.** `git revert <sha>` in the checkout, `cargo build --release --locked`, restart. The
   commit that broke it and the revert that fixed it are both in `git log`, and
   the reason for each restart is in `journalctl --user -u 'ghost-restart-*'`.
-- **A ghost home.** Deletion moves the whole directory to the freedesktop trash
-  with `gio trash`, which refuses rather than copies across filesystems;
-  `gio trash --restore` puts it back. Ghost never recursively removes a home,
-  and neither should you.
+- **The conversation and the ghost home.** Starting over moves the
+  conversation to Trash, where it can be restored. Nothing in Ghost removes a
+  ghost home; to remove one yourself, `gio trash` it (`gio trash --restore`
+  puts it back), never `rm -r`.
 - **The system.** Omarchy wraps snapper: `omarchy-snapshot create` before a
   risky change, `omarchy-snapshot restore` to go back. Both need sudo, and
   `create` does nothing useful until snapper has a config.
 
 Never `rm -rf` a checkout. `git` already holds every state worth returning to.
-
-> **A shared tree is not a safe clone to run from.** If other agent sessions
-> or you edit the same working tree, the ghost's branch, its `git status`, and
-> its build will collide with yours, and a restart will ship whatever happened
-> to be built last. Give the ghost its own clone.
 
 ## Back to the package
 
@@ -175,5 +172,5 @@ clone stays where it is, and `git` in it still holds every change.
 
 Omarchy owns package updates. While a ghost runs from its clone, a package
 update changes nothing that runs; the clone takes upstream changes with
-`git pull`, a build, and a restart, within the owner's instructions. See [getting started](https://github.com/ferdousbhai/ghost/blob/master/docs/getting-started.md#10-if-something-is-wrong)
+`git pull`, a build, and a restart, within the owner's instructions. See [getting started](getting-started.md#10-if-something-is-wrong)
 for the packaged upgrade commands.

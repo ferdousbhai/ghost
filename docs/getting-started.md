@@ -2,8 +2,8 @@
 
 Install Ghost and talk to it from its bar or the terminal.
 
-For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
-of — this page.
+What the pieces are, and why Ghost stops where it does, is in
+[CONTRACTS.md](../CONTRACTS.md).
 
 ## 0. What you need
 
@@ -17,9 +17,10 @@ of — this page.
 
 ## 1. Install the package
 
-Open the Omarchy menu, then **Install → AI → Ghost**. Until that entry ships
-([#54](https://github.com/ferdousbhai/ghost/issues/54)), install the `ghost`
-package from Omarchy's repository; `omarchy update` keeps it current:
+Install the `ghost` package from Omarchy's repository; `omarchy update` keeps
+it current. (An **Install → AI → Ghost** menu entry that does this and
+section 3 in one step is proposed in
+[#54](https://github.com/ferdousbhai/ghost/issues/54).)
 
 ```sh
 omarchy pkg add ghost
@@ -40,18 +41,6 @@ It also starts Ghost for your login (section 3).
 To run from a checkout instead, follow
 [the maintenance runbook](self-maintenance.md).
 
-The package only puts files in place; section 3 starts Ghost for this login.
-
-If `omarchy update` fails on `ghost.db`, this machine still has the
-self-hosted `[ghost]` repository that installs from before Omarchy shipped
-Ghost added. Its releases are gone; remove it:
-
-```sh
-sudo sed -i '\#^Include = /etc/pacman.d/ghost.conf$#d' /etc/pacman.conf
-sudo rm -f /etc/pacman.d/ghost.conf
-rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
-```
-
 ### Product skills through Bash
 
 Nothing to install: a ghost reads the product index with `ghost help
@@ -59,7 +48,7 @@ products`. It lists the recommended products; the ghost installs a product
 when needed, and the product installs its own skill
 (`<cli> skill install`). Ghost uses
 these product CLIs from the model's shell, reading each one's skill; no
-additional daemon integration or MCP server is needed.
+daemon integration is needed.
 
 Each skill explains how to detect and install its missing CLI and use existing
 accounts. The owner completes sign-in windows and keeps passwords/recovery keys
@@ -83,8 +72,8 @@ ghost can offer to install Recall, which indexes only the folders you choose.
 
 ## 3. Confirm setup
 
-The Install → AI → Ghost entry starts the daemon. After `omarchy pkg add
-ghost`, do the same for this login:
+The package only puts files in place. After `omarchy pkg add ghost`, start
+Ghost for this login (the installer script has already done it):
 
 ```sh
 systemctl --user enable --now ghostd.service
@@ -141,9 +130,10 @@ Set `local` in `~/.config/ghost/config.json` and restart ghostd:
 ```
 
 `server` may be left out when `llama-server` is on your `PATH`. What to
-install is in `ghost help products`, under "Running locally". No guide names
+install is in `ghost help products`, under "The local model". No guide names
 a model, since the best one changes too often; what was measured, on which
-machine and when, is in [local-models.md](local-models.md). Ghost starts the server on
+machine and when, is in
+[local-models.md](https://github.com/ferdousbhai/ghost/blob/master/docs/local-models.md). Ghost starts the server on
 the first turn and stops it after five idle minutes.
 
 The model has two tools, a shell that runs as you and a question to you
@@ -157,14 +147,12 @@ leaves the machine; nothing else does.
 ## 6. First conversation
 
 Summon Ghost from your app launcher, or with the key you bound. Type in the
-prompt, and `Enter` sends. The prompt goes, and the answer appears in its
-place, with a line saying which command the ghost is running. It stays
-until you press `Esc` or turn to another window; neither stops the ghost,
-and summoning the bar again shows a turn that is still running. `Ctrl+C`
-stops a running turn (with none it empties the prompt, and with the prompt
-empty it puts the bar away). It is one conversation: `Up` and `Down` go
-back and forth through it, and `ghost show` in a terminal lists all of it,
-the ghost's reasoning and commands included.
+prompt, and `Enter` sends: the answer takes the prompt's place, and stays
+until you press `Esc` or turn to another window, neither of which stops the
+ghost. `Ctrl+C` stops a running turn. The rest of what the bar does is in
+[its README](https://github.com/ferdousbhai/ghost/blob/master/packages/bar/README.md).
+It is one conversation, and `ghost show` in a terminal lists all of it, the
+ghost's reasoning and commands included.
 
 Your notes, mail, photos and the rest stay in their own apps. The ghost
 reaches them through each app's command line, and installs or connects one
@@ -202,8 +190,8 @@ codes.
 
 | Path | What |
 |---|---|
-| `~/.local/share/ghost/` | the ghost home: `character.md` and `conversation/`, the one conversation (its log, attachments, and the directory the ghost's commands run in) |
-| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one is an error |
+| `~/.local/share/ghost/` | the ghost home: `character.md`; `conversation/`, the one conversation (its log, attachments, and the directory the ghost's commands run in); and `topics/`, the ghost's topic documents |
+| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one or an unknown key is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/push.json` | the devices that get alerts, with their keys |
@@ -228,7 +216,7 @@ leaves the ghost home, the conversation, tokens, and your documents untouched.
 - **Remote access.** Tailscale Serve is the opt-in: `tailscale serve --bg --https=443 http://127.0.0.1:7717`
   turns it on and `tailscale serve --https=443 off` turns it off. `ghost
   status` then prints the summonghost.com link that adds this machine to the
-  app, the phone client ([mobile](mobile.md)).
+  page, the phone client ([mobile](mobile.md)).
   Only your own login gets in. On a
   phone, the camera attaches photos; dictate
   with the keyboard's own mic.
@@ -238,7 +226,7 @@ leaves the ghost home, the conversation, tokens, and your documents untouched.
 | Symptom | Check |
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
-| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the bar and CLI read `~/.local/state/ghost/api-token` |
+| `unauthorized` (exit 4) | `ghostd api-token` as the owner; the bar and CLI read `~/.local/state/ghost/api-token` |
 | A turn fails at once | Is `local.model` set in `~/.config/ghost/config.json`, and does `llama-server` start? `journalctl --user -u ghostd -e` has its error |
 
 After an upgrade, restart the daemon to load the new build:

@@ -69,7 +69,7 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   fold opened while the turn runs is still open when the transcript replaces
   it. Below the thread a typing bubble shows the command running now and for
   how long.
-- **What a chat does:** the turn wire and its `resume` frames; photos
+- **What a chat does:** the turn wire; photos
   uploaded on send; the follow-up queue (while a turn runs the send button
   queues, and stops when the composer is empty); stop, which hands queued
   text back to the composer; the ghost's open question, its answers as
@@ -120,7 +120,7 @@ parses, the service worker's list names exactly the files that exist and an
 alert is tagged by its machine, machine names normalize, and
 [`thread.js`](public/js/thread.js) holds: the route, the bubbles a transcript
 makes and their folded working, a running turn's events against the transcript
-they become, a turn cut by `resume` frames, paging, and the list's times.
+they become, paging, and the list's times.
 
 Publishing is the owner's call, like a release. `publish.sh` replaces the
 contents of the CloudChef project `ferdous/summonghost` with `public/` and
@@ -173,10 +173,8 @@ stopped profile's `Default/Preferences`
   a public origin calling a tailnet address is unknown.
 - Discovery listing a second machine: `/api/remote/machines` answers the
   page, but no other machine of the owner's ran Ghost when it was tried.
-- A turn long enough to be cut by `resume` frames, against a real ghostd; the
-  reader is checked in `check.html` only.
 - Alerts on a real phone, Apple's push service, and an alert arriving with
-  the app closed. Checked on 2026-11-25 in desktop Chromium only: the page
+  the page closed. Checked on 2026-11-25 in desktop Chromium only: the page
   subscribed, and a scratch ghostd's test alert and a real turn's alert went
   through Google's push service and were shown by the service worker. Alerts
   from two machines keeping separate tags is checked in `check.html` only.
