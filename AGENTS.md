@@ -64,8 +64,7 @@ The daemon and the bar are Rust, in one cargo workspace at the repository root; 
 
 ## Cloudflare CLI
 
-Use the `cf` CLI for Cloudflare work in this repository (the page's Worker, its
-domains and DNS). Use Wrangler or the dashboard only where `cf` has no command
-for the task; wrangler is in `packages/web` only because `cf deploy` builds with
-it. Find commands with `cf cli search "<what you want to do>"`, then check
+Use the `cf` CLI alone for Cloudflare work in this repository (the page's
+Worker, its domains and DNS): no Wrangler, as a command, a config file or a
+dependency. Find commands with `cf cli search "<what you want to do>"`, then check
 `<command> --help`.

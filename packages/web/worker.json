@@ -1,0 +1,8 @@
+{
+  "name": "summonghost",
+  "compatibilityDate": "2025-12-23",
+  "assets": { "htmlHandling": "auto-trailing-slash", "notFoundHandling": "404-page" },
+  "domains": ["summonghost.com", "www.summonghost.com"],
+  "workersDev": false,
+  "previewUrls": false
+}

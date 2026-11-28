@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Publishes the page to summonghost.com: a Cloudflare Worker that only serves
-# public/, deployed with Cloudflare's `cf` (cloudflare.config.ts; never wrangler
-# by hand). On the owner's go only.
+# Publishes the page to summonghost.com: a Cloudflare Worker with no script,
+# which only serves public/ (worker.json is its settings). Deployed with
+# Cloudflare's `cf` alone: this writes the Build Output `cf deploy --prebuilt`
+# uploads, so there is no wrangler, no package.json and no node_modules here.
+# On the owner's go only.
 #
 #   packages/web/publish.sh             publish HEAD's packages/web
 #   packages/web/publish.sh --dry-run   build and check, upload nothing
@@ -22,7 +24,13 @@ if [[ -n "$(git -C "$root" status --porcelain -- packages/web)" ]]; then
 fi
 bash "$here/check.sh"
 
-cd -- "$here"
-# cf and the wrangler it builds with, at the versions the lockfile names.
-pnpm install --frozen-lockfile --silent
-pnpm exec cf deploy "${dry_run[@]}" --message "ghost $(git -C "$root" rev-parse --short HEAD)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-web-publish.XXXXXX")"
+trap 'rm -rf -- "$work"' EXIT
+worker="$work/.cloudflare/output/v1/workers/default"
+mkdir -p -- "$worker/assets"
+git -C "$root" archive HEAD:packages/web/public | tar -x -C "$worker/assets"
+git -C "$root" show HEAD:packages/web/worker.json > "$worker/worker.config.json"
+printf '%s\n' '{"buildContext":{"isPreview":false}}' > "$work/.cloudflare/output/v1/config.json"
+
+cd -- "$work"
+cf deploy --prebuilt "${dry_run[@]}" --message "ghost $(git -C "$root" rev-parse --short HEAD)"

@@ -124,10 +124,10 @@ they become, paging, and the list's times.
 
 Publishing is the owner's call, like a release. `publish.sh` deploys
 `public/` as the Cloudflare Worker `summonghost`, which has no script and
-only serves those files, with Cloudflare's `cf`
-([`cloudflare.config.ts`](cloudflare.config.ts), which names summonghost.com
-and www as its domains). `package.json` holds only that tooling: `cf`, and the
-wrangler it builds with, which is never run by hand.
+only serves those files, with Cloudflare's `cf` alone
+([`worker.json`](worker.json) is the Worker's settings, and names
+summonghost.com and www as its domains): it writes the Build Output that
+`cf deploy --prebuilt` uploads, so there is no wrangler and no `package.json`.
 
 A machine only admits the `https://summonghost.com` origin, and only with the
 identity Tailscale Serve stamps. Before it is published the page is walked on
