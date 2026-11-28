@@ -26,7 +26,7 @@ a click on the microphone does the same as the key.
 | Key | What it does |
 |---|---|
 | `Enter` | Sends what is in the prompt; while a turn runs, as a follow-up to it. What could not be sent comes back to the prompt. |
-| `Escape` | Puts the bar away. It stops nothing: a running turn runs on and is on screen when the bar is summoned again; an answer that had ended while on screen is not. Turning to another window does the same for an answer; the prompt keeps the keyboard until it is sent or put away. |
+| `Escape`, or a click off the bar | Puts the bar away. It stops nothing: a running turn runs on and is on screen when the bar is summoned again; an answer that had ended while on screen is not. While it is on screen the bar has the keyboard. |
 | `Ctrl+C` | As in a terminal: stops the running turn; with none, empties the prompt; with nothing to empty, puts the bar away. |
 | `Up`, `Down` (`Page Up`, `Page Down`) | Back and forth through the conversation's newest messages, an exchange at a time. |
 | `Ctrl+Q` | Ends the bar. |

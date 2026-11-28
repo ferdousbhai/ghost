@@ -410,7 +410,9 @@ icons. Removing it preserves owner data.
   id `io.github.ferdousbhai.Ghost`): a prompt near the bottom of the screen
   with the whole of what the ghost answers above it, and Ghost's only desktop
   surface. It is Rust and GTK 4, a layer-shell surface (`gtk4-layer-shell`; a
-  plain undecorated window where the display has none) with
+  plain undecorated window where the display has none) that is the whole
+  screen, clear but for the bar, and has the keyboard while it is on screen:
+  Escape or a click off the bar puts it away. It has
   [omui](https://github.com/ferdousbhai/omui)'s look. It is a client of the
   API and keeps no data; putting it away stops nothing. It finds the daemon
   with the CLI's own client (`ghostd::client`), afresh for each request; a
@@ -419,7 +421,7 @@ icons. Removing it preserves owner data.
   the keyboard, which is how a key binding summons it, and a launch of
   another version replaces the one running. Nothing listens
   until the owner starts dictation: it types into the bar's prompt as into
-  any focused field, which the prompt holds the keyboard for, and Ghost has
+  any focused field, and Ghost has
   no speech stack of its own. Where the machine has Omarchy's dictation the
   prompt shows a microphone, which a click toggles it with, and beside it the
   key Hyprland has bound as Omarchy's "Toggle dictation" (none where it

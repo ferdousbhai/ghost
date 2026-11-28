@@ -149,7 +149,7 @@ leaves the machine; nothing else does.
 
 Summon Ghost from your app launcher, or with the key you bound. Type in the
 prompt, and `Enter` sends: the answer takes the prompt's place, and stays
-until you press `Esc` or turn to another window, neither of which stops the
+until you press `Esc` or click off it, neither of which stops the
 ghost. `Ctrl+C` stops a running turn. The rest of what the bar does is in
 [its README](https://github.com/ferdousbhai/ghost/blob/master/packages/bar/README.md).
 It is one conversation, and `ghost show` in a terminal lists all of it, the

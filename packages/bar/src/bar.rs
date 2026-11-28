@@ -1,6 +1,6 @@
 //! The bar: a prompt near the bottom of the screen and, above it, what the owner asked with the whole of what the
 //! ghost answers, over whatever else is on screen. Nothing of it stays: the prompt goes when a question is sent,
-//! the answer when the owner presses Escape or turns to another window, and summoning the bar brings the prompt back.
+//! the answer when the owner presses Escape or clicks off it, and summoning the bar brings the prompt back.
 //!
 //! It is a layer-shell surface where the compositor has them, and a plain undecorated window where it has not
 //! (scripted QA's broadway display). Text is typed into it by whatever types into the focused field, so Omarchy's
@@ -130,17 +130,9 @@ fn width(window: &gtk::ApplicationWindow) -> i32 {
     WIDTH.min(screen(window).0 - 2 * 16)
 }
 
-/// Where the screen puts the bar: raised from its bottom edge by a share of its height. Whether that moved it.
-fn place(window: &gtk::ApplicationWindow) -> bool {
-    let raised = (f64::from(screen(window).1) * RAISED) as i32;
-    let moved = window.is_layer_window() && window.margin(Edge::Bottom) != raised;
-    if moved {
-        window.set_margin(Edge::Bottom, raised);
-    }
-    moved
-}
-
-/// The surface: nothing of a window, near the bottom edge above everything else.
+/// The surface: nothing of a window, above everything else. On a layer shell it is the whole screen, clear but for
+/// the bar near its bottom edge, so a click anywhere off the bar reaches it and puts the bar away; and it has the
+/// keyboard for as long as it is on screen, whatever else appears there (dictation's indicator does).
 fn surface(app: &gtk::Application) -> gtk::ApplicationWindow {
     let window = gtk::ApplicationWindow::builder().application(app).title("Ghost").decorated(false).default_width(WIDTH).build();
     window.add_css_class("bar-window");
@@ -150,11 +142,11 @@ fn surface(app: &gtk::Application) -> gtk::ApplicationWindow {
         window.init_layer_shell();
         window.set_namespace(Some("ghost"));
         window.set_layer(Layer::Overlay);
-        window.set_anchor(Edge::Bottom, true);
-        // `Bar::hold` says who has the keyboard: the prompt keeps it, an answer gives it up when turned from.
+        for edge in [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right] {
+            window.set_anchor(edge, true);
+        }
         window.set_keyboard_mode(KeyboardMode::Exclusive);
     }
-    place(&window);
     window
 }
 
@@ -162,6 +154,8 @@ impl Bar {
     pub fn build(app: &gtk::Application) {
         let window = surface(app);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 10);
+        root.set_halign(gtk::Align::Center);
+        root.set_valign(gtk::Align::End);
         // The keyboard's place once the prompt has gone, so the bar's keys still reach it.
         root.set_focusable(true);
         let panel = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -243,55 +237,44 @@ impl Bar {
             glib::Propagation::Stop
         });
         bar.window.add_controller(keys);
-        // Turning to another window puts an answer away, as Escape does. Not the prompt: it holds the keyboard, and
-        // what takes the compositor's attention meanwhile (dictation's indicator appearing) is not the owner leaving.
+        // A click off the bar puts it away, as Escape does: the clear screen around it is the bar's own surface.
+        let off = gtk::GestureClick::new();
         let this = bar.clone();
-        let was_active = Cell::new(false);
-        bar.window.connect_is_active_notify(move |window| {
-            if was_active.replace(window.is_active()) && !window.is_active() && !this.entry.get_visible() {
+        off.connect_pressed(move |_, _, x, y| {
+            let on_bar = this.window.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|picked| picked != *this.window.upcast_ref::<gtk::Widget>());
+            if !on_bar {
                 this.put_away();
             }
         });
+        bar.window.add_controller(off);
         // Summoned again (a second `ghost-bar`): the prompt, with the keyboard. omui's own handler shows the window.
         let this = bar.clone();
         app.connect_activate(move |_| this.summon());
 
         // Its screen is known once it is on one.
         let this = bar.clone();
-        bar.window.connect_map(move |window| {
-            // On another screen than was guessed, it is shown afresh at that screen's sizes: a layer surface resized
-            // as it appears is left undrawn.
-            if this.fit(window) {
-                let window = window.clone();
-                glib::idle_add_local_once(move || {
-                    window.set_visible(false);
-                    window.set_visible(true);
-                });
-            }
-        });
+        bar.window.connect_map(move |window| this.fit(window));
         bar.fit(&bar.window);
         bar.window.present();
         bar.summon();
     }
 
-    /// The bar's width, its distance from the bottom edge and the height an answer scrolls at, for its screen.
-    /// Whether any of them changed.
-    fn fit(&self, window: &gtk::ApplicationWindow) -> bool {
-        let (wide, tall) = (width(window), (f64::from(screen(window).1) * TALLEST) as i32);
-        let root = window.child();
-        let changed = root.as_ref().is_some_and(|root| root.width_request() != wide) || self.scroll.max_content_height() != tall;
-        if let Some(root) = root {
-            root.set_size_request(wide, -1);
+    /// The bar's width, how far it is raised from the screen's bottom edge and the height an answer scrolls at,
+    /// for its screen.
+    fn fit(&self, window: &gtk::ApplicationWindow) {
+        let (_, high) = screen(window);
+        if let Some(root) = window.child() {
+            root.set_size_request(width(window), -1);
+            // A plain window (no layer shell) is the bar alone, with nothing under it to be raised from.
+            root.set_margin_bottom(if window.is_layer_window() { (f64::from(high) * RAISED) as i32 } else { 0 });
         }
-        self.scroll.set_max_content_height(tall);
-        place(window) || changed
+        self.scroll.set_max_content_height((f64::from(high) * TALLEST) as i32);
     }
 
     /// The prompt back with the keyboard, and the conversation as it now is (the `ghost` command and the phone's
     /// page write to the same one).
     fn summon(self: &Rc<Self>) {
         self.entry.set_visible(true);
-        self.hold(true);
         self.window.set_visible(true);
         self.entry.grab_focus();
         let this = self.clone();
@@ -313,14 +296,6 @@ impl Bar {
         }
         for key in keys {
             self.caps.append(&gtk::Label::builder().label(key).css_classes(["keycap"]).build());
-        }
-    }
-
-    /// Who has the keyboard. The prompt holds it against everything else on screen, so what is typed or dictated
-    /// lands in it whatever appears meanwhile; an answer has it only until the owner turns to another window.
-    fn hold(&self, prompt: bool) {
-        if self.window.is_layer_window() {
-            self.window.set_keyboard_mode(if prompt { KeyboardMode::Exclusive } else { KeyboardMode::OnDemand });
         }
     }
 
@@ -499,7 +474,6 @@ impl Bar {
                             this.entry.set_text(&prompt);
                             this.entry.set_position(-1);
                             this.entry.set_visible(true);
-                            this.hold(true);
                             this.entry.grab_focus();
                         }
                     }
@@ -524,7 +498,6 @@ impl Bar {
     fn sent(&self) {
         self.entry.set_text("");
         self.entry.set_visible(false);
-        self.hold(false);
         if let Some(root) = self.window.child() {
             root.grab_focus();
         }
