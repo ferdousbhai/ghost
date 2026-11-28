@@ -56,9 +56,9 @@ Git history.
 
 ## Releases
 
-The last release is 0.14.1, and Omarchy's package repository carries it:
-its recipe is this repository's (omacom/omarchy-pkgs #3712, merged
-2026-11-28), and its sync follows each release. That recipe does not yet
+The last release is 0.14.2. Omarchy's package repository follows each
+release by itself, some hours behind: its recipe is this repository's
+(omacom/omarchy-pkgs #3712, merged 2026-11-28). That recipe does not yet
 name `openssl`, which the client has linked since reaching a ghost on another
 machine; it is installed with `curl`, so the package builds and runs, and
 naming it there is a small pull request still to open.
