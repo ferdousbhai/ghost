@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "ghost-bar"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "ghostd",
  "gtk4",
@@ -424,7 +424,7 @@ dependencies = [
 
 [[package]]
 name = "ghostd"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "aes-gcm",
  "hkdf",
