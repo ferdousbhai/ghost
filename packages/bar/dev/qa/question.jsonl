@@ -11,7 +11,8 @@
 {"do":"wait","role":"button","name":"The north pier","visible":true,"timeout_ms":30000}
 {"do":"wait","role":"button","name":"The south pier","visible":true}
 {"do":"wait","role":"button","name":"Neither","visible":true}
-{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+# The prompt says an answer can be typed instead.
+{"do":"wait","role":"text-box","name":"Type something","focused":true}
 # The answers are not also written out under the question.
 {"do":"wait","role":"label","name":"1. The north pier","visible":false}
 {"do":"shot","path":"qa-bar-question.png"}

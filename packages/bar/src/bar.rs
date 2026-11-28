@@ -22,6 +22,10 @@ use serde_json::{Value, json};
 use crate::{api, dictation, md};
 
 const WIDTH: i32 = 880;
+/// What the empty prompt says: to ask, and, under the ghost's open question, that an answer can be typed instead of
+/// chosen (the last row of Claude Code's own question).
+const ASK: &str = "Ask your ghost";
+const ANSWER: &str = "Type something";
 /// The panel's border and padding on both sides (`.bar-panel` in style.css), which the answer's width is less by.
 const PANEL_INSET: i32 = 2 * (1 + 18);
 /// Where the prompt's lower edge is, as a share of the screen's height from its bottom. Omarchy's dictation shows
@@ -188,7 +192,7 @@ impl Bar {
         panel.append(&status);
         panel.append(&options);
         // The prompt: the field, and where the machine has dictation, a microphone with the key that starts it.
-        let entry = gtk::Entry::builder().placeholder_text("Ask your ghost").hexpand(true).build();
+        let entry = gtk::Entry::builder().placeholder_text(ASK).hexpand(true).build();
         let prompt = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         prompt.add_css_class("bar-entry");
         prompt.append(&entry);
@@ -229,6 +233,13 @@ impl Bar {
 
         let this = bar.clone();
         bar.entry.connect_activate(move |_| this.ask());
+        // What is typed is the answer: the arrows leave the ghost's own, for the prompt under them.
+        let this = bar.clone();
+        bar.entry.connect_changed(move |entry| {
+            if !entry.text().is_empty() {
+                this.choose(isize::MAX);
+            }
+        });
         // Escape puts the bar away and stops nothing. Ctrl+C is a terminal's: it stops the turn that is running; with
         // none it empties the prompt; with nothing to empty it puts the bar away. Up and Down go through the
         // conversation an exchange at a time. Ctrl+Q ends the bar itself, which the next `ghost-bar` starts anew.
@@ -333,6 +344,7 @@ impl Bar {
         self.say("");
         self.note("", false);
         self.options.set_visible(false);
+        self.entry.set_placeholder_text(Some(ASK));
         self.shape();
     }
 
@@ -452,6 +464,7 @@ impl Bar {
             self.entry.set_visible(true);
             self.entry.grab_focus();
         }
+        self.entry.set_placeholder_text(Some(if offered.is_empty() { ASK } else { ANSWER }));
         *self.offered.borrow_mut() = offered;
         // The ghost's recommendation is its first, and where the arrows start.
         self.choice.set(0);
@@ -464,10 +477,11 @@ impl Bar {
         self.options.get_visible() && self.live.borrow().is_none() && self.entry.text().is_empty()
     }
 
-    /// Move to the answer `by` from the one the arrows are on, stopping at the first and the last, and mark it.
+    /// Move `by` from the answer the arrows are on, and mark where they land. Under the last answer is the prompt,
+    /// the row for an answer of the owner's own: no answer is marked there, and Enter gives only what is typed.
     fn choose(&self, by: isize) {
-        let last = self.offered.borrow().len().saturating_sub(1);
-        let on = self.choice.get().saturating_add_signed(by).min(last);
+        let prompt = self.offered.borrow().len();
+        let on = self.choice.get().saturating_add_signed(by).min(prompt);
         self.choice.set(on);
         let mut button = self.options.first_child();
         let mut index = 0;

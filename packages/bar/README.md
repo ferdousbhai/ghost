@@ -15,8 +15,9 @@ running as one status line. Reasoning, commands and what they printed are not
 in it: `ghost show` lists them. The ghost's open question is shown with the
 answers it offers as buttons under it, its recommendation first, and not
 also written out. The arrow keys move among them while nothing is typed, and
-`Enter` or a click gives one; any other answer is typed into the prompt,
-which is there with the question.
+`Enter` or a click gives one. Any other answer is typed into the prompt,
+which is there under them as their last row and says "Type something";
+what is typed is what `Enter` gives.
 
 The prompt sits just above where Omarchy's dictation shows what it hears, so
 neither covers the other. Where the machine has that dictation, the prompt
