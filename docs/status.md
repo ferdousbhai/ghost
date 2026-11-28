@@ -56,12 +56,14 @@ Git history.
 
 ## Releases
 
-The last release is 0.13.0. Omarchy's package repository still carries
-0.11.9: its recipe is the old two-package one, and takes a newer release only
-once the single-package recipe (`packaging/omarchy/`) is merged there
-(omacom/omarchy-pkgs #3712, open). Until
-then `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs
-it. The page no longer reaches a machine on 0.11.9. It is published by
+The last release is 0.14.1, and Omarchy's package repository carries it:
+its recipe is this repository's (omacom/omarchy-pkgs #3712, merged
+2026-11-28), and its sync follows each release. That recipe does not yet
+name `openssl`, which the client has linked since reaching a ghost on another
+machine; it is installed with `curl`, so the package builds and runs, and
+naming it there is a small pull request still to open.
+`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs a
+release ahead of Omarchy's sync. The page is published by
 `packages/web/publish.sh`, on the owner's go, as the Cloudflare Worker that
 serves summonghost.com.
 
