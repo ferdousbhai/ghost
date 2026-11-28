@@ -1,0 +1,17 @@
+# As question.jsonl, by the mouse: a click on one of the ghost's answers gives it.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"type","text":"Which pier?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"button","name":"Neither","visible":true,"timeout_ms":30000}
+# A click on the third answer: it is what is asked next, and the stand-in answers it.
+{"do":"click","role":"button","name":"Neither"}
+{"do":"wait","role":"label","name":"Neither","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"button","name":"The north pier","visible":false}
+{"do":"wait","name":"Answer","visible":true,"timeout_ms":30000}
+
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

@@ -1,0 +1,10 @@
+# As offer.jsonl, by the mouse: a click on a machine's row takes its ghost as Enter does.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"label","name":"No model on this machine. Use the ghost on:","visible":true,"timeout_ms":15000}
+{"do":"click","role":"button","name":"localhost"}
+{"do":"wait","role":"text-box","name":"Ask your ghost on localhost","focused":true,"timeout_ms":15000}
+{"do":"wait","role":"button","name":"localhost","visible":false}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

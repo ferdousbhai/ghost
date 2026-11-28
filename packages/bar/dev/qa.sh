@@ -94,7 +94,7 @@ for script in "${scripts[@]}"; do
   no_model=(GHOSTD_CONFIG="$machine/config.json" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token PATH="$machine/bin:$PATH")
   case $name in
     elsewhere.jsonl) elsewhere=(GHOST_AT="http://127.0.0.1:$serve_port" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token) ;;
-    offer.jsonl) stand_in_tailnet "$machine" "http://localhost:$serve_port"; elsewhere=("${no_model[@]}") ;;
+    offer.jsonl | offer-click.jsonl) stand_in_tailnet "$machine" "http://localhost:$serve_port"; elsewhere=("${no_model[@]}") ;;
     offer-none.jsonl) stand_in_tailnet "$machine"; elsewhere=("${no_model[@]}") ;;
   esac
   (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME "${elsewhere[@]}" \

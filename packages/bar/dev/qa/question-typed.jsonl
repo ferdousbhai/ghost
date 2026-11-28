@@ -1,0 +1,17 @@
+# As question.jsonl, with an answer of the owner's own: typed into the prompt under the ghost's answers, it is what
+# Enter gives, though the arrows had been on the ghost's first.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"type","text":"Which pier?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"button","name":"The north pier","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"text-box","name":"Type something","focused":true}
+{"do":"type","text":"The east one"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"The east one","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"button","name":"The north pier","visible":false}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}
