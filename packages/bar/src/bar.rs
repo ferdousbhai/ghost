@@ -26,6 +26,11 @@ const WIDTH: i32 = 880;
 /// chosen (the last row of Claude Code's own question).
 const ASK: &str = "Ask your ghost";
 const ANSWER: &str = "Type something";
+
+/// `ASK`, naming the machine when the ghost is on another: its commands run there, not here.
+fn asking(machine: Option<&str>) -> String {
+    machine.map_or_else(|| ASK.to_string(), |machine| format!("{ASK} on {machine}"))
+}
 /// The panel's border and padding on both sides (`.bar-panel` in style.css), which the answer's width is less by.
 const PANEL_INSET: i32 = 2 * (1 + 18);
 /// Where the prompt's lower edge is, as a share of the screen's height from its bottom. Omarchy's dictation shows
@@ -192,7 +197,7 @@ impl Bar {
         panel.append(&status);
         panel.append(&options);
         // The prompt: the field, and where the machine has dictation, a microphone with the key that starts it.
-        let entry = gtk::Entry::builder().placeholder_text(ASK).hexpand(true).build();
+        let entry = gtk::Entry::builder().placeholder_text(asking(api::machine().as_deref())).hexpand(true).build();
         let prompt = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         prompt.add_css_class("bar-entry");
         prompt.append(&entry);
@@ -344,7 +349,7 @@ impl Bar {
         self.say("");
         self.note("", false);
         self.options.set_visible(false);
-        self.entry.set_placeholder_text(Some(ASK));
+        self.entry.set_placeholder_text(Some(&asking(api::machine().as_deref())));
         self.shape();
     }
 
@@ -464,7 +469,8 @@ impl Bar {
             self.entry.set_visible(true);
             self.entry.grab_focus();
         }
-        self.entry.set_placeholder_text(Some(if offered.is_empty() { ASK } else { ANSWER }));
+        let ask = asking(api::machine().as_deref());
+        self.entry.set_placeholder_text(Some(if offered.is_empty() { &ask } else { ANSWER }));
         *self.offered.borrow_mut() = offered;
         // The ghost's recommendation is its first, and where the arrows start.
         self.choice.set(0);
@@ -652,6 +658,11 @@ impl Bar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_prompt_names_the_machine_only_when_the_ghost_is_on_another() {
+        assert_eq!((asking(None), asking(Some("beelink"))), ("Ask your ghost".to_string(), "Ask your ghost on beelink".to_string()));
+    }
 
     #[test]
     fn a_question_is_shown_without_the_answers_numbered_under_it() {

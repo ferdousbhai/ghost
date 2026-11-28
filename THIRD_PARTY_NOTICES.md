@@ -87,8 +87,12 @@ named. `Cargo.lock` holds the exact versions.
 
 The daemon and the `ghost` command (`ghostd`, `ghost`):
 
-- MIT or Apache-2.0: equivalent, hashbrown, httparse, indexmap, itoa, libc,
-  serde_core, serde_json
+- MIT or Apache-2.0: bitflags, equivalent, foreign-types,
+  foreign-types-shared, hashbrown, httparse, indexmap, itoa, libc, serde_core,
+  serde_json
+- Apache-2.0: openssl, the binding to the system's OpenSSL (itself
+  Apache-2.0, and not part of Ghost's package), which is the TLS of the client
+  of a ghost on another machine
 - MIT or Apache-2.0, the [RustCrypto](https://github.com/RustCrypto) crates
   that encrypt and sign push alerts: aead, aes, aes-gcm, base16ct,
   block-buffer, cipher, const-oid, cpufeatures, crypto-bigint, crypto-common,
@@ -96,7 +100,7 @@ The daemon and the `ghost` command (`ghostd`, `ghost`):
   inout, opaque-debug, p256, polyval, primeorder, rand_core, rfc6979, sec1,
   sha2, signature, typenum, universal-hash, zeroize; and cfg-if
 - BSD-3-Clause: subtle
-- MIT: generic-array, zmij
+- MIT: generic-array, openssl-sys, zmij
 - Unlicense or MIT: memchr
 - Zlib: foldhash
 
@@ -109,6 +113,6 @@ is built from all of the above, and from:
   gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
   pango, pango-sys
 - MIT: gdk4-wayland, gdk4-wayland-sys, gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab
-- MIT or Apache-2.0: bitflags, field-offset, futures-channel, futures-core,
+- MIT or Apache-2.0: field-offset, futures-channel, futures-core,
   futures-executor, futures-io, futures-task, futures-util, pin-project-lite,
   smallvec, unicase

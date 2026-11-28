@@ -129,7 +129,8 @@ fn get(port: u16, target: &str, token: Option<&str>) -> (u16, Value) {
     let authorization = token.map(|token| format!("Bearer {token}"));
     let headers: Vec<(&str, &str)> = authorization.iter().map(|value| ("authorization", value.as_str())).collect();
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    let request = ClientRequest { address, method: "GET", target, headers: &headers, body: None, timeout: Some(PATIENCE), abort: None };
+    let request =
+        ClientRequest { address: address.into(), method: "GET", target, headers: &headers, body: None, timeout: Some(PATIENCE), abort: None };
     let mut response = send(request).unwrap();
     let body = response.text(1 << 20).unwrap();
     (response.status, serde_json::from_str(&body).unwrap_or(Value::Null))

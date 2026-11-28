@@ -1,8 +1,9 @@
 # The summonghost.com page
 
 [summonghost.com](https://summonghost.com) is how an owner reaches Ghost on
-their machines from a phone or any other device on their tailnet. It is
-Ghost's only remote client. The owner's words for it: "myself and every other
+their machines from a phone or any other device on their tailnet; a machine
+with Ghost installed can use its own bar and `ghost` command instead
+([CONTRACTS.md](../../CONTRACTS.md#a-ghost-on-another-machine)). The owner's words for it: "myself and every other
 user [can] go to a simple domain (summonghost.com), have a one time setup per
 machine, and then see all their machines and the ghosts in them, and
 converse." A machine has one ghost and a ghost one conversation, so the page

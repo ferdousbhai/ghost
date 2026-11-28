@@ -42,7 +42,10 @@ bar; a build of the same version needs `Ctrl+Q` first.
 
 It reaches the daemon through the CLI's own client (`ghostd::client`), found
 afresh for each request, which gives up after 5 s. A port, config or token
-file it cannot use is an error line in the bar.
+file it cannot use is an error line in the bar. Where the owner's ghost is on
+another machine, the empty prompt says which ("Ask your ghost on beelink"),
+and a ghost there that cannot be reached or refuses this machine is that
+error line.
 
 ## Working on it
 
@@ -50,5 +53,6 @@ The look is [omui](https://github.com/ferdousbhai/omui)'s, on Omarchy's
 current theme; [`style.css`](src/style.css) holds only Ghost's own rules, on
 omui's `@om_*` colours. [`dev/qa.sh`](dev/qa.sh) walks the main flows, with
 screenshots, in a bar built with the `qa` feature, against a scratch ghostd (the
-release build) and a stand-in model on a private broadway display; never try a change on the
+release build) and a stand-in model on a private broadway display, once as a
+ghost on another machine behind a stand-in for Tailscale Serve; never try a change on the
 owner's session.

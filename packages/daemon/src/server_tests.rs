@@ -278,7 +278,7 @@ impl Daemon {
     /// Send a request and read the response head; the body is the caller's to read.
     fn open(&self, method: &str, target: &str, headers: &[(&str, &str)], body: Option<&[u8]>) -> ClientResponse {
         let address = SocketAddr::from(([127, 0, 0, 1], self.listening.address.port()));
-        send(ClientRequest { address, method, target, headers, body, timeout: Some(WAIT), abort: None }).expect("the daemon answers")
+        send(ClientRequest { address: address.into(), method, target, headers, body, timeout: Some(WAIT), abort: None }).expect("the daemon answers")
     }
 
     fn call(&self, method: &str, target: &str, headers: &[(&str, &str)], body: Option<&[u8]>) -> Reply {
@@ -1056,7 +1056,7 @@ fn a_completion_stops_when_its_caller_goes_away() {
     std::thread::scope(|scope| {
         let request = scope.spawn(|| {
             let request = ClientRequest {
-                address,
+                address: address.into(),
                 method: "POST",
                 target: "/api/complete",
                 headers: &[JSON],

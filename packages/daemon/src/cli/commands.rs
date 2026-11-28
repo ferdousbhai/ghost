@@ -102,7 +102,8 @@ pub fn new_command(ctx: &mut Context) -> Result<i32, CliError> {
         return Err(CliError::usage("ghost new requires --yes"));
     }
     let response = ctx.request("DELETE", "/api/conversation", None)?;
-    ctx.emit(&response, || Rendered::Secondary("Started over; the conversation so far is in Trash.\n".to_string()));
+    let there = ctx.elsewhere()?;
+    ctx.emit(&response, || Rendered::Secondary(format!("Started over; the conversation so far is in Trash{there}.\n")));
     Ok(EXIT_SUCCESS)
 }
 
@@ -136,6 +137,8 @@ pub fn character_command(ctx: &mut Context) -> Result<i32, CliError> {
 /// `ghost status`: that the daemon answers and accepts the token, what it
 /// runs, whether the code on disk has changed under it, where the ghost's
 /// topic documents are and how many, and what the conversation is doing.
+/// Of a ghost on another machine it leads with the address, and every line
+/// about that machine says so.
 pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
     let about = ctx.request("GET", "/api/ghost", None)?;
     let (ghost, topics) = (about.get("name").cloned(), about.get("topics").cloned());
@@ -144,12 +147,14 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
     let conversation = ctx.request("GET", "/api/conversation", None)?;
     let now = crate::clock::now_ms();
     let client = ctx.client()?;
-    let (base_url, token_file) = (client.base_url(), client.token_path().display().to_string());
+    let (base_url, token_file) = (client.base_url(), client.token_path().map(|path| path.display().to_string()));
+    let machine = client.machine().map(str::to_string);
     let version = crate::VERSION;
     let mut result = Map::new();
     let fields = [
         ("daemon", Some(json!(base_url))),
-        ("tokenFile", Some(json!(token_file))),
+        ("machine", machine.as_ref().map(|machine| json!(machine))),
+        ("tokenFile", token_file.as_ref().map(|file| json!(file))),
         ("ghost", ghost.clone()),
         ("topics", topics.clone()),
         ("version", Some(json!(version))),
@@ -169,21 +174,25 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         // What the daemon left out or sent as null is a dash.
         let text = |value: &Value| value.as_str().unwrap_or("—").to_string();
         let topics = topics.as_ref().and_then(|topics| Some(format!("{} in {}", topics["count"].as_u64()?, topics["path"].as_str()?)));
-        let mut lines = vec![
-            format!("daemon         {base_url}"),
-            format!("token file     {token_file}"),
+        // Where a line is about the ghost's machine and that is not this one, it says which.
+        let there = machine.as_ref().map_or_else(String::new, |machine| format!(" (on {machine})"));
+        let mut lines = match &token_file {
+            Some(token_file) => vec![format!("daemon         {base_url}"), format!("token file     {token_file}")],
+            None => vec![format!("ghost at       {base_url}")],
+        };
+        lines.extend([
             format!("ghost          {}", ghost.as_ref().map_or_else(|| "—".to_string(), text)),
             // The ghost's topic documents: plain files, the owner's to read, edit and delete.
-            format!("topics         {}", topics.unwrap_or_else(|| "—".to_string())),
-            format!("version        {version}"),
-            format!("daemon version {}", text(&daemon["version"])),
-            format!("daemon commit  {}", daemon["source"]["commit"].as_str().unwrap_or("unknown")),
-            format!("daemon source  {}", daemon["source"]["root"].as_str().unwrap_or("packaged install")),
-            format!("daemon started {}", text(&daemon["startedAt"])),
-        ];
+            format!("topics         {}{there}", topics.unwrap_or_else(|| "—".to_string())),
+            format!("version        {version}{}", if machine.is_some() { " (this machine)" } else { "" }),
+            format!("daemon version {}{there}", text(&daemon["version"])),
+            format!("daemon commit  {}{there}", daemon["source"]["commit"].as_str().unwrap_or("unknown")),
+            format!("daemon source  {}{there}", daemon["source"]["root"].as_str().unwrap_or("packaged install")),
+            format!("daemon started {}{there}", text(&daemon["startedAt"])),
+        ]);
         // The code changed under a running daemon: what is on disk is not what answers.
         if daemon["restartNeeded"] == true {
-            lines.push("restart needed code on disk is newer than this daemon (ghost help self)".to_string());
+            lines.push(format!("restart needed code on disk is newer than this daemon (ghost help self){there}"));
         }
         // Remote access is Tailscale Serve, the owner's to turn on: off names the command, on the app's link to this machine.
         let state = text(&remote["state"]);
@@ -193,7 +202,10 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         }
         match (remote["problem"]["message"].as_str(), remote["command"].as_str()) {
             (Some(problem), _) => line.push_str(&format!(" ({problem})")),
-            (None, Some(command)) if state == "off" => line.push_str(&format!("; turn on: {command}")),
+            (None, Some(command)) if state == "off" => {
+                let place = machine.as_ref().map_or_else(String::new, |machine| format!("on {machine}, "));
+                line.push_str(&format!("; {place}turn on: {command}"));
+            }
             _ => {}
         }
         lines.push(line);
@@ -244,6 +256,7 @@ pub fn hooks_command(ctx: &mut Context) -> Result<i32, CliError> {
         }
         _ => return Err(CliError::usage(format!("ghost hooks does not know \"{action}\"; use status, show, or set."))),
     };
+    let there = ctx.elsewhere()?;
     let rendered = if ctx.parsed.boolean("json") {
         // --json prints the API body as it came, unexamined.
         Rendered::Secondary(String::new())
@@ -253,7 +266,7 @@ pub fn hooks_command(ctx: &mut Context) -> Result<i32, CliError> {
         let path = body["path"].as_str().unwrap_or("hooks.json");
         let rows = hook_rows(&body["document"], path)?;
         if action == "set" {
-            Rendered::Secondary(format!("Replaced {path} ({} {}).\n", rows.len(), if rows.len() == 1 { "hook" } else { "hooks" }))
+            Rendered::Secondary(format!("Replaced {path}{there} ({} {}).\n", rows.len(), if rows.len() == 1 { "hook" } else { "hooks" }))
         } else {
             Rendered::Both {
                 human: if rows.is_empty() {

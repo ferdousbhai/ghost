@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 # The bar's QA scripts (dev/qa/*.jsonl, omui's scripted QA: README "Scripted QA" in omui), each in a fresh bar
 # built with feature `qa`, against one scratch ghostd and a stand-in model (stand-in.sh), on a broadway display of its own:
+# (`elsewhere.jsonl` reaches that ghostd as a ghost on another machine is reached: `GHOST_AT`, a stand-in for Tailscale
+# Serve, no token and no daemon port of this machine's)
 # private HOME, XDG directories and runtime, no session bus, no Wayland or X display, so no window opens anywhere and
 # nothing of the desktop this is run from is read. Any failed command, GLib warning or critical fails the run.
 # The gate (`.githooks/verify`) runs it.
@@ -35,16 +37,17 @@ binary=$(realpath -e -- "$binary")
 root=$(mktemp -d /tmp/ghost-bar-qa.XXXXXX)
 broadway_pid=""
 daemon_pid=""
+serve_pid=""
 app_pid=""
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
   local pid
   # Only the PIDs this script started.
-  for pid in "$app_pid" "$broadway_pid" "$daemon_pid"; do
+  for pid in "$app_pid" "$broadway_pid" "$serve_pid" "$daemon_pid"; do
     [[ -z $pid ]] || kill -TERM "$pid" 2>/dev/null || true
   done
-  for pid in "$app_pid" "$broadway_pid" "$daemon_pid"; do
+  for pid in "$app_pid" "$broadway_pid" "$serve_pid" "$daemon_pid"; do
     [[ -z $pid ]] || wait "$pid" 2>/dev/null || true
   done
   [[ -z $root || $root != /tmp/ghost-bar-qa.* ]] || rm -rf -- "$root"
@@ -59,6 +62,7 @@ chmod 700 "$root/runtime"
 export XDG_RUNTIME_DIR=$root/runtime
 stand_in_home
 stand_in_ghostd
+stand_in_serve
 shots=${GHOST_BAR_QA_SHOTS:-$root/shots}
 mkdir -p "$shots"
 
@@ -81,7 +85,9 @@ for script in "${scripts[@]}"; do
   # in a process group of its own, which Ctrl-C does not reach. Killing `timeout` stops the app with it. TZ fixes the
   # times it shows, which the scripts name widgets by.
   status=0
-  (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME \
+  elsewhere=()
+  [[ ${script##*/} != elsewhere.jsonl ]] || elsewhere=(GHOST_AT="http://127.0.0.1:$serve_port" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token)
+  (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME "${elsewhere[@]}" \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent TZ=UTC \
     GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" OMUI_QA=1 OMUI_QA_INPUT="127.0.0.1:$input_port" OMUI_QA_FD=3 \
     timeout "${OMUI_QA_TIMEOUT:-120}" "$binary" < "$script" 3> "$root/answers") &

@@ -4,9 +4,12 @@
 #
 #   stand_in_home      exports HOME, the XDG directories and GHOST_HOME under $root
 #   stand_in_ghostd    starts ghostd on a spare port (sets daemon_pid, exports GHOSTD_PORT) with the ghost home its first start makes
+#   stand_in_serve     starts what Tailscale Serve is to that ghostd, but for the TLS (sets serve_pid and serve_port):
+#                      a loopback port whose requests reach it stamped as its owner's tailnet login, so a client
+#                      whose `GHOST_AT` is `http://127.0.0.1:$serve_port` is taken for the owner's with no token
 #
-# The caller sets `root` (an empty directory of its own) and a private XDG_RUNTIME_DIR, and kills `daemon_pid` when
-# it ends.
+# The caller sets `root` (an empty directory of its own) and a private XDG_RUNTIME_DIR, and kills `daemon_pid` and
+# `serve_pid` when it ends.
 stand_in_dir=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 stand_in_repo=$(realpath -e -- "$stand_in_dir/../../..")
 # rustup's own directory when no cargo is on PATH.
@@ -16,6 +19,8 @@ command -v cargo >/dev/null || PATH="$HOME/.cargo/bin:$PATH"
 (cd "$stand_in_repo" && cargo build --release --locked --quiet -p ghostd --bin ghostd --example stand_in)
 stand_in_ghostd_binary=$stand_in_repo/target/release/ghostd
 stand_in_tool=$stand_in_repo/target/release/examples/stand_in
+# The tailnet login the scratch ghostd takes for its owner's (`remote.owner`), so it asks no Tailscale who that is.
+stand_in_owner=owner@example.com
 
 stand_in_home() {
   mkdir -p "$root"/{home,config,state,data,cache,bin}
@@ -43,7 +48,8 @@ stand_in_ghostd() {
   chmod 755 "$root/bin/fake-llama-server"
   : > "$root/model.gguf"
   mkdir -p "$XDG_CONFIG_HOME/ghost"
-  printf '{"local":{"model":"%s","server":"%s"}}\n' "$root/model.gguf" "$root/bin/fake-llama-server" > "$XDG_CONFIG_HOME/ghost/config.json"
+  printf '{"local":{"model":"%s","server":"%s"},"remote":{"owner":"%s"}}\n' "$root/model.gguf" "$root/bin/fake-llama-server" "$stand_in_owner" \
+    > "$XDG_CONFIG_HOME/ghost/config.json"
   # No session bus: nothing ghostd might announce reaches the desktop this runs from.
   PATH=$root/bin:$tools DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent \
     "$stand_in_ghostd_binary" > "$root/ghostd.log" 2>&1 &
@@ -52,6 +58,18 @@ stand_in_ghostd() {
   for _ in {1..100}; do
     [[ -s $token_file ]] && curl -fsS -o /dev/null -H "Authorization: Bearer $(cat "$token_file")" "http://127.0.0.1:$port/api/ghost" 2>/dev/null && break
     kill -0 "$daemon_pid" 2>/dev/null || { echo "stand-in: ghostd exited" >&2; sed -n '1,40p' "$root/ghostd.log" >&2; exit 1; }
+    sleep 0.1
+  done
+}
+
+stand_in_serve() {
+  serve_port=$("$stand_in_tool" port)
+  [[ $serve_port != 7717 ]] || { echo "stand-in: refusing port 7717" >&2; exit 1; }
+  "$stand_in_tool" serve "$serve_port" "$GHOSTD_PORT" "$stand_in_owner" > "$root/serve.log" 2>&1 &
+  serve_pid=$!
+  for _ in {1..100}; do
+    curl -fsS -o /dev/null "http://127.0.0.1:$serve_port/api/remote/whoami" 2>/dev/null && break
+    kill -0 "$serve_pid" 2>/dev/null || { echo "stand-in: serve exited" >&2; cat "$root/serve.log" >&2; exit 1; }
     sleep 0.1
   done
 }

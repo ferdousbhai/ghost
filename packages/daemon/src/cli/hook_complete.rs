@@ -25,7 +25,7 @@ fn complete(runtime: &mut CliRuntime) -> Result<String, String> {
     if prompt.trim().is_empty() {
         return Err("prompt must be a non-empty string.".to_string());
     }
-    let mut client = Client::discover(runtime.env, runtime.home).map_err(|error| error.to_string())?;
+    let mut client = Client::local(runtime.env, runtime.home).map_err(|error| error.to_string())?;
     // No deadline of its own: the hook's `timeout` kills this process group,
     // which closes the request and stops the completion.
     let answer = client.request("POST", "/api/complete", Some(&json!({ "prompt": prompt })), None).map_err(|error| match error {

@@ -84,8 +84,8 @@ impl CliError {
 impl From<ClientError> for CliError {
     fn from(error: ClientError) -> Self {
         let exit_code = match &error {
-            ClientError::Unreachable(_) => EXIT_UNREACHABLE,
-            ClientError::Unauthorized { .. } | ClientError::Status { status: 403, .. } => EXIT_UNAUTHORIZED,
+            ClientError::Unreachable(_) | ClientError::UnreachableAt { .. } => EXIT_UNREACHABLE,
+            ClientError::Unauthorized { .. } | ClientError::Refused { .. } | ClientError::Status { status: 403, .. } => EXIT_UNAUTHORIZED,
             ClientError::Status { status: 404, .. } => EXIT_NOT_FOUND,
             ClientError::Status { status: 409, .. } => EXIT_CONFLICT,
             ClientError::Configuration(_) => EXIT_USAGE,
@@ -111,6 +111,11 @@ impl Context<'_, '_> {
             self.client = Some(Client::discover(self.runtime.env, self.runtime.home)?);
         }
         Ok(self.client.as_mut().expect("just set"))
+    }
+
+    /// ` on <machine>` when the ghost is on another machine, for a sentence that names a place there; else nothing.
+    pub fn elsewhere(&mut self) -> Result<String, CliError> {
+        Ok(self.client()?.machine().map_or_else(String::new, |machine| format!(" on {machine}")))
     }
 
     /// A control request to the daemon.

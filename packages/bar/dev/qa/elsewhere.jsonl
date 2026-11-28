@@ -1,0 +1,15 @@
+# The bar on a machine whose ghost is on another (`GHOST_AT`, which dev/qa.sh sets for this script to a stand-in for
+# that machine's Tailscale Serve address): the prompt names the machine, and a turn is asked and answered there.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost on 127.0.0.1","focused":true}
+{"do":"shot","path":"qa-bar-elsewhere.png"}
+{"do":"type","text":"Is the pier far?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"Is the pier far?","visible":true}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+# The turn has ended and the conversation is read again, from there.
+{"do":"wait","name":"Answer","visible":true,"timeout_ms":30000}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

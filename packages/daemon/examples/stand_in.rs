@@ -4,9 +4,12 @@
 //!                                        short reply, so Ask can be checked without loading a model (ghostd spawns it
 //!                                        as `local.server`); told "Which pier?", it asks that with its `ask` tool
 //!   stand_in port                        a loopback port that is free now
+//!   stand_in serve <port> <to> <login>   what Tailscale Serve is to a daemon on loopback port <to>, but for the TLS:
+//!                                        every request to <port> is passed on, stamped as that tailnet login's
 use ghostd::http::Server;
 use serde_json::json;
-use std::net::SocketAddr;
+use std::io::{Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 const REPLY: &str =
@@ -69,15 +72,46 @@ fn llama_server(args: &[String]) {
     }
 }
 
+/// One request, passed on with `Tailscale-User-Login` after its request line, and its answer passed back as it
+/// comes; either side closing closes the other, so a reader that leaves a stream is gone for the daemon too.
+fn pass_on(mut client: TcpStream, to: u16, login: &str) -> std::io::Result<()> {
+    let mut daemon = TcpStream::connect(("127.0.0.1", to))?;
+    let (mut line, mut byte) = (Vec::new(), [0u8; 1]);
+    while byte[0] != b'\n' {
+        client.read_exact(&mut byte)?;
+        line.push(byte[0]);
+    }
+    daemon.write_all(&line)?;
+    daemon.write_all(format!("tailscale-user-login: {login}\r\n").as_bytes())?;
+    let (mut asking, mut asked) = (client.try_clone()?, daemon.try_clone()?);
+    std::thread::spawn(move || {
+        let _ = std::io::copy(&mut asking, &mut asked);
+        let _ = asked.shutdown(Shutdown::Both);
+    });
+    let _ = std::io::copy(&mut daemon, &mut client);
+    client.shutdown(Shutdown::Both)
+}
+
+fn serve(args: &[String]) {
+    let [port, to, login] = args else { panic!("serve <port> <to> <login>") };
+    let (port, to): (u16, u16) = (port.parse().expect("a port"), to.parse().expect("a port"));
+    let listener = TcpListener::bind(("127.0.0.1", port)).expect("the port is free");
+    for client in listener.incoming().flatten() {
+        let login = login.clone();
+        std::thread::spawn(move || pass_on(client, to, &login));
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("llama-server") => llama_server(&args[1..]),
+        Some("serve") => serve(&args[1..]),
         Some("port") => {
             println!("{}", std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|listener| listener.local_addr()).expect("a free port").port())
         }
         _ => {
-            eprintln!("usage: stand_in llama-server --port <n> | port");
+            eprintln!("usage: stand_in llama-server --port <n> | port | serve <port> <to> <login>");
             std::process::exit(2);
         }
     }

@@ -92,6 +92,8 @@ fn daemon_env(config: &DaemonConfig, mut env: Env) -> Env {
     env.insert("GHOSTD_CONFIG".into(), config.config_path.to_string_lossy().into_owned());
     env.insert("GHOST_HOME".into(), config.home.to_string_lossy().into_owned());
     env.insert("GHOSTD_HOOKS".into(), config.hooks_path.to_string_lossy().into_owned());
+    // This machine's ghost, even where the owner's `ghost` command and bar are set to one on another machine.
+    env.insert("GHOST_AT".into(), "local".into());
     env
 }
 
@@ -348,8 +350,8 @@ mod tests {
         let config = load_config(&parsed.overrides, &Env::new(), &scratch).unwrap();
         let inherited = Env::from([("HOME".to_string(), scratch.display().to_string()), ("PATH".to_string(), "/usr/bin:/bin".to_string())]);
         let env = daemon_env(&config, inherited.clone());
-        // What the daemon was started with stays; the four that name it are added.
-        assert_eq!(env.len(), inherited.len() + 4);
+        // What the daemon was started with stays; the four that name it are added, and that the ghost is this machine's.
+        assert_eq!((env.len(), env.get("GHOST_AT").map(String::as_str)), (inherited.len() + 5, Some("local")));
         assert!(inherited.iter().all(|(name, value)| env.get(name) == Some(value)));
         // A hook's shell sees the flag's port…
         let print = "printf '%s %s %s %s' \"$GHOSTD_PORT\" \"$GHOSTD_CONFIG\" \"$GHOST_HOME\" \"$GHOSTD_HOOKS\"";
@@ -357,6 +359,9 @@ mod tests {
         assert_eq!(hook.stdout, format!("7788 {config_file} {root} {}", scratch.join("hooks.json").display()));
         // …and a child that loads the config from its environment resolves this daemon's.
         assert_eq!(load_config(&Overrides::default(), &env, &scratch).unwrap(), config);
+        // Its `ghost` asks this daemon even where the owner's config names a ghost on another machine.
+        std::fs::write(&config_file, "{\"ghost\":\"beelink.tailnet.ts.net\"}").unwrap();
+        assert_eq!(crate::client::Client::discover(&env, &scratch).unwrap().base_url(), "http://127.0.0.1:7788");
         std::fs::remove_dir_all(scratch).unwrap();
     }
 }

@@ -29,12 +29,14 @@ Antigravity) is a command the model runs from its shell, with that agent's
 own sign-in, tools, and limits.
 `ghostd` owns the conversation and its state transitions; the bar and CLI are
 clients. The daemon binds `127.0.0.1` only (no setting moves it) and serves no
-web page; remote access is the summonghost.com page over an explicit Tailscale
-Serve address. The page is static, not a backend: it has no server, accounts,
+web page; remote access is over an explicit Tailscale Serve address, to the
+summonghost.com page and to the bar and CLI of the owner's other machines
+([A ghost on another machine](#a-ghost-on-another-machine)). The page is
+static, not a backend: it has no server, accounts,
 or storage; the browser calls each machine's Serve address directly, admitted
 by Tailscale identity. Whoever controls summonghost.com's code can therefore
 act as a visiting owner on that owner's tailnet; `remote.apps: []` opts out,
-leaving no remote client at all. The page's code is
+leaving the owner's own machines the only remote clients. The page's code is
 [`packages/web`](packages/web/README.md).
 
 The rest belongs to the machine. Omarchy owns package updates, the theme the
@@ -246,8 +248,9 @@ handed the ghost's persona and the conversation so far, replayed from the log
 as the chat messages it was, since the model keeps no session of its own. Its
 commands run in the conversation directory with the daemon's resolved
 `GHOSTD_PORT`, `GHOSTD_CONFIG`, `GHOST_HOME`, and `GHOSTD_HOOKS` in their
-environment, which every child of ghostd (a command, a hook, `ghost`)
-inherits, so a daemon started with flags is the one they address. Ghost has no screen control: desktop work goes through
+environment, and `GHOST_AT=local`, which every child of ghostd (a command, a
+hook, `ghost`) inherits, so a daemon started with flags is the one they
+address, wherever the owner's `ghost` command is set to look. Ghost has no screen control: desktop work goes through
 Omarchy's commands, app CLIs, and config files, on the bet that Omarchy's
 command line keeps growing toward full coverage.
 
@@ -303,8 +306,8 @@ request without a token or that identity.
 Remote access never broadens a ghost's local tool authority.
 
 `remote.apps` lists `https://` web app origins admitted past the Origin check
-(default `["https://summonghost.com"]`; `[]` admits none, so nothing can
-reach Ghost remotely). An app is admitted
+(default `["https://summonghost.com"]`; `[]` admits none, so no web page can
+reach Ghost). An app is admitted
 by tailnet identity alone; a request from it carrying
 `Authorization` is `403 app_token_refused`. Its responses carry
 `Access-Control-Allow-Origin: <origin>` and `Vary: Origin`, its preflight
@@ -366,6 +369,37 @@ The response ends after the terminal, once the conversation is free, so a
 client that reads to the end and posts again is never answered
 `409 conversation_busy`.
 
+### A ghost on another machine
+
+The `ghost` command and the bar are clients of this machine's daemon unless
+the owner says their ghost is elsewhere: `"ghost": "<address>"` at the top of
+`~/.config/ghost/config.json`, or `GHOST_AT=<address>` for one command, which
+wins. The address is the other machine's Tailscale Serve address: a host name
+(`https://` on 443) or an origin, `https://host[:port]` or
+`http://host[:port]`; anything else is a configuration error. `GHOST_AT=local`
+is this machine's daemon whatever the config says, and ghostd reads neither.
+
+With it set, every request of both clients goes to that address and none to
+this machine: no daemon port, no token file (which is not read), and no ghost
+home. They send no token and no `Origin`, so the daemon there admits them as
+it admits any request of its owner's through Serve, with every route they
+use; it has nothing of its own for them. TLS is the system's OpenSSL,
+verifying the certificate against the system's trust store and the name asked
+for, and nothing turns that off. A `401` or `403` from there is one sentence
+(exit 4): this machine must be signed in to the same tailnet as the ghost's
+owner, and the ghost's machine must have Serve on. Nothing answering is exit
+3, naming the address; this machine's daemon is never asked instead.
+
+The ghost acts on its own machine: its commands, an owner `!command`, hooks,
+Trash and files are all there. A file a verb is given (`character set`,
+`hooks set`) is read on this machine and sent. `ghost status` leads with
+`ghost at <address>`, has no token file, marks each line about the other
+machine `(on <machine>)` (`machine` under `--json`), and a change that lands
+in a place there names it. `<machine>` is the address's first label, or a
+numeric address whole. `ghostd hook-complete` always asks this machine's
+daemon. The package's `ghostd.service` on a machine that only reaches
+another's ghost runs unused.
+
 ### `ghost` CLI
 
 The terminal client never edits a ghost home; every command that changes ghost
@@ -416,7 +450,9 @@ icons. Removing it preserves owner data.
   [omui](https://github.com/ferdousbhai/omui)'s look. It is a client of the
   API and keeps no data; putting it away stops nothing. It finds the daemon
   with the CLI's own client (`ghostd::client`), afresh for each request; a
-  port, config or token file it cannot use is an error line in the bar. One
+  port, config or token file it cannot use is an error line in the bar. Of
+  [a ghost on another machine](#a-ghost-on-another-machine) its empty prompt
+  names the machine ("Ask your ghost on beelink"). One
   instance: `ghost-bar` again shows the first with its prompt and gives it
   the keyboard, which is how a key binding summons it, and a launch of
   another version replaces the one running. Nothing listens
@@ -434,7 +470,7 @@ icons. Removing it preserves owner data.
   `qa` feature. How it behaves on screen, key by key, is in
   [its README](packages/bar/README.md).
 - [`packages/web`](packages/web/README.md) is the summonghost.com page, the
-  remote client: static files with no build step, a client of the API that
+  client on a phone: static files with no build step, a client of the API that
   keeps only its machine list, in the browser. It is in no package; the
   owner publishes it with
   [`publish.sh`](packages/web/publish.sh), apart from releases, so it keeps

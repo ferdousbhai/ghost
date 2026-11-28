@@ -117,8 +117,9 @@ Common flags:
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd holds the conversation and answers each turn on a model on this machine;
-ghost talks to it.
+ghostd holds the conversation and answers each turn on a model on its machine;
+ghost talks to it: this machine's, or the one at $GHOST_AT (a Tailscale Serve
+address; the config's \"ghost\" sets it for good, and `local` is this machine).
 ",
         rows.join("\n")
     )

@@ -183,6 +183,25 @@ whole, and the next message begins a new one.
 The CLI talks to this machine's ghost. It never edits a ghost home directly:
 every change to a ghost goes through the daemon.
 
+### From another machine
+
+To talk to the ghost on your machine at home from a laptop, install Ghost on
+the laptop, sign it in to the same tailnet, turn [remote access](#9-optional-once-you-are-talking)
+on at home, and put the home machine's Tailscale name in the laptop's
+`~/.config/ghost/config.json`:
+
+```json
+{ "ghost": "beelink.your-tailnet.ts.net" }
+```
+
+The laptop's bar and `ghost` command are then that ghost's: the bar's prompt
+says "Ask your ghost on beelink", and `ghost status` begins with its address.
+The ghost still works on its own machine: the commands it runs, and the files
+it reads and writes, are the home machine's, not the laptop's.
+`GHOST_AT=<address> ghost …` does the same for one command, and
+`GHOST_AT=local` reaches the laptop's own ghost. No token is copied: your
+Tailscale login is what lets the laptop in.
+
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
 codes.
@@ -192,7 +211,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/.local/share/ghost/` | the ghost home: `character.md`; `conversation/`, the one conversation (its log, attachments, and the directory the ghost's commands run in); and `topics/`, the ghost's topic documents |
-| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model) — optional; a missing file is fine, a malformed one or an unknown key is an error |
+| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model), and `ghost`, the address of a ghost on another machine — optional; a missing file is fine, a malformed one or an unknown key is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/push.json` | the devices that get alerts, with their keys |
@@ -217,7 +236,8 @@ leaves the ghost home, the conversation, tokens, and your documents untouched.
 - **Remote access.** Tailscale Serve is the opt-in: `tailscale serve --bg --https=443 http://127.0.0.1:7717`
   turns it on and `tailscale serve --https=443 off` turns it off. `ghost
   status` then prints the summonghost.com link that adds this machine to the
-  page, the phone client ([mobile](mobile.md)).
+  page, the phone client ([mobile](mobile.md)); your other computers reach it
+  with their own bar and `ghost` command ([From another machine](#from-another-machine)).
   Only your own login gets in. On a
   phone, the camera attaches photos; dictate
   with the keyboard's own mic.

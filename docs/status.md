@@ -27,6 +27,9 @@ Git history.
   write them.
 - The bar on a real desktop: dictation into it, and turning to another
   window putting it away.
+- The bar and `ghost` command against a ghost on a second physical machine
+  (`ghost` in the config, 2026-11-28): proven only by `ghost status` through
+  this machine's own Serve address, and by the tests' stand-in for Serve.
 - The page (`packages/web`) as one chat per machine is not published, and its
   own list of what is unverified is in
   [its README](../packages/web/README.md#not-yet-verified).

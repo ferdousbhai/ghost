@@ -30,6 +30,46 @@ impl Default for RemoteConfig {
     }
 }
 
+/// A ghost on another machine, as this machine's `ghost` command and bar reach
+/// it: its Tailscale Serve address (CONTRACTS.md "A ghost on another machine").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GhostAddress {
+    pub tls: bool,
+    pub host: String,
+    pub port: u16,
+}
+
+impl GhostAddress {
+    /// A host name, which is `https://` on 443, or an `https://host[:port]` or `http://host[:port]` origin.
+    pub fn parse(text: &str) -> Option<Self> {
+        let text = text.trim().to_ascii_lowercase();
+        let (tls, authority) = match (text.strip_prefix("https://"), text.strip_prefix("http://")) {
+            (Some(authority), _) => (true, authority),
+            (_, Some(authority)) => (false, authority),
+            _ => (true, text.as_str()),
+        };
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port.parse::<u16>().ok().filter(|port| *port != 0)?),
+            None => (authority, if tls { 443 } else { 80 }),
+        };
+        host_ok(host).then(|| Self { tls, host: host.to_string(), port })
+    }
+
+    /// `https://host`, with the port when it is not the scheme's own.
+    pub fn origin(&self) -> String {
+        let (scheme, default) = if self.tls { ("https", 443) } else { ("http", 80) };
+        if self.port == default { format!("{scheme}://{}", self.host) } else { format!("{scheme}://{}:{}", self.host, self.port) }
+    }
+
+    /// What the machine is called: the first label of its name, or the whole of a numeric address.
+    pub fn machine(&self) -> &str {
+        if self.host.parse::<std::net::IpAddr>().is_ok() {
+            return &self.host;
+        }
+        self.host.split('.').next().unwrap_or(&self.host)
+    }
+}
+
 /// The model ghostd runs itself (CONTRACTS.md "Local model").
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalModelConfig {
@@ -54,6 +94,10 @@ pub struct DaemonConfig {
     pub config_path: PathBuf,
     pub hooks_path: PathBuf,
     pub local: Option<LocalModelConfig>,
+    /// Where the `ghost` command and the bar find the ghost when it is not
+    /// this machine's: `$GHOST_AT`, else the file's `ghost`. ghostd reads
+    /// neither.
+    pub ghost: Option<GhostAddress>,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -87,6 +131,14 @@ fn only_keys(object: &serde_json::Map<String, Value>, known: &[&str], within: &s
     Err(format!("{path}: unknown {}; the keys are {}.", unknown.join(", "), known.join(", ")))
 }
 
+/// A host name in lowercase, or a numeric IPv4 address.
+fn host_ok(host: &str) -> bool {
+    !host.is_empty()
+        && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
+        && !host.starts_with(['.', '-'])
+        && !host.ends_with(['.', '-'])
+}
+
 /// An `https://host[:port]` origin exactly as a browser sends it, or None.
 fn app_origin(value: &Value) -> Option<String> {
     let text = value.as_str()?;
@@ -95,13 +147,9 @@ fn app_origin(value: &Value) -> Option<String> {
         Some((host, port)) => (host, Some(port)),
         None => (authority, None),
     };
-    let host_ok = !host.is_empty()
-        && host.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-')
-        && !host.starts_with(['.', '-'])
-        && !host.ends_with(['.', '-']);
     // A browser's origin leaves the default port out and writes no leading zero.
     let port_ok = port.is_none_or(|port| port.parse::<u16>().is_ok_and(|n| n != 443 && n.to_string() == port));
-    (host_ok && port_ok).then(|| text.to_string())
+    (host_ok(host) && port_ok).then(|| text.to_string())
 }
 
 /// `local`: `{ model, server?, contextSize?, idleMinutes?, reasoningEffort? }`, paths `~`-expanded.
@@ -140,6 +188,7 @@ struct ConfigFile {
     owner: Option<String>,
     apps: Option<Vec<String>>,
     local: Option<LocalModelConfig>,
+    ghost: Option<GhostAddress>,
 }
 
 fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, String> {
@@ -149,7 +198,7 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
     };
     let parsed: Value = serde_json::from_str(&text).map_err(|error| format!("{shown} is not valid JSON: {error}"))?;
     let file = parsed.as_object().ok_or_else(|| format!("{shown} must contain a JSON object."))?;
-    only_keys(file, &["port", "home", "remote", "local"], "", &shown)?;
+    only_keys(file, &["port", "home", "remote", "local", "ghost"], "", &shown)?;
     let mut config = ConfigFile::default();
     if let Some(port) = file.get("port") {
         let port = port.as_u64().and_then(|port| u16::try_from(port).ok());
@@ -173,6 +222,12 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
     }
     if let Some(local) = file.get("local") {
         config.local = Some(parse_local(local, &shown, home)?);
+    }
+    if let Some(ghost) = file.get("ghost") {
+        let address = ghost.as_str().and_then(GhostAddress::parse);
+        config.ghost = Some(address.ok_or_else(|| {
+            format!("{shown}: \"ghost\" must be another machine's address like \"machine.tailnet.ts.net\" or \"https://machine.tailnet.ts.net\".")
+        })?);
     }
     Ok(Some(config))
 }
@@ -198,6 +253,12 @@ pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<Daem
         Some(path) => expand_home(path, home),
         None => config_path.parent().unwrap_or(Path::new("/")).join("hooks.json"),
     };
+    // `local` is this machine's own ghost, whatever the file says: an empty variable is not set, so it cannot say so.
+    let ghost = match var(env, "GHOST_AT") {
+        Some("local") => None,
+        Some(raw) => Some(GhostAddress::parse(raw).ok_or_else(|| format!("Invalid address from GHOST_AT: {}", Value::String(raw.to_string())))?),
+        None => file.ghost,
+    };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     Ok(DaemonConfig {
         port,
@@ -206,6 +267,7 @@ pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<Daem
         hooks_path: resolve(&cwd, &hooks),
         config_path,
         local: file.local,
+        ghost,
     })
 }
 
@@ -349,6 +411,60 @@ mod tests {
     }
 
     #[test]
+    fn reads_where_the_ghost_is_and_the_environment_overrides_the_file() {
+        let (dir, mut env) = scratch(None);
+        let ghost = |dir: &Path, env: &Env| load(dir, env).map(|config| config.ghost.map(|ghost| (ghost.origin(), ghost.machine().to_string())));
+        let at = |origin: &str, machine: &str| Ok(Some((origin.to_string(), machine.to_string())));
+        // Neither set: this machine's own.
+        assert_eq!(ghost(&dir, &env), Ok(None));
+        // A host name is https on 443; an origin says its scheme, and its port when it is not the scheme's own.
+        for (written, origin, machine) in [
+            ("beelink.tailnet.ts.net", "https://beelink.tailnet.ts.net", "beelink"),
+            (" HTTPS://Beelink.Tailnet.ts.net:443 ", "https://beelink.tailnet.ts.net", "beelink"),
+            ("https://beelink.tailnet.ts.net:8443", "https://beelink.tailnet.ts.net:8443", "beelink"),
+            ("http://beelink:80", "http://beelink", "beelink"),
+            ("http://127.0.0.1:7000", "http://127.0.0.1:7000", "127.0.0.1"),
+        ] {
+            rewrite(&dir, json!({ "ghost": written }));
+            assert_eq!(ghost(&dir, &env), at(origin, machine), "{written}");
+        }
+        let path = dir.join(".config/ghost/config.json");
+        for refused in [
+            json!(""),
+            json!("https://"),
+            json!("beelink/"),
+            json!("https://beelink/api"),
+            json!("user@beelink"),
+            json!("beelink:0"),
+            json!("beelink:port"),
+            json!("ftp://beelink"),
+            json!(7),
+            json!(null),
+        ] {
+            rewrite(&dir, json!({ "ghost": refused }));
+            assert_eq!(
+                load(&dir, &env).unwrap_err(),
+                format!(
+                    "{}: \"ghost\" must be another machine's address like \"machine.tailnet.ts.net\" or \"https://machine.tailnet.ts.net\".",
+                    path.display()
+                ),
+                "{refused}"
+            );
+        }
+        // GHOST_AT overrides the file for one command; `local` is this machine's own ghost, and empty is not set.
+        rewrite(&dir, json!({ "ghost": "beelink.tailnet.ts.net" }));
+        env.insert("GHOST_AT".into(), "http://127.0.0.1:7000".into());
+        assert_eq!(ghost(&dir, &env), at("http://127.0.0.1:7000", "127.0.0.1"));
+        env.insert("GHOST_AT".into(), "local".into());
+        assert_eq!(ghost(&dir, &env), Ok(None));
+        env.insert("GHOST_AT".into(), " ".into());
+        assert_eq!(ghost(&dir, &env), at("https://beelink.tailnet.ts.net", "beelink"));
+        env.insert("GHOST_AT".into(), "bee link".into());
+        assert_eq!(load(&dir, &env).unwrap_err(), "Invalid address from GHOST_AT: \"bee link\"");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn reads_the_xdg_config_file_and_honours_xdg_config_home() {
         let (dir, mut env) = scratch(Some(json!({ "port": 8123, "home": "~/Spirits" })));
         let config = load(&dir, &env).unwrap();
@@ -412,7 +528,7 @@ mod tests {
         // A key ghostd does not read is named, with the ones it does, wherever it is.
         assert_eq!(
             refused(json!({ "host": "0.0.0.0", "prot": 1 })),
-            "unknown \"host\", \"prot\"; the keys are \"port\", \"home\", \"remote\", \"local\"."
+            "unknown \"host\", \"prot\"; the keys are \"port\", \"home\", \"remote\", \"local\", \"ghost\"."
         );
         assert_eq!(refused(json!({ "remote": { "port": 443 } })), "unknown \"remote.port\"; the keys are \"remote.owner\", \"remote.apps\".");
         assert_eq!(

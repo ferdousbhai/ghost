@@ -105,7 +105,7 @@ impl LocalModel {
         let body = json!({ "filename": file }).to_string();
         let target = format!("/slots/0?action={action}");
         let answered = send(ClientRequest {
-            address: endpoint.address,
+            address: endpoint.address.into(),
             method: "POST",
             target: &target,
             headers: &[("content-type", "application/json"), ("authorization", &authorization)],
@@ -339,7 +339,7 @@ impl LocalModel {
                 return Err(format!("The local model could not start: {why}{}", if last.is_empty() { String::new() } else { format!("\n{last}") }));
             }
             let health = send(ClientRequest {
-                address: endpoint.address,
+                address: endpoint.address.into(),
                 method: "GET",
                 target: "/health",
                 headers: &[],

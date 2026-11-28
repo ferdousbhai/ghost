@@ -1,14 +1,17 @@
-//! HTTP/1.1 over loopback, both ways, and nothing more than Ghost uses: the
-//! daemon's server (one request per connection, answered and closed, so an
+//! HTTP/1.1, both ways, and nothing more than Ghost uses: the daemon's
+//! loopback server (one request per connection, answered and closed, so an
 //! event stream simply ends when the connection does) and the client the CLI
 //! uses for the daemon and the daemon for llama-server. Tailscale Serve is
-//! the only thing that ever fronts this, and it speaks to it the same way.
+//! the only thing that ever fronts the server, and it speaks to it the same
+//! way; the client reaches a ghost on another machine through that Serve
+//! address, over TLS (the system's OpenSSL and its trust store).
 use crate::abort::{Abort, AbortGuard};
 use crate::error::GhostError;
+use openssl::ssl::{HandshakeError, SslConnector, SslMethod, SslStream};
 use serde_json::Value;
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const MAX_HEAD_BYTES: usize = 64 * 1024;
@@ -19,8 +22,48 @@ fn bad(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
 
+/// A connection: the socket itself, or TLS over it.
+pub(crate) enum Connection {
+    Plain(TcpStream),
+    Tls(Box<SslStream<TcpStream>>),
+}
+
+impl Connection {
+    fn socket(&self) -> &TcpStream {
+        match self {
+            Self::Plain(socket) => socket,
+            Self::Tls(stream) => stream.get_ref(),
+        }
+    }
+}
+
+impl Read for Connection {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.read(buffer),
+            Self::Tls(stream) => stream.read(buffer),
+        }
+    }
+}
+
+impl Write for Connection {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Plain(socket) => socket.write(buffer),
+            Self::Tls(stream) => stream.write(buffer),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Plain(socket) => socket.flush(),
+            Self::Tls(stream) => stream.flush(),
+        }
+    }
+}
+
 /// Bytes up to and including the blank line that ends a head.
-fn read_head(reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
+fn read_head(reader: &mut BufReader<Connection>) -> io::Result<Vec<u8>> {
     let mut head = Vec::new();
     loop {
         let before = head.len();
@@ -45,7 +88,7 @@ enum Framing {
 
 /// A message body as its framing delimits it.
 pub(crate) struct Body {
-    reader: BufReader<TcpStream>,
+    reader: BufReader<Connection>,
     framing: Framing,
 }
 
@@ -326,7 +369,7 @@ fn accept(stream: TcpStream, peer: SocketAddr) -> io::Result<(Request, Responder
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
     stream.set_nodelay(true)?;
     let mut writer = stream.try_clone()?;
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufReader::new(Connection::Plain(stream));
     let head = read_head(&mut reader)?;
     let mut slots = [httparse::EMPTY_HEADER; 96];
     let mut parsed = httparse::Request::new(&mut slots);
@@ -412,18 +455,59 @@ impl ClientResponse {
 
     /// Change how long a read of the body may wait; None waits for ever.
     pub(crate) fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
-        self.body.reader.get_ref().set_read_timeout(timeout)
+        self.body.reader.get_ref().socket().set_read_timeout(timeout)
     }
 }
 
+/// Where a request goes: a socket address, spoken to in plain HTTP (the
+/// daemon and llama-server on loopback), or a named host, over TLS or not.
+#[derive(Clone, Copy, Debug)]
+pub enum Address<'a> {
+    Socket(SocketAddr),
+    Named { host: &'a str, port: u16, tls: bool },
+}
+
+impl From<SocketAddr> for Address<'_> {
+    fn from(address: SocketAddr) -> Self {
+        Self::Socket(address)
+    }
+}
+
+/// TLS as the system's OpenSSL does it by default: the peer's certificate is
+/// verified against the system's trust store and the name asked for. Nothing
+/// here can turn that off.
+fn system_tls() -> io::Result<SslConnector> {
+    static CONNECTOR: OnceLock<Result<SslConnector, String>> = OnceLock::new();
+    CONNECTOR
+        .get_or_init(|| SslConnector::builder(SslMethod::tls()).map(|builder| builder.build()).map_err(|error| error.to_string()))
+        .clone()
+        .map_err(|error| io::Error::other(format!("TLS is unavailable: {error}")))
+}
+
+/// Connect to the first of `addresses` that answers.
+fn connect(addresses: &[SocketAddr], timeout: Option<Duration>) -> io::Result<TcpStream> {
+    let mut last = io::Error::new(io::ErrorKind::NotFound, "the name has no address");
+    for address in addresses {
+        let connected = match timeout {
+            Some(timeout) => TcpStream::connect_timeout(address, timeout),
+            None => TcpStream::connect(address),
+        };
+        match connected {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last = error,
+        }
+    }
+    Err(last)
+}
+
 pub struct ClientRequest<'a> {
-    pub address: SocketAddr,
+    pub address: Address<'a>,
     pub method: &'a str,
     /// Path and query, already encoded.
     pub target: &'a str,
     pub headers: &'a [(&'a str, &'a str)],
     pub body: Option<&'a [u8]>,
-    /// How long connecting, and each read up to the response head, may take; None waits for ever.
+    /// How long connecting, and each read up to the response head (a TLS handshake's among them), may take; None waits for ever.
     pub timeout: Option<Duration>,
     /// Aborting closes the connection, which ends a read in progress.
     pub abort: Option<&'a Abort>,
@@ -431,9 +515,19 @@ pub struct ClientRequest<'a> {
 
 /// Send one request and read the response head; the body is read by the caller.
 pub fn send(request: ClientRequest<'_>) -> io::Result<ClientResponse> {
-    let stream = match request.timeout {
-        Some(timeout) => TcpStream::connect_timeout(&request.address, timeout)?,
-        None => TcpStream::connect(request.address)?,
+    send_over(request, &system_tls)
+}
+
+/// `send`, with the TLS connector given: a test's trusts its own certificate.
+fn send_over(request: ClientRequest<'_>, tls: &dyn Fn() -> io::Result<SslConnector>) -> io::Result<ClientResponse> {
+    // The `host` header: the default port of the scheme is left out, as a browser leaves it.
+    let (stream, host) = match request.address {
+        Address::Socket(address) => (connect(&[address], request.timeout)?, address.to_string()),
+        Address::Named { host, port, tls } => {
+            let addresses: Vec<SocketAddr> = (host, port).to_socket_addrs()?.collect();
+            let default = if tls { 443 } else { 80 };
+            (connect(&addresses, request.timeout)?, if port == default { host.to_string() } else { format!("{host}:{port}") })
+        }
     };
     stream.set_nodelay(true)?;
     stream.set_read_timeout(request.timeout)?;
@@ -446,7 +540,16 @@ pub fn send(request: ClientRequest<'_>) -> io::Result<ClientResponse> {
         }
         None => None,
     };
-    let mut head = format!("{} {} HTTP/1.1\r\nhost: {}\r\nconnection: close\r\n", request.method, request.target, request.address);
+    let mut stream = match request.address {
+        Address::Named { host, tls: true, .. } => match tls()?.connect(host, stream) {
+            Ok(stream) => Connection::Tls(Box::new(stream)),
+            // The socket's read timeout passed mid-handshake.
+            Err(HandshakeError::WouldBlock(_)) => return Err(io::Error::new(io::ErrorKind::TimedOut, "the TLS handshake timed out")),
+            Err(error) => return Err(io::Error::other(error.to_string())),
+        },
+        _ => Connection::Plain(stream),
+    };
+    let mut head = format!("{} {} HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n", request.method, request.target);
     for (name, value) in request.headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }
@@ -456,7 +559,7 @@ pub fn send(request: ClientRequest<'_>) -> io::Result<ClientResponse> {
     head.push_str("\r\n");
     let mut message = head.into_bytes();
     message.extend_from_slice(request.body.unwrap_or(b""));
-    (&stream).write_all(&message)?;
+    stream.write_all(&message)?;
     let mut reader = BufReader::new(stream);
     let head = read_head(&mut reader)?;
     let mut slots = [httparse::EMPTY_HEADER; 96];
@@ -527,7 +630,16 @@ mod tests {
     }
 
     fn get(address: SocketAddr, target: &str) -> ClientResponse {
-        send(ClientRequest { address, method: "GET", target, headers: &[], body: None, timeout: Some(Duration::from_secs(5)), abort: None }).unwrap()
+        send(ClientRequest {
+            address: address.into(),
+            method: "GET",
+            target,
+            headers: &[],
+            body: None,
+            timeout: Some(Duration::from_secs(5)),
+            abort: None,
+        })
+        .unwrap()
     }
 
     #[test]
@@ -544,7 +656,7 @@ mod tests {
         let reply: Value = serde_json::from_str(&response.text(4096).unwrap()).unwrap();
         assert_eq!(reply, json!({ "path": "/api/x%20y/z", "q": "a b&c", "segments": ["api", "x%20y", "z"], "body": "", "type": null }));
         let mut posted = send(ClientRequest {
-            address: server.address,
+            address: server.address.into(),
             method: "POST",
             target: "/",
             headers: &[("content-type", "application/json")],
@@ -567,7 +679,7 @@ mod tests {
         .unwrap();
         let post = |body: &[u8]| {
             send(ClientRequest {
-                address: server.address,
+                address: server.address.into(),
                 method: "POST",
                 target: "/",
                 headers: &[],
@@ -631,8 +743,15 @@ mod tests {
         .unwrap();
         let abort = Abort::new();
         std::thread::scope(|scope| {
-            let request =
-                ClientRequest { address: server.address, method: "GET", target: "/", headers: &[], body: None, timeout: None, abort: Some(&abort) };
+            let request = ClientRequest {
+                address: server.address.into(),
+                method: "GET",
+                target: "/",
+                headers: &[],
+                body: None,
+                timeout: None,
+                abort: Some(&abort),
+            };
             let reading = scope.spawn(|| send(request).map(|response| response.status));
             // The request is with the server, which answers nothing: the client is reading.
             waiting.recv_timeout(Duration::from_secs(30)).unwrap();
@@ -641,6 +760,116 @@ mod tests {
         });
         assert!(gone.recv_timeout(Duration::from_secs(30)).unwrap());
         server.close();
+    }
+
+    /// A key and a certificate for `localhost` signed by that key, made for one test and trusted nowhere else.
+    fn self_signed() -> (openssl::pkey::PKey<openssl::pkey::Private>, openssl::x509::X509) {
+        use openssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
+        let group = openssl::ec::EcGroup::from_curve_name(openssl::nid::Nid::X9_62_PRIME256V1).unwrap();
+        let key = openssl::pkey::PKey::from_ec_key(openssl::ec::EcKey::generate(&group).unwrap()).unwrap();
+        let mut name = openssl::x509::X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "localhost").unwrap();
+        let name = name.build();
+        let mut builder = openssl::x509::X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        builder.set_serial_number(&openssl::bn::BigNum::from_u32(1).unwrap().to_asn1_integer().unwrap()).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_issuer_name(&name).unwrap();
+        builder.set_pubkey(&key).unwrap();
+        builder.set_not_before(&openssl::asn1::Asn1Time::days_from_now(0).unwrap()).unwrap();
+        builder.set_not_after(&openssl::asn1::Asn1Time::days_from_now(1).unwrap()).unwrap();
+        builder.append_extension(BasicConstraints::new().critical().ca().build().unwrap()).unwrap();
+        let names = SubjectAlternativeName::new().dns("localhost").build(&builder.x509v3_context(None, None)).unwrap();
+        builder.append_extension(names).unwrap();
+        builder.sign(&key, openssl::hash::MessageDigest::sha256()).unwrap();
+        (key, builder.build())
+    }
+
+    /// A TLS server on loopback, as Tailscale Serve is to a client: `/events` streams one event and stays open
+    /// until `release` is aborted, anything else answers JSON saying what `host` it was asked as.
+    fn tls_server(key: &openssl::pkey::PKey<openssl::pkey::Private>, certificate: &openssl::x509::X509, release: Abort) -> SocketAddr {
+        let mut acceptor = openssl::ssl::SslAcceptor::mozilla_intermediate_v5(SslMethod::tls()).unwrap();
+        acceptor.set_private_key(key).unwrap();
+        acceptor.set_certificate(certificate).unwrap();
+        let acceptor = acceptor.build();
+        let listener = TcpListener::bind(local()).unwrap();
+        let address = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let (acceptor, release) = (acceptor.clone(), release.clone());
+                std::thread::spawn(move || {
+                    // A client that does not trust the certificate ends the handshake.
+                    let Ok(stream) = acceptor.accept(stream) else { return };
+                    let mut reader = BufReader::new(Connection::Tls(Box::new(stream)));
+                    let Ok(head) = read_head(&mut reader) else { return };
+                    let head = String::from_utf8_lossy(&head).into_owned();
+                    let host = head.lines().find_map(|line| line.strip_prefix("host: ")).unwrap_or("").to_string();
+                    let stream = reader.get_mut();
+                    if head.starts_with("GET /events ") {
+                        let event = "data: {\"n\":1}\n\n";
+                        let _ = write!(stream, "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n{:x}\r\n{event}\r\n", event.len());
+                        release.wait(Duration::from_secs(30));
+                        let _ = stream.write_all(b"0\r\n\r\n");
+                    } else {
+                        let body = json!({ "host": host }).to_string();
+                        let _ = write!(stream, "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}", body.len());
+                    }
+                });
+            }
+        });
+        address
+    }
+
+    // The path to a ghost on another machine, with a certificate only this test trusts: verified against the
+    // trust store and the name, a JSON round-trip, and a stream that an abort ends mid-read.
+    #[test]
+    fn tls_verifies_the_certificate_and_its_name_and_carries_json_and_an_aborted_stream() {
+        let (key, certificate) = self_signed();
+        let release = Abort::new();
+        let address = tls_server(&key, &certificate, release.clone());
+        let trusting = || {
+            let mut builder = SslConnector::builder(SslMethod::tls()).unwrap();
+            builder.cert_store_mut().add_cert(certificate.clone()).unwrap();
+            Ok(builder.build())
+        };
+        let named = |host| Address::Named { host, port: address.port(), tls: true };
+        let request = |address, target, abort| ClientRequest {
+            address,
+            method: "GET",
+            target,
+            headers: &[],
+            body: None,
+            timeout: Some(Duration::from_secs(20)),
+            abort,
+        };
+
+        // The system's trust store does not know the certificate: the shipped client refuses it.
+        let refused = send(request(named("localhost"), "/", None)).err().expect("an unknown certificate is refused");
+        assert!(refused.to_string().contains("certificate verify failed"), "{refused}");
+        // Trusted, but for another name: refused too.
+        let misnamed = send_over(request(named("127.0.0.1"), "/", None), &trusting).err().expect("a certificate for another name is refused");
+        assert!(misnamed.to_string().contains("certificate verify failed"), "{misnamed}");
+
+        // Trusted and named: the answer, asked for by host name and port.
+        let mut response = send_over(request(named("localhost"), "/", None), &trusting).unwrap();
+        assert_eq!(response.status, 200);
+        assert_eq!(serde_json::from_str::<Value>(&response.text(4096).unwrap()).unwrap(), json!({ "host": format!("localhost:{}", address.port()) }));
+
+        // A stream: its event arrives while the turn goes on, the read after it waits, and an abort from another
+        // thread ends that read.
+        let abort = Abort::new();
+        let response = send_over(request(named("localhost"), "/events", Some(&abort)), &trusting).unwrap();
+        response.set_read_timeout(None).unwrap();
+        let mut events = EventReader::new(response.body);
+        assert_eq!(events.next_event().unwrap().as_deref(), Some("{\"n\":1}"));
+        let stop = abort.clone();
+        let stopping = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            stop.abort();
+        });
+        assert!(events.next_event().is_err(), "an aborted stream ends the read");
+        stopping.join().unwrap();
+        release.abort();
     }
 
     #[test]

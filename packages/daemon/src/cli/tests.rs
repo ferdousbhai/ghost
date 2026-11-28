@@ -475,7 +475,7 @@ fn prints_the_usage_screen_with_no_verb() {
     let verbs: Vec<&str> = listed.lines().map(|line| line.split_whitespace().next().unwrap()).collect();
     assert_eq!(verbs, ["say", "stop", "show", "new", "hooks", "character", "status", "help"]);
     assert!(bare.stdout.contains("\n  -v, --version            Show the ghost package version\n"));
-    assert!(bare.stdout.ends_with("\n\nghostd holds the conversation and answers each turn on a model on this machine;\nghost talks to it.\n"));
+    assert!(bare.stdout.ends_with("\n\nghostd holds the conversation and answers each turn on a model on its machine;\nghost talks to it: this machine's, or the one at $GHOST_AT (a Tailscale Serve\naddress; the config's \"ghost\" sets it for good, and `local` is this machine).\n"));
 }
 
 #[test]
@@ -1038,6 +1038,123 @@ fn maps_a_closed_daemon_to_exit_3_and_other_refusals_to_their_codes() {
     let config = offline(&["status"], &[("GHOSTD_PORT", "70000")]);
     assert_eq!(config.code, 2);
     assert!(config.stderr.starts_with("ghost: invalid daemon configuration: Invalid port from GHOSTD_PORT"), "{}", config.stderr);
+}
+
+// ── A ghost on another machine ──────────────────────────────────────────
+
+/// A ghost at another address, which takes a request for its owner's only when it carries no token (as its Serve
+/// address takes a signed-in owner), and the client's environment: `GHOST_AT` names that address, while this
+/// machine's own port answers nothing and its token file is one that cannot be read as a token.
+fn elsewhere(handle: impl Fn(&Seen, Responder) + Send + Sync + 'static) -> (Fake, crate::client::tests::Refusing) {
+    let mut there = fake(move |request, responder| match &request.authorization {
+        Some(_) => responder.json(401, &json!({ "error": { "code": "unauthorized", "message": "Unauthorized." } })),
+        None => handle(request, responder),
+    });
+    let nobody = refusing();
+    there.env.insert("GHOST_AT".into(), format!("http://127.0.0.1:{}", there.server.address.port()));
+    there.env.insert("GHOSTD_PORT".into(), nobody.port.to_string());
+    std::fs::write(there.token_file(), "short\n").unwrap();
+    (there, nobody)
+}
+
+// Every verb asks the ghost where `GHOST_AT` says it is, with no token; status leads with the address and marks
+// what is about that machine, and a change that lands in a place there names the machine.
+#[test]
+fn a_ghost_on_another_machine_answers_every_verb_and_status_says_where_it_is() {
+    let source = json!({ "commit": null, "root": null });
+    let running = json!({ "version": "1.4.0", "source": source, "startedAt": "2026-10-28T12:40:53.000Z", "restartNeeded": true });
+    let serve = json!({ "state": "off", "hostname": "box.tail.ts.net", "app": null, "command": SERVE_COMMAND, "problem": null });
+    let hooks = json!({ "path": "/home/owner/.config/ghost/hooks.json", "document": {} });
+    let (there, _nobody) = elsewhere(move |request, responder| match request.line().as_str() {
+        "GET /api/ghost" => responder.json(200, &casper()),
+        "GET /api/status" => responder.json(200, &running),
+        "GET /api/remote" => responder.json(200, &serve),
+        "GET /api/conversation" => responder.json(200, &empty_conversation()),
+        "DELETE /api/conversation" => responder.json(200, &json!({ "ok": true })),
+        "PUT /api/hooks/config" => responder.json(200, &hooks),
+        "POST /api/messages" => events(responder, &success_events()),
+        _ => unexpected(responder),
+    });
+    let (address, version) = (format!("http://127.0.0.1:{}", there.server.address.port()), crate::VERSION);
+    let status = there.run(&["status"]);
+    assert_eq!(
+        (status.code, status.stdout.as_str(), status.stderr.as_str()),
+        (
+            0,
+            format!(
+                "ghost at       {address}\nghost          casper\n\
+                 topics         3 in /home/owner/.local/share/ghost/topics (on 127.0.0.1)\nversion        {version} (this machine)\n\
+                 daemon version 1.4.0 (on 127.0.0.1)\ndaemon commit  unknown (on 127.0.0.1)\ndaemon source  packaged install (on 127.0.0.1)\n\
+                 daemon started 2026-10-28T12:40:53.000Z (on 127.0.0.1)\n\
+                 restart needed code on disk is newer than this daemon (ghost help self) (on 127.0.0.1)\n\
+                 remote         off; on 127.0.0.1, turn on: {SERVE_COMMAND}\nconversation   empty\n"
+            )
+            .as_str(),
+            ""
+        )
+    );
+    let json: Value = serde_json::from_str(&there.run(&["status", "--json"]).stdout).unwrap();
+    assert_eq!((&json["daemon"], &json["machine"], json.get("tokenFile")), (&json!(address), &json!("127.0.0.1"), None));
+
+    assert_eq!(there.run(&["new", "--yes"]).stdout, "Started over; the conversation so far is in Trash on 127.0.0.1.\n");
+    let file = there.dir.join("hooks.json").display().to_string();
+    std::fs::write(&file, "{}").unwrap();
+    assert_eq!(there.run(&["hooks", "set", &file]).stdout, "Replaced /home/owner/.config/ghost/hooks.json on 127.0.0.1 (0 hooks).\n");
+    // A turn streams from there as from here.
+    let said = there.run(&["say", "hello"]);
+    assert_eq!((said.code, said.stdout.as_str(), said.stderr.as_str()), (0, "hello there\n", "$ pwd\nwhoami\n"));
+    assert!(there.seen().iter().all(|request| request.authorization.is_none()));
+
+    // The config's key does what the variable does, and the variable wins over it: `local` is this machine's
+    // daemon, which here is not running and whose token file cannot be used.
+    std::fs::write(there.dir.join("config.json"), json!({ "ghost": address }).to_string()).unwrap();
+    assert_eq!(there.run_env(&["status", "-q"], &[("GHOST_AT", "")]).stdout, "ok\n");
+    let local = there.run_env(&["status"], &[("GHOST_AT", "local")]);
+    assert_eq!(local.code, 2);
+    assert!(local.stderr.starts_with("ghost: Token file "), "{}", local.stderr);
+    let unusable = there.run_env(&["status"], &[("GHOST_AT", "not an address")]);
+    assert_eq!(
+        (unusable.code, unusable.stderr.as_str()),
+        (2, "ghost: invalid daemon configuration: Invalid address from GHOST_AT: \"not an address\"\n")
+    );
+}
+
+#[test]
+fn a_ghost_on_another_machine_that_refuses_or_is_not_there_says_so_in_one_sentence() {
+    let (there, nobody) = elsewhere(|_, responder| responder.json(401, &json!({ "error": { "code": "unauthorized", "message": "Unauthorized." } })));
+    let address = format!("http://127.0.0.1:{}", there.server.address.port());
+    for verb in [&["status"][..], &["say", "hello"], &["show"]] {
+        let refused = there.run(verb);
+        assert_eq!(
+            (refused.code, refused.stdout.as_str(), refused.stderr.as_str()),
+            (
+                4,
+                "",
+                format!(
+                    "ghost: the ghost at {address} refused this machine: it must be signed in to the same tailnet as the ghost's owner, and the ghost's machine must have Tailscale Serve on (`ghost status` there says how)\n"
+                )
+                .as_str()
+            ),
+            "{verb:?}"
+        );
+    }
+    // Asked once each: there is no token to read again.
+    assert_eq!(there.lines().len(), 3);
+    let gone = format!("http://127.0.0.1:{}", nobody.port);
+    let lost = there.run_env(&["status"], &[("GHOST_AT", &gone)]);
+    assert_eq!(lost.code, 3);
+    assert!(lost.stderr.starts_with(&format!("ghost: cannot reach the ghost at {gone}: ")), "{}", lost.stderr);
+}
+
+// The daemon's own command asks the daemon it was run by, wherever the owner's ghost is.
+#[test]
+fn hook_complete_asks_this_machines_daemon_when_the_ghost_is_on_another() {
+    let mut daemon = answering(json!({ "text": "APPROVE" }));
+    write_token(&daemon.token_file(), 'a');
+    daemon.env.insert("GHOST_AT".into(), "nowhere.invalid".into());
+    let result = hook_complete(&daemon, &json!({ "prompt": "Review this." }).to_string());
+    assert_eq!((result.code, result.stdout.as_str()), (0, "{\"text\":\"APPROVE\"}\n"));
+    assert_eq!(daemon.lines(), ["POST /api/complete"]);
 }
 
 // ── ghostd hook-complete ────────────────────────────────────────────────

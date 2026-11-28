@@ -410,7 +410,7 @@ fn complete(
     let failed =
         |error: std::io::Error| if abort.is_aborted() { "Turn aborted.".to_string() } else { format!("The local model did not answer: {error}") };
     let mut response = send(ClientRequest {
-        address: endpoint.address,
+        address: endpoint.address.into(),
         method: "POST",
         target: "/v1/chat/completions",
         headers: &[("content-type", "application/json"), ("authorization", &authorization)],

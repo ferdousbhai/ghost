@@ -26,6 +26,8 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 libc = "0.2"
 # Request-line and header parsing for the loopback server and client.
 httparse = "1.10"
+# TLS for the client of a ghost on another machine: the system's OpenSSL and its trust store.
+openssl = "0.10"
 p256 = { version = "0.13", default-features = false, features = ["ecdh", "ecdsa", "arithmetic"] }
 hkdf = "0.12"
 sha2 = "0.10"

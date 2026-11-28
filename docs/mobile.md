@@ -17,7 +17,8 @@ Certificates), and may ask for the operator right (`sudo tailscale set
 local network access. The page has no server; it calls each machine's
 Tailscale Serve address directly, admitted by your Tailscale identity. Ghost
 itself serves no page there. Set `remote.apps` to `[]` in the config to refuse
-the page, which leaves no remote client.
+the page, which leaves only your other computers' bar and `ghost` command
+([getting started](getting-started.md#from-another-machine)).
 
 Only your own Tailscale login gets in. See `CONTRACTS.md` for the wire contract.
 
