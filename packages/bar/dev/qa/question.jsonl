@@ -1,0 +1,26 @@
+# The ghost's question (the stand-in model asks one when told "Which pier?"): the question without its answers
+# numbered under it, the answers as buttons, the arrows moving among them and Enter giving the one they are on.
+# dev/qa.sh runs it.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"type","text":"Which pier?"}
+{"do":"key","keys":"Return"}
+# The question, and each answer as a button; the prompt is back for an answer of the owner's own.
+{"do":"wait","role":"label","name":"There are two piers. Which do you mean?","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"button","name":"The north pier","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"button","name":"The south pier","visible":true}
+{"do":"wait","role":"button","name":"Neither","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+# The answers are not also written out under the question.
+{"do":"wait","role":"label","name":"1. The north pier","visible":false}
+{"do":"shot","path":"qa-bar-question.png"}
+# Down to the second answer, and Enter gives it: it is what was asked next, and the stand-in answers that.
+{"do":"key","keys":"Down"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"The south pier","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+{"do":"wait","role":"button","name":"The north pier","visible":false}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

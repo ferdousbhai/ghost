@@ -51,3 +51,6 @@
   border-radius: 5px;
   padding: 8px 10px;
 }
+
+/* The answers the ghost's question offers: a row each, the one the arrows are on marked as omui marks a chosen chip. */
+.bar-options > button.chip { padding: 6px 12px; }

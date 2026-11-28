@@ -50,6 +50,9 @@ pub struct Bar {
     entry: gtk::Entry,
     /// The caps of the key that starts dictation, beside the prompt's microphone.
     caps: gtk::Box,
+    /// The answers the ghost's open question offers, and the one the arrow keys are on, which Enter gives.
+    offered: RefCell<Vec<String>>,
+    choice: Cell<usize>,
     /// The conversation so far, as the log has it.
     exchanges: RefCell<Vec<Exchange>>,
     /// The exchange on screen while the owner is looking back; none at the conversation's end.
@@ -93,6 +96,13 @@ fn exchanges_of(transcript: &Value) -> Vec<Exchange> {
     }
     exchanges.retain(|exchange| !exchange.said.is_empty());
     exchanges
+}
+
+/// What the ghost said in asking, without the answers it offers: the daemon writes them under the question, numbered,
+/// for the clients that have nothing else to show them with, and the bar shows them as buttons.
+fn without_answers<'a>(said: &'a str, offered: &[String]) -> &'a str {
+    let numbered: Vec<String> = offered.iter().enumerate().map(|(index, answer)| format!("{}. {answer}", index + 1)).collect();
+    said.trim_end().strip_suffix(&numbered.join("\n")).map_or(said, str::trim_end)
 }
 
 /// Where the conversation's newest page starts, when `page`, read from its oldest message, is not all of it.
@@ -170,7 +180,8 @@ impl Bar {
             .child(&said)
             .visible(false)
             .build();
-        let options = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let options = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        options.add_css_class("bar-options");
         options.set_visible(false);
         panel.append(&asked);
         panel.append(&scroll);
@@ -206,6 +217,8 @@ impl Bar {
             options,
             entry,
             caps,
+            offered: RefCell::new(Vec::new()),
+            choice: Cell::new(0),
             exchanges: RefCell::new(Vec::new()),
             at: Cell::new(None),
             text: RefCell::new(String::new()),
@@ -230,6 +243,11 @@ impl Bar {
                 gdk::Key::c if control && !this.entry.text().is_empty() && this.entry.get_visible() => this.entry.set_text(""),
                 gdk::Key::c if control => this.put_away(),
                 gdk::Key::q if control => this.window.application().iter().for_each(|app| app.quit()),
+                // The ghost's question is open and nothing is typed: the arrows are on its answers, and Enter gives
+                // the one they are on. Page Up and Page Down still go through the conversation.
+                gdk::Key::Up | gdk::Key::Left if this.choosing() => this.choose(-1),
+                gdk::Key::Down | gdk::Key::Right if this.choosing() => this.choose(1),
+                gdk::Key::Return | gdk::Key::KP_Enter if this.choosing() => this.ask(),
                 gdk::Key::Up | gdk::Key::Page_Up => this.step(-1),
                 gdk::Key::Down | gdk::Key::Page_Down => this.step(1),
                 _ => return glib::Propagation::Proceed,
@@ -411,11 +429,10 @@ impl Bar {
             .map(|options| options.iter().filter_map(Value::as_str).map(String::from).collect())
             .unwrap_or_default();
         omui::clear(&self.options);
-        for (index, option) in offered.iter().enumerate() {
-            let button = gtk::Button::builder().label(option).css_classes(["chip"]).build();
-            if index == 0 {
-                button.add_css_class("suggested-action");
-            }
+        for option in &offered {
+            let label = gtk::Label::builder().label(option).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).build();
+            let button = gtk::Button::builder().child(&label).css_classes(["chip"]).focus_on_click(false).build();
+            button.update_property(&[Property::Label(option)]);
             let (this, answer) = (self.clone(), option.clone());
             button.connect_clicked(move |_| {
                 this.entry.set_text(&answer);
@@ -424,19 +441,53 @@ impl Bar {
             self.options.append(&button);
         }
         self.options.set_visible(!offered.is_empty());
-        // A question waits on screen for its answer.
+        // A question waits on screen for its answer: what the ghost said, without the answers it numbered there (they
+        // are the buttons), and the prompt, for an answer of the owner's own.
         if !offered.is_empty()
             && self.at.get().is_none()
             && let Some(exchange) = self.exchanges.borrow().last()
         {
             self.show(&self.asked, &exchange.asked);
-            self.say(&exchange.said);
+            self.say(without_answers(&exchange.said, &offered));
+            self.entry.set_visible(true);
+            self.entry.grab_focus();
         }
+        *self.offered.borrow_mut() = offered;
+        // The ghost's recommendation is its first, and where the arrows start.
+        self.choice.set(0);
+        self.choose(0);
         self.shape();
     }
 
+    /// Whether the arrows and Enter are for the open question's answers: they are on screen and nothing is typed.
+    fn choosing(&self) -> bool {
+        self.options.get_visible() && self.live.borrow().is_none() && self.entry.text().is_empty()
+    }
+
+    /// Move to the answer `by` from the one the arrows are on, stopping at the first and the last, and mark it.
+    fn choose(&self, by: isize) {
+        let last = self.offered.borrow().len().saturating_sub(1);
+        let on = self.choice.get().saturating_add_signed(by).min(last);
+        self.choice.set(on);
+        let mut button = self.options.first_child();
+        let mut index = 0;
+        while let Some(widget) = button {
+            if index == on {
+                widget.add_css_class("active");
+            } else {
+                widget.remove_css_class("active");
+            }
+            button = widget.next_sibling();
+            index += 1;
+        }
+    }
+
     fn ask(self: &Rc<Self>) {
-        let prompt = self.entry.text().trim().to_string();
+        let mut prompt = self.entry.text().trim().to_string();
+        // Enter on the open question with nothing typed gives the answer the arrows are on.
+        if prompt.is_empty() && self.choosing() {
+            prompt = self.offered.borrow().get(self.choice.get()).cloned().unwrap_or_default();
+        }
         if prompt.is_empty() {
             return;
         }
@@ -587,6 +638,16 @@ impl Bar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_question_is_shown_without_the_answers_numbered_under_it() {
+        let offered = vec!["The north pier".to_string(), "The south pier".to_string()];
+        let said = "I found two.\n\nWhich pier?\n\n1. The north pier\n2. The south pier";
+        assert_eq!(without_answers(said, &offered), "I found two.\n\nWhich pier?");
+        // Anything else the ghost said is left as it is.
+        assert_eq!(without_answers("Which pier?", &offered), "Which pier?");
+        assert_eq!(without_answers("1. The north pier\n2. The south pier\n\nWhich?", &offered), "1. The north pier\n2. The south pier\n\nWhich?");
+    }
 
     #[test]
     fn a_transcript_is_all_that_was_said_under_what_it_answered() {

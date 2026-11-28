@@ -2,7 +2,7 @@
 //!
 //!   stand_in llama-server … --port <n>   a model server that, for every turn, reasons, runs one command and gives one
 //!                                        short reply, so Ask can be checked without loading a model (ghostd spawns it
-//!                                        as `local.server`)
+//!                                        as `local.server`); told "Which pier?", it asks that with its `ask` tool
 //!   stand_in port                        a loopback port that is free now
 use ghostd::http::Server;
 use serde_json::json;
@@ -11,6 +11,11 @@ use std::time::Duration;
 
 const REPLY: &str =
     "The boat leaves at **nine**, from the north pier (Documents/Notes/Ferry trip.md).\n\n- Bring the tickets.\n- Sara is meeting you there.";
+
+/// What the owner says to have it put a question back, and the question it puts.
+const ASK_FOR: &str = "Which pier?";
+const QUESTION: &str = "There are two piers. Which do you mean?";
+const ANSWERS: [&str; 3] = ["The north pier", "The south pier", "Neither"];
 
 /// The command its one tool call runs: a shell builtin, so it needs nothing of the scratch home.
 const COMMAND: &str = "echo 'The boat leaves at nine from the north pier.'";
@@ -25,6 +30,14 @@ fn llama_server(args: &[String]) {
             let body: serde_json::Value = request.read_body(8 << 20).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
             let answering = body["messages"].as_array().is_some_and(|messages| messages.last().is_some_and(|last| last["role"] == "tool"));
             let Ok(mut events) = responder.event_stream() else { return };
+            // A question for the owner ends the turn: the server is not called again for it.
+            let asking = body["messages"].as_array().and_then(|messages| messages.last()).is_some_and(|last| last["role"] == "user" && last["content"].to_string().contains(ASK_FOR));
+            if asking {
+                let call = json!([{ "index": 0, "id": "call-ask", "function": { "name": "ask", "arguments": json!({ "question": QUESTION, "options": ANSWERS }).to_string() } }]);
+                let _ = events.write(&format!("data: {}\n\n", json!({ "choices": [{ "delta": { "tool_calls": call } }] })));
+                let _ = events.write("data: [DONE]\n\n");
+                return;
+            }
             if !answering {
                 let call =
                     json!([{ "index": 0, "id": "call-1", "function": { "name": "bash", "arguments": json!({ "command": COMMAND }).to_string() } }]);

@@ -12,9 +12,11 @@ Nothing of it stays on screen. The prompt goes when a question is sent. The
 answer stays until the owner puts the bar away: all of it, as Markdown,
 scrolling past about half the screen's height, with the command that is
 running as one status line. Reasoning, commands and what they printed are not
-in it: `ghost show` lists them. The answers to the ghost's open question are
-buttons under what it said, the one it recommends first and marked; any other
-answer is typed.
+in it: `ghost show` lists them. The ghost's open question is shown with the
+answers it offers as buttons under it, its recommendation first, and not
+also written out. The arrow keys move among them while nothing is typed, and
+`Enter` or a click gives one; any other answer is typed into the prompt,
+which is there with the question.
 
 The prompt sits just above where Omarchy's dictation shows what it hears, so
 neither covers the other. Where the machine has that dictation, the prompt
@@ -28,7 +30,7 @@ a click on the microphone does the same as the key.
 | `Enter` | Sends what is in the prompt; while a turn runs, as a follow-up to it. What could not be sent comes back to the prompt. |
 | `Escape`, or a click off the bar | Puts the bar away. It stops nothing: a running turn runs on and is on screen when the bar is summoned again; an answer that had ended while on screen is not. While it is on screen the bar has the keyboard. |
 | `Ctrl+C` | As in a terminal: stops the running turn; with none, empties the prompt; with nothing to empty, puts the bar away. |
-| `Up`, `Down` (`Page Up`, `Page Down`) | Back and forth through the conversation's newest messages, an exchange at a time. |
+| `Up`, `Down` (`Page Up`, `Page Down`) | Back and forth through the conversation's newest messages, an exchange at a time. With a question open and nothing typed, the arrows (`Left` and `Right` too) are on its answers, and the page keys still go through the conversation. |
 | `Ctrl+Q` | Ends the bar. |
 
 Summoning the bar (`ghost-bar` again, which is what a key binding runs) shows
