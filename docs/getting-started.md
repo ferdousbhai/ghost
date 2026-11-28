@@ -84,7 +84,7 @@ compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
 launcher summons the bar (`ghost-bar`): a prompt near the bottom of the
 screen, with what you ask and the ghost's answer above it.
 Bind a key to it in `~/.config/hypr/bindings.lua` so it is always one press
-away, for example `o.bind("SUPER + CTRL + G", "Ghost", "ghost-bar --listen")`;
+away, for example `o.bind("SUPER + A", "Ghost", "ghost-bar --listen")`;
 with `--listen` the same key starts Omarchy's dictation, and pressed again
 ends it, so what you said is in the prompt.
 
