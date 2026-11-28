@@ -306,7 +306,7 @@ fn reads_a_node_out_of_tailscale_status() {
         (node.backend_state.as_str(), node.login.as_deref(), node.hostname.as_deref()),
         ("Running", Some("owner@example.com"), Some(FAKE_HOSTNAME))
     );
-    let tagged = TailscalePeer { hostname: "server.example.ts.net".into(), login: None, online: true };
+    let tagged = TailscalePeer { hostname: "server.example.ts.net".into(), login: None, online: true, os: String::new() };
     assert_eq!(node.peers.len(), 4);
     assert_eq!(node.peers[3], tagged);
     assert_eq!(node.peers[2].login.as_deref(), Some("partner@example.com"));

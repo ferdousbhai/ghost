@@ -186,21 +186,32 @@ every change to a ghost goes through the daemon.
 ### From another machine
 
 To talk to the ghost on your machine at home from a laptop, install Ghost on
-the laptop, sign it in to the same tailnet, turn [remote access](#9-optional-once-you-are-talking)
-on at home, and put the home machine's Tailscale name in the laptop's
-`~/.config/ghost/config.json`:
+the laptop, sign it in to the same tailnet, and turn [remote access](#9-optional-once-you-are-talking)
+on at home. Then summon the bar on the laptop. With no model of its own, it
+looks for your ghost on your other machines and offers it:
 
-```json
-{ "ghost": "beelink.your-tailnet.ts.net" }
+```text
+No model on this machine. Use the ghost on:
+  beelink
 ```
+
+`Enter` takes it. From a terminal, `ghost use` lists the same ghosts to pick
+from by number, and `ghost use beelink` names one outright (a machine's
+Tailscale name, short or in full); a laptop that has a model of its own is
+never offered another's ghost, so there it is this command. Either way the
+ghost is asked first, and saved only once it has answered as yours.
 
 The laptop's bar and `ghost` command are then that ghost's: the bar's prompt
 says "Ask your ghost on beelink", and `ghost status` begins with its address.
 The ghost still works on its own machine: the commands it runs, and the files
 it reads and writes, are the home machine's, not the laptop's.
-`GHOST_AT=<address> ghost …` does the same for one command, and
-`GHOST_AT=local` reaches the laptop's own ghost. No token is copied: your
-Tailscale login is what lets the laptop in.
+`ghost use local` goes back to the laptop's own ghost. No token is copied:
+your Tailscale login is what lets the laptop in.
+
+What is saved is one key in the laptop's `~/.config/ghost/config.json`,
+`{ "ghost": "beelink.your-tailnet.ts.net" }`, which you can also write by
+hand. `GHOST_AT=<address> ghost …` does the same for one command, and
+`GHOST_AT=local` reaches the laptop's own ghost.
 
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
@@ -211,7 +222,7 @@ codes.
 | Path | What |
 |---|---|
 | `~/.local/share/ghost/` | the ghost home: `character.md`; `conversation/`, the one conversation (its log, attachments, and the directory the ghost's commands run in); and `topics/`, the ghost's topic documents |
-| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model), and `ghost`, the address of a ghost on another machine — optional; a missing file is fine, a malformed one or an unknown key is an error |
+| `~/.config/ghost/config.json` | daemon config (port, ghost home, remote owner and apps, and the local model), and `ghost`, the address of a ghost on another machine, which `ghost use` writes — optional; a missing file is fine, a malformed one or an unknown key is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also edited with `ghost hooks` |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/push.json` | the devices that get alerts, with their keys |

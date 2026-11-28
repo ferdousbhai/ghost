@@ -3,7 +3,9 @@
 use super::common::{read_argument_file, read_argument_json};
 use super::output::{Rendered, primary, relative_time, table, truncate};
 use super::{CliError, Context, EXIT_SUCCESS};
+use crate::ghosts::{self, GhostAddress};
 use serde_json::{Map, Value, json};
+use std::io::Read;
 
 // ── The conversation ────────────────────────────────────────────────────
 
@@ -231,6 +233,87 @@ pub fn status_command(ctx: &mut Context) -> Result<i32, CliError> {
         Rendered::Both { human: format!("{}\n", lines.join("\n")), quiet: "ok\n".to_string() }
     });
     Ok(EXIT_SUCCESS)
+}
+
+// ── Which ghost answers here ────────────────────────────────────────────
+
+/// Save which ghost answers here, once it has answered, and say so in a sentence.
+fn using(ctx: &mut Context, address: Option<&GhostAddress>) -> Result<i32, CliError> {
+    let sentence = ghosts::use_ghost(ctx.runtime.env, ctx.runtime.home, address)?;
+    let body = json!({ "ghost": address.map(GhostAddress::origin), "machine": address.map(GhostAddress::machine) });
+    ctx.emit(&body, || Rendered::Secondary(format!("{sentence}\n")));
+    // The variable wins over what was just saved, for as long as this shell has it.
+    if crate::env::var(ctx.runtime.env, "GHOST_AT").is_some() {
+        ctx.err("ghost: GHOST_AT is set in this shell, and still says where the ghost is here.\n");
+    }
+    Ok(EXIT_SUCCESS)
+}
+
+/// One line typed at the terminal, without its end.
+fn typed_line(reader: &mut dyn Read) -> String {
+    let (mut line, mut byte) = (Vec::new(), [0u8; 1]);
+    while reader.read(&mut byte).is_ok_and(|read| read == 1) && byte[0] != b'\n' {
+        line.push(byte[0]);
+    }
+    String::from_utf8_lossy(&line).trim().to_string()
+}
+
+/// `ghost use [machine|local]`: say which machine's ghost answers here. With
+/// no machine, list the ghosts that answer on the tailnet, this machine's own
+/// first; at a terminal one is then picked by its number.
+pub fn use_command(ctx: &mut Context) -> Result<i32, CliError> {
+    let run = ghosts::tailscale_runner(ctx.runtime.env.clone());
+    if let Some(machine) = ctx.parsed.positionals.first().cloned() {
+        let address = ghosts::resolve(&machine, &run)?;
+        return using(ctx, address.as_ref());
+    }
+    let found = ghosts::find(ctx.runtime.env, ctx.runtime.home, &run).map_err(|error| match error {
+        ghosts::NotFound::Tailnet(problem) => {
+            CliError::failure(format!("{}, so the ghosts on your tailnet cannot be listed; `ghost use <address>` still works.", problem.clause()))
+        }
+        ghosts::NotFound::Config(message) => CliError::usage(format!("invalid daemon configuration: {message}")),
+    })?;
+    let listed: Vec<Value> = found
+        .ghosts
+        .iter()
+        .map(|ghost| {
+            json!({ "machine": ghost.machine, "address": ghost.address.as_ref().map(GhostAddress::origin), "here": ghost.address.is_none(), "inUse": ghost.in_use })
+        })
+        .collect();
+    let body = json!({ "inUse": found.in_use.as_ref().map(GhostAddress::origin), "ghosts": listed });
+    let rows: Vec<Vec<String>> = found
+        .ghosts
+        .iter()
+        .enumerate()
+        .map(|(index, ghost)| {
+            let marks = [(ghost.address.is_none(), "this machine"), (ghost.in_use, "in use")];
+            let marks: Vec<&str> = marks.iter().filter(|(holds, _)| *holds).map(|(_, mark)| *mark).collect();
+            vec![(index + 1).to_string(), ghost.machine.clone(), marks.join(", ")]
+        })
+        .collect();
+    let mut human = if rows.is_empty() { "No ghost answers on your tailnet.\n".to_string() } else { format!("{}\n", table(&rows, None)) };
+    // The one in use is said even when it is not among those that answer.
+    if !found.ghosts.iter().any(|ghost| ghost.in_use) {
+        human.push_str(&match &found.in_use {
+            Some(address) => format!("In use: the ghost at {}, which does not answer.\n", address.origin()),
+            None => "In use: this machine's own ghost, which does not answer.\n".to_string(),
+        });
+    }
+    ctx.emit(&body, || Rendered::Both { human, quiet: found.ghosts.iter().map(|ghost| format!("{}\n", ghost.machine)).collect() });
+    // Someone is there to pick: a terminal on both sides, and a list that was printed for them.
+    let asked = ctx.runtime.stdin.is_tty && ctx.runtime.stdout_is_tty && !ctx.parsed.boolean("json") && !ctx.parsed.boolean("quiet");
+    if !asked || found.ghosts.is_empty() {
+        return Ok(EXIT_SUCCESS);
+    }
+    ctx.out("Number to use (Enter changes nothing): ");
+    let typed = typed_line(&mut ctx.runtime.stdin.reader);
+    if typed.is_empty() {
+        return Ok(EXIT_SUCCESS);
+    }
+    let picked = typed.parse::<usize>().ok().and_then(|number| found.ghosts.get(number.checked_sub(1)?));
+    let ghost =
+        picked.ok_or_else(|| CliError::usage(format!("\"{typed}\" is not a number from 1 to {}; nothing was changed.", found.ghosts.len())))?;
+    using(ctx, ghost.address.as_ref())
 }
 
 // ── Hooks ───────────────────────────────────────────────────────────────

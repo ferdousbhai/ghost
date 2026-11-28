@@ -118,8 +118,8 @@ Common flags:
   -v, --version            Show the ghost package version
 
 ghostd holds the conversation and answers each turn on a model on its machine;
-ghost talks to it: this machine's, or the one at $GHOST_AT (a Tailscale Serve
-address; the config's \"ghost\" sets it for good, and `local` is this machine).
+ghost talks to it: this machine's, or another machine's once `ghost use <machine>`
+says so ($GHOST_AT=<address> does for one command; `local` is this machine).
 ",
         rows.join("\n")
     )

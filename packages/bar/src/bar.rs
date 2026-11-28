@@ -14,7 +14,10 @@ use std::{
     time::Duration,
 };
 
-use ghostd::abort::Abort;
+use ghostd::{
+    abort::Abort,
+    ghosts::{Ghost, GhostAddress, Tailnet},
+};
 use gtk::{accessible::Property, gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde_json::{Value, json};
@@ -26,6 +29,19 @@ const WIDTH: i32 = 880;
 /// chosen (the last row of Claude Code's own question).
 const ASK: &str = "Ask your ghost";
 const ANSWER: &str = "Type something";
+/// What a machine with no model of its own is told: while its owner's other machines are asked for a ghost, over
+/// the ones found, and, with none, what is missing and how to get one.
+const NO_MODEL: &str = "No model on this machine";
+const HOW: &str = "Set a model up here (`ghost help products`), or turn Tailscale Serve on where your ghost is (`ghost status` there says how).";
+
+/// The one line over what the tailnet came to: the ghosts to choose from, or why there is none.
+fn offering(found: &Result<Vec<Ghost>, Tailnet>) -> String {
+    match found {
+        Ok(ghosts) if ghosts.is_empty() => format!("{NO_MODEL}, and no ghost found on your tailnet. {HOW}"),
+        Ok(_) => format!("{NO_MODEL}. Use the ghost on:"),
+        Err(problem) => format!("{NO_MODEL}, and {}, so no ghost on another can be looked for. {HOW}", problem.clause()),
+    }
+}
 
 /// `ASK`, naming the machine when the ghost is on another: its commands run there, not here.
 fn asking(machine: Option<&str>) -> String {
@@ -59,9 +75,12 @@ pub struct Bar {
     entry: gtk::Entry,
     /// The caps of the key that starts dictation, beside the prompt's microphone.
     caps: gtk::Box,
-    /// The answers the ghost's open question offers, and the one the arrow keys are on, which Enter gives.
+    /// The rows under what is on screen, and the one the arrow keys are on, which Enter gives: the answers the
+    /// ghost's open question offers, or the machines whose ghost this one can use.
     offered: RefCell<Vec<String>>,
     choice: Cell<usize>,
+    /// Where each row's ghost is, while the rows are machines; empty while they are a question's answers.
+    machines: RefCell<Vec<GhostAddress>>,
     /// The conversation so far, as the log has it.
     exchanges: RefCell<Vec<Exchange>>,
     /// The exchange on screen while the owner is looking back; none at the conversation's end.
@@ -228,6 +247,7 @@ impl Bar {
             caps,
             offered: RefCell::new(Vec::new()),
             choice: Cell::new(0),
+            machines: RefCell::new(Vec::new()),
             exchanges: RefCell::new(Vec::new()),
             at: Cell::new(None),
             text: RefCell::new(String::new()),
@@ -426,6 +446,15 @@ impl Bar {
         if self.live.borrow().is_some() {
             return;
         }
+        // Nothing on this machine could answer: the owner's other machines are asked for a ghost instead.
+        if api::wanting() {
+            self.note(&format!("{NO_MODEL}. Looking for your ghost on another…"), false);
+            let found = api::others().await;
+            if self.live.borrow().is_none() {
+                self.offer(found);
+            }
+            return;
+        }
         let transcript = newest_page().await;
         let conversation = api::call("GET", "/api/conversation".to_string(), None).await.unwrap_or(Value::Null);
         if self.live.borrow().is_some() {
@@ -445,19 +474,7 @@ impl Bar {
             .as_array()
             .map(|options| options.iter().filter_map(Value::as_str).map(String::from).collect())
             .unwrap_or_default();
-        omui::clear(&self.options);
-        for option in &offered {
-            let label = gtk::Label::builder().label(option).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).build();
-            let button = gtk::Button::builder().child(&label).css_classes(["chip"]).focus_on_click(false).build();
-            button.update_property(&[Property::Label(option)]);
-            let (this, answer) = (self.clone(), option.clone());
-            button.connect_clicked(move |_| {
-                this.entry.set_text(&answer);
-                this.ask();
-            });
-            self.options.append(&button);
-        }
-        self.options.set_visible(!offered.is_empty());
+        self.rows(&offered, Vec::new());
         // A question waits on screen for its answer: what the ghost said, without the answers it numbered there (they
         // are the buttons), and the prompt, for an answer of the owner's own.
         if !offered.is_empty()
@@ -471,11 +488,70 @@ impl Bar {
         }
         let ask = asking(api::machine().as_deref());
         self.entry.set_placeholder_text(Some(if offered.is_empty() { &ask } else { ANSWER }));
-        *self.offered.borrow_mut() = offered;
-        // The ghost's recommendation is its first, and where the arrows start.
+        self.shape();
+    }
+
+    /// The rows under what is on screen, each a button: a question's answers, or, with `machines`, the machines
+    /// whose ghost can be used. The first is where the arrows start (the ghost's recommendation is its first).
+    fn rows(self: &Rc<Self>, labels: &[String], machines: Vec<GhostAddress>) {
+        omui::clear(&self.options);
+        for (index, text) in labels.iter().enumerate() {
+            let label = gtk::Label::builder().label(text).xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).build();
+            let button = gtk::Button::builder().child(&label).css_classes(["chip"]).focus_on_click(false).build();
+            button.update_property(&[Property::Label(text)]);
+            let this = self.clone();
+            button.connect_clicked(move |_| this.pick(index));
+            self.options.append(&button);
+        }
+        self.options.set_visible(!labels.is_empty());
+        *self.offered.borrow_mut() = labels.to_vec();
+        *self.machines.borrow_mut() = machines;
         self.choice.set(0);
         self.choose(0);
+    }
+
+    /// The row at `index` is chosen: that machine's ghost is the one to use, or that answer is given. The prompt's
+    /// own row, under the last, is neither.
+    fn pick(self: &Rc<Self>, index: usize) {
+        let machine = self.machines.borrow().get(index).cloned();
+        let answer = self.offered.borrow().get(index).cloned();
+        match (machine, answer) {
+            (Some(address), _) => self.use_ghost(address),
+            (None, Some(answer)) if self.machines.borrow().is_empty() => {
+                self.entry.set_text(&answer);
+                self.ask();
+            }
+            _ => {}
+        }
+    }
+
+    /// What a machine with no model is shown in place of its conversation: one line, and under it a row for each
+    /// of the owner's other machines whose ghost answers. With none, the line says what is missing and nothing is
+    /// offered. It stays until the bar is put away, and is looked for again when it is summoned.
+    fn offer(self: &Rc<Self>, found: Result<Vec<Ghost>, Tailnet>) {
+        self.seen.set(true);
+        self.note(&offering(&found), false);
+        let ghosts = found.unwrap_or_default();
+        let labels: Vec<String> = ghosts.iter().map(|ghost| ghost.machine.clone()).collect();
+        self.rows(&labels, ghosts.into_iter().filter_map(|ghost| ghost.address).collect());
         self.shape();
+    }
+
+    /// The owner chose a machine: its ghost is asked and saved, as `ghost use` does it, and the prompt is that
+    /// ghost's at once, with its conversation. What stopped it is the error line, over the rows as they were.
+    fn use_ghost(self: &Rc<Self>, address: GhostAddress) {
+        let this = self.clone();
+        glib::spawn_future_local(async move {
+            match api::use_ghost(address).await {
+                Ok(()) => {
+                    this.rows(&[], Vec::new());
+                    this.clear();
+                    this.seen.set(false);
+                    this.settle().await;
+                }
+                Err(error) => this.note(&error, true),
+            }
+        });
     }
 
     /// Whether the arrows and Enter are for the open question's answers: they are on screen and nothing is typed.
@@ -506,6 +582,9 @@ impl Bar {
         let mut prompt = self.entry.text().trim().to_string();
         // Enter on the open question with nothing typed gives the answer the arrows are on.
         if prompt.is_empty() && self.choosing() {
+            if !self.machines.borrow().is_empty() {
+                return self.pick(self.choice.get());
+            }
             prompt = self.offered.borrow().get(self.choice.get()).cloned().unwrap_or_default();
         }
         if prompt.is_empty() {
@@ -662,6 +741,20 @@ mod tests {
     #[test]
     fn the_prompt_names_the_machine_only_when_the_ghost_is_on_another() {
         assert_eq!((asking(None), asking(Some("beelink"))), ("Ask your ghost".to_string(), "Ask your ghost on beelink".to_string()));
+    }
+
+    #[test]
+    fn a_machine_with_no_model_is_told_which_ghosts_it_can_use_or_what_is_missing() {
+        let alarm = Ghost { machine: "alarm".into(), address: GhostAddress::parse("alarm.tailnet.ts.net"), in_use: false };
+        assert_eq!(offering(&Ok(vec![alarm])), "No model on this machine. Use the ghost on:");
+        assert_eq!(
+            offering(&Ok(Vec::new())),
+            "No model on this machine, and no ghost found on your tailnet. Set a model up here (`ghost help products`), or turn Tailscale Serve on where your ghost is (`ghost status` there says how)."
+        );
+        assert_eq!(
+            offering(&Err(Tailnet::Missing)),
+            "No model on this machine, and Tailscale is not installed here, so no ghost on another can be looked for. Set a model up here (`ghost help products`), or turn Tailscale Serve on where your ghost is (`ghost status` there says how)."
+        );
     }
 
     #[test]

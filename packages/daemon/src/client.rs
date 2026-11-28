@@ -89,6 +89,11 @@ impl Client {
         Self::find(env, home, false)
     }
 
+    /// The ghost at `address`, whatever the config says: what `ghost use` asks before it saves one.
+    pub fn at(env: &Env, home: &Path, address: GhostAddress) -> Self {
+        Self { env: env.clone(), home: home.to_path_buf(), found: Found::Elsewhere(address) }
+    }
+
     fn find(env: &Env, home: &Path, anywhere: bool) -> Result<Self, ClientError> {
         let config = load_config(&Overrides::default(), env, home)
             .map_err(|error| ClientError::Configuration(format!("invalid daemon configuration: {error}")))?;

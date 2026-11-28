@@ -47,6 +47,17 @@ another machine, the empty prompt says which ("Ask your ghost on beelink"),
 and a ghost there that cannot be reached or refuses this machine is that
 error line.
 
+On a machine with no model of its own and no ghost set, the bar has nothing
+to ask, so when it is summoned it looks for the owner's ghost on their other
+machines, as `ghost use` does, and shows "No model on this machine. Use the
+ghost on:" with a row for each machine whose ghost answers. The rows are
+chosen as a question's answers are: the arrows, `Enter` or a click. The one
+chosen is asked and saved (the `ghost` key of this machine's config), and
+the prompt is that ghost's at once; `ghost use local` undoes it. With none
+found, or no Tailscale to look with, the line says what is missing and how
+to get it, and no row is offered. A machine with a model, or with a ghost
+already set, never sees this.
+
 ## Working on it
 
 The look is [omui](https://github.com/ferdousbhai/omui)'s, on Omarchy's
@@ -54,5 +65,6 @@ current theme; [`style.css`](src/style.css) holds only Ghost's own rules, on
 omui's `@om_*` colours. [`dev/qa.sh`](dev/qa.sh) walks the main flows, with
 screenshots, in a bar built with the `qa` feature, against a scratch ghostd (the
 release build) and a stand-in model on a private broadway display, once as a
-ghost on another machine behind a stand-in for Tailscale Serve; never try a change on the
-owner's session.
+ghost on another machine behind a stand-in for Tailscale Serve, and twice as
+a machine with no model, whose `tailscale` is a stand-in first on the bar's
+`PATH`; never try a change on the owner's session.

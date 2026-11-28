@@ -372,9 +372,10 @@ fn names_the_machines_one_ghost() {
     let daemon = Daemon::start();
     let response = daemon.get("/api/ghost");
     assert_eq!(response.status, 200);
-    // With where its topic documents are, the owner's to read, edit and delete, and how many there are.
+    // With whether it has a model to answer on, where its topic documents are, the owner's to read, edit and
+    // delete, and how many there are.
     let topics = daemon.ghost_dir.join("topics");
-    assert_eq!(response.json(), json!({ "name": "casper", "topics": { "path": topics.to_string_lossy(), "count": 0 } }));
+    assert_eq!(response.json(), json!({ "name": "casper", "model": true, "topics": { "path": topics.to_string_lossy(), "count": 0 } }));
     std::fs::create_dir_all(&topics).unwrap();
     std::fs::write(topics.join("boat-trip.md"), "The Heron leaves at nine.\n").unwrap();
     assert_eq!(daemon.get("/api/ghost").json()["topics"]["count"], 1);

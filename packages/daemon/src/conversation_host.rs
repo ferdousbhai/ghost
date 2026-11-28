@@ -524,6 +524,11 @@ impl ConversationHost {
         }
     }
 
+    /// Whether a turn can be answered at all: a local model is configured.
+    pub fn has_model(&self) -> bool {
+        self.inner.answerer.is_some()
+    }
+
     /// Run one prompt on the local model, handed the conversation so far as
     /// the messages it was: the model keeps no session of its own. Returns the terminal error, or None on success.
     fn run_turn_on_model(&self, prompt: &str, emit: &Emit, blocks: &mut usize, abort: &Abort) -> Result<Option<Value>> {

@@ -7,6 +7,10 @@
 #   stand_in_serve     starts what Tailscale Serve is to that ghostd, but for the TLS (sets serve_pid and serve_port):
 #                      a loopback port whose requests reach it stamped as its owner's tailnet login, so a client
 #                      whose `GHOST_AT` is `http://127.0.0.1:$serve_port` is taken for the owner's with no token
+#   stand_in_tailnet <dir> [name ...]  makes <dir>/bin/tailscale, a `tailscale` whose `status --json` is a signed-in
+#                      node with those machines as its owner's others, each on: put first on a bar's PATH, it is the
+#                      tailnet that bar looks for ghosts on. A name is a machine's MagicDNS name, read as any address
+#                      is, so `http://localhost:$serve_port` is a machine called localhost whose ghost is the stand-in
 #
 # The caller sets `root` (an empty directory of its own) and a private XDG_RUNTIME_DIR, and kills `daemon_pid` and
 # `serve_pid` when it ends.
@@ -72,4 +76,18 @@ stand_in_serve() {
     kill -0 "$serve_pid" 2>/dev/null || { echo "stand-in: serve exited" >&2; cat "$root/serve.log" >&2; exit 1; }
     sleep 0.1
   done
+}
+
+stand_in_tailnet() {
+  local dir=$1 peers="" name index=0
+  shift
+  for name in "$@"; do
+    peers+="${peers:+,}\"key$index\":{\"DNSName\":\"$name.\",\"UserID\":42,\"Online\":true,\"OS\":\"linux\"}"
+    index=$((index + 1))
+  done
+  mkdir -p "$dir/bin"
+  printf '#!/bin/sh\nprintf %%s %q\n' \
+    "{\"BackendState\":\"Running\",\"Self\":{\"DNSName\":\"laptop.example.ts.net.\",\"UserID\":42},\"Peer\":{$peers},\"User\":{\"42\":{\"LoginName\":\"$stand_in_owner\"}}}" \
+    > "$dir/bin/tailscale"
+  chmod 755 "$dir/bin/tailscale"
 }

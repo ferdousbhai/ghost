@@ -13,6 +13,7 @@ mod conversation_log;
 pub mod daemon;
 pub mod env;
 mod error;
+pub mod ghosts;
 mod help_guides;
 mod help_topics;
 mod home;

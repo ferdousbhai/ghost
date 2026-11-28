@@ -4,7 +4,9 @@ set -Eeuo pipefail
 # The bar's QA scripts (dev/qa/*.jsonl, omui's scripted QA: README "Scripted QA" in omui), each in a fresh bar
 # built with feature `qa`, against one scratch ghostd and a stand-in model (stand-in.sh), on a broadway display of its own:
 # (`elsewhere.jsonl` reaches that ghostd as a ghost on another machine is reached: `GHOST_AT`, a stand-in for Tailscale
-# Serve, no token and no daemon port of this machine's)
+# Serve, no token and no daemon port of this machine's; `offer.jsonl` and `offer-none.jsonl` are a bar on a machine
+# with no model, no daemon and a config of its own, whose `tailscale`, first on its PATH, lists that stand-in as the
+# owner's other machine, or lists none)
 # private HOME, XDG directories and runtime, no session bus, no Wayland or X display, so no window opens anywhere and
 # nothing of the desktop this is run from is read. Any failed command, GLib warning or critical fails the run.
 # The gate (`.githooks/verify`) runs it.
@@ -86,7 +88,15 @@ for script in "${scripts[@]}"; do
   # times it shows, which the scripts name widgets by.
   status=0
   elsewhere=()
-  [[ ${script##*/} != elsewhere.jsonl ]] || elsewhere=(GHOST_AT="http://127.0.0.1:$serve_port" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token)
+  name=${script##*/}
+  # A machine of its own, with nothing but a tailnet: no model, no daemon, and a config file that is not there yet.
+  machine=$root/machine-${name%.jsonl}
+  no_model=(GHOSTD_CONFIG="$machine/config.json" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token PATH="$machine/bin:$PATH")
+  case $name in
+    elsewhere.jsonl) elsewhere=(GHOST_AT="http://127.0.0.1:$serve_port" GHOSTD_PORT=1 GHOSTD_API_TOKEN_FILE=/nonexistent/api-token) ;;
+    offer.jsonl) stand_in_tailnet "$machine" "http://localhost:$serve_port"; elsewhere=("${no_model[@]}") ;;
+    offer-none.jsonl) stand_in_tailnet "$machine"; elsewhere=("${no_model[@]}") ;;
+  esac
   (cd "$shots" && exec env -u WAYLAND_DISPLAY -u DISPLAY -u GTK_THEME "${elsewhere[@]}" \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent TZ=UTC \
     GDK_BACKEND=broadway BROADWAY_DISPLAY=":$display" OMUI_QA=1 OMUI_QA_INPUT="127.0.0.1:$input_port" OMUI_QA_FD=3 \

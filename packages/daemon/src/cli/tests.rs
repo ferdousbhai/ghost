@@ -473,9 +473,11 @@ fn prints_the_usage_screen_with_no_verb() {
     assert!(bare.stdout.contains(&format!("\n  {:<widest$}  Start over: move the conversation to recoverable Trash.\n", "new --yes [--json] [-q]")));
     let listed = bare.stdout.split_once("\nCommands:\n").unwrap().1.split_once("\n\n").unwrap().0;
     let verbs: Vec<&str> = listed.lines().map(|line| line.split_whitespace().next().unwrap()).collect();
-    assert_eq!(verbs, ["say", "stop", "show", "new", "hooks", "character", "status", "help"]);
+    assert_eq!(verbs, ["say", "stop", "show", "new", "hooks", "character", "status", "use", "help"]);
     assert!(bare.stdout.contains("\n  -v, --version            Show the ghost package version\n"));
-    assert!(bare.stdout.ends_with("\n\nghostd holds the conversation and answers each turn on a model on its machine;\nghost talks to it: this machine's, or the one at $GHOST_AT (a Tailscale Serve\naddress; the config's \"ghost\" sets it for good, and `local` is this machine).\n"));
+    assert!(bare.stdout.ends_with(
+        "\n\nghostd holds the conversation and answers each turn on a model on its machine;\nghost talks to it: this machine's, or another machine's once `ghost use <machine>`\nsays so ($GHOST_AT=<address> does for one command; `local` is this machine).\n"
+    ));
 }
 
 #[test]
@@ -1155,6 +1157,231 @@ fn hook_complete_asks_this_machines_daemon_when_the_ghost_is_on_another() {
     let result = hook_complete(&daemon, &json!({ "prompt": "Review this." }).to_string());
     assert_eq!((result.code, result.stdout.as_str()), (0, "{\"text\":\"APPROVE\"}\n"));
     assert_eq!(daemon.lines(), ["POST /api/complete"]);
+}
+
+// ── ghost use ───────────────────────────────────────────────────────────
+
+/// A `tailscale` on the run's PATH, and nothing else there, that prints `status` for whatever it is asked.
+fn tailscale_on_path(daemon: &mut Fake, status: &Value) {
+    let bin = daemon.dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("tailscale"), format!("#!/bin/sh\nprintf '%s' '{status}'\n")).unwrap();
+    std::fs::set_permissions(bin.join("tailscale"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    daemon.env.insert("PATH".into(), bin.display().to_string());
+}
+
+/// A ghost on another machine that takes its owner, on a machine of the client's with no daemon and no `GHOST_AT`.
+fn another_machine(ghost: Value) -> (Fake, crate::client::tests::Refusing) {
+    let (mut there, nobody) = elsewhere(move |request, responder| match request.line().as_str() {
+        "GET /api/ghost" => responder.json(200, &ghost),
+        "GET /api/conversation" => responder.json(200, &empty_conversation()),
+        _ => responder.json(200, &json!({})),
+    });
+    there.env.remove("GHOST_AT");
+    (there, nobody)
+}
+
+fn config_of(daemon: &Fake) -> Option<String> {
+    std::fs::read_to_string(daemon.dir.join("config.json")).ok()
+}
+
+/// A run with someone at the terminal on both sides, who types `typed`.
+fn run_at_a_terminal(daemon: &Fake, args: &[&str], typed: &str) -> Output {
+    let _shared = SIGNALS.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    let stdin = Stdin { reader: Box::new(Cursor::new(typed.to_string())), is_tty: true };
+    let runtime = CliRuntime { env: &daemon.env, home: &daemon.dir, stdout: &mut stdout, stderr: &mut stderr, stdin, stdout_is_tty: true };
+    let code = ghost_cli(&strings(args), runtime);
+    Output { code, stdout: String::from_utf8(stdout).unwrap(), stderr: String::from_utf8(stderr).unwrap() }
+}
+
+// `ghost use <machine>`: a short name is looked up in Tailscale, the ghost there is asked, and only then is it saved;
+// every verb after it goes there. `local`, or this machine's own name, is the way back.
+#[test]
+fn use_saves_the_ghost_on_a_named_machine_once_it_has_answered_and_local_takes_it_back() {
+    use crate::ghosts::tests::{machine, status};
+    let (mut there, _nobody) = another_machine(casper());
+    let port = there.server.address.port();
+    let by_name = format!("http://localhost:{port}");
+    tailscale_on_path(&mut there, &status("laptop.tail.ts.net", &[machine(&by_name)]));
+
+    let used = there.run(&["use", "localhost"]);
+    assert_eq!((used.code, used.stdout.as_str(), used.stderr.as_str()), (0, "The ghost on localhost answers here now.\n", ""));
+    assert_eq!(config_of(&there), Some(format!("{{\n  \"ghost\": \"{by_name}\"\n}}\n")));
+    assert_eq!(std::fs::metadata(there.dir.join("config.json")).unwrap().permissions().mode() & 0o777, 0o600);
+    // It was asked once, as its owner is: no token.
+    assert_eq!((there.lines(), there.seen()[0].authorization.clone()), (vec!["GET /api/ghost".to_string()], None));
+    // Every verb now goes there, with nothing in the environment saying so.
+    assert_eq!(there.run(&["status", "-q"]).stdout, "ok\n");
+
+    // This machine's own name, and `local`, are this machine's own ghost: the key goes, and no ghost is asked.
+    let asked = there.lines().len();
+    let back = there.run(&["use", "laptop"]);
+    assert_eq!((back.code, back.stdout.as_str()), (0, "This machine's own ghost answers here now.\n"));
+    assert_eq!(config_of(&there), Some("{}\n".to_string()));
+    // An address needs no Tailscale. --json says where the ghost now is, and -q nothing.
+    let numbered = format!("http://127.0.0.1:{port}");
+    let json = there.run_env(&["use", &numbered, "--json"], &[("PATH", "/nonexistent")]);
+    assert_eq!((json.code, json.stdout), (0, format!("{}\n", json!({ "ghost": numbered, "machine": "127.0.0.1" }))));
+    assert_eq!(there.run(&["use", "local", "--json"]).stdout, "{\"ghost\":null,\"machine\":null}\n");
+    let quiet = there.run(&["use", &numbered, "-q"]);
+    assert_eq!((quiet.code, quiet.stdout.as_str(), quiet.stderr.as_str()), (0, "", ""));
+    assert_eq!(there.lines().len(), asked + 2);
+    // While `GHOST_AT` is set it still wins in that shell, and the command says so.
+    let overridden = there.run_env(&["use", "local"], &[("GHOST_AT", "elsewhere.invalid")]);
+    assert_eq!(
+        (overridden.code, overridden.stdout.as_str(), overridden.stderr.as_str()),
+        (0, "This machine's own ghost answers here now.\n", "ghost: GHOST_AT is set in this shell, and still says where the ghost is here.\n")
+    );
+}
+
+// Whatever is wrong is one sentence that says which thing it was, with its own exit code, and nothing is written.
+#[test]
+fn use_writes_nothing_and_says_which_thing_failed() {
+    use crate::ghosts::tests::{machine, status};
+    let (mut there, nobody) = another_machine(json!({ "name": "casper", "model": false }));
+    let stranger = fake(|_, responder| responder.json(401, &json!({ "error": { "code": "unauthorized", "message": "Unauthorized." } })));
+    let (no_model, gone, refusing) = (
+        format!("http://127.0.0.1:{}", there.server.address.port()),
+        format!("http://127.0.0.1:{}", nobody.port),
+        format!("http://127.0.0.1:{}", stranger.server.address.port()),
+    );
+    tailscale_on_path(&mut there, &status("laptop.tail.ts.net", &[machine("alarm.tail.ts.net")]));
+    let failed_with = |args: &[&str], extra: &[(&str, &str)]| {
+        let result = there.run_env(args, extra);
+        assert_eq!((result.stdout.as_str(), config_of(&there)), ("", None), "{args:?}");
+        (result.code, result.stderr)
+    };
+    let failed = |args: &[&str]| failed_with(args, &[]);
+    let (code, lost) = failed(&["use", &gone]);
+    assert!(code == 3 && lost.starts_with(&format!("ghost: No ghost answers at {gone} (")) && lost.contains("), so nothing was saved: "), "{lost}");
+    assert_eq!(
+        failed(&["use", &refusing]),
+        (
+            4,
+            format!(
+                "ghost: The ghost at {refusing} does not take this machine for its owner's, so nothing was saved: sign this machine in to the Tailscale account that machine is on.\n"
+            )
+        )
+    );
+    assert_eq!(
+        failed(&["use", &no_model]),
+        (
+            1,
+            "ghost: The ghost on 127.0.0.1 has no model to answer with, so nothing was saved: set `local.model` in ~/.config/ghost/config.json there.\n"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        failed(&["use", "beelink"]),
+        (1, "ghost: No machine on your tailnet is named \"beelink\" (`tailscale status` lists them).\n".to_string())
+    );
+    assert_eq!(failed(&["use", "bee/link"]).0, 2);
+    assert_eq!(failed(&["use", "alarm", "beelink"]), (2, "ghost: Usage: ghost use [machine|local] [--json] [-q]\n".to_string()));
+    // No Tailscale to look a short name up in: the full address still works, and the sentence says so.
+    assert_eq!(
+        failed_with(&["use", "alarm"], &[("PATH", "/nonexistent")]),
+        (
+            1,
+            "ghost: Tailscale is not installed here, so \"alarm\" cannot be looked up: give the machine's full address (`ghost use alarm.<tailnet>.ts.net`).\n"
+                .to_string()
+        )
+    );
+    // A config that does not parse is left as it is.
+    std::fs::write(there.dir.join("config.json"), "{ not json").unwrap();
+    let broken = there.run(&["use", "local"]);
+    assert!(
+        broken.code == 1 && broken.stderr.starts_with("ghost: Nothing was saved: ") && broken.stderr.contains("is not valid JSON"),
+        "{}",
+        broken.stderr
+    );
+    assert_eq!(config_of(&there), Some("{ not json".to_string()));
+}
+
+// `ghost use`: the ghosts that answer on the owner's machines, this machine's own first, the one in use marked. Only
+// someone at a terminal is asked to pick; a pipe, `--json` and `-q` get the list and nothing is changed.
+#[test]
+fn use_lists_the_ghosts_on_the_tailnet_and_a_terminal_picks_one_by_number() {
+    use crate::ghosts::tests::{Machine, machine, status};
+    // This machine's own daemon, which has a model, and another machine's ghost under two names.
+    let mut here = fake(|request, responder| match request.line().as_str() {
+        "GET /api/ghost" => responder.json(200, &casper()),
+        _ => unexpected(responder),
+    });
+    let (there, nobody) = another_machine(casper());
+    let port = there.server.address.port();
+    let (by_name, numbered, off) =
+        (format!("http://localhost:{port}"), format!("http://127.0.0.1:{port}"), format!("http://127.0.0.1:{}", nobody.port));
+    let phone = Machine { os: "iOS", ..machine(&numbered) };
+    tailscale_on_path(&mut here, &status("laptop.tail.ts.net", &[machine(&by_name), machine(&off), phone]));
+    let listing = "1  laptop     this machine, in use\n2  localhost\n";
+
+    let listed = here.run(&["use"]);
+    assert_eq!((listed.code, listed.stdout.as_str(), listed.stderr.as_str()), (0, listing, ""));
+    assert_eq!(here.run(&["use", "-q"]).stdout, "laptop\nlocalhost\n");
+    let json: Value = serde_json::from_str(&here.run(&["use", "--json"]).stdout).unwrap();
+    assert_eq!(
+        json,
+        json!({ "inUse": null, "ghosts": [
+            { "machine": "laptop", "address": null, "here": true, "inUse": true },
+            { "machine": "localhost", "address": by_name, "here": false, "inUse": false },
+        ] })
+    );
+    // A terminal on one side only is not someone to ask, and neither are --json and -q at one.
+    assert_eq!(run_with(&["use"], &here.env, &here.dir, piped("2\n")).stdout, listing);
+    assert_eq!(run_at_a_terminal(&here, &["use", "-q"], "2\n").stdout, "laptop\nlocalhost\n");
+    assert!(run_at_a_terminal(&here, &["use", "--json"], "2\n").stdout.ends_with("}\n"));
+    assert_eq!(config_of(&here), None);
+
+    // At a terminal: Enter changes nothing, a number that is not listed is refused, and a number is that ghost.
+    let ask = "Number to use (Enter changes nothing): ";
+    let kept = run_at_a_terminal(&here, &["use"], "\n");
+    assert_eq!((kept.code, kept.stdout, config_of(&here)), (0, format!("{listing}{ask}"), None));
+    let wrong = run_at_a_terminal(&here, &["use"], "3\n");
+    assert_eq!((wrong.code, wrong.stderr.as_str(), config_of(&here)), (2, "ghost: \"3\" is not a number from 1 to 2; nothing was changed.\n", None));
+    let picked = run_at_a_terminal(&here, &["use"], "2\n");
+    assert_eq!((picked.code, picked.stdout), (0, format!("{listing}{ask}The ghost on localhost answers here now.\n")));
+    assert_eq!(config_of(&here), Some(format!("{{\n  \"ghost\": \"{by_name}\"\n}}\n")));
+    // The mark has moved, and the first is the way back.
+    assert_eq!(here.run(&["use"]).stdout, "1  laptop     this machine\n2  localhost  in use\n");
+    let back = run_at_a_terminal(&here, &["use"], "1\n");
+    assert!(back.stdout.ends_with("This machine's own ghost answers here now.\n"), "{}", back.stdout);
+    assert_eq!(config_of(&here), Some("{}\n".to_string()));
+
+    // One in use that does not answer is not in the list, and the list says so.
+    std::fs::write(here.dir.join("config.json"), json!({ "ghost": off }).to_string()).unwrap();
+    assert_eq!(here.run(&["use"]).stdout, format!("1  laptop     this machine\n2  localhost\nIn use: the ghost at {off}, which does not answer.\n"));
+}
+
+#[test]
+fn use_says_when_no_ghost_answers_and_when_tailscale_cannot_be_asked() {
+    use crate::ghosts::tests::status;
+    // No daemon here, and no other machine: nothing to list, said in a sentence (and not under -q).
+    let (mut there, _nobody) = another_machine(casper());
+    tailscale_on_path(&mut there, &status("laptop.tail.ts.net", &[]));
+    let none = there.run(&["use"]);
+    assert_eq!(
+        (none.code, none.stdout.as_str()),
+        (0, "No ghost answers on your tailnet.\nIn use: this machine's own ghost, which does not answer.\n")
+    );
+    assert_eq!(there.run(&["use", "-q"]).stdout, "");
+    assert_eq!(there.run(&["use", "--json"]).stdout, "{\"inUse\":null,\"ghosts\":[]}\n");
+    // With no one to pick from, a terminal is asked nothing.
+    assert_eq!(run_at_a_terminal(&there, &["use"], "1\n").stdout, none.stdout);
+
+    // Not signed in, and not installed: one sentence, which says what still works.
+    let mut signed_out = status("laptop.tail.ts.net", &[]);
+    signed_out["BackendState"] = json!("NeedsLogin");
+    tailscale_on_path(&mut there, &signed_out);
+    let rest = ", so the ghosts on your tailnet cannot be listed; `ghost use <address>` still works.\n";
+    for flags in [&["use"][..], &["use", "--json"]] {
+        let result = there.run(flags);
+        assert_eq!((result.code, result.stdout.as_str(), result.stderr), (1, "", format!("ghost: Tailscale is not signed in here{rest}")));
+    }
+    let missing = there.run_env(&["use"], &[("PATH", "/nonexistent")]);
+    assert_eq!((missing.code, missing.stderr), (1, format!("ghost: Tailscale is not installed here{rest}")));
+    assert!(there.lines().is_empty());
+    assert_eq!(config_of(&there), None);
 }
 
 // ── ghostd hook-complete ────────────────────────────────────────────────

@@ -32,16 +32,18 @@ pub fn tailscale_runner(env: Env) -> TailscaleRunner {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct TailscalePeer {
+pub(crate) struct TailscalePeer {
     pub hostname: String,
     /// As logins are compared; None for a tagged node, which is owned by its tags.
     pub login: Option<String>,
     pub online: bool,
+    /// `linux`, `macOS`, `iOS`, `android`, ... as Tailscale names it; empty when it does not say.
+    pub os: String,
 }
 
 /// `tailscale status --json`, reduced to what Ghost asks of it.
 #[derive(Clone, Debug, PartialEq)]
-struct TailscaleNode {
+pub(crate) struct TailscaleNode {
     /// `Running`, `NeedsLogin`, `Stopped`, ... as `tailscale status` reports it.
     pub backend_state: String,
     /// The login this node is signed in as, as logins are compared.
@@ -67,7 +69,7 @@ fn dns_hostname(name: &Value) -> Option<String> {
 }
 
 /// Ask Tailscale about this node; an error when it is missing or does not answer.
-fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, CommandFailure> {
+pub(crate) fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, CommandFailure> {
     let result = run(&["status", "--json"])?;
     if result.code != 0 {
         return Err(CommandFailure::Other(detail(&result)));
@@ -87,6 +89,7 @@ fn read_tailscale_node(run: &TailscaleRunner) -> Result<TailscaleNode, CommandFa
                         hostname,
                         login: if tagged { None } else { login_of(users, &peer["UserID"]) },
                         online: peer["Online"] == true,
+                        os: peer["OS"].as_str().unwrap_or("").to_string(),
                     })
                 })
                 .collect()
@@ -198,7 +201,7 @@ fn tailscale_missing() -> RemoteProblem {
     RemoteProblem::new("tailscale_missing", "Tailscale is not installed.", Some("omarchy-install-service-tailscale"))
 }
 
-fn first_line(text: &str) -> String {
+pub(crate) fn first_line(text: &str) -> String {
     text.trim().lines().next().unwrap_or("").trim().to_string()
 }
 

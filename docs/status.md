@@ -30,6 +30,9 @@ Git history.
 - The bar and `ghost` command against a ghost on a second physical machine
   (`ghost` in the config, 2026-11-28): proven only by `ghost status` through
   this machine's own Serve address, and by the tests' stand-in for Serve.
+  The same holds for `ghost use` and the bar's offer (2026-11-28): a ghost
+  has been saved, and the bar's rows chosen, only against that stand-in and
+  a stand-in `tailscale`.
 - The page (`packages/web`) as one chat per machine is not published, and its
   own list of what is unverified is in
   [its README](../packages/web/README.md#not-yet-verified).

@@ -95,6 +95,20 @@ impl From<ClientError> for CliError {
     }
 }
 
+/// Why `ghost use` saved nothing, as this command line's exit code.
+impl From<crate::ghosts::Refusal> for CliError {
+    fn from(refusal: crate::ghosts::Refusal) -> Self {
+        use crate::ghosts::Refusal;
+        let exit_code = match &refusal {
+            Refusal::Usage(_) => EXIT_USAGE,
+            Refusal::Unreachable(_) => EXIT_UNREACHABLE,
+            Refusal::Refused(_) => EXIT_UNAUTHORIZED,
+            Refusal::Failed(_) => EXIT_FAILURE,
+        };
+        Self { exit_code, message: refusal.message().to_string() }
+    }
+}
+
 /// One command's run: its arguments, the runtime, and the daemon client,
 /// which is made on first use so a verb that needs no daemon never looks for one.
 pub(crate) struct Context<'r, 'a> {
@@ -240,6 +254,16 @@ fn commands() -> Vec<Command> {
             none,
             none,
             commands::status_command,
+        ),
+        command(
+            "use",
+            "use [machine|local] [--json] [-q]",
+            "Say which machine's ghost answers here; with no machine, list the ghosts on your tailnet to pick from.",
+            "ghost use alarm",
+            (0, 1),
+            none,
+            none,
+            commands::use_command,
         ),
         command(
             "help",

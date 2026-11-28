@@ -10,6 +10,7 @@ use ghostd::{
     abort::Abort,
     client::{CONTROL_TIMEOUT, Client, ClientError},
     env,
+    ghosts::{self, Ghost, GhostAddress, Tailnet},
 };
 use gtk::gio;
 use serde_json::Value;
@@ -23,6 +24,33 @@ fn client() -> Result<Client, ClientError> {
 /// the first request says.
 pub fn machine() -> Option<String> {
     client().ok()?.machine().map(str::to_string)
+}
+
+/// Whether this machine has nothing of its own to ask: no model, and no ghost on another machine set.
+pub fn wanting() -> bool {
+    let env = env::current();
+    ghosts::wanting(&env, &env::home(&env))
+}
+
+/// The ghosts on the owner's other machines, asked for now, or why they cannot be looked for.
+pub async fn others() -> Result<Vec<Ghost>, Tailnet> {
+    let find = || {
+        let env = env::current();
+        ghosts::others(&env, &env::home(&env), &ghosts::tailscale_runner(env.clone()))
+    };
+    gio::spawn_blocking(find).await.unwrap_or(Ok(Vec::new()))
+}
+
+/// Say the ghost at `address` answers here, as `ghost use` does: it is asked, and saved once it has answered.
+pub async fn use_ghost(address: GhostAddress) -> Result<(), String> {
+    let save = move || {
+        let env = env::current();
+        ghosts::use_ghost(&env, &env::home(&env), Some(&address))
+    };
+    match gio::spawn_blocking(save).await {
+        Ok(saved) => saved.map(drop).map_err(|refusal| refusal.message().to_string()),
+        Err(_) => Err("The request was lost.".to_string()),
+    }
 }
 
 /// One JSON request, which the daemon answers at once.

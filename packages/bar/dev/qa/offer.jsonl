@@ -1,0 +1,29 @@
+# The bar on a machine with no model and no ghost set, whose owner has a ghost on another machine (dev/qa.sh gives
+# this bar a config of its own, no daemon, and a `tailscale` that lists the stand-in for that machine's Tailscale
+# Serve as "localhost"): it offers that machine by itself, Enter takes it, and the prompt and the next turn are that
+# ghost's.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+# One line, and under it a row for each machine whose ghost answers; the arrows start on the first.
+{"do":"wait","role":"label","name":"No model on this machine. Use the ghost on:","visible":true,"timeout_ms":15000}
+{"do":"wait","role":"button","name":"localhost","visible":true}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"shot","path":"qa-bar-offer.png"}
+# Enter with nothing typed takes the row the arrows are on: the ghost there is asked and saved, the rows and the line
+# go, and the prompt names the machine at once.
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"text-box","name":"Ask your ghost on localhost","focused":true,"timeout_ms":15000}
+{"do":"wait","role":"button","name":"localhost","visible":false}
+{"do":"wait","role":"label","name":"No model on this machine. Use the ghost on:","visible":false}
+{"do":"shot","path":"qa-bar-offer-taken.png"}
+# A turn is asked and answered there.
+{"do":"type","text":"Is the pier far?"}
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"label","name":"Is the pier far?","visible":true}
+{"do":"wait","role":"label","name":"Bring the tickets.","visible":true,"timeout_ms":30000}
+{"do":"wait","name":"Answer","visible":true,"timeout_ms":30000}
+# The setting was saved: nothing is offered once the turn has ended and the conversation is read again.
+{"do":"wait","role":"button","name":"localhost","visible":false}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}

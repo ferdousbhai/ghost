@@ -61,6 +61,11 @@ impl GhostAddress {
         if self.port == default { format!("{scheme}://{}", self.host) } else { format!("{scheme}://{}:{}", self.host, self.port) }
     }
 
+    /// As the config's `ghost` holds it: the host name alone when that says it all, else the origin.
+    pub fn written(&self) -> String {
+        if self.tls && self.port == 443 { self.host.clone() } else { self.origin() }
+    }
+
     /// What the machine is called: the first label of its name, or the whole of a numeric address.
     pub fn machine(&self) -> &str {
         if self.host.parse::<std::net::IpAddr>().is_ok() {
@@ -232,12 +237,44 @@ fn read_config_file(path: &Path, home: &Path) -> Result<Option<ConfigFile>, Stri
     Ok(Some(config))
 }
 
+/// The config file: `$GHOSTD_CONFIG`, else the XDG one.
+fn config_path(env: &Env, home: &Path) -> PathBuf {
+    var(env, "GHOSTD_CONFIG").map(|path| expand_home(path, home)).unwrap_or_else(|| default_config_path(env, home))
+}
+
+/// The file's own `ghost`: what `ghost use` saved, whatever `$GHOST_AT` says for one command.
+pub fn saved_ghost(env: &Env, home: &Path) -> Result<Option<GhostAddress>, String> {
+    Ok(read_config_file(&config_path(env, home), home)?.and_then(|file| file.ghost))
+}
+
+/// Set the file's `ghost` to `address`, or remove it (None: this machine's own ghost), keeping every other key.
+/// The file and its directory are made when absent, private, and the file is replaced whole, through one rename.
+/// A file ghostd would refuse is not rewritten: the error says what is wrong with it.
+pub fn save_ghost(env: &Env, home: &Path, address: Option<&GhostAddress>) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    let path = config_path(env, home);
+    // A link (a dotfiles checkout) is written through, to the file it names.
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
+    read_config_file(&path, home)?;
+    let text = crate::private_file::read_text(&path).map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
+    let mut document: Value =
+        text.as_deref().map_or(Ok(Value::Object(Default::default())), serde_json::from_str).map_err(|error| error.to_string())?;
+    let keys = document.as_object_mut().ok_or_else(|| format!("{} must contain a JSON object.", path.display()))?;
+    match address {
+        Some(address) => drop(keys.insert("ghost".to_string(), Value::String(address.written()))),
+        // Nothing to take out: the file is left as it is, or absent.
+        None if keys.shift_remove("ghost").is_none() => return Ok(()),
+        None => {}
+    }
+    let written = |error: std::io::Error| format!("Cannot write {}: {error}", path.display());
+    if let Some(directory) = path.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(directory).map_err(written)?;
+    }
+    crate::private_file::write_json_atomic(&path, &document).map_err(written)
+}
+
 pub fn load_config(overrides: &Overrides, env: &Env, home: &Path) -> Result<DaemonConfig, String> {
-    let config_path = overrides
-        .config_path
-        .clone()
-        .or_else(|| var(env, "GHOSTD_CONFIG").map(|path| expand_home(path, home)))
-        .unwrap_or_else(|| default_config_path(env, home));
+    let config_path = overrides.config_path.clone().unwrap_or_else(|| config_path(env, home));
     let file = read_config_file(&config_path, home)?.unwrap_or_default();
     let env_port = var(env, "GHOSTD_PORT")
         .map(|raw| raw.parse::<u16>().map_err(|_| format!("Invalid port from GHOSTD_PORT: {}", Value::String(raw.to_string()))))
@@ -461,6 +498,63 @@ mod tests {
         assert_eq!(ghost(&dir, &env), at("https://beelink.tailnet.ts.net", "beelink"));
         env.insert("GHOST_AT".into(), "bee link".into());
         assert_eq!(load(&dir, &env).unwrap_err(), "Invalid address from GHOST_AT: \"bee link\"");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // `ghost use` and the bar's offer write one key: every other key, and the file's privacy, survive it.
+    #[test]
+    fn saving_where_the_ghost_is_keeps_every_other_key_and_the_file_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, mut env) = scratch(None);
+        let path = dir.join(".config/ghost/config.json");
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        let alarm = GhostAddress::parse("alarm.tailnet.ts.net").unwrap();
+        // The owner's file, in their order, readable by them alone.
+        std::fs::write(&path, "{\"port\": 8123, \"remote\": {\"owner\": \"me@example.com\"},\n \"local\": {\"model\": \"/m.gguf\"}}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        save_ghost(&env, &dir, Some(&alarm)).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{\n  \"port\": 8123,\n  \"remote\": {\n    \"owner\": \"me@example.com\"\n  },\n  \"local\": {\n    \"model\": \"/m.gguf\"\n  },\n  \"ghost\": \"alarm.tailnet.ts.net\"\n}\n"
+        );
+        assert_eq!((mode(&path), saved_ghost(&env, &dir)), (0o600, Ok(Some(alarm.clone()))));
+        assert_eq!(std::fs::read_dir(dir.join(".config/ghost")).unwrap().count(), 1, "no temporary file is left");
+        // An address that is not a host name on 443 is saved as its origin; a file anyone could read ends private.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        save_ghost(&env, &dir, Some(&GhostAddress::parse("http://127.0.0.1:7000").unwrap())).unwrap();
+        assert_eq!((load(&dir, &env).unwrap().ghost.unwrap().origin().as_str(), mode(&path)), ("http://127.0.0.1:7000", 0o600));
+        // Back to this machine's own: the key goes, the rest stays; with no key there is nothing to write.
+        save_ghost(&env, &dir, None).unwrap();
+        let config = load(&dir, &env).unwrap();
+        assert_eq!((config.ghost, config.port, config.remote.owner.as_deref(), config.local.is_some()), (None, 8123, Some("me@example.com"), true));
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        save_ghost(&env, &dir, None).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+
+        // A file ghostd would refuse is never rewritten: what is wrong with it is the error.
+        for broken in ["{ not json", "[]", "{\"host\": 1}", "{\"port\": \"7717\"}"] {
+            std::fs::write(&path, broken).unwrap();
+            for address in [Some(&alarm), None] {
+                assert!(save_ghost(&env, &dir, address).unwrap_err().starts_with(&path.display().to_string()), "{broken}");
+            }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
+        }
+
+        // No file and no directory: both are made, private. Removing from no file makes none.
+        env.insert("XDG_CONFIG_HOME".into(), dir.join("fresh/config").display().to_string());
+        let fresh = dir.join("fresh/config/ghost/config.json");
+        save_ghost(&env, &dir, None).unwrap();
+        assert!(!dir.join("fresh").exists());
+        save_ghost(&env, &dir, Some(&alarm)).unwrap();
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "{\n  \"ghost\": \"alarm.tailnet.ts.net\"\n}\n");
+        assert_eq!((mode(&fresh), mode(fresh.parent().unwrap())), (0o600, 0o700));
+        // A link is written through: it stays a link, and the file it names is the one replaced.
+        let link = dir.join("link.json");
+        std::os::unix::fs::symlink(&fresh, &link).unwrap();
+        env.insert("GHOSTD_CONFIG".into(), link.display().to_string());
+        save_ghost(&env, &dir, None).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "{}\n");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

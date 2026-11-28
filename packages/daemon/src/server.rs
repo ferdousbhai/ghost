@@ -390,7 +390,11 @@ impl Shared {
             Route::Ghost => {
                 // The topic documents are the owner's to read, edit and delete: where they are, and how many.
                 let topics = options.ghost.topics_dir();
-                ok(json!({ "name": options.ghost.name(), "topics": { "path": topics.to_string_lossy(), "count": crate::topics::count(&topics) } }))
+                ok(json!({
+                    "name": options.ghost.name(),
+                    "model": options.host.has_model(),
+                    "topics": { "path": topics.to_string_lossy(), "count": crate::topics::count(&topics) },
+                }))
             }
             Route::CharacterGet => {
                 let character = options.ghost.read_character(false)?;

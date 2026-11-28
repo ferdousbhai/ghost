@@ -120,8 +120,8 @@ A daemon start that finds no `character.md` there makes one, seeded
 home. The ghost's name is its
 persona's title, the leading `# ` heading of `character.md`, read when it is
 needed, else `ghost`; to rename the ghost, retitle its persona. No route,
-command or URL carries the name; `GET /api/ghost` reports it, with where
-the topic documents are and how many. Another
+command or URL carries the name; `GET /api/ghost` reports it, with whether
+it has a model and where the topic documents are and how many. Another
 machine's ghost is reached at that machine, over Tailscale
 ([Daemon HTTP API](#daemon-http-api)). The directory is the whole ghost: to remove
 it, `gio trash` it.
@@ -324,7 +324,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 |---|---|
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/status` | `{ version, source: { commit, root }, startedAt, restartNeeded }`. `root` is the git root of the running executable, or `null` for the packaged install. `restartNeeded` is true once the code on disk is not what runs: an install or a build rewrote the running executable after `startedAt` (its ctime, which a package cannot backdate); a commit that was not built changes nothing that runs. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
-| `GET /api/ghost` | `{ name, topics: { path, count } }`, the machine's one ghost and its [topic documents](#topic-documents). No route makes, renames, or removes it ([Ghost home](#ghost-home)). |
+| `GET /api/ghost` | `{ name, model, topics: { path, count } }`, the machine's one ghost, whether a local model is configured for it (with none it answers no turn), and its [topic documents](#topic-documents). No route makes, renames, or removes it ([Ghost home](#ghost-home)). |
 | `GET\|PUT /api/character` | Read or atomically replace the character file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `POST /api/complete` | `{ prompt }` → `{ text }`: one completion for a command hook (`ghostd hook-complete`) on the local model, with no persona, conversation, or tools (`409 no_local_model` with none configured; `502 completion_failed` for an empty answer). It takes no admission, since the turn awaiting the `session_stop` hook that asks holds its own. |
 | `POST /api/messages` | `{ prompt }` → one turn of the conversation as the turn wire below; `409 conversation_busy` while another runs. |
@@ -373,11 +373,54 @@ client that reads to the end and posts again is never answered
 
 The `ghost` command and the bar are clients of this machine's daemon unless
 the owner says their ghost is elsewhere: `"ghost": "<address>"` at the top of
-`~/.config/ghost/config.json`, or `GHOST_AT=<address>` for one command, which
+`~/.config/ghost/config.json`, which `ghost use` and the bar's offer (both
+below) write, or `GHOST_AT=<address>` for one command, which
 wins. The address is the other machine's Tailscale Serve address: a host name
 (`https://` on 443) or an origin, `https://host[:port]` or
 `http://host[:port]`; anything else is a configuration error. `GHOST_AT=local`
 is this machine's daemon whatever the config says, and ghostd reads neither.
+
+`ghost use <machine>` saves that key, and `ghost use local` (or this
+machine's own name) removes it. `<machine>` is an address as above, or a
+machine's short name, which is the first label of its MagicDNS name in
+`tailscale status --json`; only a short name needs Tailscale on this machine.
+The address is asked before it is saved (`GET /api/ghost`, with no token),
+and saved only when a ghost answers there, takes the caller for its owner,
+and has a model (`model` is not `false`). Otherwise nothing is written, and
+one sentence says which of those failed and what to do: nothing answering is
+exit 3, a refusal exit 4, anything else exit 1. Saving changes that one key
+and keeps every other, through one rename, the file private (0600); the file
+and its directory are made when absent, a link is written through, and a
+config ghostd would refuse is not rewritten. It acknowledges in one sentence
+(`The ghost on alarm answers here now.`), `{ ghost, machine }` under `--json`
+(the origin and the machine's name, both null for this machine's own), and
+says so on stderr when `GHOST_AT` is set and still wins.
+
+`ghost use` with no machine lists the ghosts there are to use: this machine's
+own daemon, and every other machine on the tailnet that is online, signed in
+as this node's login and not a phone (tagged nodes are no login's), each
+asked at once as above and given 3 s. Those that answer are listed, this
+machine's own first and marked, the one in use marked: `{ inUse, ghosts:
+[{ machine, address, here, inUse }] }` under `--json`, where `address` is the
+ghost's origin (null for this machine's own, which has `here: true`) and the
+top-level `inUse` the saved origin (null: this machine's own), whether or not
+it answered. With a terminal on both sides, and neither `--json` nor `-q`, it
+then asks for a number, and Enter changes nothing; otherwise it only prints.
+Without Tailscale installed, signed in and running it is one sentence (exit
+1) that says so and that `ghost use <address>` still works. Nothing looks for
+ghosts but this command and the bar's offer, when they are run; none of it
+needs a daemon on this machine.
+
+The bar offers the same by itself on a machine that has nothing of its own
+to ask: no `ghost` address and no `local` model in its config, whether or not
+its daemon runs. Summoned there, it looks for the ghosts on the owner's
+other machines as `ghost use` does and shows one line ("No model on this
+machine. Use the ghost on:") with a row for each, chosen as the answers of a
+question are. Choosing one asks and saves it through the same code
+(`ghostd::ghosts`), and the prompt is that ghost's at once. With none found,
+or no Tailscale to ask, the line says what is missing and how to get it, and
+offers nothing. A machine with a model, or with a ghost set, is never shown
+this.
 
 With it set, every request of both clients goes to that address and none to
 this machine: no daemon port, no token file (which is not read), and no ghost
@@ -403,7 +446,9 @@ another's ghost runs unused.
 ### `ghost` CLI
 
 The terminal client never edits a ghost home; every command that changes ghost
-state goes through the daemon. Its command catalog is defined in
+state goes through the daemon. `ghost use` changes no ghost: it writes where
+this machine's clients find one, in this machine's config
+([A ghost on another machine](#a-ghost-on-another-machine)). Its command catalog is defined in
 [`cli/mod.rs`](packages/daemon/src/cli/mod.rs). What a ghost needs to drive
 and verify itself is a named verb there (character, the conversation's say,
 show, stop and starting over, hooks, and status, which also says where the
@@ -452,7 +497,8 @@ icons. Removing it preserves owner data.
   with the CLI's own client (`ghostd::client`), afresh for each request; a
   port, config or token file it cannot use is an error line in the bar. Of
   [a ghost on another machine](#a-ghost-on-another-machine) its empty prompt
-  names the machine ("Ask your ghost on beelink"). One
+  names the machine ("Ask your ghost on beelink"), and on a machine with no
+model and no ghost set it offers the ghosts on the owner's other machines. One
   instance: `ghost-bar` again shows the first with its prompt and gives it
   the keyboard, which is how a key binding summons it, and a launch of
   another version replaces the one running. Nothing listens

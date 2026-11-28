@@ -1,0 +1,14 @@
+# The bar on a machine with no model and no ghost set, on a tailnet where no other machine has one (dev/qa.sh gives
+# this bar a `tailscale` that lists no other machine): one line says what is missing and how to get it, and nothing
+# is offered.
+
+{"do":"wait","role":"window","name":"Ghost","visible":true}
+{"do":"wait","role":"label","name":"No model on this machine, and no ghost found on your tailnet. Set a model up here (`ghost help products`), or turn Tailscale Serve on where your ghost is (`ghost status` there says how).","visible":true,"timeout_ms":15000}
+{"do":"wait","role":"button","name":"localhost","visible":false}
+{"do":"shot","path":"qa-bar-offer-none.png"}
+# Enter with nothing typed does nothing: there is no row to take.
+{"do":"key","keys":"Return"}
+{"do":"wait","role":"text-box","name":"Ask your ghost","focused":true}
+{"do":"key","keys":"Escape"}
+{"do":"wait","role":"window","name":"Ghost","visible":false}
+{"do":"quit"}
