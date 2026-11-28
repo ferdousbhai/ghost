@@ -108,7 +108,7 @@ is built from all of the above, and from:
   gdk-pixbuf, gdk-pixbuf-sys, gdk4, gdk4-sys, gio, gio-sys, glib, glib-sys,
   gobject-sys, graphene-rs, graphene-sys, gsk4, gsk4-sys, gtk4, gtk4-sys,
   pango, pango-sys
-- MIT: gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab
+- MIT: gdk4-wayland, gdk4-wayland-sys, gtk4-layer-shell, gtk4-layer-shell-sys, memoffset, pulldown-cmark, slab
 - MIT or Apache-2.0: bitflags, field-offset, futures-channel, futures-core,
   futures-executor, futures-io, futures-task, futures-util, pin-project-lite,
   smallvec, unicase
