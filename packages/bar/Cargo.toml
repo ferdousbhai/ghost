@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 # The look and the shared widgets, pinned by commit (v0.5.7).
-omui = { git = "https://github.com/ferdousbhai/omui", rev = "d5796183fdcc1dab218c7af5343bc0f29389db0e" }
+omui = { git = "https://github.com/ferdousbhai/omui", rev = "0f102e15fac3d02b7649728f079ac774911c08e8" }
 # The GTK 4 stack omui is built on; cargo resolves both to one gtk4.
 gtk = { package = "gtk4", version = "0.11.4" }
 # The bar's place on the screen edge; the system library is one Omarchy's own dictation app already needs.

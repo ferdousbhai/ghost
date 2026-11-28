@@ -14,6 +14,6 @@ systemctl --user daemon-reload
 systemctl --user enable --now ghostd.service
 
 echo ""
-echo "Ghost is installed. Ghost in your app launcher, or a key bound to ghost-bar --listen, summons it at the bottom of the screen."
+echo "Ghost is installed. Ghost in your app launcher, or a key bound to ghost-bar, summons it at the bottom of the screen."
 echo ""
 echo "Or talk to your ghost from a terminal:  ghost say \"hello\"   (its turns run on a model on this machine: set local.model in ~/.config/ghost/config.json)"

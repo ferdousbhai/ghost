@@ -417,10 +417,13 @@ icons. Removing it preserves owner data.
   port, config or token file it cannot use is an error line in the bar. One
   instance: `ghost-bar` again shows the first with its prompt and gives it
   the keyboard, which is how a key binding summons it, and a launch of
-  another version replaces the one running. `ghost-bar
-  --listen` also runs `omarchy-dictation toggle`, so one key opens the bar and
-  listens; dictation types into the bar's prompt as into any focused field,
-  and Ghost has no speech stack of its own. The launcher entry
+  another version replaces the one running. Nothing listens
+  until the owner starts dictation: it types into the bar's prompt as into
+  any focused field, which the prompt holds the keyboard for, and Ghost has
+  no speech stack of its own. Where the machine has Omarchy's dictation the
+  prompt shows a microphone, which a click toggles it with, and beside it the
+  key Hyprland has bound as Omarchy's "Toggle dictation" (none where it
+  cannot be told). The launcher entry
   `io.github.ferdousbhai.Ghost.desktop` opens it, and `--version` prints the
   release version. It is a member of the cargo workspace at the repository
   root, built, linted and tested with the daemon; the gate also walks its

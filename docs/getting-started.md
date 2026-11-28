@@ -84,9 +84,10 @@ compositor and dies with it, and binds `127.0.0.1:7717`. Ghost in your app
 launcher summons the bar (`ghost-bar`): a prompt near the bottom of the
 screen, with what you ask and the ghost's answer above it.
 Bind a key to it in `~/.config/hypr/bindings.lua` so it is always one press
-away, for example `o.bind("SUPER + A", "Ghost", "ghost-bar --listen")`;
-with `--listen` the same key starts Omarchy's dictation, and pressed again
-ends it, so what you said is in the prompt.
+away, for example `o.bind("SUPER + A", "Ghost", "ghost-bar")`. To speak
+instead of typing, press your dictation key while the prompt is open (the
+prompt shows it beside a microphone); what you said is in the prompt, and
+`Enter` sends it.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -211,7 +212,7 @@ leaves the ghost home, the conversation, tokens, and your documents untouched.
 - **Use websites.** Install agent-browser; `ghost help browser` covers signed-in Chromium
   setup, shared-session tab locking, and cleanup.
 - **Talk instead of typing.** Omarchy's dictation types into the bar's
-  prompt as into any app, and `ghost-bar --listen` starts it as the bar opens. Ghost adds no speech stack of its own.
+  prompt as into any app; the prompt shows the key that starts it. Ghost adds no speech stack of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** Tailscale Serve is the opt-in: `tailscale serve --bg --https=443 http://127.0.0.1:7717`
   turns it on and `tailscale serve --https=443 off` turns it off. `ghost

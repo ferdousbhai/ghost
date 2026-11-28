@@ -4,7 +4,8 @@
 //!
 //! It is a layer-shell surface where the compositor has them, and a plain undecorated window where it has not
 //! (scripted QA's broadway display). Text is typed into it by whatever types into the focused field, so Omarchy's
-//! dictation fills it as it fills any other.
+//! dictation fills it as it fills any other; where the machine has dictation, the prompt shows a microphone and
+//! the key that starts it.
 
 use std::{
     cell::{Cell, RefCell},
@@ -18,7 +19,7 @@ use gtk::{accessible::Property, gdk, glib, prelude::*};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use serde_json::{Value, json};
 
-use crate::{api, md};
+use crate::{api, dictation, md};
 
 const WIDTH: i32 = 880;
 /// The panel's border and padding on both sides (`.bar-panel` in style.css), which the answer's width is less by.
@@ -47,6 +48,8 @@ pub struct Bar {
     status: gtk::Label,
     options: gtk::Box,
     entry: gtk::Entry,
+    /// The caps of the key that starts dictation, beside the prompt's microphone.
+    caps: gtk::Box,
     /// The conversation so far, as the log has it.
     exchanges: RefCell<Vec<Exchange>>,
     /// The exchange on screen while the owner is looking back; none at the conversation's end.
@@ -148,8 +151,8 @@ fn surface(app: &gtk::Application) -> gtk::ApplicationWindow {
         window.set_namespace(Some("ghost"));
         window.set_layer(Layer::Overlay);
         window.set_anchor(Edge::Bottom, true);
-        // The keyboard while the bar is on screen, and back to the owner's work when they turn to it.
-        window.set_keyboard_mode(KeyboardMode::OnDemand);
+        // `Bar::hold` says who has the keyboard: the prompt keeps it, an answer gives it up when turned from.
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
     }
     place(&window);
     window
@@ -179,9 +182,24 @@ impl Bar {
         panel.append(&scroll);
         panel.append(&status);
         panel.append(&options);
-        let entry = gtk::Entry::builder().placeholder_text("Ask your ghost").css_classes(["bar-entry"]).build();
+        // The prompt: the field, and where the machine has dictation, a microphone with the key that starts it.
+        let entry = gtk::Entry::builder().placeholder_text("Ask your ghost").hexpand(true).build();
+        let prompt = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        prompt.add_css_class("bar-entry");
+        prompt.append(&entry);
+        entry.bind_property("visible", &prompt, "visible").sync_create().build();
+        let caps = gtk::Box::new(gtk::Orientation::Horizontal, 3);
+        if dictation::installed() {
+            let microphone = gtk::Button::from_icon_name(omui::icons::name::MICROPHONE);
+            microphone.add_css_class("bar-microphone");
+            microphone.set_focus_on_click(false);
+            microphone.update_property(&[Property::Label("Dictate")]);
+            microphone.connect_clicked(|_| dictation::toggle());
+            prompt.append(&microphone);
+            prompt.append(&caps);
+        }
         root.append(&panel);
-        root.append(&entry);
+        root.append(&prompt);
         window.set_child(Some(&root));
 
         let bar = Rc::new(Self {
@@ -193,6 +211,7 @@ impl Bar {
             status,
             options,
             entry,
+            caps,
             exchanges: RefCell::new(Vec::new()),
             at: Cell::new(None),
             text: RefCell::new(String::new()),
@@ -224,11 +243,12 @@ impl Bar {
             glib::Propagation::Stop
         });
         bar.window.add_controller(keys);
-        // Turning to another window puts the bar away, as Escape does.
+        // Turning to another window puts an answer away, as Escape does. Not the prompt: it holds the keyboard, and
+        // what takes the compositor's attention meanwhile (dictation's indicator appearing) is not the owner leaving.
         let this = bar.clone();
         let was_active = Cell::new(false);
         bar.window.connect_is_active_notify(move |window| {
-            if was_active.replace(window.is_active()) && !window.is_active() {
+            if was_active.replace(window.is_active()) && !window.is_active() && !this.entry.get_visible() {
                 this.put_away();
             }
         });
@@ -271,10 +291,37 @@ impl Bar {
     /// page write to the same one).
     fn summon(self: &Rc<Self>) {
         self.entry.set_visible(true);
+        self.hold(true);
         self.window.set_visible(true);
         self.entry.grab_focus();
         let this = self.clone();
-        glib::spawn_future_local(async move { this.settle().await });
+        glib::spawn_future_local(async move {
+            this.hint().await;
+            this.settle().await;
+        });
+    }
+
+    /// The key that starts dictation, as this machine has it bound now, a cap for each key; none where it cannot
+    /// be told, and the microphone stands alone.
+    async fn hint(&self) {
+        if !dictation::installed() {
+            return;
+        }
+        let keys = dictation::keys().await.unwrap_or_default();
+        while let Some(cap) = self.caps.first_child() {
+            self.caps.remove(&cap);
+        }
+        for key in keys {
+            self.caps.append(&gtk::Label::builder().label(key).css_classes(["keycap"]).build());
+        }
+    }
+
+    /// Who has the keyboard. The prompt holds it against everything else on screen, so what is typed or dictated
+    /// lands in it whatever appears meanwhile; an answer has it only until the owner turns to another window.
+    fn hold(&self, prompt: bool) {
+        if self.window.is_layer_window() {
+            self.window.set_keyboard_mode(if prompt { KeyboardMode::Exclusive } else { KeyboardMode::OnDemand });
+        }
     }
 
     /// Off the screen. A turn that is running runs on, and is on screen again when the bar is summoned; an answer
@@ -452,6 +499,7 @@ impl Bar {
                             this.entry.set_text(&prompt);
                             this.entry.set_position(-1);
                             this.entry.set_visible(true);
+                            this.hold(true);
                             this.entry.grab_focus();
                         }
                     }
@@ -476,6 +524,7 @@ impl Bar {
     fn sent(&self) {
         self.entry.set_text("");
         self.entry.set_visible(false);
+        self.hold(false);
         if let Some(root) = self.window.child() {
             root.grab_focus();
         }
