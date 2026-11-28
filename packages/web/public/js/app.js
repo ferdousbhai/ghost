@@ -8,7 +8,7 @@ import { renderMarkdown } from "./markdown.js";
 import { api, base, label, normalizeHost, request, seg, shortName, tailnetOf } from "./net.js";
 import * as push from "./push.js";
 import { load, save } from "./store.js";
-import { fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, worked } from "./thread.js";
+import { asking, fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, worked } from "./thread.js";
 import { toolCall } from "./tool-call.js";
 
 const $ = (id) => document.getElementById(id);
@@ -355,6 +355,8 @@ const turnHere = () => !!turn && turn.host === route;
 /** This page's turn is here and its bubbles are on screen. */
 const liveHere = () => turnHere() && turn.shown;
 const runningHere = () => turnHere() || !!conv()?.running;
+/** The ghost's question, while it waits for the owner's answer. */
+const openQuestion = () => (owner() && !turnHere() ? conv()?.question : null) || null;
 /** The reader is at the newest message, so the thread follows what arrives; scrolled up, it stays put. */
 let following = true;
 const atBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
@@ -593,7 +595,7 @@ function draw() {
   // Where the reader is now, not only where the last scroll event left them.
   const stick = following && atBottom();
   const live = liveHere() ? thread(turn.messages) : [];
-  const items = thread(page.messages).concat(live);
+  const items = asking(thread(page.messages), openQuestion()).concat(live);
   // A turn that just ended comes back from the transcript under its own keys: what was open in it stays open.
   const ended = live.length ? [] : [...nodes].filter(([key]) => key.startsWith("live")).map(([, node]) => !!node.work?.open);
   let at = earlier;
@@ -661,7 +663,7 @@ function drawMeta() {
   $("chat-sub").textContent = label(route) + (m.status === "offline" ? " · offline" : "");
   document.title = ghostName() + " · SummonGhost";
   $("chat-tools").hidden = !owner() || !c?.messageCount;
-  const question = owner() && !turnHere() ? c?.question : null;
+  const question = openQuestion();
   $("question").hidden = !question;
   if (question) {
     // The ghost's reply says its question; the panel does not repeat the last bubble.
@@ -677,7 +679,7 @@ function drawMeta() {
       options.append(button);
     }
   }
-  prompt.placeholder = question ? "Answer " + ghostName() : runningHere() ? "Add to this turn" : "Message";
+  prompt.placeholder = question ? "Type something" : runningHere() ? "Add to this turn" : "Message";
   if (!turnHere()) {
     if (c?.running) readQueue().catch(() => {});
     else $("queue").hidden = true;

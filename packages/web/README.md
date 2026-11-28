@@ -73,7 +73,11 @@ Owners' instructions are in [docs/mobile.md](../../docs/mobile.md).
   uploaded on send; the follow-up queue (while a turn runs the send button
   queues, and stops when the composer is empty); stop, which hands queued
   text back to the composer; the ghost's open question, its answers as
-  buttons above the composer, the first marked; read marking only while the
+  buttons above the composer, the first (the ghost's recommendation) marked,
+  while the last bubble says the question without the numbered answers the
+  reply carries and the composer reads "Type something" (an answered
+  question keeps its numbered list in the thread: that is the record); read
+  marking only while the
   page is visible and focused; and starting over, the one destructive act,
   behind the chat's menu and a dialog that says the conversation goes to that
   machine's Trash.
@@ -119,7 +123,8 @@ bash packages/web/publish.sh           # publish HEAD's page, and wait for it
 parses, the service worker's list names exactly the files that exist and an
 alert is tagged by its machine, machine names normalize, and
 [`thread.js`](public/js/thread.js) holds: the route, the bubbles a transcript
-makes and their folded working, a running turn's events against the transcript
+makes and their folded working, the last bubble without an open question's
+numbered answers, a running turn's events against the transcript
 they become, paging, and the list's times.
 
 Publishing is the owner's call, like a release. `publish.sh` deploys

@@ -1,8 +1,9 @@
 /**
  * One machine's conversation as a messaging thread, worked out apart from the
  * page so it can be checked on its own (check.html): the route, the bubbles a
- * transcript makes, a running turn folded into the same shape, the pages of a
- * long transcript, and the time on a machine's row.
+ * transcript makes, the last of them while the ghost's question is open, a
+ * running turn folded into the same shape, the pages of a long transcript, and
+ * the time on a machine's row.
  */
 import { toolCall } from "./tool-call.js";
 
@@ -75,6 +76,22 @@ export function thread(messages) {
     }
   }
   return items;
+}
+
+/** What the ghost said without its question's numbered answers under it: only that exact ending is taken off. */
+export function withoutAnswers(said, offered) {
+  const numbered = offered.map((answer, index) => `${index + 1}. ${answer}`).join("\n"), text = said.trimEnd();
+  return numbered && text.endsWith(numbered) ? text.slice(0, -numbered.length).trimEnd() : said;
+}
+
+/**
+ * The thread while `question` is open: its answers are buttons, so the last bubble does not list them too.
+ * An answered question keeps its list: that is the record.
+ */
+export function asking(items, question) {
+  const last = items.at(-1);
+  if (!question?.options?.length || last?.kind !== "ghost") return items;
+  return items.slice(0, -1).concat({ ...last, text: withoutAnswers(last.text, question.options) });
 }
 
 /** The folded line over a bubble's working: "Thought, ran 3 commands, 1 failed". */

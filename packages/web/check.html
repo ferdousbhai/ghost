@@ -44,7 +44,7 @@ for (const name of scripts) document.write(`<script type="module" src="public/js
 </script>
 <script type="module">
 import { normalizeHost, shortName, tailnetOf } from "./public/js/net.js";
-import { attachmentOf, fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, worked } from "./public/js/thread.js";
+import { asking, attachmentOf, fold, link, newestOffset, olderPage, routeHost, thread, turnEvents, when, withoutAnswers, worked } from "./public/js/thread.js";
 
 const same = (got, want, what) => equal(JSON.stringify(got), JSON.stringify(want), what);
 
@@ -120,6 +120,28 @@ try {
   same([items[3].text, worked(items[3].steps)], ["", "Asked you"], "working with no words after it");
   same([items[7].error, items[7].text], ["The model stopped.", ""], "a failed turn");
   equal(new Set(items.map((item) => item.key)).size, items.length, "bubble keys repeat");
+
+  // An open question's answers are buttons: the last bubble says the question without them numbered under it.
+  const piers = ["The north pier", "The south pier"], listed = "1. The north pier\n2. The south pier";
+  equal(withoutAnswers(`I found two.\n\nWhich pier?\n\n${listed}\n`, piers), "I found two.\n\nWhich pier?", "the numbered answers under a question");
+  equal(withoutAnswers("Which pier?", piers), "Which pier?", "a question with no list under it");
+  equal(withoutAnswers("Which pier?\n\n1. The north pier\n2. The west pier", piers), "Which pier?\n\n1. The north pier\n2. The west pier", "a list that is not the answers");
+  equal(withoutAnswers(`${listed}\n\nWhich?`, piers), `${listed}\n\nWhich?`, "the answers before the ghost's last words");
+  equal(withoutAnswers("Which pier?\n\n", []), "Which pier?\n\n", "no answers offered");
+  const asked = thread([
+    { role: "assistant", entryId: "a1", content: [text(`Which day?\n\n${listed}`)] },
+    { role: "user", entryId: "a2", content: [text("The north pier")] },
+    { role: "assistant", entryId: "a3", content: [
+      text("Two piers."), { type: "toolCall", id: "q", name: "ask", arguments: { question: "Which pier?", options: piers }, output: "Asked." },
+      text(`Which pier?\n\n${listed}`),
+    ] },
+  ]);
+  const open = asking(asked, { text: "Which pier?", options: piers, askedAt: "2026-11-28T09:00:00Z" });
+  same(open.map((item) => item.text), [`Which day?\n\n${listed}`, "The north pier", "Two piers.", "Which pier?"], "the thread while a question is open");
+  same([open[3].key, open[3].steps], [asked[3].key, asked[3].steps], "the asking bubble keeps its key and working");
+  equal(asked[3].text, `Which pier?\n\n${listed}`, "the transcript's bubble is not changed");
+  for (const none of [null, undefined, { text: "Which pier?", options: [] }]) same(asking(asked, none), asked, "no open question leaves the thread as it is");
+  same(asking(asked.slice(0, 2), { text: "Which pier?", options: piers }), asked.slice(0, 2), "the owner's words are never cut");
 
   // A running turn folds into the shape its transcript will have.
   const live = [];

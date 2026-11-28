@@ -538,9 +538,9 @@ said to the model). It records the conversation's open question
 (`question` in `GET /api/conversation`), says the question in the reply with its answers
 numbered, so the transcript keeps them, and ends the turn (the next turn is
 handed the call and `Asked.`); the bar and the page also show the answers as buttons, the
-first marked, and any other answer is typed. The bar shows the question
-without the numbered answers under it, and gives one by the arrow keys and
-Enter as by a click.
+first marked, and any other answer is typed. While the question is open
+both show it without the numbered answers under it; the bar gives one by the
+arrow keys and Enter as by a click.
 `bash(command)` is a command line run as the owner in the conversation's
 directory, with the conversation's environment, no sandbox and no
 confirmation. The owner's products are command lines with a skill each under
