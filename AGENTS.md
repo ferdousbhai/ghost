@@ -60,4 +60,12 @@ bash packages/web/check.sh
 
 Verify with the smallest proof: the tests you touched (`cargo test -p ghostd --locked <name>`, or `-p ghost-bar`; the bar's scripted QA is `packages/bar/dev/qa.sh`) plus `clippy` for the packages you changed (`cargo clippy -p ghostd --all-targets --locked -- -D warnings`). Run the repo-wide gate only when asked, with one exception: a push to master runs it. The `pre-push` hook in `.githooks/` (set once per clone with `git config core.hooksPath .githooks`) refuses a master push until `.githooks/verify` — the whole gate, whose tests the `Native packages` workflow also runs, inside the package build, on x86_64 and aarch64 for each master push — (format, lints, a release build, tests, the bar's scripted QA, the page's checks, and the packaging checks) has passed on that tree; run `.githooks/verify` after the final commit so the push is instant, and never reach for `--no-verify` to get around a red result. An unreproducible gate failure is an open flake investigation (suspects: the timing-sensitive daemon stream-lifecycle tests) — record the failing test from `.git/ghost-verify-last.log` before re-running. Behavior changes ship with a focused test. Raising a size in the prompt budget test is a deliberate decision that has to be justified in the commit message.
 
-The daemon and the bar are Rust, in one cargo workspace at the repository root; `packages/web` is the summonghost.com page, plain files published only on the owner's go (`packages/web/publish.sh`). Cloudflare is worked through `cf` (`cf cli search "<task>"` finds the command), never `wrangler`. Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.
+The daemon and the bar are Rust, in one cargo workspace at the repository root; `packages/web` is the summonghost.com page, plain files published only on the owner's go (`packages/web/publish.sh`). Work in this repository commits directly to `master`, as the owner instructed; do not open task PRs.
+
+## Cloudflare CLI
+
+Use the `cf` CLI for Cloudflare work in this repository (the page's Worker, its
+domains and DNS). Use Wrangler or the dashboard only where `cf` has no command
+for the task; wrangler is in `packages/web` only because `cf deploy` builds with
+it. Find commands with `cf cli search "<what you want to do>"`, then check
+`<command> --help`.
