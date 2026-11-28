@@ -1,9 +1,0 @@
-// summonghost.com: static files only. There is no Worker script and no binding.
-// packages/web/publish.sh sends this to CloudChef, which publishes it. summonghost.com and www are custom
-// domains attached to CloudChef's Worker in Cloudflare, not declared here: CloudChef
-// deploys never claim hostnames.
-{
-  "name": "summonghost",
-  "compatibility_date": "2025-12-23",
-  "assets": { "directory": "./public", "html_handling": "auto-trailing-slash", "not_found_handling": "404-page" }
-}

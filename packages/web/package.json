@@ -1,0 +1,12 @@
+{
+  "name": "summonghost",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "cf": "1.0.0-rc.6",
+    "wrangler": "^4.145.0"
+  },
+  "scripts": {
+    "deploy": "cf deploy"
+  }
+}

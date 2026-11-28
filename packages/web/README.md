@@ -122,14 +122,12 @@ alert is tagged by its machine, machine names normalize, and
 makes and their folded working, a running turn's events against the transcript
 they become, paging, and the list's times.
 
-Publishing is the owner's call, like a release. `publish.sh` replaces the
-contents of the CloudChef project `ferdous/summonghost` with `public/` and
-`wrangler.jsonc` from HEAD, plus a pointer README and the minimal
-`package.json` CloudChef asks of any project; CloudChef publishes a push to
-its `main`. Nothing
-is edited in that project. summonghost.com and www are custom domains attached
-to its Worker in Cloudflare; a CloudChef deploy cannot attach domains, so
-`wrangler.jsonc` declares no routes.
+Publishing is the owner's call, like a release. `publish.sh` deploys
+`public/` as the Cloudflare Worker `summonghost`, which has no script and
+only serves those files, with Cloudflare's `cf`
+([`cloudflare.config.ts`](cloudflare.config.ts), which names summonghost.com
+and www as its domains). `package.json` holds only that tooling: `cf`, and the
+wrangler it builds with, which is never run by hand.
 
 A machine only admits the `https://summonghost.com` origin, and only with the
 identity Tailscale Serve stamps. Before it is published the page is walked on

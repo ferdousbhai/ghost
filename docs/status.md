@@ -56,7 +56,7 @@ once the single-package recipe (`packaging/omarchy/`) is merged there
 (omacom/omarchy-pkgs #3712, open). Until
 then `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` installs
 it. The page no longer reaches a machine on 0.11.9. It is published by
-`packages/web/publish.sh`, on the owner's go, to the CloudChef project that
+`packages/web/publish.sh`, on the owner's go, as the Cloudflare Worker that
 serves summonghost.com.
 
 ## Compatibility

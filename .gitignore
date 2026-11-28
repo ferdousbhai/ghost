@@ -9,3 +9,8 @@ dist/
 
 # agents' worktrees
 .claude/worktrees/
+
+# the page's deploy tooling
+node_modules/
+.cloudflare/
+.wrangler/
